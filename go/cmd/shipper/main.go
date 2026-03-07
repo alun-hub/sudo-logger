@@ -92,36 +92,60 @@ func handlePluginConn(pluginConn net.Conn) {
 	pr := bufio.NewReader(pluginConn)
 	pw := bufio.NewWriter(pluginConn)
 
-	// Each session gets its own ACK tracker so the plugin gets
-	// per-session freshness, not a stale value from a concurrent session.
-	const ackLagLimit = int64(4 * time.Second) // ns without ACK after sending chunks = dead
+	// ── Step 1: read SESSION_START before connecting to the server ────────
+	//
+	// We need the sudo PID to create the session cgroup BEFORE sudo forks
+	// the child.  Fork inherits cgroup membership, so the child and all its
+	// descendants — including GUI programs that later detach and re-parent
+	// to init/systemd — remain in the cgroup and can be frozen atomically.
+	msgType, plen, err := protocol.ReadHeader(pr)
+	if err != nil {
+		log.Printf("read first message: %v", err)
+		return
+	}
+	if msgType != protocol.MsgSessionStart {
+		log.Printf("expected SESSION_START, got 0x%02x — dropping", msgType)
+		return
+	}
+	startPayload, err := protocol.ReadPayload(pr, plen)
+	if err != nil {
+		log.Printf("read SESSION_START payload: %v", err)
+		return
+	}
+	start, err := protocol.ParseSessionStart(startPayload)
+	if err != nil {
+		log.Printf("parse SESSION_START: %v", err)
+		return
+	}
+
+	// ── Step 2: create session cgroup, move sudo into it ──────────────────
+	//
+	// defer cg.remove() runs on every return path: normal end, TLS error,
+	// network loss, and force-kill.  remove() is nil-safe.
+	cg := newCgroupSession(start.SessionID, start.Pid)
+	defer cg.remove()
+
+	// ── Step 3: per-session ACK tracking ──────────────────────────────────
+	const ackLagLimit = int64(4 * time.Second)
 
 	var (
 		sessionAckMu    sync.Mutex
 		sessionAckSeq   uint64
 		serverConnAlive bool
-		// ackDebtStartNs is set when a chunk is forwarded without a prior ACK
-		// clearing the debt. It is reset to 0 whenever an ACK arrives from the
-		// server. This measures "how long have chunks been waiting for an ACK"
-		// independent of how long the user was idle between keypresses.
+		// ackDebtStartNs measures how long chunks have been waiting for an
+		// ACK.  Reset on every incoming ACK.  Independent of idle time so
+		// idle sessions never trigger a false freeze.
 		ackDebtStartNs int64
 	)
 
 	updateAck := func(ts int64, seq uint64) {
 		sessionAckMu.Lock()
 		sessionAckSeq = seq
-		// Any ACK from the server clears the outstanding debt.
 		ackDebtStartNs = 0
 		sessionAckMu.Unlock()
+		cg.unfreeze() // nil-safe; no-op when not frozen
 	}
 
-	// readAck returns the current ACK state.
-	// Returns time.Now() (fresh) when the server is alive and ACKing promptly.
-	// Returns 0 (stale) when:
-	//   - TCP connection has died, OR
-	//   - A chunk has been waiting for an ACK for longer than ackLagLimit.
-	//     The wait is measured from when the debt started, not from when the
-	//     user last typed — this prevents false freezes after idle periods.
 	readAck := func() (int64, uint64) {
 		sessionAckMu.Lock()
 		defer sessionAckMu.Unlock()
@@ -134,8 +158,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		return time.Now().UnixNano(), sessionAckSeq
 	}
 
-	// Connect to remote server — must succeed before sudo is allowed to proceed.
-	// Dial TCP manually so we can set aggressive keepalives before the TLS handshake.
+	// ── Step 4: connect to remote log server ──────────────────────────────
 	tcpAddr, err := net.ResolveTCPAddr("tcp", *flagServer)
 	if err != nil {
 		log.Printf("resolve server addr: %v", err)
@@ -150,14 +173,13 @@ func handlePluginConn(pluginConn net.Conn) {
 	}
 	// Aggressive TCP keepalives: detect network loss in ~4 seconds.
 	rawTCP.SetKeepAlive(true)
-	rawTCP.SetKeepAlivePeriod(1 * time.Second) // TCP_KEEPIDLE=1
+	rawTCP.SetKeepAlivePeriod(1 * time.Second)
 	if sc, scErr := rawTCP.SyscallConn(); scErr == nil {
 		sc.Control(func(fd uintptr) {
 			syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, 1)
 			syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, 3)
 		})
 	}
-	// Clone config and set ServerName from the address (host part only).
 	tlsClientCfg := tlsCfg.Clone()
 	if tlsClientCfg.ServerName == "" {
 		tlsClientCfg.ServerName = tcpAddr.IP.String()
@@ -173,25 +195,36 @@ func handlePluginConn(pluginConn net.Conn) {
 		return
 	}
 
-	// Mark alive — readAck will return time.Now() until this flips to false.
 	markDead := func() {
 		sessionAckMu.Lock()
 		serverConnAlive = false
-		ackDebtStartNs = 0 // readAck uses serverConnAlive=false path now
+		ackDebtStartNs = 0
 		sessionAckMu.Unlock()
+		cg.freeze() // nil-safe; freezes all session processes via cgroup
 	}
 
 	sessionAckMu.Lock()
 	serverConnAlive = true
 	sessionAckMu.Unlock()
 
-	// Tell plugin sudo may proceed
+	// ── Step 5: forward SESSION_START to server, then unblock sudo ────────
+	//
+	// SESSION_READY is sent only after SESSION_START has been forwarded so
+	// the server is always informed before sudo forks the child process.
+	serverBuf := bufio.NewWriter(serverConn)
+	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v",
+		start.SessionID, start.User, start.Host, start.Pid,
+		truncate(start.Command, 60), cg != nil)
+	if err := protocol.WriteMessage(serverBuf, protocol.MsgSessionStart, startPayload); err != nil {
+		log.Printf("[%s] forward SESSION_START: %v", start.SessionID, err)
+		markDead()
+		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(err.Error()))
+		return
+	}
+	// Sudo is now cleared to fork the child — which inherits the cgroup.
 	protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
 
-	serverBuf := bufio.NewWriter(serverConn)
-
-	// Goroutine: read ACKs from server. When connection drops, mark dead
-	// so the plugin sees a stale ACK timestamp and freezes within ACK_TIMEOUT_SECS.
+	// ── Step 6: read ACKs from server ─────────────────────────────────────
 	go func() {
 		defer func() {
 			serverConn.Close()
@@ -223,9 +256,6 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 	}()
 
-	// forward sends a message to the server with a hard write deadline so the
-	// main loop is never blocked longer than 2s. On any error the connection
-	// is marked dead and subsequent calls become no-ops.
 	forward := func(msgType uint8, payload []byte) {
 		sessionAckMu.Lock()
 		alive := serverConnAlive
@@ -245,9 +275,6 @@ func handlePluginConn(pluginConn net.Conn) {
 			markDead()
 			return
 		}
-		// Start the ACK debt timer when a chunk is forwarded.
-		// If no debt is already outstanding, this is the start of a new
-		// unACKed window. An arriving ACK (updateAck) will reset it to 0.
 		if msgType == protocol.MsgChunk {
 			sessionAckMu.Lock()
 			if ackDebtStartNs == 0 {
@@ -257,13 +284,12 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 	}
 
-	// Main loop: read messages from plugin
+	// ── Step 7: main loop — SESSION_START already handled above ───────────
 	for {
 		msgType, plen, err := protocol.ReadHeader(pr)
 		if err != nil {
 			return
 		}
-
 		payload, err := protocol.ReadPayload(pr, plen)
 		if err != nil {
 			return
@@ -271,7 +297,6 @@ func handlePluginConn(pluginConn net.Conn) {
 
 		switch msgType {
 		case protocol.MsgAckQuery:
-			// Plugin wants to know the last ACK timestamp — respond immediately
 			ts, seq := readAck()
 			resp := protocol.EncodeAckResponse(ts, seq)
 			if err := protocol.WriteMessage(pw, protocol.MsgAckResponse, resp); err != nil {
@@ -279,22 +304,13 @@ func handlePluginConn(pluginConn net.Conn) {
 				return
 			}
 
-		case protocol.MsgSessionStart:
-			log.Printf("session start: %s", truncate(string(payload), 120))
-			forward(protocol.MsgSessionStart, payload)
-
 		case protocol.MsgChunk:
 			forward(protocol.MsgChunk, payload)
 
 		case protocol.MsgSessionEnd:
 			forward(protocol.MsgSessionEnd, payload)
-			if serverConn != nil {
-				// Flush and close gracefully
-				if serverBuf != nil {
-					serverBuf.Flush()
-				}
-				serverConn.Close()
-			}
+			serverBuf.Flush()
+			serverConn.Close()
 			return
 
 		default:

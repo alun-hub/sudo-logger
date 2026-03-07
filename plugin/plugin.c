@@ -437,9 +437,9 @@ static int plugin_open(unsigned int        version,
     char payload[512];
     int plen = snprintf(payload, sizeof(payload),
         "{\"session_id\":\"%s\",\"user\":\"%s\",\"host\":\"%s\","
-        "\"command\":\"%s\",\"ts\":%lld}",
+        "\"command\":\"%s\",\"ts\":%lld,\"pid\":%d}",
         g_session_id, user, host, cmd,
-        (long long)now_sec());
+        (long long)now_sec(), (int)getpid());
 
     /* snprintf returns the number of bytes that *would* have been written,
      * which may exceed sizeof(payload) if the input was truncated.
