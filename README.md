@@ -164,6 +164,17 @@ A TLS server running on a dedicated machine. For each client connection:
 - **No log rotation**: `/var/log/sudoreplay/` grows without bound. Implement
   external rotation (logrotate, cron) as needed.
 
+- **Graphical programs that detach from sudo cannot be frozen**: GUI
+  applications such as `gvim`, `okular`, or `firefox` typically double-fork
+  to release the launching process. When they do, sudo's direct child exits,
+  `plugin_close()` is called, and the plugin shuts down — while the GUI
+  window continues running as root with no parent relationship to sudo. There
+  is nothing left in the plugin to send SIGSTOP. The session *is* still
+  logged up to the point sudo exits, but the running window cannot be frozen
+  after that. Addressing this would require a mechanism outside the plugin:
+  placing sessions in a cgroup and freezing the cgroup, or a persistent
+  watchdog daemon that survives sudo's exit.
+
 - **TTY dimensions not recorded**: terminal size (rows/cols) is not sent to
   the server. Replay will use default dimensions.
 
