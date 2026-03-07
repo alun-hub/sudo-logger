@@ -120,10 +120,11 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	// ── Step 2: create session cgroup, move sudo into it ──────────────────
 	//
-	// defer cg.remove() runs on every return path: normal end, TLS error,
-	// network loss, and force-kill.  remove() is nil-safe.
+	// cgRef is a mutable pointer: the SESSION_END path may nil it out to
+	// hand off the cgroup to a linger goroutine instead of removing it.
 	cg := newCgroupSession(start.SessionID, start.Pid)
-	defer cg.remove()
+	cgRef := cg
+	defer func() { cgRef.remove() }()
 
 	// ── Step 3: per-session ACK tracking ──────────────────────────────────
 	const ackLagLimit = int64(4 * time.Second)
@@ -311,10 +312,67 @@ func handlePluginConn(pluginConn net.Conn) {
 			forward(protocol.MsgSessionEnd, payload)
 			serverBuf.Flush()
 			serverConn.Close()
+			// GUI programs (gvim, okular, …) double-fork: the launcher exits
+			// quickly while the real window runs as a child of init/systemd.
+			// Because fork inherits cgroup membership the window is still in
+			// our cgroup.  Hand it off to a linger goroutine instead of
+			// removing the cgroup immediately.
+			if cg.hasPids() {
+				cgRef = nil // prevent defer from removing it
+				go lingerCgroup(cg, *flagServer, tlsCfg)
+			}
 			return
 
 		default:
 			log.Printf("unknown message type 0x%02x len=%d — ignoring", msgType, plen)
+		}
+	}
+}
+
+// lingerCgroup keeps a session cgroup alive after the sudo process exits so
+// that detached GUI programs (gvim, okular, …) remain frozen when the log
+// server is unreachable.  It polls until the cgroup is empty, then cleans up.
+func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
+	defer cg.remove()
+	log.Printf("cgroup %s: lingering (GUI processes remain)", cg.path)
+
+	const pollInterval = 3 * time.Second
+	const dialTimeout = 4 * time.Second
+
+	serverReachable := func() bool {
+		tcpAddr, err := net.ResolveTCPAddr("tcp", server)
+		if err != nil {
+			return false
+		}
+		rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
+		if err != nil {
+			return false
+		}
+		defer rawTCP.Close()
+		cfg := tlsCfg.Clone()
+		if cfg.ServerName == "" {
+			if host, _, splitErr := net.SplitHostPort(server); splitErr == nil {
+				cfg.ServerName = host
+			} else {
+				cfg.ServerName = tcpAddr.IP.String()
+			}
+		}
+		tlsConn := tls.Client(rawTCP, cfg)
+		tlsConn.SetDeadline(time.Now().Add(dialTimeout))
+		defer tlsConn.Close()
+		return tlsConn.Handshake() == nil
+	}
+
+	for {
+		time.Sleep(pollInterval)
+		if !cg.hasPids() {
+			log.Printf("cgroup %s: linger done — no more processes", cg.path)
+			return
+		}
+		if serverReachable() {
+			cg.unfreeze()
+		} else {
+			cg.freeze()
 		}
 	}
 }
