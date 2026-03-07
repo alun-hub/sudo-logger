@@ -121,6 +121,18 @@ func (cg *cgroupSession) unfreeze() {
 	log.Printf("cgroup %s: unfrozen", filepath.Base(cg.path))
 }
 
+// hasPids reports whether any processes remain in the session cgroup.
+func (cg *cgroupSession) hasPids() bool {
+	if cg == nil {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(cg.path, "cgroup.procs"))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(data)) != ""
+}
+
 // remove unfreezes the cgroup, migrates any remaining processes (e.g. a
 // detached gvim window) to the parent cgroup, then removes the directory.
 // Safe to call on a nil receiver.
