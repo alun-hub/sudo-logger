@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -51,6 +52,20 @@ type Writer struct {
 func NewWriter(baseDir, user, host, runas, tty, command string, startTime time.Time) (*Writer, error) {
 	ts := startTime.UTC().Format("20060102-150405")
 	dir := filepath.Join(baseDir, user, fmt.Sprintf("%s_%s", host, ts))
+
+	// Defence-in-depth: ensure the resolved path stays within baseDir.
+	// filepath.Join already cleans ".." but we verify explicitly.
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve base dir: %w", err)
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve session dir: %w", err)
+	}
+	if !strings.HasPrefix(absDir, absBase+string(filepath.Separator)) {
+		return nil, fmt.Errorf("session dir %q escapes base dir %q", absDir, absBase)
+	}
 
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", dir, err)

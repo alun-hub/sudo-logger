@@ -104,10 +104,19 @@ func ReadHeader(r io.Reader) (msgType uint8, payloadLen uint32, err error) {
 	return
 }
 
+// maxPayloadSize is the largest payload we will allocate.
+// A single tty chunk is at most a few KB; 1 MB is generous.
+const maxPayloadSize = uint32(1 * 1024 * 1024) // 1 MB
+
 // ReadPayload reads exactly payloadLen bytes from r.
+// Returns an error if payloadLen exceeds maxPayloadSize to prevent
+// a malicious client from triggering an OOM allocation.
 func ReadPayload(r io.Reader, payloadLen uint32) ([]byte, error) {
 	if payloadLen == 0 {
 		return nil, nil
+	}
+	if payloadLen > maxPayloadSize {
+		return nil, fmt.Errorf("payload length %d exceeds maximum %d", payloadLen, maxPayloadSize)
 	}
 	buf := make([]byte, payloadLen)
 	_, err := io.ReadFull(r, buf)

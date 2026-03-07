@@ -17,12 +17,24 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
 )
+
+// validName matches safe directory name components: alphanumeric plus .-_
+// Maximum 64 characters. Rejects empty strings, dots-only, and path separators.
+var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
+
+func sanitizeName(s string) (string, error) {
+	if !validName.MatchString(s) {
+		return "", fmt.Errorf("invalid characters or length in name: %q", s)
+	}
+	return s, nil
+}
 
 var (
 	flagListen = flag.String("listen", ":9876", "Listen address (TLS)")
@@ -182,12 +194,21 @@ func (srv *server) handleConn(conn *tls.Conn) {
 }
 
 func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
+	user, err := sanitizeName(start.User)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user field: %w", err)
+	}
+	host, err := sanitizeName(start.Host)
+	if err != nil {
+		return nil, fmt.Errorf("invalid host field: %w", err)
+	}
+
 	startTime := time.Unix(start.Ts, 0)
 
 	w, err := iolog.NewWriter(
 		srv.logDir,
-		start.User,
-		start.Host,
+		user,
+		host,
 		"root",        // runas — always root for now
 		"unknown",     // tty — not yet sent by plugin
 		start.Command,
