@@ -1,0 +1,6 @@
+# /etc/sudo.conf additions for sudo-logger
+#
+# The plugin intercepts all sudo I/O, ships it to the local shipper daemon,
+# and freezes user input if the log server ACK becomes stale.
+
+Plugin io_logger sudo_logger_plugin.so
