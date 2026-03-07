@@ -1,0 +1,30 @@
+[Unit]
+Description=Sudo log shipper (bridges sudo plugin to remote log server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/sudo-logger/shipper.conf
+ExecStart=/usr/bin/sudo-shipper \
+    -server   ${LOGSERVER} \
+    -socket   /run/sudo-logger/plugin.sock \
+    -cert     /etc/sudo-logger/client.crt \
+    -key      /etc/sudo-logger/client.key \
+    -ca       /etc/sudo-logger/ca.crt \
+    -hmackey  /etc/sudo-logger/hmac.key
+
+RuntimeDirectory=sudo-logger
+RuntimeDirectoryMode=0750
+
+Restart=always
+RestartSec=2
+
+User=root
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/run/sudo-logger
+
+[Install]
+WantedBy=multi-user.target

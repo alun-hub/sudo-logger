@@ -1,0 +1,27 @@
+[Unit]
+Description=Sudo session log server
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/sudo-logger/server.conf
+ExecStart=/usr/bin/sudo-logserver \
+    -listen   ${LISTEN_ADDR} \
+    -logdir   ${LOG_DIR} \
+    -cert     /etc/sudo-logger/server.crt \
+    -key      /etc/sudo-logger/server.key \
+    -ca       /etc/sudo-logger/ca.crt \
+    -hmackey  /etc/sudo-logger/hmac.key
+
+Restart=always
+RestartSec=5
+
+User=sudologger
+Group=sudologger
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/sudoreplay
+
+[Install]
+WantedBy=multi-user.target
