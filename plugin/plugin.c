@@ -375,20 +375,33 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
             write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
             g_frozen = 1;
         }
-        /* Allow Ctrl+C (0x03) and Ctrl+\ (0x1c) through so the user
-         * can kill the frozen session — all other input is blocked. */
+        /* Allow Ctrl+C (0x03) and Ctrl+\ (0x1c) through immediately
+         * so the user can kill the frozen session. */
         for (unsigned int i = 0; i < len; i++) {
             if ((unsigned char)buf[i] == 0x03 || (unsigned char)buf[i] == 0x1c)
                 return 1;
         }
-        return 0;
-    }
+        /* Block here until ACKs resume rather than returning 0.
+         * Returning 0 causes sudo to send SIGTERM to the child process.
+         * Blocking keeps the child alive while preventing unlogged input
+         * from reaching it. When the network recovers we fall through
+         * and return 1, forwarding the pending keystroke. */
+        do {
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = 200000000L };
+            nanosleep(&ts, NULL);
+        } while (!ack_is_fresh());
 
-    if (g_frozen) {
+        if (g_frozen) {
+            if (g_tty_fd >= 0)
+                write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
+            g_frozen = 0;
+        }
+    } else if (g_frozen) {
         if (g_tty_fd >= 0)
             write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
         g_frozen = 0;
     }
+
     return 1;
 }
 
