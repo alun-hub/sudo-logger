@@ -1,32 +1,38 @@
 // cgroup.go — per-session cgroup management for sudo-shipper.
 //
-// When the shipper service runs with Delegate=yes in its systemd unit it owns
-// a cgroup subtree.  For each sudo session the shipper creates a sub-cgroup,
-// moves the sudo process into it before sending SESSION_READY, and then
-// freeze/thaws that sub-cgroup when the log server becomes unreachable or
-// recovers.
+// Creates a sub-cgroup per sudo session and moves the sudo process into it
+// before SESSION_READY so that all forked children inherit the cgroup.
 //
-// Because fork(2) inherits cgroup membership, all child processes — including
-// GUI programs (gvim, okular, …) that double-fork and re-parent to
-// init/systemd — remain in the session cgroup and are frozen atomically.
-// Re-parenting in the process tree never changes cgroup membership.
+// Design: freeze only children, not sudo
+// ──────────────────────────────────────
+// If sudo itself is in the frozen cgroup it can never send SESSION_END, so
+// the shipper goroutine blocks forever in ReadHeader.  To avoid this, the
+// background tracker moves sudo's PID back to the parent cgroup as soon as
+// it detects the first child process (bash, gvim-launcher, …).  After that:
+//   • Terminal programs (bash, vi, …) — frozen via cgroup.freeze.
+//   • GUI programs (gvim, okular, …) — typically moved by GNOME/systemd to
+//     an app-*.scope cgroup before our tracker sees them.  Detected as
+//     "escaped" and frozen via SIGSTOP/SIGCONT instead.
 //
-// Graceful degradation: if cgroupBase is empty (cgroup v2 unavailable or
-// Delegate=yes not set), newCgroupSession returns nil and all methods on a
-// nil *cgroupSession are no-ops.
+// The tracker polls /proc/<pid>/task/<pid>/children every 10 ms and also
+// re-checks every known PID's cgroup membership so late GNOME migrations are
+// caught even if the PID was initially seen inside our cgroup.
+//
+// Graceful degradation: nil receiver is safe on all exported methods.
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 )
 
-// cgroupBase is the cgroup v2 directory delegated to this service process.
-// Populated once in init(); empty when cgroups are unavailable.
 var cgroupBase string
 
 func init() {
@@ -34,7 +40,6 @@ func init() {
 	if err != nil {
 		return
 	}
-	// cgroup v2 unified hierarchy produces a single line: "0::<path>"
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "0::") {
 			rel := strings.TrimSpace(strings.TrimPrefix(line, "0::"))
@@ -48,17 +53,21 @@ func init() {
 	}
 }
 
-// cgroupSession is the cgroup created for a single sudo session.
 type cgroupSession struct {
-	path   string
+	path    string
+	sudoPid int
+	cgName  string // basename of path, used in /proc/PID/cgroup checks
+
 	mu     sync.Mutex
 	frozen bool
+
+	escapedMu sync.Mutex
+	escaped   map[int]struct{} // non-cgroup PIDs frozen via SIGSTOP
+
+	stopTrack chan struct{}
+	trackDone chan struct{}
 }
 
-// newCgroupSession creates a sub-cgroup under cgroupBase named after sessionID
-// and moves sudoPid into it so that all subsequent forks (including GUI
-// programs that later detach) inherit the cgroup membership.
-// Returns nil when cgroup delegation is unavailable.
 func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 	if cgroupBase == "" || sudoPid <= 0 {
 		return nil
@@ -74,51 +83,156 @@ func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 		0644,
 	); err != nil {
 		log.Printf("cgroup: move sudo pid %d: %v", sudoPid, err)
-		// Keep the cgroup even on failure — the directory exists and the
-		// freeze file is still functional for any PIDs that do land here.
 	}
 	log.Printf("cgroup: session %s created, sudo pid %d", filepath.Base(path), sudoPid)
-	return &cgroupSession{path: path}
+	cg := &cgroupSession{
+		path:      path,
+		sudoPid:   sudoPid,
+		cgName:    filepath.Base(path),
+		escaped:   make(map[int]struct{}),
+		stopTrack: make(chan struct{}),
+		trackDone: make(chan struct{}),
+	}
+	go cg.trackDescendants()
+	return cg
 }
 
-// freeze suspends all processes in the session cgroup (idempotent).
-func (cg *cgroupSession) freeze() {
+// procChildren returns the direct child PIDs of pid via the kernel's
+// /proc/PID/task/PID/children interface (fast, no scanning of all /proc).
+func procChildren(pid int) []int {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, s := range strings.Fields(string(data)) {
+		if n, err := strconv.Atoi(s); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// inOurCgroup reports whether pid's current cgroup is our session cgroup.
+func (cg *cgroupSession) inOurCgroup(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), cg.cgName)
+}
+
+// moveSudoOut moves sudo's PID to the parent cgroup so that cgroup.freeze
+// only affects child processes (bash, gvim, …), not sudo itself.
+// Called once, the first time a child process is detected in our cgroup.
+func (cg *cgroupSession) moveSudoOut() {
+	parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
+	if err := os.WriteFile(parentProcs, []byte(strconv.Itoa(cg.sudoPid)+"\n"), 0644); err != nil {
+		log.Printf("cgroup %s: move sudo out: %v", cg.cgName, err)
+		return
+	}
+	log.Printf("cgroup %s: sudo pid %d moved to parent cgroup (child detected)", cg.cgName, cg.sudoPid)
+}
+
+// trackDescendants runs as a goroutine for the lifetime of the session.
+// Every 10 ms it:
+//  1. Discovers new child PIDs via /proc/PID/task/PID/children.
+//  2. Removes dead PIDs from the tracking set.
+//  3. Moves sudo to the parent cgroup once a child appears.
+//  4. Re-checks every tracked (non-sudo) PID's cgroup membership so that
+//     late GNOME/systemd migrations are caught and tracked via SIGSTOP.
+func (cg *cgroupSession) trackDescendants() {
+	defer close(cg.trackDone)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	seen := map[int]struct{}{cg.sudoPid: {}}
+	sudoMoved := false
+
+	for {
+		select {
+		case <-cg.stopTrack:
+			return
+		case <-ticker.C:
+			// ── 1. Discover new children ─────────────────────────────────
+			var newPIDs []int
+			for pid := range seen {
+				for _, child := range procChildren(pid) {
+					if _, already := seen[child]; !already {
+						seen[child] = struct{}{}
+						newPIDs = append(newPIDs, child)
+					}
+				}
+			}
+			_ = newPIDs // discovered; they'll be handled in step 4 below
+
+			// ── 2. Remove dead PIDs ───────────────────────────────────────
+			for pid := range seen {
+				if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err != nil {
+					delete(seen, pid)
+				}
+			}
+
+			// ── 3. Move sudo out once we have any child process ───────────
+			if !sudoMoved && len(seen) > 1 {
+				cg.moveSudoOut()
+				sudoMoved = true
+			}
+
+			// ── 4. Re-check cgroup membership for all tracked non-sudo PIDs
+			cg.mu.Lock()
+			isFrozen := cg.frozen
+			cg.mu.Unlock()
+
+			for pid := range seen {
+				if pid == cg.sudoPid {
+					continue
+				}
+				cg.escapedMu.Lock()
+				_, alreadyEscaped := cg.escaped[pid]
+				cg.escapedMu.Unlock()
+				if alreadyEscaped {
+					continue
+				}
+				if cg.inOurCgroup(pid) {
+					continue // in our cgroup → handled by cgroup.freeze
+				}
+				// Not in our cgroup.  Verify it is still alive before
+				// classifying as escaped: short-lived subprocesses (rpm, ls,
+				// …) often exit between procChildren() and the cgroup check,
+				// causing inOurCgroup to return false on a non-existent PID.
+				if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err != nil {
+					delete(seen, pid) // exited normally, forget it
+					continue
+				}
+				// Still alive but not in our cgroup: genuinely escaped.
+				cg.escapedMu.Lock()
+				if _, already := cg.escaped[pid]; !already {
+					cg.escaped[pid] = struct{}{}
+					log.Printf("cgroup %s: pid %d escaped to foreign cgroup, tracking via SIGSTOP",
+						cg.cgName, pid)
+					if isFrozen {
+						syscall.Kill(pid, syscall.SIGSTOP)
+					}
+				}
+				cg.escapedMu.Unlock()
+			}
+		}
+	}
+}
+
+// stopTracking stops the tracking goroutine and waits for it to exit.
+// Safe to call multiple times and on a nil receiver.
+func (cg *cgroupSession) stopTracking() {
 	if cg == nil {
 		return
 	}
-	cg.mu.Lock()
-	defer cg.mu.Unlock()
-	if cg.frozen {
-		return
+	select {
+	case <-cg.stopTrack:
+	default:
+		close(cg.stopTrack)
 	}
-	if err := os.WriteFile(
-		filepath.Join(cg.path, "cgroup.freeze"), []byte("1\n"), 0644,
-	); err != nil {
-		log.Printf("cgroup freeze: %v", err)
-		return
-	}
-	cg.frozen = true
-	log.Printf("cgroup %s: frozen", filepath.Base(cg.path))
-}
-
-// unfreeze resumes all processes in the session cgroup (idempotent).
-func (cg *cgroupSession) unfreeze() {
-	if cg == nil {
-		return
-	}
-	cg.mu.Lock()
-	defer cg.mu.Unlock()
-	if !cg.frozen {
-		return
-	}
-	if err := os.WriteFile(
-		filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644,
-	); err != nil {
-		log.Printf("cgroup unfreeze: %v", err)
-		return
-	}
-	cg.frozen = false
-	log.Printf("cgroup %s: unfrozen", filepath.Base(cg.path))
+	<-cg.trackDone
 }
 
 // hasPids reports whether any processes remain in the session cgroup.
@@ -128,22 +242,98 @@ func (cg *cgroupSession) hasPids() bool {
 	}
 	data, err := os.ReadFile(filepath.Join(cg.path, "cgroup.procs"))
 	if err != nil {
+		log.Printf("cgroup %s: hasPids read error: %v", cg.cgName, err)
 		return false
 	}
-	return strings.TrimSpace(string(data)) != ""
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		log.Printf("cgroup %s: no processes remain", cg.cgName)
+		return false
+	}
+	log.Printf("cgroup %s: processes remain: %s", cg.cgName,
+		strings.ReplaceAll(trimmed, "\n", ","))
+	return true
 }
 
-// remove unfreezes the cgroup, migrates any remaining processes (e.g. a
-// detached gvim window) to the parent cgroup, then removes the directory.
-// Safe to call on a nil receiver.
+// hasEscapedRunning reports whether any escaped PIDs are still running.
+// Removes dead PIDs from the escaped set as a side-effect.
+func (cg *cgroupSession) hasEscapedRunning() bool {
+	if cg == nil {
+		return false
+	}
+	cg.escapedMu.Lock()
+	defer cg.escapedMu.Unlock()
+	running := false
+	for pid := range cg.escaped {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err == nil {
+			running = true
+		} else {
+			delete(cg.escaped, pid)
+		}
+	}
+	return running
+}
+
+// freeze suspends all processes in the session cgroup and SIGSTOPs escaped PIDs.
+func (cg *cgroupSession) freeze() {
+	if cg == nil {
+		return
+	}
+	cg.mu.Lock()
+	if !cg.frozen {
+		if err := os.WriteFile(
+			filepath.Join(cg.path, "cgroup.freeze"), []byte("1\n"), 0644,
+		); err != nil {
+			log.Printf("cgroup freeze: %v", err)
+		} else {
+			cg.frozen = true
+			log.Printf("cgroup %s: frozen", cg.cgName)
+		}
+	}
+	cg.mu.Unlock()
+	cg.escapedMu.Lock()
+	for pid := range cg.escaped {
+		syscall.Kill(pid, syscall.SIGSTOP)
+	}
+	cg.escapedMu.Unlock()
+}
+
+// unfreeze resumes all processes in the session cgroup and SIGCONTs escaped PIDs.
+func (cg *cgroupSession) unfreeze() {
+	if cg == nil {
+		return
+	}
+	cg.mu.Lock()
+	if cg.frozen {
+		if err := os.WriteFile(
+			filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644,
+		); err != nil {
+			log.Printf("cgroup unfreeze: %v", err)
+		} else {
+			cg.frozen = false
+			log.Printf("cgroup %s: unfrozen", cg.cgName)
+		}
+	}
+	cg.mu.Unlock()
+	cg.escapedMu.Lock()
+	for pid := range cg.escaped {
+		syscall.Kill(pid, syscall.SIGCONT)
+	}
+	cg.escapedMu.Unlock()
+}
+
+// remove unfreezes the cgroup, resumes escaped PIDs, migrates remaining
+// processes to the parent cgroup, and removes the directory.
 func (cg *cgroupSession) remove() {
 	if cg == nil {
 		return
 	}
-	// Must unfreeze before migrating — frozen cgroups block process moves.
 	_ = os.WriteFile(filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644)
-
-	// Drain remaining processes to the parent cgroup so rmdir succeeds.
+	cg.escapedMu.Lock()
+	for pid := range cg.escaped {
+		syscall.Kill(pid, syscall.SIGCONT)
+	}
+	cg.escapedMu.Unlock()
 	parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
 	if data, err := os.ReadFile(filepath.Join(cg.path, "cgroup.procs")); err == nil {
 		for _, pid := range strings.Split(strings.TrimSpace(string(data)), "\n") {
@@ -153,8 +343,8 @@ func (cg *cgroupSession) remove() {
 		}
 	}
 	if err := os.Remove(cg.path); err != nil {
-		log.Printf("cgroup remove %s: %v", cg.path, err)
+		log.Printf("cgroup remove %s: %v", cg.cgName, err)
 	} else {
-		log.Printf("cgroup %s: removed", filepath.Base(cg.path))
+		log.Printf("cgroup %s: removed", cg.cgName)
 	}
 }

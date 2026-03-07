@@ -20,6 +20,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
 	"syscall"
 	"time"
@@ -40,6 +41,52 @@ var (
 	hmacKey []byte
 	tlsCfg  *tls.Config
 )
+
+// activeCgs tracks all live session cgroups so they can be cleaned up on
+// shutdown.  Without this, a SIGTERM during e.g. "sudo rpm -Uvh …" (which
+// restarts the shipper via a systemd trigger) would leave the session cgroup
+// frozen, causing rpm's scriptlet to hang.
+var (
+	activeCgsMu sync.Mutex
+	activeCgs   []*cgroupSession
+)
+
+func registerCg(cg *cgroupSession) {
+	if cg == nil {
+		return
+	}
+	activeCgsMu.Lock()
+	activeCgs = append(activeCgs, cg)
+	activeCgsMu.Unlock()
+}
+
+func unregisterCg(cg *cgroupSession) {
+	if cg == nil {
+		return
+	}
+	activeCgsMu.Lock()
+	for i, c := range activeCgs {
+		if c == cg {
+			activeCgs = append(activeCgs[:i], activeCgs[i+1:]...)
+			break
+		}
+	}
+	activeCgsMu.Unlock()
+}
+
+// cleanupAllCgs unfreezes and removes every active session cgroup.
+// Called on SIGTERM/SIGINT so that processes in frozen cgroups can continue.
+func cleanupAllCgs() {
+	activeCgsMu.Lock()
+	cgs := make([]*cgroupSession, len(activeCgs))
+	copy(cgs, activeCgs)
+	activeCgs = nil
+	activeCgsMu.Unlock()
+	for _, cg := range cgs {
+		cg.stopTracking()
+		cg.remove()
+	}
+}
 
 func main() {
 	flag.Parse()
@@ -72,6 +119,17 @@ func main() {
 	if err := os.Chmod(*flagSocket, 0600); err != nil {
 		log.Fatalf("chmod socket: %v", err)
 	}
+
+	// Unfreeze all session cgroups on graceful shutdown so processes in
+	// frozen cgroups (e.g. rpm scriptlets) are not left stuck.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		log.Printf("sudo-shipper shutting down — cleaning up session cgroups")
+		cleanupAllCgs()
+		os.Exit(0)
+	}()
 
 	log.Printf("sudo-shipper listening on %s, forwarding to %s", *flagSocket, *flagServer)
 
@@ -120,11 +178,22 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	// ── Step 2: create session cgroup, move sudo into it ──────────────────
 	//
-	// cgRef is a mutable pointer: the SESSION_END path may nil it out to
-	// hand off the cgroup to a linger goroutine instead of removing it.
+	// The defer checks for lingering processes on every exit path (normal
+	// SESSION_END, TLS error, read error, etc.).  If the cgroup still has
+	// processes, or if any processes escaped the cgroup but are still running
+	// (e.g. GUI programs moved by GNOME/systemd to an app-*.scope cgroup),
+	// we hand off to a linger goroutine instead of removing immediately.
 	cg := newCgroupSession(start.SessionID, start.Pid)
-	cgRef := cg
-	defer func() { cgRef.remove() }()
+	registerCg(cg)
+	defer func() {
+		unregisterCg(cg)
+		if cg.hasPids() || cg.hasEscapedRunning() {
+			go lingerCgroup(cg, *flagServer, tlsCfg)
+		} else {
+			cg.stopTracking()
+			cg.remove()
+		}
+	}()
 
 	// ── Step 3: per-session ACK tracking ──────────────────────────────────
 	const ackLagLimit = int64(4 * time.Second)
@@ -312,15 +381,6 @@ func handlePluginConn(pluginConn net.Conn) {
 			forward(protocol.MsgSessionEnd, payload)
 			serverBuf.Flush()
 			serverConn.Close()
-			// GUI programs (gvim, okular, …) double-fork: the launcher exits
-			// quickly while the real window runs as a child of init/systemd.
-			// Because fork inherits cgroup membership the window is still in
-			// our cgroup.  Hand it off to a linger goroutine instead of
-			// removing the cgroup immediately.
-			if cg.hasPids() {
-				cgRef = nil // prevent defer from removing it
-				go lingerCgroup(cg, *flagServer, tlsCfg)
-			}
 			return
 
 		default:
@@ -331,8 +391,11 @@ func handlePluginConn(pluginConn net.Conn) {
 
 // lingerCgroup keeps a session cgroup alive after the sudo process exits so
 // that detached GUI programs (gvim, okular, …) remain frozen when the log
-// server is unreachable.  It polls until the cgroup is empty, then cleans up.
+// server is unreachable.  It also tracks any PIDs that escaped the cgroup
+// (moved by GNOME/systemd) and freezes those via SIGSTOP/SIGCONT.
+// Exits when both the cgroup and all escaped PIDs are empty.
 func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
+	defer cg.stopTracking()
 	defer cg.remove()
 	log.Printf("cgroup %s: lingering (GUI processes remain)", cg.path)
 
@@ -365,7 +428,7 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 
 	for {
 		time.Sleep(pollInterval)
-		if !cg.hasPids() {
+		if !cg.hasPids() && !cg.hasEscapedRunning() {
 			log.Printf("cgroup %s: linger done — no more processes", cg.path)
 			return
 		}
