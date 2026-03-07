@@ -26,6 +26,7 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [ACK mechanism](#ack-mechanism)
   - [Freeze mechanism](#freeze-mechanism)
   - [Building RPMs](#building-rpms)
+- [Performance and capacity](#performance-and-capacity)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -649,6 +650,76 @@ cloud-managed PVC is simpler and sufficient.
   which IP ranges (your client machines) can reach port 9876.
 - Rotate the HMAC key and client certificates periodically; update the
   Secret and restart the pod.
+
+---
+
+## Performance and capacity
+
+### Resource usage per session
+
+Each active sudo session consumes:
+
+| Resource | Per session | Notes |
+|----------|-------------|-------|
+| Goroutines | 2 | `handleConn` + ACK reader goroutine, ~8 KB stack each |
+| Memory | ~100–200 KB | bufio buffers (8 KB) + TLS buffers (~64 KB) + Go runtime overhead |
+| File descriptors | 4 | `ttyout`, `ttyin`, `timing` files + TLS socket |
+| CPU per chunk | ~1–5 µs | 2× `os.Write` + HMAC-SHA256 + AES-NI TLS encrypt |
+
+### Bottlenecks
+
+**Disk I/O** (not the limiting factor in practice)
+Each chunk generates two `Write()` calls against `os.File` — but these hit the kernel page cache and return immediately. The kernel flushes asynchronously to disk. With a modern NVMe SSD, the page cache absorbs bursts easily. Disk I/O only becomes a bottleneck if the system runs out of memory for the page cache, or if `O_SYNC` were used (it is not).
+
+**File descriptor limit** (the first hard limit)
+The default FD limit for a systemd service is 1 024. At 4 FD per session this caps out at ~250 simultaneous sessions without configuration changes.
+
+Add to the service file or a drop-in to raise the limit:
+```
+LimitNOFILE=65536
+```
+
+With that setting the theoretical FD ceiling is ~16 000 sessions.
+
+**Memory** (secondary limit)
+~150 KB × 1 000 sessions ≈ 150 MB. A pod or server with 2 GB RAM can comfortably hold thousands of concurrent sessions in memory.
+
+**TLS handshake CPU** (burst cost only)
+A TLS 1.3 + P-256 handshake costs ~0.5–2 ms of CPU. 100 new sessions per second ≈ 100–200 ms CPU/s — not a bottleneck at normal sudo rates.
+
+### Practical capacity estimates
+
+| Scenario | Simultaneous sessions |
+|----------|-----------------------|
+| Default install (no tuning) | ~200–250 (FD limit) |
+| `LimitNOFILE=65536` set | ~5 000–10 000 (memory) |
+| Dedicated server, 16 GB RAM, NVMe | ~15 000–20 000 |
+
+**50 simultaneous sessions** — the typical target for this system — is handled trivially on any hardware, including a small Kubernetes pod with 256 MB RAM.
+
+### Known resource leak
+
+A crashed or killed shipper that never sends `SESSION_END` will leave a goroutine and 4 file descriptors open on the server until the server process is restarted. The server has no built-in session timeout. For production environments with many short-lived client machines, add a periodic server restart via a systemd `Restart=` policy or a Kubernetes liveness probe.
+
+### Recommended resource limits for Kubernetes
+
+```yaml
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "2Gi"
+    cpu: "2"
+```
+
+And in the server service/pod spec (or via `LimitNOFILE` in the systemd unit):
+```yaml
+securityContext:
+  sysctls:
+    - name: fs.file-max
+      value: "65536"
+```
 
 ---
 
