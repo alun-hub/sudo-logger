@@ -289,10 +289,14 @@ static int ack_is_fresh_locked(void)
 /*
  * Background monitor thread.
  *
- * Polls ACK state every 500 ms and sends SIGSTOP/SIGCONT to the child
- * process.  This handles graphical (non-tty) programs where log_ttyin
- * is never called and therefore the input-blocking freeze never fires.
- * For tty programs it adds a second layer of enforcement.
+ * Polls ACK state every 500 ms and sends SIGSTOP/SIGCONT to the child's
+ * entire process group.  Using the process group rather than a single PID
+ * is required because sudo forks a monitor process ([sudo]) as its direct
+ * child, which in turn forks the actual command (e.g. okular).  Sending
+ * SIGSTOP to only the direct child would leave the command running.
+ *
+ * This is the sole freeze enforcement path.  log_ttyin always returns 1
+ * so sudo's main event loop stays responsive and Ctrl+C works correctly.
  */
 static void *monitor_thread_fn(void *arg)
 {
@@ -306,6 +310,13 @@ static void *monitor_thread_fn(void *arg)
     if (child < 0)
         return NULL;
 
+    /* Freeze the child's entire process group so grandchildren (the actual
+     * command) are also stopped.  Verify the pgid differs from our own so
+     * we don't accidentally freeze the sudo parent itself. */
+    pid_t child_pgid = getpgid(child);
+    if (child_pgid <= 0 || child_pgid == getpgid(g_sudo_pid))
+        child_pgid = 0; /* same group — fall back to single-process kill */
+
     int was_stopped = 0;
 
     while (!g_monitor_stop) {
@@ -318,21 +329,31 @@ static void *monitor_thread_fn(void *arg)
         int fresh = ack_is_fresh_locked();
 
         if (!fresh && !was_stopped) {
-            if (!g_frozen && g_tty_fd >= 0)
+            if (g_tty_fd >= 0)
                 write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
-            kill(child, SIGSTOP);
+            if (child_pgid > 0)
+                kill(-child_pgid, SIGSTOP);
+            else
+                kill(child, SIGSTOP);
             was_stopped = 1;
         } else if (fresh && was_stopped) {
-            kill(child, SIGCONT);
+            if (child_pgid > 0)
+                kill(-child_pgid, SIGCONT);
+            else
+                kill(child, SIGCONT);
             if (g_tty_fd >= 0)
                 write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
             was_stopped = 0;
         }
     }
 
-    /* Unfreeze child if we stopped it before session ended cleanly. */
-    if (was_stopped)
-        kill(child, SIGCONT);
+    /* Unfreeze on clean session end so the child doesn't remain stopped. */
+    if (was_stopped) {
+        if (child_pgid > 0)
+            kill(-child_pgid, SIGCONT);
+        else
+            kill(child, SIGCONT);
+    }
 
     return NULL;
 }
@@ -500,46 +521,17 @@ static void plugin_close(int exit_status, int error)
 
 /*
  * Called for input typed by the user (terminal → child process).
- * Return 1 to forward to child, 0 to swallow (freeze).
+ *
+ * Always returns 1 (forward to child).  Freeze enforcement is handled
+ * entirely by the background monitor thread via SIGSTOP/SIGCONT on the
+ * child process group.  Blocking here would prevent sudo's main event
+ * loop from processing signals, causing Ctrl+C to stop working and the
+ * terminal to hang.
  */
 static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
-
     ship_chunk(STREAM_TTYIN, buf, len);
-
-    if (!ack_is_fresh_locked()) {
-        if (!g_frozen && g_tty_fd >= 0) {
-            write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
-            g_frozen = 1;
-        }
-        /* Allow Ctrl+C (0x03) and Ctrl+\ (0x1c) through immediately
-         * so the user can kill the frozen session. */
-        for (unsigned int i = 0; i < len; i++) {
-            if ((unsigned char)buf[i] == 0x03 || (unsigned char)buf[i] == 0x1c)
-                return 1;
-        }
-        /* Block here until ACKs resume rather than returning 0.
-         * Returning 0 causes sudo to send SIGTERM to the child process.
-         * Blocking keeps the child alive while preventing unlogged input
-         * from reaching it. When the network recovers we fall through
-         * and return 1, forwarding the pending keystroke. */
-        do {
-            struct timespec ts = { .tv_sec = 0, .tv_nsec = 200000000L };
-            nanosleep(&ts, NULL);
-        } while (!ack_is_fresh_locked());
-
-        if (g_frozen) {
-            if (g_tty_fd >= 0)
-                write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
-            g_frozen = 0;
-        }
-    } else if (g_frozen) {
-        if (g_tty_fd >= 0)
-            write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
-        g_frozen = 0;
-    }
-
     return 1;
 }
 
