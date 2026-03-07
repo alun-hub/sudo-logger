@@ -25,6 +25,9 @@
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <pthread.h>
+#include <signal.h>
 
 /* ---------- tunables ---------- */
 #define SHIPPER_SOCK_PATH    "/run/sudo-logger/plugin.sock"
@@ -65,6 +68,15 @@ static uint64_t      g_seq        = 0;
 static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
 static time_t g_last_ack_query = 0;  /* when we last queried the shipper */
 static int    g_frozen         = 0;
+
+/* Background monitor thread — freezes graphical (non-tty) programs via
+ * SIGSTOP/SIGCONT when ACKs go stale.  Also provides a second line of
+ * defence for tty sessions alongside the log_ttyin blocking. */
+static pid_t          g_sudo_pid       = -1;
+static volatile int   g_monitor_stop   = 0;
+static int            g_monitor_started = 0;
+static pthread_t      g_monitor_thread;
+static pthread_mutex_t g_ack_mu        = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------- helpers ---------- */
 
@@ -214,6 +226,118 @@ static int ack_is_fresh(void)
 }
 
 /*
+ * Find the PID of a direct child of parent_pid.
+ * First tries /proc/<pid>/task/<pid>/children (Linux 3.5+),
+ * then falls back to scanning /proc/<N>/status for PPid.
+ */
+static pid_t find_child_pid(pid_t parent_pid)
+{
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/task/%d/children",
+             (int)parent_pid, (int)parent_pid);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        pid_t child = -1;
+        fscanf(f, "%d", &child);
+        fclose(f);
+        if (child > 0)
+            return child;
+    }
+
+    /* Fallback: scan /proc for PPid == parent_pid */
+    DIR *proc = opendir("/proc");
+    if (!proc)
+        return -1;
+    struct dirent *e;
+    pid_t found = -1;
+    while ((e = readdir(proc)) != NULL && found < 0) {
+        char *end;
+        long pid = strtol(e->d_name, &end, 10);
+        if (*end != '\0' || pid <= 0)
+            continue;
+        snprintf(path, sizeof(path), "/proc/%ld/status", pid);
+        FILE *sf = fopen(path, "r");
+        if (!sf)
+            continue;
+        char line[128];
+        while (fgets(line, sizeof(line), sf)) {
+            if (strncmp(line, "PPid:", 5) == 0) {
+                if (strtol(line + 5, NULL, 10) == (long)parent_pid)
+                    found = (pid_t)pid;
+                break;
+            }
+        }
+        fclose(sf);
+    }
+    closedir(proc);
+    return found;
+}
+
+/*
+ * Thread-safe wrapper around ack_is_fresh().
+ * Both log_ttyin and the monitor thread call this; the mutex ensures
+ * the shared shipper socket is not used concurrently.
+ */
+static int ack_is_fresh_locked(void)
+{
+    pthread_mutex_lock(&g_ack_mu);
+    int fresh = ack_is_fresh();
+    pthread_mutex_unlock(&g_ack_mu);
+    return fresh;
+}
+
+/*
+ * Background monitor thread.
+ *
+ * Polls ACK state every 500 ms and sends SIGSTOP/SIGCONT to the child
+ * process.  This handles graphical (non-tty) programs where log_ttyin
+ * is never called and therefore the input-blocking freeze never fires.
+ * For tty programs it adds a second layer of enforcement.
+ */
+static void *monitor_thread_fn(void *arg)
+{
+    (void)arg;
+
+    /* Give sudo time to fork the child before we try to find its PID. */
+    struct timespec wait = { .tv_sec = 0, .tv_nsec = 300000000L };
+    nanosleep(&wait, NULL);
+
+    pid_t child = find_child_pid(g_sudo_pid);
+    if (child < 0)
+        return NULL;
+
+    int was_stopped = 0;
+
+    while (!g_monitor_stop) {
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 500000000L };
+        nanosleep(&ts, NULL);
+
+        if (g_monitor_stop)
+            break;
+
+        int fresh = ack_is_fresh_locked();
+
+        if (!fresh && !was_stopped) {
+            if (!g_frozen && g_tty_fd >= 0)
+                write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+            kill(child, SIGSTOP);
+            was_stopped = 1;
+        } else if (fresh && was_stopped) {
+            kill(child, SIGCONT);
+            if (g_tty_fd >= 0)
+                write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
+            was_stopped = 0;
+        }
+    }
+
+    /* Unfreeze child if we stopped it before session ended cleanly. */
+    if (was_stopped)
+        kill(child, SIGCONT);
+
+    return NULL;
+}
+
+/*
  * Build and send a CHUNK message.
  * Payload: [8 seq BE][8 ts_ns BE][1 stream][4 datalen BE][data]
  */
@@ -336,12 +460,26 @@ static int plugin_open(unsigned int        version,
     /* Seed ack time so the freeze window starts from now */
     g_last_ack_time = now_sec();
 
+    /* Start background monitor thread that handles graphical (non-tty)
+     * programs via SIGSTOP/SIGCONT. */
+    g_sudo_pid      = getpid();
+    g_monitor_stop  = 0;
+    g_monitor_started = (pthread_create(&g_monitor_thread, NULL,
+                                        monitor_thread_fn, NULL) == 0);
+
     return 1;
 }
 
 static void plugin_close(int exit_status, int error)
 {
     (void)error;
+
+    /* Stop the background monitor thread before closing the shipper socket. */
+    if (g_monitor_started) {
+        g_monitor_stop = 1;
+        pthread_join(g_monitor_thread, NULL);
+        g_monitor_started = 0;
+    }
 
     if (g_shipper_fd >= 0) {
         uint8_t payload[12];
@@ -370,7 +508,7 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 
     ship_chunk(STREAM_TTYIN, buf, len);
 
-    if (!ack_is_fresh()) {
+    if (!ack_is_fresh_locked()) {
         if (!g_frozen && g_tty_fd >= 0) {
             write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
             g_frozen = 1;
@@ -389,7 +527,7 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
         do {
             struct timespec ts = { .tv_sec = 0, .tv_nsec = 200000000L };
             nanosleep(&ts, NULL);
-        } while (!ack_is_fresh());
+        } while (!ack_is_fresh_locked());
 
         if (g_frozen) {
             if (g_tty_fd >= 0)
