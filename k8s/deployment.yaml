@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sudo-logserver
+  namespace: sudo-logger
+  labels:
+    app: sudo-logserver
+spec:
+  # Keep at 1 replica unless you add a ReadWriteMany PVC and a TCP load
+  # balancer with connection-level stickiness. See README for details.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sudo-logserver
+  strategy:
+    type: Recreate   # ensures only one writer to the PVC at a time
+  template:
+    metadata:
+      labels:
+        app: sudo-logserver
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532    # distroless nonroot UID
+        runAsGroup: 65532
+        fsGroup: 65532      # ensures PVC mount is writable by the process
+
+      containers:
+        - name: sudo-logserver
+          image: ghcr.io/alun-hub/sudo-logserver:1.0
+          args:
+            - -listen=:9876
+            - -logdir=/var/log/sudoreplay
+            - -cert=/etc/sudo-logger/server.crt
+            - -key=/etc/sudo-logger/server.key
+            - -ca=/etc/sudo-logger/ca.crt
+            - -hmackey=/etc/sudo-logger/hmac.key
+
+          ports:
+            - name: tls
+              containerPort: 9876
+              protocol: TCP
+
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/sudo-logger
+              readOnly: true
+            - name: logs
+              mountPath: /var/log/sudoreplay
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+          livenessProbe:
+            tcpSocket:
+              port: 9876
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 3
+
+          readinessProbe:
+            tcpSocket:
+              port: 9876
+            initialDelaySeconds: 3
+            periodSeconds: 5
+
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: sudo-logger-tls
+            defaultMode: 0400   # private key readable only by process
+        - name: logs
+          persistentVolumeClaim:
+            claimName: sudoreplay-logs

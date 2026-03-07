@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sudoreplay-logs
+  namespace: sudo-logger
+spec:
+  accessModes:
+    - ReadWriteOnce   # sufficient for single replica; use ReadWriteMany for HA
+  resources:
+    requests:
+      storage: 20Gi
+  # Remove or change storageClassName to match your cluster.
+  # Leave commented out to use the cluster default.
+  # storageClassName: standard

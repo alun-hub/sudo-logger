@@ -549,6 +549,109 @@ ls ~/rpmbuild/RPMS/x86_64/
 
 ---
 
+## Kubernetes deployment
+
+### Why not standard Ingress?
+
+sudo-logserver speaks raw TCP with mutual TLS. Standard Kubernetes Ingress
+is HTTP/HTTPS only and terminates TLS — this breaks mTLS. Use a
+`LoadBalancer` Service instead (TCP passthrough).
+
+### Quick start
+
+```bash
+# 1. Create namespace
+kubectl apply -f k8s/namespace.yaml
+
+# 2. Load PKI files as a Secret (run setup.sh first if you haven't)
+bash k8s/create-secret.sh /path/to/pki
+
+# 3. Deploy everything else
+kubectl apply -f k8s/pvc.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+
+# Or apply all at once with kustomize
+kubectl apply -k k8s/
+
+# 4. Get the external IP assigned by your cloud LB
+kubectl get svc -n sudo-logger sudo-logserver
+# NAME             TYPE           EXTERNAL-IP      PORT(S)
+# sudo-logserver   LoadBalancer   203.0.113.42     9876:31234/TCP
+
+# 5. Update shipper.conf on all clients
+# LOGSERVER=203.0.113.42:9876
+```
+
+### Build and push the container image
+
+```bash
+docker build -t ghcr.io/alun-hub/sudo-logserver:1.0 .
+docker push ghcr.io/alun-hub/sudo-logserver:1.0
+```
+
+Or with podman:
+```bash
+podman build -t ghcr.io/alun-hub/sudo-logserver:1.0 .
+podman push ghcr.io/alun-hub/sudo-logserver:1.0
+```
+
+### Accessing logs from the pod
+
+```bash
+# Open a shell via a debug sidecar or ephemeral container
+kubectl debug -it -n sudo-logger deploy/sudo-logserver \
+    --image=debian:slim --target=sudo-logserver
+
+# Or copy logs out
+kubectl cp sudo-logger/<pod-name>:/var/log/sudoreplay ./sudoreplay-backup
+
+# Run sudoreplay against the PVC locally by port-forwarding is not possible
+# since sudoreplay reads files directly. Mount the PVC in a separate pod:
+kubectl run replay --rm -it --image=fedora:latest \
+    --overrides='{
+      "spec": {
+        "volumes": [{"name":"logs","persistentVolumeClaim":{"claimName":"sudoreplay-logs"}}],
+        "containers": [{"name":"replay","image":"fedora:latest",
+          "command":["bash"],
+          "volumeMounts":[{"name":"logs","mountPath":"/var/log/sudoreplay"}]}]
+      }
+    }' \
+    -n sudo-logger -- bash
+# Inside: dnf install -y sudo && sudoreplay -d /var/log/sudoreplay -l
+```
+
+### Multiple replicas (HA)
+
+Running more than one replica requires:
+
+1. **ReadWriteMany PVC** — NFS, CephFS, or a cloud file share (EFS, Filestore)
+   so all pods can write logs to the same directory simultaneously.
+
+2. **Connection-level sticky sessions** — each sudo session is one TCP
+   connection; it must stay on the same pod for the duration. Configure
+   `sessionAffinity: ClientIP` on the Service, or use an NLB/cloud LB
+   that supports connection tracking.
+
+3. Change `strategy.type` from `Recreate` to `RollingUpdate` in
+   `deployment.yaml` once the above are in place.
+
+For most environments (≤50 simultaneous users) a single replica with a
+cloud-managed PVC is simpler and sufficient.
+
+### Security notes
+
+- The container runs as UID 65532 (distroless `nonroot`) with a read-only
+  root filesystem and all Linux capabilities dropped.
+- TLS private key and HMAC key are mounted read-only from a Kubernetes
+  Secret (`defaultMode: 0400`).
+- Consider using `loadBalancerSourceRanges` in `service.yaml` to restrict
+  which IP ranges (your client machines) can reach port 9876.
+- Rotate the HMAC key and client certificates periodically; update the
+  Secret and restart the pod.
+
+---
+
 ## Troubleshooting
 
 ### `sudo: error in /etc/sudo.conf: unable to load plugin`
