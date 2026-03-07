@@ -98,33 +98,37 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	var (
 		sessionAckMu    sync.Mutex
-		sessionAckTs    int64 // when we last received a real ACK (ns)
 		sessionAckSeq   uint64
 		serverConnAlive bool
-		lastChunkSentNs int64 // when we last forwarded a MsgChunk (ns)
+		// ackDebtStartNs is set when a chunk is forwarded without a prior ACK
+		// clearing the debt. It is reset to 0 whenever an ACK arrives from the
+		// server. This measures "how long have chunks been waiting for an ACK"
+		// independent of how long the user was idle between keypresses.
+		ackDebtStartNs int64
 	)
 
 	updateAck := func(ts int64, seq uint64) {
 		sessionAckMu.Lock()
-		sessionAckTs = ts
 		sessionAckSeq = seq
+		// Any ACK from the server clears the outstanding debt.
+		ackDebtStartNs = 0
 		sessionAckMu.Unlock()
 	}
 
 	// readAck returns the current ACK state.
-	// Returns time.Now() (fresh) when the server connection is alive and ACKs
-	// are keeping up with sent chunks. Returns 0 (stale) when:
+	// Returns time.Now() (fresh) when the server is alive and ACKing promptly.
+	// Returns 0 (stale) when:
 	//   - TCP connection has died, OR
-	//   - Chunks have been sent but no ACK arrived within ackLagLimit (network silent)
+	//   - A chunk has been waiting for an ACK for longer than ackLagLimit.
+	//     The wait is measured from when the debt started, not from when the
+	//     user last typed — this prevents false freezes after idle periods.
 	readAck := func() (int64, uint64) {
 		sessionAckMu.Lock()
 		defer sessionAckMu.Unlock()
 		if !serverConnAlive {
 			return 0, sessionAckSeq
 		}
-		// ACK lag check: unACKed chunks exist AND last real ACK is > ackLagLimit old
-		if lastChunkSentNs > 0 && sessionAckTs < lastChunkSentNs &&
-			time.Now().UnixNano()-sessionAckTs > ackLagLimit {
+		if ackDebtStartNs > 0 && time.Now().UnixNano()-ackDebtStartNs > ackLagLimit {
 			return 0, sessionAckSeq
 		}
 		return time.Now().UnixNano(), sessionAckSeq
@@ -173,13 +177,12 @@ func handlePluginConn(pluginConn net.Conn) {
 	markDead := func() {
 		sessionAckMu.Lock()
 		serverConnAlive = false
-		sessionAckTs = 0 // plugin sees stale immediately on next poll
+		ackDebtStartNs = 0 // readAck uses serverConnAlive=false path now
 		sessionAckMu.Unlock()
 	}
 
 	sessionAckMu.Lock()
 	serverConnAlive = true
-	sessionAckTs = time.Now().UnixNano() // seed so ACK lag check starts clean
 	sessionAckMu.Unlock()
 
 	// Tell plugin sudo may proceed
@@ -242,11 +245,14 @@ func handlePluginConn(pluginConn net.Conn) {
 			markDead()
 			return
 		}
-		// Track when the last chunk was successfully handed to TCP so we can
-		// detect ACK lag even when the send buffer isn't full.
+		// Start the ACK debt timer when a chunk is forwarded.
+		// If no debt is already outstanding, this is the start of a new
+		// unACKed window. An arriving ACK (updateAck) will reset it to 0.
 		if msgType == protocol.MsgChunk {
 			sessionAckMu.Lock()
-			lastChunkSentNs = time.Now().UnixNano()
+			if ackDebtStartNs == 0 {
+				ackDebtStartNs = time.Now().UnixNano()
+			}
 			sessionAckMu.Unlock()
 		}
 	}
