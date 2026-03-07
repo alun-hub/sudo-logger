@@ -44,7 +44,8 @@ type SessionStart struct {
 	User      string `json:"user"`
 	Host      string `json:"host"`
 	Command   string `json:"command"`
-	Ts        int64  `json:"ts"` // unix seconds
+	Ts        int64  `json:"ts"`  // unix seconds
+	Pid       int    `json:"pid"` // sudo process PID — used by the shipper for cgroup setup
 }
 
 // Chunk is a decoded CHUNK message.

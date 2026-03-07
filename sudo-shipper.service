@@ -25,6 +25,10 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ReadWritePaths=/run/sudo-logger
+# Delegate=yes grants this service ownership of its cgroup subtree so it
+# can create per-session sub-cgroups and freeze them when the log server
+# becomes unreachable.  Required for GUI program freeze support.
+Delegate=yes
 
 [Install]
 WantedBy=multi-user.target
