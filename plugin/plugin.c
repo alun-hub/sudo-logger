@@ -296,6 +296,13 @@ static int plugin_open(unsigned int        version,
         g_session_id, user, host, cmd,
         (long long)now_sec());
 
+    /* snprintf returns the number of bytes that *would* have been written,
+     * which may exceed sizeof(payload) if the input was truncated.
+     * Cap to the actual number of bytes written to avoid over-reading the
+     * stack buffer in send_msg/writev. */
+    if (plen >= (int)sizeof(payload))
+        plen = (int)sizeof(payload) - 1;
+
     send_msg(g_shipper_fd, MSG_SESSION_START, payload, (uint32_t)plen);
 
     /* Wait for shipper to confirm server connection before allowing sudo */
