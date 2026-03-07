@@ -1,0 +1,30 @@
+# LoadBalancer Service — cloud provider allocates an external IP.
+# TCP traffic is passed straight through to the pod; TLS is NOT terminated
+# here. mTLS handshake happens inside the sudo-logserver container.
+#
+# On-prem without a cloud LB: change type to NodePort and use
+# MetalLB, a hardware LB, or direct NodePort access.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sudo-logserver
+  namespace: sudo-logger
+  annotations:
+    # AWS: use NLB (Network Load Balancer) to preserve client IPs
+    # service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    #
+    # GCP: TCP passthrough (no proxy) — already the default for TCP
+    # cloud.google.com/load-balancer-type: "External"
+spec:
+  type: LoadBalancer
+  selector:
+    app: sudo-logserver
+  ports:
+    - name: tls
+      port: 9876
+      targetPort: 9876
+      protocol: TCP
+  # Optional: restrict which source IPs may connect (e.g. your office/datacenter)
+  # loadBalancerSourceRanges:
+  #   - 192.168.0.0/16
+  #   - 10.0.0.0/8
