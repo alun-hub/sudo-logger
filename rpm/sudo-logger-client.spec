@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.1
-Release:        22%{?dist}
+Release:        23%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -88,6 +88,11 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Sun Mar 08 2026 sudo-logger 1.1-23
+- Show styled ANSI banner on /dev/tty when log server is unreachable at
+  startup (matches freeze banner style); fall back to plain g_printf for
+  non-TTY invocations
+
 * Sun Mar 08 2026 sudo-logger 1.1-22
 - Fix bash being suspended during freeze: escaped processes that share bash's
   process group are dropped from tracking (no SIGSTOP); only processes with
