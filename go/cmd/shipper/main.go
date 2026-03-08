@@ -34,8 +34,12 @@ var (
 	flagCert    = flag.String("cert", "/etc/sudo-logger/client.crt", "Client TLS certificate")
 	flagKey     = flag.String("key", "/etc/sudo-logger/client.key", "Client TLS key")
 	flagCA      = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate")
-	flagHMAC = flag.String("hmackey", "/etc/sudo-logger/hmac.key", "HMAC key file")
+	flagHMAC    = flag.String("hmackey", "/etc/sudo-logger/hmac.key", "HMAC key file")
+	flagDebug   = flag.Bool("debug", false, "Enable verbose debug logging")
 )
+
+// debugLog is a no-op by default; replaced with log.Printf when -debug is set.
+var debugLog = func(format string, args ...any) {}
 
 var (
 	hmacKey []byte
@@ -90,6 +94,9 @@ func cleanupAllCgs() {
 
 func main() {
 	flag.Parse()
+	if *flagDebug {
+		debugLog = log.Printf
+	}
 
 	var err error
 	hmacKey, err = os.ReadFile(*flagHMAC)
@@ -490,7 +497,7 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 	for {
 		time.Sleep(pollInterval)
 		if !cg.hasPids() && !cg.hasEscapedRunning() {
-			log.Printf("cgroup %s: linger done — no more processes", cg.path)
+			debugLog("cgroup %s: linger done — no more processes", cg.path)
 			return
 		}
 		if serverReachable() {
