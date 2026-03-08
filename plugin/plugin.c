@@ -61,7 +61,6 @@
     "\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
-static sudo_conv_t   g_conv;
 static sudo_printf_t g_printf;
 static int           g_shipper_fd = -1;
 static int           g_tty_fd     = -1;
@@ -326,10 +325,9 @@ static int plugin_open(unsigned int        version,
                        char * const        plugin_options[],
                        const char        **errstr)
 {
-    (void)version; (void)settings; (void)command_info;
+    (void)version; (void)conversation; (void)settings; (void)command_info;
     (void)user_env; (void)plugin_options;
 
-    g_conv    = conversation;
     g_printf  = sudo_plugin_printf;
     g_seq     = 0;
     g_last_ack_time  = 0;

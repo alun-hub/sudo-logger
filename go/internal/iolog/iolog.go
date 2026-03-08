@@ -80,8 +80,9 @@ func NewWriter(baseDir, user, host, runas, tty, command string, startTime time.T
 	if err != nil {
 		return nil, err
 	}
+	safeCmd := strings.NewReplacer("\n", " ", "\r", " ").Replace(command)
 	fmt.Fprintf(logF, "%d:%s:%s::%s\n/\n%s\n",
-		startTime.Unix(), user, runas, tty, command)
+		startTime.Unix(), user, runas, tty, safeCmd)
 	logF.Close()
 
 	ttyoutF, err := os.Create(filepath.Join(dir, "ttyout"))
@@ -153,11 +154,15 @@ func (w *Writer) Dir() string {
 }
 
 // Close flushes and closes all log files.
+// Returns the first error encountered, if any.
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.ttyoutF.Close()
-	w.ttyinF.Close()
-	w.timingF.Close()
-	return nil
+	var firstErr error
+	for _, f := range []*os.File{w.ttyoutF, w.ttyinF, w.timingF} {
+		if err := f.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

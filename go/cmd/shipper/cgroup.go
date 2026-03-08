@@ -255,32 +255,10 @@ func (cg *cgroupSession) trackDescendants() {
 		case <-cg.stopTrack:
 			return
 		case <-ticker.C:
-			// ── 1. Discover new children ─────────────────────────────────
-			// GUI apps are detected by their open connection to an X11 or
-			// Wayland display socket (more reliable than checking TTY: GUI
-			// apps inherit the parent shell's controlling terminal, so
-			// hasControllingTTY returns true even for gvim, okular, etc.).
-			// GUI apps found here are moved immediately to the parent cgroup
-			// so they are never subject to cgroup.freeze.  Freezing a GUI
-			// app prevents it from responding to compositor pings → GNOME
-			// queues SIGTERM → app dies on unfreeze.
-			parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
-			displayInodes := displaySocketInodes()
+			// ── 1. Discover new children ────────────────────────────────────────────
 			for pid := range seen {
 				for _, child := range procChildren(pid) {
 					if _, already := seen[child]; !already {
-						if isGUIApp(child, displayInodes) {
-							// GUI app: push to parent cgroup, don't track.
-							if err := os.WriteFile(parentProcs,
-								[]byte(strconv.Itoa(child)+"\n"), 0644); err == nil {
-								debugLog("cgroup %s: pid %d new GUI child (display conn), moved to parent cgroup",
-									cg.cgName, child)
-							} else {
-								debugLog("cgroup %s: pid %d new GUI child (display conn), move to parent failed: %v",
-									cg.cgName, child, err)
-							}
-							continue // do not add to seen
-						}
 						seen[child] = struct{}{}
 					}
 				}
@@ -311,18 +289,7 @@ func (cg *cgroupSession) trackDescendants() {
 					continue
 				}
 				if cg.inOurCgroup(pid) {
-					// Process is in our cgroup.  If it has since opened a
-					// display connection it is a GUI app that must not be
-					// frozen — move it to the parent cgroup now.
-					if isGUIApp(pid, displayInodes) {
-						if err := os.WriteFile(parentProcs,
-							[]byte(strconv.Itoa(pid)+"\n"), 0644); err == nil {
-							debugLog("cgroup %s: pid %d detected as GUI (display conn), moved to parent cgroup",
-								cg.cgName, pid)
-							delete(seen, pid)
-						}
-					}
-					continue // handled by cgroup.freeze (or just moved out)
+					continue // handled by cgroup.freeze
 				}
 				// Not in our cgroup.  Verify it is still alive before
 				// classifying as escaped: short-lived subprocesses (rpm, ls,
