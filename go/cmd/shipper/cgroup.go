@@ -50,7 +50,7 @@ func init() {
 			base := "/sys/fs/cgroup" + rel
 			if _, err := os.Stat(base); err == nil {
 				cgroupBase = base
-				log.Printf("cgroup: delegated subtree at %s", base)
+				debugLog("cgroup: delegated subtree at %s", base)
 			}
 			return
 		}
@@ -100,7 +100,7 @@ func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 	); err != nil {
 		log.Printf("cgroup: move sudo pid %d: %v", sudoPid, err)
 	}
-	log.Printf("cgroup: session %s created, sudo pid %d", filepath.Base(path), sudoPid)
+	debugLog("cgroup: session %s created, sudo pid %d", filepath.Base(path), sudoPid)
 	cg := &cgroupSession{
 		path:      path,
 		sudoPid:   sudoPid,
@@ -147,7 +147,7 @@ func (cg *cgroupSession) moveSudoOut() {
 		log.Printf("cgroup %s: move sudo out: %v", cg.cgName, err)
 		return
 	}
-	log.Printf("cgroup %s: sudo pid %d moved to parent cgroup (child detected)", cg.cgName, cg.sudoPid)
+	debugLog("cgroup %s: sudo pid %d moved to parent cgroup (child detected)", cg.cgName, cg.sudoPid)
 }
 
 // trackDescendants runs as a goroutine for the lifetime of the session.
@@ -225,7 +225,7 @@ func (cg *cgroupSession) trackDescendants() {
 				cg.escapedMu.Lock()
 				if _, already := cg.escaped[pid]; !already {
 					cg.escaped[pid] = struct{}{}
-					log.Printf("cgroup %s: pid %d escaped to foreign cgroup, tracking via SIGSTOP",
+					debugLog("cgroup %s: pid %d escaped to foreign cgroup, tracking via SIGSTOP",
 						cg.cgName, pid)
 					if isFrozen {
 						signalGroup(pid, syscall.SIGSTOP)
@@ -263,10 +263,10 @@ func (cg *cgroupSession) hasPids() bool {
 	}
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {
-		log.Printf("cgroup %s: no processes remain", cg.cgName)
+		debugLog("cgroup %s: no processes remain", cg.cgName)
 		return false
 	}
-	log.Printf("cgroup %s: processes remain: %s", cg.cgName,
+	debugLog("cgroup %s: processes remain: %s", cg.cgName,
 		strings.ReplaceAll(trimmed, "\n", ","))
 	return true
 }
@@ -303,7 +303,7 @@ func (cg *cgroupSession) freeze() {
 			log.Printf("cgroup freeze: %v", err)
 		} else {
 			cg.frozen = true
-			log.Printf("cgroup %s: frozen", cg.cgName)
+			debugLog("cgroup %s: frozen", cg.cgName)
 		}
 	}
 	cg.mu.Unlock()
@@ -327,7 +327,7 @@ func (cg *cgroupSession) unfreeze() {
 			log.Printf("cgroup unfreeze: %v", err)
 		} else {
 			cg.frozen = false
-			log.Printf("cgroup %s: unfrozen", cg.cgName)
+			debugLog("cgroup %s: unfrozen", cg.cgName)
 		}
 	}
 	cg.mu.Unlock()
@@ -361,6 +361,6 @@ func (cg *cgroupSession) remove() {
 	if err := os.Remove(cg.path); err != nil {
 		log.Printf("cgroup remove %s: %v", cg.cgName, err)
 	} else {
-		log.Printf("cgroup %s: removed", cg.cgName)
+		debugLog("cgroup %s: removed", cg.cgName)
 	}
 }
