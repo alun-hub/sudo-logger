@@ -73,14 +73,6 @@ type Ack struct {
 	HMAC      [32]byte
 }
 
-// AckResponse is sent by the shipper to the plugin in reply to ACK_QUERY.
-//
-// Payload layout: [8 last_ack_ts_ns BE][8 last_ack_seq BE]
-type AckResponse struct {
-	LastAckTs  int64
-	LastAckSeq uint64
-}
-
 // WriteMessage writes a framed message to w.
 func WriteMessage(w *bufio.Writer, msgType uint8, payload []byte) error {
 	hdr := [5]byte{msgType}

@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.1
-Release:        23%{?dist}
+Release:        24%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -88,6 +88,15 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Sun Mar 08 2026 sudo-logger 1.1-24
+- Security: fix nil-ptr dereference in server on malformed SESSION_END
+- Security: reject duplicate session IDs in server (prevents file handle leak)
+- Log integrity: strip newlines from command field in iolog log file
+- iolog Close() now returns real file close errors
+- Dead code: remove broken GUI socket detection (displaySocketInodes/isGUIApp)
+- Dead code: remove unused g_conv from plugin
+- Dead code: remove unused AckResponse struct from protocol
+
 * Sun Mar 08 2026 sudo-logger 1.1-23
 - Show styled ANSI banner on /dev/tty when log server is unreachable at
   startup (matches freeze banner style); fall back to plain g_printf for

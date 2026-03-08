@@ -185,9 +185,11 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("parse session_end: %v", err)
 			}
 			if sess != nil {
-				log.Printf("[%s] end user=%s exit=%d seq=%d duration=%s",
-					sess.id, sess.user, end.ExitCode, end.FinalSeq,
-					time.Since(sess.startTime).Round(time.Second))
+				if end != nil {
+					log.Printf("[%s] end user=%s exit=%d seq=%d duration=%s",
+						sess.id, sess.user, end.ExitCode, end.FinalSeq,
+						time.Since(sess.startTime).Round(time.Second))
+				}
 				srv.closeSession(sess)
 			}
 			return
@@ -233,6 +235,11 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 	}
 
 	srv.mu.Lock()
+	if _, exists := srv.sessions[sess.id]; exists {
+		srv.mu.Unlock()
+		w.Close()
+		return nil, fmt.Errorf("duplicate session id: %s", start.SessionID)
+	}
 	srv.sessions[sess.id] = sess
 	srv.mu.Unlock()
 
@@ -243,7 +250,9 @@ func (srv *server) closeSession(sess *session) {
 	if sess == nil {
 		return
 	}
-	sess.writer.Close()
+	if err := sess.writer.Close(); err != nil {
+		log.Printf("[%s] close writer: %v", sess.id, err)
+	}
 	srv.mu.Lock()
 	delete(srv.sessions, sess.id)
 	srv.mu.Unlock()
