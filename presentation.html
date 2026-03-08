@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sudo-logger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:ital,wght@0,300;0,400;0,700;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:         #07090a;
+  --card:       #0c1012;
+  --border:     #18232a;
+  --green:      #00e87a;
+  --green-dim:  #00884a;
+  --green-glow: rgba(0,232,122,0.12);
+  --red:        #ff3535;
+  --red-dim:    #3d0e0e;
+  --amber:      #ffb800;
+  --text:       #c4cfd4;
+  --text-dim:   #4a5c65;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  cursor: none;
+  user-select: none;
+}
+
+/* ── Scanlines ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.10) 2px, rgba(0,0,0,0.10) 4px
+  );
+  pointer-events: none; z-index: 900;
+}
+
+/* ── CRT Vignette ── */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0,0,0,0.75) 100%);
+  pointer-events: none; z-index: 901;
+}
+
+/* ── Grain noise ── */
+.grain {
+  position: fixed; inset: 0;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+  pointer-events: none; z-index: 902;
+}
+
+/* ── Custom cursor ── */
+#cursor {
+  position: fixed;
+  width: 8px; height: 8px;
+  background: var(--green);
+  pointer-events: none;
+  z-index: 9999;
+  mix-blend-mode: screen;
+  transform: translate(-50%, -50%);
+}
+
+/* ── Corner marks ── */
+.corner { position: fixed; width: 18px; height: 18px; z-index: 800; }
+.c-tl { top: 18px; left: 18px; border-top: 1px solid var(--green-dim); border-left: 1px solid var(--green-dim); }
+.c-tr { top: 18px; right: 18px; border-top: 1px solid var(--green-dim); border-right: 1px solid var(--green-dim); }
+.c-bl { bottom: 18px; left: 18px; border-bottom: 1px solid var(--green-dim); border-left: 1px solid var(--green-dim); }
+.c-br { bottom: 18px; right: 18px; border-bottom: 1px solid var(--green-dim); border-right: 1px solid var(--green-dim); }
+
+/* ── HUD ── */
+#counter {
+  position: fixed; top: 24px; right: 40px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; color: var(--text-dim);
+  letter-spacing: 0.15em; z-index: 800;
+}
+
+#progress {
+  position: fixed; bottom: 28px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 8px; z-index: 800;
+}
+
+.dot {
+  width: 5px; height: 5px;
+  border: 1px solid var(--green-dim);
+  cursor: pointer;
+  transition: background 0.3s, transform 0.2s;
+}
+
+.dot.active { background: var(--green); transform: scale(1.5); }
+
+.nav-hint {
+  position: fixed; bottom: 28px; right: 40px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; color: var(--text-dim);
+  letter-spacing: 0.12em; z-index: 800;
+}
+
+/* ── Slide engine ── */
+.slides { position: relative; width: 100%; height: 100%; }
+
+.slide {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 64px 80px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+
+.slide.enter-right  { transform: translateX(48px); }
+.slide.enter-left   { transform: translateX(-48px); }
+.slide.active       { opacity: 1; transform: translateX(0); pointer-events: all; }
+.slide.exit-left    { opacity: 0; transform: translateX(-48px); }
+.slide.exit-right   { opacity: 0; transform: translateX(48px); }
+
+/* ════════════════════════════════════════════
+   SLIDE 1 — TITLE
+════════════════════════════════════════════ */
+.s-title { flex-direction: column; text-align: center; position: relative; }
+
+.title-grid {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.title-grid::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, var(--bg) 25%, transparent 75%);
+}
+
+.title-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; letter-spacing: 0.35em;
+  color: var(--green); text-transform: uppercase;
+  margin-bottom: 28px; position: relative; z-index: 1;
+}
+
+.title-main {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(88px, 15vw, 200px);
+  line-height: 0.88; letter-spacing: 0.01em;
+  color: #fff; position: relative; z-index: 1;
+}
+
+.title-main .dash { color: var(--green); }
+
+.title-cursor {
+  display: inline-block;
+  width: 0.055em; height: 0.8em;
+  background: var(--green);
+  vertical-align: middle;
+  margin-left: 6px;
+  animation: blink 1s step-end infinite;
+  box-shadow: 0 0 12px var(--green);
+}
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+.title-tagline {
+  font-size: 15px; font-weight: 300;
+  color: var(--text-dim); line-height: 1.7;
+  margin-top: 32px; max-width: 560px;
+  position: relative; z-index: 1;
+}
+
+.title-prompt {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--green-dim);
+  margin-top: 44px; position: relative; z-index: 1;
+  opacity: 0.8;
+}
+
+/* ════════════════════════════════════════════
+   SLIDE 2 — PROBLEM
+════════════════════════════════════════════ */
+.s-problem { gap: 64px; align-items: center; }
+
+.prob-left { flex: 1; }
+
+.prob-left h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(56px, 7vw, 88px);
+  line-height: 0.88; color: var(--red);
+  margin-bottom: 28px;
+}
+
+.prob-left .lead {
+  font-size: 16px; line-height: 1.75; color: var(--text);
+  margin-bottom: 18px;
+}
+
+.prob-left .sub {
+  font-size: 13px; color: var(--text-dim); line-height: 1.65;
+}
+
+.prob-right { flex: 1; }
+
+.t-log {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 20px 20px 16px;
+}
+
+.t-log-header {
+  font-size: 9px; letter-spacing: 0.2em;
+  color: var(--text-dim); text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px; margin-bottom: 14px;
+}
+
+.t-row {
+  display: grid;
+  grid-template-columns: 68px 54px 1fr;
+  gap: 8px;
+  margin-bottom: 9px;
+  align-items: center;
+  min-height: 20px;
+}
+
+.t-row .ts { color: var(--text-dim); font-size: 10px; }
+.t-row .usr { color: var(--green); }
+.t-row .cmd { color: var(--text); }
+
+.t-row.redacted { position: relative; }
+.t-row.redacted .ts,
+.t-row.redacted .usr,
+.t-row.redacted .cmd {
+  background: var(--red-dim);
+  color: transparent;
+  border-radius: 2px;
+}
+
+.t-row.redacted::after {
+  content: 'UNLOGGED';
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--red); font-size: 9px; letter-spacing: 0.25em;
+  font-weight: 700;
+}
+
+/* ════════════════════════════════════════════
+   SLIDE 3 — ARCHITECTURE
+════════════════════════════════════════════ */
+.s-arch { flex-direction: column; width: 100%; max-width: 1080px; }
+
+.slide-heading {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 52px; color: var(--green);
+  text-align: center; margin-bottom: 52px;
+  letter-spacing: 0.04em;
+}
+
+.arch-row {
+  display: flex; align-items: center;
+  justify-content: center;
+}
+
+.a-box {
+  flex: 1; max-width: 230px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 28px 22px;
+  text-align: center;
+  transition: border-color 0.3s;
+  position: relative;
+}
+
+.a-box:hover { border-color: var(--green-dim); }
+
+.a-box .a-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; letter-spacing: 0.25em;
+  color: var(--green); text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.a-box .a-name {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 32px; color: #fff;
+  margin-bottom: 10px; letter-spacing: 0.05em;
+}
+
+.a-box .a-desc {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px; color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.a-box.glow { border-color: var(--green-dim); box-shadow: 0 0 28px var(--green-glow); }
+
+.a-conn {
+  min-width: 90px;
+  display: flex; flex-direction: column;
+  align-items: center; padding: 0 4px;
+  position: relative;
+}
+
+.a-conn .line {
+  width: 100%; height: 1px;
+  background: var(--green-dim);
+  position: relative; overflow: hidden;
+}
+
+.a-conn .pkt {
+  position: absolute;
+  width: 5px; height: 5px;
+  background: var(--green);
+  border-radius: 50%;
+  top: -2px; left: -5px;
+  box-shadow: 0 0 6px var(--green);
+  animation: flow 2.2s linear infinite;
+}
+
+.a-conn .pkt2 { animation-delay: 1.1s; }
+
+@keyframes flow {
+  0%   { left: -5px; opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { left: calc(100% + 5px); opacity: 0; }
+}
+
+.a-conn .proto {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; color: var(--text-dim);
+  margin-top: 7px; letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.arch-note {
+  margin-top: 40px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; line-height: 1.6;
+  color: var(--amber);
+  text-align: center;
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.arch-note em { color: var(--red); font-style: normal; font-weight: 700; }
+
+/* ════════════════════════════════════════════
+   SLIDE 4 — FREEZE
+════════════════════════════════════════════ */
+.s-freeze { flex-direction: column; width: 100%; max-width: 960px; }
+
+.freeze-banner-demo {
+  background: #8b1a1a;
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px; font-weight: 700;
+  padding: 11px 24px;
+  text-align: center;
+  letter-spacing: 0.04em;
+  border: 1px solid #c0392b;
+  margin-bottom: 6px;
+}
+
+.freeze-sub-demo {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--amber);
+  text-align: center; margin-bottom: 36px;
+}
+
+.f-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px; background: var(--border);
+  border: 1px solid var(--border);
+  margin-bottom: 28px;
+}
+
+.f-step {
+  background: var(--card);
+  padding: 22px 16px; text-align: center;
+}
+
+.f-step .f-icon { font-size: 22px; margin-bottom: 12px; }
+
+.f-step .f-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; letter-spacing: 0.2em;
+  text-transform: uppercase; margin-bottom: 8px;
+  color: var(--green);
+}
+
+.f-step.danger .f-label { color: var(--red); }
+.f-step.warn   .f-label { color: var(--amber); }
+
+.f-step .f-text {
+  font-size: 11.5px; color: var(--text-dim); line-height: 1.55;
+}
+
+.f-detail {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--text-dim);
+  text-align: center; line-height: 2;
+}
+
+.f-detail span { color: var(--green); }
+
+/* Glitch */
+@keyframes glitch-anim {
+  0%   { transform: translateX(0);  clip-path: inset(0 0 100% 0); filter: none; }
+  5%   { clip-path: inset(20% 0 60% 0); transform: translateX(-4px); filter: hue-rotate(90deg) brightness(1.8); }
+  10%  { clip-path: inset(50% 0 20% 0); transform: translateX(4px); }
+  15%  { clip-path: inset(0 0 0 0); transform: translateX(0); filter: none; }
+  100% { transform: translateX(0); filter: none; }
+}
+
+.glitch-run { animation: glitch-anim 0.55s ease forwards; }
+
+/* ════════════════════════════════════════════
+   SLIDE 5 — SECURITY
+════════════════════════════════════════════ */
+.s-security { flex-direction: column; width: 100%; max-width: 960px; }
+
+.sec-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sec-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 20px 22px;
+  display: flex; gap: 16px;
+  align-items: flex-start;
+  transition: border-color 0.25s;
+}
+
+.sec-card:hover { border-color: var(--green-dim); }
+.sec-card.full  { grid-column: 1 / -1; }
+
+.sec-icon {
+  font-size: 20px;
+  flex-shrink: 0; width: 30px;
+  text-align: center; padding-top: 2px;
+}
+
+.sec-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--green);
+  margin-bottom: 5px;
+}
+
+.sec-desc {
+  font-size: 12.5px; color: var(--text-dim); line-height: 1.55;
+}
+
+.sec-desc code {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--green); font-size: 11px;
+}
+
+/* ════════════════════════════════════════════
+   SLIDE 6 — FEATURES / CLOSE
+════════════════════════════════════════════ */
+.s-features { flex-direction: column; width: 100%; max-width: 860px; text-align: center; }
+
+.s-features h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(60px, 9vw, 110px);
+  line-height: 0.9; color: #fff; margin-bottom: 10px;
+}
+
+.s-features .sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--green);
+  letter-spacing: 0.25em; margin-bottom: 44px;
+}
+
+.feat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px; text-align: left;
+  margin-bottom: 44px;
+}
+
+.feat {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px; color: var(--text);
+  padding: 10px 14px;
+  border-left: 2px solid var(--green-dim);
+  background: var(--card);
+  line-height: 1.5;
+}
+
+.feat .arr { color: var(--green); margin-right: 6px; }
+
+.gh-link {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.12em;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 12px 36px;
+  text-decoration: none;
+  transition: border-color 0.25s, color 0.25s;
+  cursor: none;
+}
+
+.gh-link:hover { border-color: var(--green); color: var(--green); }
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+<div id="cursor"></div>
+<div class="corner c-tl"></div>
+<div class="corner c-tr"></div>
+<div class="corner c-bl"></div>
+<div class="corner c-br"></div>
+<div id="counter">01 / 06</div>
+<div id="progress"></div>
+<div class="nav-hint">← → navigate</div>
+
+<div class="slides" id="slides">
+
+  <!-- ░░ SLIDE 1: TITLE ░░ -->
+  <div class="slide active" id="s0">
+    <div class="title-grid"></div>
+    <div class="s-title">
+      <div class="title-eyebrow">▶ session recording &nbsp;·&nbsp; mTLS &nbsp;·&nbsp; mandatory acknowledgement</div>
+      <div class="title-main">
+        SUDO<span class="dash">-</span>LOGGER<span class="title-cursor"></span>
+      </div>
+      <div class="title-tagline">
+        Real-time sudo session recording with mandatory remote acknowledgement.<br>
+        If the log server goes dark — so does your terminal.
+      </div>
+      <div class="title-prompt">$ sudo-shipper -server logserver:9876&nbsp;<span style="color:var(--green);animation:blink 1s step-end infinite;display:inline-block">█</span></div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 2: PROBLEM ░░ -->
+  <div class="slide" id="s1">
+    <div class="s-problem" style="display:flex;width:100%;max-width:1100px;gap:64px;align-items:center;">
+      <div class="prob-left">
+        <h2>THE<br>BLIND<br>SPOT</h2>
+        <p class="lead">
+          Every <code style="font-family:'JetBrains Mono',monospace;color:var(--red)">sudo</code> command grants root.
+          Without verified remote logging, you have no tamper-proof record
+          of what actually happened — or if it happened at all.
+        </p>
+        <p class="sub">
+          Traditional syslog is advisory. The admin can stop the logger,
+          the log server can be unreachable, or the service can simply be killed.
+          None of these edge cases should allow privileged execution to go unrecorded.
+        </p>
+      </div>
+      <div class="prob-right">
+        <div class="t-log">
+          <div class="t-log-header">sudo audit log — /var/log/sudoreplay</div>
+          <div class="t-row">
+            <span class="ts">09:14:02</span><span class="usr">alun</span><span class="cmd">cat /etc/shadow</span>
+          </div>
+          <div class="t-row">
+            <span class="ts">09:18:41</span><span class="usr">alun</span><span class="cmd">systemctl restart nginx</span>
+          </div>
+          <div class="t-row redacted">
+            <span class="ts">09:31:07</span><span class="usr">alun</span><span class="cmd">bash</span>
+          </div>
+          <div class="t-row redacted">
+            <span class="ts">09:31:22</span><span class="usr">alun</span><span class="cmd">rm -rf /var/log/*</span>
+          </div>
+          <div class="t-row">
+            <span class="ts">09:44:12</span><span class="usr">alun</span><span class="cmd">ls /root</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 3: ARCHITECTURE ░░ -->
+  <div class="slide" id="s2">
+    <div class="s-arch">
+      <div class="slide-heading">HOW IT WORKS</div>
+      <div class="arch-row">
+
+        <div class="a-box glow">
+          <div class="a-label">C Plugin</div>
+          <div class="a-name">PLUGIN</div>
+          <div class="a-desc">
+            Loaded by sudo for every invocation.<br>
+            Captures all I/O streams.<br>
+            <span style="color:var(--red)">Blocks sudo entirely</span> if shipper is unreachable at start.
+          </div>
+        </div>
+
+        <div class="a-conn">
+          <div class="line">
+            <div class="pkt"></div>
+            <div class="pkt pkt2"></div>
+          </div>
+          <div class="proto">Unix socket</div>
+        </div>
+
+        <div class="a-box glow">
+          <div class="a-label">Go Daemon</div>
+          <div class="a-name">SHIPPER</div>
+          <div class="a-desc">
+            Local bridge running as root.<br>
+            ACK state per session.<br>
+            Heartbeat every 400 ms.
+          </div>
+        </div>
+
+        <div class="a-conn">
+          <div class="line">
+            <div class="pkt" style="animation-delay:0.6s"></div>
+            <div class="pkt pkt2" style="animation-delay:1.7s"></div>
+          </div>
+          <div class="proto">Mutual TLS · 9876</div>
+        </div>
+
+        <div class="a-box glow">
+          <div class="a-label">Go Server</div>
+          <div class="a-name">LOGSERVER</div>
+          <div class="a-desc">
+            Central log receiver.<br>
+            HMAC-signed ACKs per chunk.<br>
+            sudoreplay-compatible storage.
+          </div>
+        </div>
+
+      </div>
+      <div class="arch-note">
+        If the server is unreachable when <code style="font-family:'JetBrains Mono',monospace">sudo</code> runs →
+        <em>the command is blocked before execution.</em>
+        No server, no sudo.
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 4: FREEZE ░░ -->
+  <div class="slide" id="s3">
+    <div class="s-freeze" id="freeze-inner">
+      <div class="slide-heading" style="color:#fff;margin-bottom:32px;">THE FREEZE MECHANISM</div>
+
+      <div class="freeze-banner-demo">
+        [ SUDO-LOGGER: log server unreachable — input frozen ]
+      </div>
+      <div class="freeze-sub-demo">Waiting for log server to come back...</div>
+
+      <div class="f-steps">
+        <div class="f-step">
+          <div class="f-icon">🟢</div>
+          <div class="f-label">Running</div>
+          <div class="f-text">Session active. Server ACKs every chunk. Heartbeat every 400 ms.</div>
+        </div>
+        <div class="f-step danger">
+          <div class="f-icon">📡</div>
+          <div class="f-label">Network lost</div>
+          <div class="f-text">No HEARTBEAT_ACK within 800 ms. Connection declared dead.</div>
+        </div>
+        <div class="f-step warn">
+          <div class="f-icon">❄️</div>
+          <div class="f-label">Frozen</div>
+          <div class="f-text">cgroup.freeze=1 suspends the session. Banner shown on tty. No input reaches the shell.</div>
+        </div>
+        <div class="f-step">
+          <div class="f-icon">✅</div>
+          <div class="f-label">Resumed</div>
+          <div class="f-text">Network returns. ACK received. cgroup unfreezes. Session continues seamlessly.</div>
+        </div>
+      </div>
+
+      <div class="f-detail">
+        Freeze latency: <span>~1 second</span> &nbsp;·&nbsp;
+        Auto-recovery: <span>&lt; 2 seconds</span> &nbsp;·&nbsp;
+        GUI apps frozen via <span>SIGSTOP</span> (pgid-aware) &nbsp;·&nbsp;
+        <span>Ctrl+C</span> always works
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 5: SECURITY ░░ -->
+  <div class="slide" id="s4">
+    <div class="s-security">
+      <div class="slide-heading">SECURITY PROPERTIES</div>
+      <div class="sec-grid">
+
+        <div class="sec-card">
+          <div class="sec-icon">🚫</div>
+          <div>
+            <div class="sec-title">Blocked at start</div>
+            <div class="sec-desc">If the log server is unreachable when sudo runs, the session is rejected before the command executes. No logging capability = no execution.</div>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-icon">🔐</div>
+          <div>
+            <div class="sec-title">Mutual TLS</div>
+            <div class="sec-desc">Both client and server authenticate with certificates from a shared CA. Unknown clients are rejected at the TLS handshake.</div>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-icon">✍</div>
+          <div>
+            <div class="sec-title">HMAC-signed ACKs</div>
+            <div class="sec-desc">The server signs every ACK with HMAC-SHA256. A network attacker cannot forge ACKs to allow unlogged sudo activity.</div>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-icon">🗄</div>
+          <div>
+            <div class="sec-title">Tamper-evident storage</div>
+            <div class="sec-desc">Logs are written on a separate server the sudo-running user has no access to. Users cannot modify their own audit trail.</div>
+          </div>
+        </div>
+
+        <div class="sec-card full">
+          <div class="sec-icon">⌨</div>
+          <div>
+            <div class="sec-title">Complete I/O capture — replayed with sudoreplay</div>
+            <div class="sec-desc">
+              stdin · stdout · stderr · tty input · tty output — all recorded in real time with full timing data.
+              Replay any session with <code>sudoreplay -d /var/log/sudoreplay &lt;TSID&gt;</code>.
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 6: DEPLOY ░░ -->
+  <div class="slide" id="s5">
+    <div class="s-features">
+      <h2>READY TO<br>DEPLOY</h2>
+      <div class="sub">▸ RPM · systemd · mTLS · sudoreplay</div>
+
+      <div class="feat-grid">
+        <div class="feat"><span class="arr">→</span> Full replay with native sudo iolog format</div>
+        <div class="feat"><span class="arr">→</span> Real-time streaming, zero local buffering</div>
+        <div class="feat"><span class="arr">→</span> Freeze within ~1 s of network loss</div>
+        <div class="feat"><span class="arr">→</span> Automatic recovery when network returns</div>
+        <div class="feat"><span class="arr">→</span> GUI app freeze via SIGSTOP (pgid-aware)</div>
+        <div class="feat"><span class="arr">→</span> RPM packages with systemd integration</div>
+        <div class="feat"><span class="arr">→</span> Kubernetes / LoadBalancer deployment</div>
+        <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
+      </div>
+
+      <a class="gh-link" href="https://github.com/alun-hub/sudo-logger" target="_blank">
+        github.com/alun-hub/sudo-logger
+      </a>
+    </div>
+  </div>
+
+</div><!-- /slides -->
+
+<script>
+(function () {
+  const N = 6;
+  let cur = 0, busy = false;
+
+  /* cursor */
+  const cursor = document.getElementById('cursor');
+  document.addEventListener('mousemove', e => {
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top  = e.clientY + 'px';
+  });
+
+  /* progress dots */
+  const prog = document.getElementById('progress');
+  for (let i = 0; i < N; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    d.addEventListener('click', () => go(i));
+    prog.appendChild(d);
+  }
+
+  function slide(i) { return document.getElementById('s' + i); }
+
+  function updateHUD() {
+    document.getElementById('counter').textContent =
+      String(cur + 1).padStart(2,'0') + ' / ' + String(N).padStart(2,'0');
+    document.querySelectorAll('.dot').forEach((d,i) =>
+      d.classList.toggle('active', i === cur));
+  }
+
+  function go(n) {
+    if (busy || n === cur || n < 0 || n >= N) return;
+    busy = true;
+    const forward = n > cur;
+    const from = slide(cur);
+    const to   = slide(n);
+
+    /* prepare destination off-screen */
+    to.style.transition = 'none';
+    to.style.opacity = '0';
+    to.style.transform = forward ? 'translateX(48px)' : 'translateX(-48px)';
+    to.classList.remove('active','exit-left','exit-right','enter-right','enter-left');
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        /* exit current */
+        from.style.transition = '';
+        from.classList.add(forward ? 'exit-left' : 'exit-right');
+        from.classList.remove('active');
+
+        /* enter next */
+        to.style.transition = '';
+        to.style.opacity = '';
+        to.style.transform = '';
+        to.classList.add('active');
+
+        /* glitch on freeze slide */
+        if (n === 3) {
+          setTimeout(() => {
+            const fi = document.getElementById('freeze-inner');
+            fi.classList.remove('glitch-run');
+            void fi.offsetWidth;
+            fi.classList.add('glitch-run');
+          }, 120);
+        }
+
+        setTimeout(() => {
+          from.classList.remove('exit-left','exit-right','active');
+          cur = n;
+          busy = false;
+          updateHUD();
+        }, 480);
+      });
+    });
+  }
+
+  function next() { go(cur + 1); }
+  function prev() { go(cur - 1); }
+
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight','ArrowDown',' '].includes(e.key)) { e.preventDefault(); next(); }
+    if (['ArrowLeft','ArrowUp'].includes(e.key))         { e.preventDefault(); prev(); }
+  });
+
+  document.getElementById('slides').addEventListener('click', e => {
+    if (!e.target.closest('a') && !e.target.closest('.dot')) next();
+  });
+
+  /* touch swipe */
+  let tx = 0;
+  document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, {passive:true});
+  document.addEventListener('touchend',   e => {
+    const dx = e.changedTouches[0].clientX - tx;
+    if (Math.abs(dx) > 50) dx < 0 ? next() : prev();
+  }, {passive:true});
+
+  updateHUD();
+})();
+</script>
+</body>
+</html>
