@@ -1,7 +1,8 @@
 # Compiled binaries
-go/shipper
 go/sudo-shipper
 go/sudo-logserver
+go/shipper
+go/server
 plugin/sudo_logger_plugin.so
 
 # Source tarballs

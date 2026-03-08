@@ -10,9 +10,13 @@
 // background tracker moves sudo's PID back to the parent cgroup as soon as
 // it detects the first child process (bash, gvim-launcher, …).  After that:
 //   • Terminal programs (bash, vi, …) — frozen via cgroup.freeze.
+//     If systemd moves them to a different cgroup they are NOT SIGSTOP'd:
+//     they have a controlling TTY and the plugin's log_ttyin already blocks
+//     all keyboard input, so a soft freeze is sufficient.  SIGSTOP would
+//     trigger job control and move the session to the background.
 //   • GUI programs (gvim, okular, …) — typically moved by GNOME/systemd to
-//     an app-*.scope cgroup before our tracker sees them.  Detected as
-//     "escaped" and frozen via SIGSTOP/SIGCONT instead.
+//     an app-*.scope cgroup before our tracker sees them.  They have no
+//     controlling TTY, so they are hard-frozen via SIGSTOP/SIGCONT.
 //
 // The tracker polls /proc/<pid>/task/<pid>/children every 10 ms and also
 // re-checks every known PID's cgroup membership so late GNOME migrations are
@@ -33,13 +37,9 @@ import (
 	"time"
 )
 
-var (
-	cgroupBase  string
-	shipperPgid int // our own process group — never signal this
-)
+var cgroupBase string
 
 func init() {
-	shipperPgid = syscall.Getpgrp() // always exclude our own process group
 	data, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
 		return
@@ -57,17 +57,6 @@ func init() {
 	}
 }
 
-// signalGroup sends sig to the entire process group of pid.
-// This ensures that bash and any subprocess it is currently running are both
-// reached.  Falls back to signalling pid directly if pgid lookup fails or if
-// the pgid belongs to the shipper itself.
-func signalGroup(pid int, sig syscall.Signal) {
-	if pgid, err := syscall.Getpgid(pid); err == nil && pgid > 1 && pgid != shipperPgid {
-		syscall.Kill(-pgid, sig)
-	} else {
-		syscall.Kill(pid, sig)
-	}
-}
 
 type cgroupSession struct {
 	path    string
@@ -78,7 +67,7 @@ type cgroupSession struct {
 	frozen bool
 
 	escapedMu sync.Mutex
-	escaped   map[int]struct{} // non-cgroup PIDs frozen via SIGSTOP
+	escaped   map[int]bool // escaped PIDs; true = freeze via SIGSTOP, false = tracked only (no SIGSTOP)
 
 	stopTrack chan struct{}
 	trackDone chan struct{}
@@ -105,7 +94,7 @@ func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 		path:      path,
 		sudoPid:   sudoPid,
 		cgName:    filepath.Base(path),
-		escaped:   make(map[int]struct{}),
+		escaped:   make(map[int]bool),
 		stopTrack: make(chan struct{}),
 		trackDone: make(chan struct{}),
 	}
@@ -127,6 +116,102 @@ func procChildren(pid int) []int {
 		}
 	}
 	return out
+}
+
+// isShell reports whether pid is an interactive shell process.
+// Used to distinguish shells (reclaim into session cgroup, never SIGSTOP)
+// from GUI apps that happen to inherit a controlling terminal from sudo.
+func isShell(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	if err != nil {
+		return false
+	}
+	switch strings.TrimSpace(string(data)) {
+	case "bash", "sh", "zsh", "fish", "ksh", "tcsh", "dash", "csh":
+		return true
+	}
+	return false
+}
+
+// hasControllingTTY reports whether pid has a controlling terminal.
+// Used to protect interactive shells (bash, zsh, …) from SIGSTOP: stopping
+// a shell that holds the terminal foreground triggers job control and moves
+// the session to the background.
+func hasControllingTTY(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	// /proc/PID/stat: "pid (comm) state ppid pgrp session tty_nr ..."
+	// comm may contain spaces; find the last ')' to skip it safely.
+	s := string(data)
+	idx := strings.LastIndex(s, ")")
+	if idx < 0 {
+		return false
+	}
+	fields := strings.Fields(s[idx+1:])
+	// After comm: [0]=state [1]=ppid [2]=pgrp [3]=session [4]=tty_nr
+	if len(fields) < 5 {
+		return false
+	}
+	ttyNr, err := strconv.Atoi(fields[4])
+	return err == nil && ttyNr != 0
+}
+
+// displaySocketInodes returns the kernel inode numbers of all X11 and Wayland
+// display server sockets currently listed in /proc/net/unix.  Called once per
+// tracker tick so the result can be reused for every PID check in that tick.
+func displaySocketInodes() map[uint64]bool {
+	result := make(map[uint64]bool)
+	data, err := os.ReadFile("/proc/net/unix")
+	if err != nil {
+		return result
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		// Format: Num RefCount Protocol Flags Type St Inode Path
+		if len(fields) < 8 {
+			continue
+		}
+		path := fields[7]
+		if strings.Contains(path, "/.X11-unix/") || strings.Contains(path, "/wayland-") {
+			if inode, err := strconv.ParseUint(fields[6], 10, 64); err == nil {
+				result[inode] = true
+			}
+		}
+	}
+	return result
+}
+
+// isGUIApp reports whether pid has an open connection to an X11 or Wayland
+// display server.  Such processes must not be frozen via cgroup.freeze or
+// SIGSTOP: they cannot respond to compositor pings while frozen, so the
+// compositor (GNOME/mutter) eventually sends SIGTERM, killing the app on
+// unfreeze.  Detection via display socket is more reliable than TTY presence
+// because GUI apps may inherit a controlling terminal from their parent shell.
+func isGUIApp(pid int, displayInodes map[uint64]bool) bool {
+	if len(displayInodes) == 0 {
+		return false
+	}
+	fds, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid))
+	if err != nil {
+		return false
+	}
+	for _, fd := range fds {
+		target, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%s", pid, fd.Name()))
+		if err != nil || !strings.HasPrefix(target, "socket:[") {
+			continue
+		}
+		inodeStr := strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]")
+		inode, err := strconv.ParseUint(inodeStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		if displayInodes[inode] {
+			return true
+		}
+	}
+	return false
 }
 
 // inOurCgroup reports whether pid's current cgroup is our session cgroup.
@@ -171,16 +256,35 @@ func (cg *cgroupSession) trackDescendants() {
 			return
 		case <-ticker.C:
 			// ── 1. Discover new children ─────────────────────────────────
-			var newPIDs []int
+			// GUI apps are detected by their open connection to an X11 or
+			// Wayland display socket (more reliable than checking TTY: GUI
+			// apps inherit the parent shell's controlling terminal, so
+			// hasControllingTTY returns true even for gvim, okular, etc.).
+			// GUI apps found here are moved immediately to the parent cgroup
+			// so they are never subject to cgroup.freeze.  Freezing a GUI
+			// app prevents it from responding to compositor pings → GNOME
+			// queues SIGTERM → app dies on unfreeze.
+			parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
+			displayInodes := displaySocketInodes()
 			for pid := range seen {
 				for _, child := range procChildren(pid) {
 					if _, already := seen[child]; !already {
+						if isGUIApp(child, displayInodes) {
+							// GUI app: push to parent cgroup, don't track.
+							if err := os.WriteFile(parentProcs,
+								[]byte(strconv.Itoa(child)+"\n"), 0644); err == nil {
+								debugLog("cgroup %s: pid %d new GUI child (display conn), moved to parent cgroup",
+									cg.cgName, child)
+							} else {
+								debugLog("cgroup %s: pid %d new GUI child (display conn), move to parent failed: %v",
+									cg.cgName, child, err)
+							}
+							continue // do not add to seen
+						}
 						seen[child] = struct{}{}
-						newPIDs = append(newPIDs, child)
 					}
 				}
 			}
-			_ = newPIDs // discovered; they'll be handled in step 4 below
 
 			// ── 2. Remove dead PIDs ───────────────────────────────────────
 			for pid := range seen {
@@ -196,10 +300,6 @@ func (cg *cgroupSession) trackDescendants() {
 			}
 
 			// ── 4. Re-check cgroup membership for all tracked non-sudo PIDs
-			cg.mu.Lock()
-			isFrozen := cg.frozen
-			cg.mu.Unlock()
-
 			for pid := range seen {
 				if pid == cg.sudoPid {
 					continue
@@ -211,7 +311,18 @@ func (cg *cgroupSession) trackDescendants() {
 					continue
 				}
 				if cg.inOurCgroup(pid) {
-					continue // in our cgroup → handled by cgroup.freeze
+					// Process is in our cgroup.  If it has since opened a
+					// display connection it is a GUI app that must not be
+					// frozen — move it to the parent cgroup now.
+					if isGUIApp(pid, displayInodes) {
+						if err := os.WriteFile(parentProcs,
+							[]byte(strconv.Itoa(pid)+"\n"), 0644); err == nil {
+							debugLog("cgroup %s: pid %d detected as GUI (display conn), moved to parent cgroup",
+								cg.cgName, pid)
+							delete(seen, pid)
+						}
+					}
+					continue // handled by cgroup.freeze (or just moved out)
 				}
 				// Not in our cgroup.  Verify it is still alive before
 				// classifying as escaped: short-lived subprocesses (rpm, ls,
@@ -221,17 +332,72 @@ func (cg *cgroupSession) trackDescendants() {
 					delete(seen, pid) // exited normally, forget it
 					continue
 				}
-				// Still alive but not in our cgroup: genuinely escaped.
-				cg.escapedMu.Lock()
-				if _, already := cg.escaped[pid]; !already {
-					cg.escaped[pid] = struct{}{}
-					debugLog("cgroup %s: pid %d escaped to foreign cgroup, tracking via SIGSTOP",
-						cg.cgName, pid)
-					if isFrozen {
-						signalGroup(pid, syscall.SIGSTOP)
+				// Still alive but not in our cgroup: escaped (GNOME/systemd
+				// moved it to a different cgroup).
+				//
+				// TTY process (interactive shell, e.g. bash): reclaim into the
+				// session cgroup so cgroup.freeze covers it.  SIGSTOP is not an
+				// option (triggers job control and moves the session to the
+				// background).  If reclaim fails, add to escaped with
+				// shouldSIGSTOP=false so we stop re-processing it every tick
+				// without sending any signals.
+				//
+				// Non-TTY process (GUI app, e.g. gvim after setsid): freeze via
+				// SIGSTOP.  The compositor shows a "not responding" dialog but
+				// will NOT auto-kill; on unfreeze we send SIGCONT and the app
+				// resumes.  Do NOT reclaim: cgroup.freeze prevents X11/Wayland
+				// ping responses → compositor queues SIGTERM → app dies.
+				if hasControllingTTY(pid) && isShell(pid) {
+					// Interactive shell (bash, zsh, …): reclaim into the
+					// session cgroup so cgroup.freeze covers it.  SIGSTOP
+					// is not an option (triggers job control).
+					if err := os.WriteFile(
+						filepath.Join(cg.path, "cgroup.procs"),
+						[]byte(strconv.Itoa(pid)+"\n"),
+						0644,
+					); err == nil {
+						debugLog("cgroup %s: pid %d escaped (shell), reclaimed into session cgroup",
+							cg.cgName, pid)
+					} else {
+						// Reclaim failed — track in escaped (no SIGSTOP) to
+						// stop the re-processing spam loop.
+						cg.escapedMu.Lock()
+						if _, already := cg.escaped[pid]; !already {
+							cg.escaped[pid] = false // track, no SIGSTOP
+							debugLog("cgroup %s: pid %d escaped (shell), reclaim failed: %v — not freezing",
+								cg.cgName, pid, err)
+						}
+						cg.escapedMu.Unlock()
 					}
+					continue
 				}
-				cg.escapedMu.Unlock()
+				// Non-shell process (GUI app such as gvim, helper, etc.).
+				// If it has its own process group (pgid == pid, set by setsid)
+				// it is safe to SIGSTOP just this PID without touching bash.
+				// If it shares a process group with bash, skip: signalling the
+				// group would trigger job control.
+				pgid, pgidErr := syscall.Getpgid(pid)
+				if pgidErr == nil && pgid == pid {
+					// Own process group — safe to signal only this PID.
+					cg.escapedMu.Lock()
+					if _, already := cg.escaped[pid]; !already {
+						cg.escaped[pid] = true
+						debugLog("cgroup %s: pid %d escaped (own pgid), frozen via SIGSTOP",
+							cg.cgName, pid)
+						cg.mu.Lock()
+						isFrozen := cg.frozen
+						cg.mu.Unlock()
+						if isFrozen {
+							syscall.Kill(pid, syscall.SIGSTOP)
+						}
+					}
+					cg.escapedMu.Unlock()
+				} else {
+					// Shares process group with bash — skip to avoid job control.
+					delete(seen, pid)
+					debugLog("cgroup %s: pid %d escaped (shared pgid), dropped from tracking",
+						cg.cgName, pid)
+				}
 			}
 		}
 	}
@@ -308,8 +474,10 @@ func (cg *cgroupSession) freeze() {
 	}
 	cg.mu.Unlock()
 	cg.escapedMu.Lock()
-	for pid := range cg.escaped {
-		signalGroup(pid, syscall.SIGSTOP)
+	for pid, shouldStop := range cg.escaped {
+		if shouldStop {
+			syscall.Kill(pid, syscall.SIGSTOP)
+		}
 	}
 	cg.escapedMu.Unlock()
 }
@@ -332,8 +500,10 @@ func (cg *cgroupSession) unfreeze() {
 	}
 	cg.mu.Unlock()
 	cg.escapedMu.Lock()
-	for pid := range cg.escaped {
-		signalGroup(pid, syscall.SIGCONT)
+	for pid, shouldStop := range cg.escaped {
+		if shouldStop {
+			syscall.Kill(pid, syscall.SIGCONT)
+		}
 	}
 	cg.escapedMu.Unlock()
 }
@@ -346,8 +516,10 @@ func (cg *cgroupSession) remove() {
 	}
 	_ = os.WriteFile(filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644)
 	cg.escapedMu.Lock()
-	for pid := range cg.escaped {
-		signalGroup(pid, syscall.SIGCONT)
+	for pid, shouldStop := range cg.escaped {
+		if shouldStop {
+			syscall.Kill(pid, syscall.SIGCONT)
+		}
 	}
 	cg.escapedMu.Unlock()
 	parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
