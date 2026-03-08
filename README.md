@@ -253,7 +253,7 @@ This generates:
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.1-5.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.1-6.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -283,7 +283,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.1-18.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.1-20.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -333,6 +333,30 @@ To override, create a drop-in:
 ```bash
 systemctl edit sudo-shipper
 ```
+
+#### Verbose debug logging
+
+By default, `sudo-shipper` only logs errors and key events (session start,
+freeze/unfreeze). Detailed cgroup operational messages (pid moved, escaped,
+frozen state changes, removed) are suppressed to keep journald output clean.
+
+To enable verbose logging for troubleshooting, add `-debug` to the service:
+
+```ini
+# /etc/systemd/system/sudo-shipper.service.d/override.conf
+[Service]
+ExecStart=
+ExecStart=/usr/bin/sudo-shipper -debug \
+    -server ... -socket ... -cert ... -key ... -ca ... -hmackey ...
+```
+
+Or temporarily on the command line:
+
+```bash
+sudo-shipper -debug -server logserver:9876 ...
+```
+
+Then watch the full output with `journalctl -u sudo-shipper -f`.
 
 ### Server: `/etc/sudo-logger/server.conf`
 
@@ -660,5 +684,5 @@ journalctl -u sudo-logserver -n 50
 
 ### Freeze is too slow after network loss
 
-Ensure you are running client ≥ 1.1-18 and server ≥ 1.1-5. Earlier versions
+Ensure you are running client ≥ 1.1-20 and server ≥ 1.1-6. Earlier versions
 used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).
