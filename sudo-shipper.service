@@ -16,6 +16,7 @@ ExecStart=/usr/bin/sudo-shipper \
 RuntimeDirectory=sudo-logger
 RuntimeDirectoryMode=0750
 
+KillMode=process
 Restart=always
 RestartSec=2
 
