@@ -41,7 +41,7 @@ User runs sudo
 │  sudo C plugin      │  Loaded by sudo for every invocation.
 │  (plugin.so)        │  Records stdin/stdout/tty I/O.
 │                     │  Blocks sudo entirely if shipper is unavailable.
-│                     │  Freezes terminal input if ACKs go stale.
+│                     │  Freezes child process if ACKs go stale.
 └────────┬────────────┘
          │ Unix socket (/run/sudo-logger/plugin.sock)
          ▼
@@ -50,6 +50,7 @@ User runs sudo
 │  (Go)               │  Bridges plugin ↔ server.
 │                     │  Tracks ACK state per session.
 │                     │  Responds instantly to ACK queries.
+│                     │  Sends heartbeats every 400 ms.
 └────────┬────────────┘
          │ Mutual TLS (TCP 9876)
          ▼
@@ -58,6 +59,7 @@ User runs sudo
 │  (Go)               │  Receives session data.
 │                     │  Writes sudo iolog directories.
 │                     │  Sends HMAC-signed ACKs per chunk.
+│                     │  Replies to heartbeats immediately.
 └─────────────────────┘
          │
          ▼
@@ -69,10 +71,11 @@ When a user runs `sudo`, the plugin connects to the local shipper daemon.
 The shipper opens a TLS connection to the remote log server. If the server
 is unreachable at this point, sudo is blocked entirely — the command never
 runs. If the connection succeeds, sudo proceeds and all I/O is streamed to
-the server in real time. The server acknowledges every chunk. If ACKs stop
-arriving (network loss, server crash), the terminal is frozen within ~5
-seconds — no further input reaches the child process until ACKs resume or
-the session is killed with Ctrl+C.
+the server in real time. The server acknowledges every chunk and replies to
+periodic heartbeat probes. If ACKs and heartbeats stop arriving (network
+loss, server crash), the child process is frozen via SIGSTOP within ~1 second
+— no further input reaches it until ACKs resume or the session is killed
+with Ctrl+C.
 
 ---
 
@@ -86,8 +89,9 @@ API. Hooks into every sudo session to:
 - Connect to the local shipper over a Unix socket at session open
 - Forward all terminal input (`log_ttyin`), output (`log_ttyout`), stdin,
   stdout, and stderr as framed chunks
-- Periodically query the shipper for the latest server ACK timestamp
-- Freeze terminal input (return 0 from `log_ttyin`) if ACKs go stale
+- Run a background monitor thread that polls ACK state every 150 ms
+- Freeze the child process via SIGSTOP when ACKs go stale; re-send SIGSTOP
+  every 150 ms to prevent job-control SIGCONT (`fg`) from escaping the freeze
 - Block sudo entirely if the shipper/server is unreachable at startup
 
 ### Go shipper (`go/cmd/shipper/`)
@@ -100,8 +104,12 @@ sudo session:
 - Forwards SESSION_START, CHUNK, SESSION_END messages
 - Receives and HMAC-verifies ACKs from the server
 - Tracks ACK state per session; responds instantly to plugin ACK queries
-- Detects server unreachability via ACK lag tracking (no ACK for 4s while
-  chunks are being sent) without relying on TCP keepalive heuristics
+- Sends a HEARTBEAT to the server every 400 ms; declares the connection
+  dead if no HEARTBEAT_ACK arrives within 800 ms (~1 s freeze latency)
+- Recovers automatically if the network comes back within ~2 seconds
+  (before TCP keepalive closes the connection)
+- Creates a per-session cgroup subtree; freezes escaped processes
+  (GUI programs moved by systemd/GNOME) via SIGSTOP/SIGCONT
 
 ### Go log server (`go/cmd/server/`)
 
@@ -110,6 +118,7 @@ A TLS server running on a dedicated machine. For each client connection:
 - Receives session metadata and writes a sudo iolog log file
 - Streams terminal I/O into `ttyout`/`ttyin` files with timing data
 - Acknowledges every chunk with an HMAC-signed ACK
+- Replies to HEARTBEAT probes immediately with HEARTBEAT_ACK
 - Sessions stored as sudoreplay-compatible directories under
   `/var/log/sudoreplay/<user>/<host>_<timestamp>/`
 
@@ -120,12 +129,15 @@ A TLS server running on a dedicated machine. For each client connection:
 | Property | Detail |
 |----------|--------|
 | **Sudo blocked at start** | If the log server is unreachable when sudo runs, the session is rejected before the command executes |
-| **Terminal freeze on network loss** | If ACKs stop arriving while a session is active, terminal input is frozen within ~5 seconds |
-| **Ctrl+C escapes frozen terminal** | Ctrl+C (0x03) and Ctrl+\ (0x1c) pass through even when frozen, allowing the user to kill the session |
+| **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen via SIGSTOP within ~1 second |
+| **Freeze cannot be escaped with `fg`** | SIGSTOP is re-sent every 150 ms; job-control SIGCONT from the parent shell cannot keep bash running |
+| **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
 | **HMAC-signed ACKs** | Server signs each ACK with HMAC-SHA256; forged ACKs from a network attacker are detected and discarded |
 | **Tamper-evident log storage** | Logs are written on a separate server that the sudo-running user has no access to |
 | **All I/O captured** | stdin, stdout, stderr, tty input and tty output are all recorded |
+| **Path traversal prevention** | User and host fields are validated against `[a-zA-Z0-9._-]{1,64}` before use in filesystem paths |
+| **Log directory confinement** | iolog writer verifies the resolved session path stays within the base log directory |
 
 ---
 
@@ -134,7 +146,9 @@ A TLS server running on a dedicated machine. For each client connection:
 - Full session replay with `sudoreplay` (native sudo iolog format)
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
-- Scalable: designed for ~50+ simultaneous sessions
+- Freeze within ~1 s of network loss; automatic recovery when network returns
+- GUI programs (gvim, okular, etc.) frozen via cgroup freeze + SIGSTOP tracking
+- Scalable: designed for 50+ simultaneous sessions
 - RPM packages for Fedora/RHEL with proper systemd integration
 - Automatic sudo.conf configuration on client RPM install/uninstall
 - Minimal footprint: one small .so on the client + one Go daemon
@@ -143,14 +157,15 @@ A TLS server running on a dedicated machine. For each client connection:
 
 ## Limitations
 
-- **No automatic reconnect**: if the server connection drops during a
-  session, the terminal freezes and stays frozen. The user must Ctrl+C
-  and start a new sudo session. A new session will attempt a fresh
-  connection to the server.
+- **Recovery requires fast network return**: if the network outage lasts
+  longer than ~2 seconds, TCP keepalive closes the underlying connection.
+  At that point the freeze is permanent for the current session — the user
+  must Ctrl+C and start a new sudo session. Brief outages (< 2 s) recover
+  automatically when the network returns.
 
-- **No session buffer/replay on reconnect**: chunks sent during a network
-  outage (before the freeze kicks in) may be lost. The ~5 second window
-  before freeze means at most a few keystrokes may not be logged.
+- **No session buffer on reconnect**: chunks sent during the window between
+  network loss and freeze detection (~400–800 ms) may not be acknowledged.
+  The session recording up to that point is intact on the server.
 
 - **One client certificate for all clients** (default setup): the included
   `setup.sh` generates one client certificate shared across all machines.
@@ -164,16 +179,10 @@ A TLS server running on a dedicated machine. For each client connection:
 - **No log rotation**: `/var/log/sudoreplay/` grows without bound. Implement
   external rotation (logrotate, cron) as needed.
 
-- **Graphical programs that detach from sudo cannot be frozen**: GUI
-  applications such as `gvim`, `okular`, or `firefox` typically double-fork
-  to release the launching process. When they do, sudo's direct child exits,
-  `plugin_close()` is called, and the plugin shuts down — while the GUI
-  window continues running as root with no parent relationship to sudo. There
-  is nothing left in the plugin to send SIGSTOP. The session *is* still
-  logged up to the point sudo exits, but the running window cannot be frozen
-  after that. Addressing this would require a mechanism outside the plugin:
-  placing sessions in a cgroup and freezing the cgroup, or a persistent
-  watchdog daemon that survives sudo's exit.
+- **GUI programs discovered late may not be tracked**: programs are tracked
+  via the shipper's cgroup descendant scanner. Programs forked more than
+  5 seconds after session start, or those not visible via
+  `/proc/PID/task/PID/children`, may not be frozen.
 
 - **TTY dimensions not recorded**: terminal size (rows/cols) is not sent to
   the server. Replay will use default dimensions.
@@ -244,7 +253,7 @@ This generates:
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.1-5.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -256,7 +265,7 @@ cp /tmp/pki/hmac.key            /etc/sudo-logger/
 chown sudologger:sudologger /etc/sudo-logger/server.key /etc/sudo-logger/hmac.key
 chmod 600 /etc/sudo-logger/server.key /etc/sudo-logger/hmac.key
 
-# Configure listen address and log directory if defaults need changing
+# Configure listen address and log directory if needed
 # Defaults: LISTEN_ADDR=:9876  LOG_DIR=/var/log/sudoreplay
 vim /etc/sudo-logger/server.conf
 
@@ -268,16 +277,13 @@ systemctl status sudo-logserver
 journalctl -u sudo-logserver -f
 ```
 
-The server creates `/var/log/sudoreplay/` (owned by `sudologger`) on
-first start if it does not exist.
-
 ---
 
 ### 3. Client installation
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.1-18.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -343,15 +349,16 @@ LOG_DIR=/var/log/sudoreplay
 | Constant | Default | Description |
 |----------|---------|-------------|
 | `SHIPPER_SOCK_PATH` | `/run/sudo-logger/plugin.sock` | Unix socket path |
-| `ACK_TIMEOUT_SECS` | `5` | Seconds without ACK before freeze |
-| `ACK_REFRESH_SECS` | `1` | How often to query the shipper for ACK status |
+| `ACK_TIMEOUT_SECS` | `2` | Seconds without ACK before plugin-side freeze |
+| `ACK_REFRESH_SECS` | `0` | Re-query shipper on every monitor poll (every 150 ms) |
 | `ACK_QUERY_TIMEOUT_MS` | `100` | Max wait for ACK_RESPONSE from shipper |
 
 ### Tunable constants in `go/cmd/shipper/main.go`
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `ackLagLimit` | `4s` | Unacknowledged chunk age before reporting dead to plugin |
+| `ackLagLimit` | `2s` | Unacknowledged chunk age before reporting dead to plugin |
+| `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
 
 ---
 
@@ -364,17 +371,13 @@ Sessions are stored on the server in sudo's native iolog format under
 # List all recorded sessions
 sudoreplay -d /var/log/sudoreplay -l
 
-# Example output:
-# Mar  7 11:22:44 2026 : alun : TTY=unknown ; CWD=/ ; USER=root ;
-#   TSID=alun/fedora_20260307-112244 ; COMMAND=bash
-
 # Replay a session (use the TSID from -l)
 sudoreplay -d /var/log/sudoreplay alun/fedora_20260307-112244
 
 # Replay at 2x speed
 sudoreplay -d /var/log/sudoreplay -s 2 alun/fedora_20260307-112244
 
-# Replay a specific time range
+# Replay a specific time range (seconds 10–30)
 sudoreplay -d /var/log/sudoreplay -f 10 -t 30 alun/fedora_20260307-112244
 
 # Search sessions by user
@@ -406,7 +409,8 @@ sudo-logger/
 │   ├── go.mod
 │   ├── cmd/
 │   │   ├── shipper/
-│   │   │   └── main.go     # Local shipper daemon
+│   │   │   ├── main.go     # Local shipper daemon
+│   │   │   └── cgroup.go   # Per-session cgroup management + SIGSTOP tracking
 │   │   └── server/
 │   │       └── main.go     # Remote log server
 │   └── internal/
@@ -451,7 +455,7 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 
 | Type | Hex | Direction | Description |
 |------|-----|-----------|-------------|
-| `SESSION_START` | `0x01` | plugin → shipper → server | JSON: session_id, user, host, command, ts |
+| `SESSION_START` | `0x01` | plugin → shipper → server | JSON: session_id, user, host, command, ts, pid |
 | `CHUNK` | `0x02` | plugin → shipper → server | Binary: seq(8) + ts_ns(8) + stream(1) + len(4) + data |
 | `SESSION_END` | `0x03` | plugin → shipper → server | Binary: final_seq(8) + exit_code(4) |
 | `ACK` | `0x04` | server → shipper | Binary: seq(8) + ts_ns(8) + hmac(32) |
@@ -459,6 +463,8 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `ACK_RESPONSE` | `0x06` | shipper → plugin | Binary: last_ack_ts_ns(8) + last_seq(8) |
 | `SESSION_READY` | `0x07` | shipper → plugin | Empty — server connection established, sudo may proceed |
 | `SESSION_ERROR` | `0x08` | shipper → plugin | String error message — server unreachable, sudo blocked |
+| `HEARTBEAT` | `0x09` | shipper → server | Empty — keepalive probe sent every 400 ms |
+| `HEARTBEAT_ACK` | `0x0a` | server → shipper | Empty — immediate reply to HEARTBEAT |
 
 **CHUNK stream types:**
 
@@ -478,86 +484,77 @@ seq_be(8 bytes) || ts_ns_be(8 bytes)
 ```
 using the shared HMAC key. The shipper verifies this before accepting the
 ACK. This prevents a network attacker from injecting fake ACKs to allow
-unlogged sudo access.
+unlogged sudo activity.
 
 ### ACK mechanism
 
-The freeze system is based on a two-level ACK cache:
-
 ```
-Server ──ACK──► Shipper (goroutine, updates sessionAckTs)
-                    │
-Plugin ──ACK_QUERY──► Shipper (main loop, responds with readAck())
-                    │
-Plugin ◄──ACK_RESPONSE── (ts=time.Now() if alive, ts=0 if dead)
+Server ──ACK/HEARTBEAT_ACK──► Shipper (ACK reader goroutine)
+                                    │ updateAck() / markAlive() / touchServerMsg()
+                                    │
+Shipper ──HEARTBEAT──────────► Server (heartbeat goroutine, every 400 ms)
+                                    │ markDead() if no reply within 800 ms
+                                    │
+Plugin ──ACK_QUERY──────────► Shipper (main loop, readAck())
+Plugin ◄──ACK_RESPONSE────── (ts=time.Now() if alive, ts=0 if dead)
 ```
 
-The shipper's `readAck()` logic:
+The shipper's `readAck()` returns:
 
-1. If `serverConnAlive == false`: return `(0, lastSeq)` — TCP connection dead
-2. If `lastChunkSentNs > sessionAckTs` (unACKed chunks exist) AND
-   `time.Now() - sessionAckTs > 4s`: return `(0, lastSeq)` — ACK lag detected
-3. Otherwise: return `(time.Now(), lastSeq)` — server is alive and responding
+1. `(0, lastSeq)` if `serverConnAlive == false` — connection declared dead
+2. `(0, lastSeq)` if unACKed chunks exist and debt age > `ackLagLimit` (2 s)
+3. `(time.Now(), lastSeq)` otherwise — server is alive and responding
 
-This means:
-- **Idle sessions** never freeze (no unACKed chunks → lag check skipped)
-- **Active sessions** freeze ~4s after the last real ACK from the server
-- **TCP death** (keepalives) triggers immediate freeze via path 1
+Recovery: when a `HEARTBEAT_ACK` or `ACK` arrives after a dead period,
+`markAlive()` sets `serverConnAlive = true` and calls `cg.unfreeze()`.
 
 ### Freeze mechanism
 
-In `plugin.c`, `log_ttyin()` is called for every keystroke:
+The plugin runs a background monitor thread that polls `ack_is_fresh()` every
+150 ms. When ACKs are stale it sends SIGSTOP to the child process groups:
 
-```c
-static int log_ttyin(const char *buf, unsigned int len, ...) {
-    ship_chunk(STREAM_TTYIN, buf, len);   // always ship
-
-    if (!ack_is_fresh()) {
-        // show freeze banner on first freeze
-        // pass Ctrl+C (0x03) and Ctrl+\ (0x1c) through
-        // swallow all other input
-        return 0;  // 0 = don't forward to child process
-    }
-    return 1;  // 1 = forward to child process
-}
+```
+monitor thread (every 150 ms)
+    │
+    ├── ack stale → write FREEZE banner to /dev/tty (once)
+    │              kill(-child_pgid, SIGSTOP)     # sudo monitor group
+    │              kill(-bash_pgid, SIGSTOP)      # bash/command group
+    │              [re-sent every poll — fg cannot escape the freeze]
+    │
+    └── ack fresh again (after markAlive)
+                   kill(-child_pgid, SIGCONT)
+                   kill(-bash_pgid, SIGCONT)
+                   write UNFREEZE banner to /dev/tty
 ```
 
-`ack_is_fresh()` queries the shipper at most once per second
-(`ACK_REFRESH_SECS`). The plugin waits at most 100ms for the response
-(`ACK_QUERY_TIMEOUT_MS`). If the shipper responds with `ts=0`, the plugin
-immediately sets `g_last_ack_time = 0` which causes `ack_is_fresh()` to
-return false on the next call.
+The shipper also freezes sessions via `cgroup.freeze = 1` and SIGSTOP for
+any processes that escaped to foreign cgroups (GUI programs, etc.).
+
+`log_ttyin()` always returns 1 and never blocks. Blocking there would
+prevent sudo's event loop from processing signals, breaking Ctrl+C.
 
 ### Building RPMs
 
 ```bash
-# Set up rpmbuild tree
-mkdir -p ~/rpmbuild/{SOURCES,SPECS,RPMS,BUILD}
-
-# Copy spec files
-cp rpmbuild/SPECS/sudo-logger-client.spec ~/rpmbuild/SPECS/
-cp rpmbuild/SPECS/sudo-logger-server.spec ~/rpmbuild/SPECS/
-
-# Create source tarball
+# Create source tarball from the repo
 cd /path/to/sudo-logger
-tar czf ~/rpmbuild/SOURCES/sudo-logger-1.0.tar.gz \
-    --transform 's,^,sudo-logger-1.0/,' \
-    go plugin server.conf setup.sh shipper.conf \
-    sudo-logserver.service sudo-shipper.service
+tar czf ~/rpmbuild/SOURCES/sudo-logger-1.1.tar.gz \
+    --transform 's,^,sudo-logger-1.1/,' \
+    --exclude='.git' \
+    --exclude='go/sudo-shipper' \
+    --exclude='go/sudo-logserver' \
+    --exclude='plugin/sudo_logger_plugin.so' \
+    .
 
 # Build client RPM
 rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-client.spec
 
 # Build server RPM
 rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-server.spec
-
-# Output
-ls ~/rpmbuild/RPMS/x86_64/
-# sudo-logger-client-1.0-1.fc43.x86_64.rpm
-# sudo-logger-server-1.0-1.fc43.x86_64.rpm
 ```
 
-**Version bump:** update `Version:` in both spec files and the tarball name.
+**Version bump:** increment `Release:` in the spec file(s) for patch changes.
+Increment `Version:` and the tarball name for new minor/major versions.
 
 ---
 
@@ -575,81 +572,18 @@ is HTTP/HTTPS only and terminates TLS — this breaks mTLS. Use a
 # 1. Create namespace
 kubectl apply -f k8s/namespace.yaml
 
-# 2. Load PKI files as a Secret (run setup.sh first if you haven't)
+# 2. Load PKI files as a Secret (run setup.sh first)
 bash k8s/create-secret.sh /path/to/pki
 
-# 3. Deploy everything else
-kubectl apply -f k8s/pvc.yaml
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
-
-# Or apply all at once with kustomize
+# 3. Deploy
 kubectl apply -k k8s/
 
-# 4. Get the external IP assigned by your cloud LB
+# 4. Get the external IP
 kubectl get svc -n sudo-logger sudo-logserver
-# NAME             TYPE           EXTERNAL-IP      PORT(S)
-# sudo-logserver   LoadBalancer   203.0.113.42     9876:31234/TCP
 
 # 5. Update shipper.conf on all clients
-# LOGSERVER=203.0.113.42:9876
+# LOGSERVER=<EXTERNAL-IP>:9876
 ```
-
-### Build and push the container image
-
-```bash
-docker build -t ghcr.io/alun-hub/sudo-logserver:1.0 .
-docker push ghcr.io/alun-hub/sudo-logserver:1.0
-```
-
-Or with podman:
-```bash
-podman build -t ghcr.io/alun-hub/sudo-logserver:1.0 .
-podman push ghcr.io/alun-hub/sudo-logserver:1.0
-```
-
-### Accessing logs from the pod
-
-```bash
-# Open a shell via a debug sidecar or ephemeral container
-kubectl debug -it -n sudo-logger deploy/sudo-logserver \
-    --image=debian:slim --target=sudo-logserver
-
-# Or copy logs out
-kubectl cp sudo-logger/<pod-name>:/var/log/sudoreplay ./sudoreplay-backup
-
-# Run sudoreplay against the PVC locally by port-forwarding is not possible
-# since sudoreplay reads files directly. Mount the PVC in a separate pod:
-kubectl run replay --rm -it --image=fedora:latest \
-    --overrides='{
-      "spec": {
-        "volumes": [{"name":"logs","persistentVolumeClaim":{"claimName":"sudoreplay-logs"}}],
-        "containers": [{"name":"replay","image":"fedora:latest",
-          "command":["bash"],
-          "volumeMounts":[{"name":"logs","mountPath":"/var/log/sudoreplay"}]}]
-      }
-    }' \
-    -n sudo-logger -- bash
-# Inside: dnf install -y sudo && sudoreplay -d /var/log/sudoreplay -l
-```
-
-### Multiple replicas (HA)
-
-Running more than one replica requires:
-
-1. **ReadWriteMany PVC** — NFS, CephFS, or a cloud file share (EFS, Filestore)
-   so all pods can write logs to the same directory simultaneously.
-
-2. **Connection-level sticky sessions** — each sudo session is one TCP
-   connection; it must stay on the same pod for the duration. Configure
-   `sessionAffinity: ClientIP` on the Service, or use an NLB/cloud LB
-   that supports connection tracking.
-
-3. Change `strategy.type` from `Recreate` to `RollingUpdate` in
-   `deployment.yaml` once the above are in place.
-
-For most environments (≤50 simultaneous users) a single replica with a
-cloud-managed PVC is simpler and sufficient.
 
 ### Security notes
 
@@ -658,79 +592,26 @@ cloud-managed PVC is simpler and sufficient.
 - TLS private key and HMAC key are mounted read-only from a Kubernetes
   Secret (`defaultMode: 0400`).
 - Consider using `loadBalancerSourceRanges` in `service.yaml` to restrict
-  which IP ranges (your client machines) can reach port 9876.
-- Rotate the HMAC key and client certificates periodically; update the
-  Secret and restart the pod.
+  which IP ranges can reach port 9876.
 
 ---
 
 ## Performance and capacity
 
-### Resource usage per session
+| Resource | Per session |
+|----------|-------------|
+| Goroutines | 3 (main loop + ACK reader + heartbeat) |
+| Memory | ~100–200 KB |
+| File descriptors | 4 |
 
-Each active sudo session consumes:
+**FD limit** is the first hard limit. At 4 FD/session the default limit of
+1 024 caps at ~250 sessions. Add `LimitNOFILE=65536` to the server service
+file to raise this to ~15 000+ sessions.
 
-| Resource | Per session | Notes |
-|----------|-------------|-------|
-| Goroutines | 2 | `handleConn` + ACK reader goroutine, ~8 KB stack each |
-| Memory | ~100–200 KB | bufio buffers (8 KB) + TLS buffers (~64 KB) + Go runtime overhead |
-| File descriptors | 4 | `ttyout`, `ttyin`, `timing` files + TLS socket |
-| CPU per chunk | ~1–5 µs | 2× `os.Write` + HMAC-SHA256 + AES-NI TLS encrypt |
-
-### Bottlenecks
-
-**Disk I/O** (not the limiting factor in practice)
-Each chunk generates two `Write()` calls against `os.File` — but these hit the kernel page cache and return immediately. The kernel flushes asynchronously to disk. With a modern NVMe SSD, the page cache absorbs bursts easily. Disk I/O only becomes a bottleneck if the system runs out of memory for the page cache, or if `O_SYNC` were used (it is not).
-
-**File descriptor limit** (the first hard limit)
-The default FD limit for a systemd service is 1 024. At 4 FD per session this caps out at ~250 simultaneous sessions without configuration changes.
-
-Add to the service file or a drop-in to raise the limit:
-```
-LimitNOFILE=65536
-```
-
-With that setting the theoretical FD ceiling is ~16 000 sessions.
-
-**Memory** (secondary limit)
-~150 KB × 1 000 sessions ≈ 150 MB. A pod or server with 2 GB RAM can comfortably hold thousands of concurrent sessions in memory.
-
-**TLS handshake CPU** (burst cost only)
-A TLS 1.3 + P-256 handshake costs ~0.5–2 ms of CPU. 100 new sessions per second ≈ 100–200 ms CPU/s — not a bottleneck at normal sudo rates.
-
-### Practical capacity estimates
-
-| Scenario | Simultaneous sessions |
-|----------|-----------------------|
-| Default install (no tuning) | ~200–250 (FD limit) |
-| `LimitNOFILE=65536` set | ~5 000–10 000 (memory) |
-| Dedicated server, 16 GB RAM, NVMe | ~15 000–20 000 |
-
-**50 simultaneous sessions** — the typical target for this system — is handled trivially on any hardware, including a small Kubernetes pod with 256 MB RAM.
-
-### Known resource leak
-
-A crashed or killed shipper that never sends `SESSION_END` will leave a goroutine and 4 file descriptors open on the server until the server process is restarted. The server has no built-in session timeout. For production environments with many short-lived client machines, add a periodic server restart via a systemd `Restart=` policy or a Kubernetes liveness probe.
-
-### Recommended resource limits for Kubernetes
-
-```yaml
-resources:
-  requests:
-    memory: "256Mi"
-    cpu: "100m"
-  limits:
-    memory: "2Gi"
-    cpu: "2"
-```
-
-And in the server service/pod spec (or via `LimitNOFILE` in the systemd unit):
-```yaml
-securityContext:
-  sysctls:
-    - name: fs.file-max
-      value: "65536"
-```
+**Known resource leak:** a shipper that disappears without sending
+`SESSION_END` leaves a goroutine and 4 FDs open on the server. Add a
+`RuntimeMaxSec=` to the server's systemd unit or a Kubernetes liveness
+probe to restart periodically.
 
 ---
 
@@ -738,16 +619,14 @@ securityContext:
 
 ### `sudo: error in /etc/sudo.conf: unable to load plugin`
 
-Verify the plugin file exists and the symbol name matches:
 ```bash
 ls -la /usr/libexec/sudo/sudo_logger_plugin.so
 grep Plugin /etc/sudo.conf
-# Should show: Plugin sudo_logger_plugin sudo_logger_plugin.so
+# Expected: Plugin sudo_logger_plugin sudo_logger_plugin.so
 ```
 
 ### `sudo-logger: cannot connect to shipper daemon`
 
-The shipper is not running or the socket doesn't exist:
 ```bash
 systemctl status sudo-shipper
 journalctl -u sudo-shipper -n 50
@@ -756,35 +635,30 @@ ls /run/sudo-logger/plugin.sock
 
 ### `sudo-logger: cannot reach log server: tls: ...`
 
-Certificate issue. Common causes:
+- **`x509: certificate is not valid for any names`**: regenerate with the
+  correct server hostname: `bash setup.sh /tmp/pki your-actual-hostname`
+- **`x509: certificate signed by unknown authority`**: CA cert mismatch
+  between client and server.
 
-- **`tls: either ServerName or InsecureSkipVerify must be specified`**:
-  ServerName mismatch in TLS config. Check shipper code version.
-- **`x509: certificate is not valid for any names`**:
-  Server certificate has no SAN for the hostname clients are connecting to.
-  Regenerate with `setup.sh` using the correct hostname:
-  ```bash
-  bash setup.sh /tmp/pki your-actual-hostname
-  ```
-- **`x509: certificate signed by unknown authority`**:
-  The CA cert on the client doesn't match the one used to sign the server cert.
+### Terminal freezes and `fg` does not resume
+
+If the network was down for > 2 s, the TCP connection is gone and the session
+cannot recover. Use Ctrl+C to kill the frozen session, wait for the network
+to return, then start a new `sudo` session.
+
+If the network recovered quickly (< 2 s), `fg` should resume automatically
+once a `HEARTBEAT_ACK` arrives from the server.
 
 ### Terminal freezes immediately on session start
 
-The plugin seeded `g_last_ack_time = 0` but the shipper is not responding to
-ACK_QUERY before `ACK_TIMEOUT_SECS` elapses. Check that:
-- `sudo-shipper` is running and connected to the server
-- The HMAC key is identical on client and server
+The shipper cannot reach the server or the HMAC key differs:
+```bash
+journalctl -u sudo-shipper -n 50
+# On the server:
+journalctl -u sudo-logserver -n 50
+```
 
-### `sudoreplay: time stamp field is missing`
+### Freeze is too slow after network loss
 
-Old log format from a previous server version. Sessions recorded with older
-server builds are not compatible. New sessions will work correctly.
-Delete the old session directories or re-install the server RPM.
-
-### Freeze takes too long after network loss
-
-Ensure you are running the latest client RPM. Earlier versions relied on
-TCP keepalive heuristics (slow). The current version uses application-level
-ACK lag detection and should freeze within ~5 seconds of network loss while
-the user is actively typing.
+Ensure you are running client ≥ 1.1-18 and server ≥ 1.1-5. Earlier versions
+used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).

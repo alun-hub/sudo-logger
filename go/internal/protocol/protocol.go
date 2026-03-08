@@ -28,8 +28,10 @@ const (
 	MsgAck          = uint8(0x04)
 	MsgAckQuery     = uint8(0x05)
 	MsgAckResponse  = uint8(0x06)
-	MsgSessionReady = uint8(0x07) // shipper→plugin: server connection OK
-	MsgSessionError = uint8(0x08) // shipper→plugin: server connection failed
+	MsgSessionReady  = uint8(0x07) // shipper→plugin: server connection OK
+	MsgSessionError  = uint8(0x08) // shipper→plugin: server connection failed
+	MsgHeartbeat     = uint8(0x09) // shipper→server: keepalive probe
+	MsgHeartbeatAck  = uint8(0x0a) // server→shipper: keepalive reply
 
 	StreamStdin  = uint8(0x00)
 	StreamStdout = uint8(0x01)

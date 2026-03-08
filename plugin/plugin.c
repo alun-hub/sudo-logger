@@ -31,8 +31,8 @@
 
 /* ---------- tunables ---------- */
 #define SHIPPER_SOCK_PATH    "/run/sudo-logger/plugin.sock"
-#define ACK_TIMEOUT_SECS     5
-#define ACK_REFRESH_SECS     1      /* how often to re-query shipper */
+#define ACK_TIMEOUT_SECS     2
+#define ACK_REFRESH_SECS     0      /* re-query shipper on every check */
 #define ACK_QUERY_TIMEOUT_MS 100    /* max wait for ACK_RESPONSE */
 
 /* ---------- wire protocol (shared with Go) ---------- */
@@ -67,7 +67,6 @@ static uint64_t      g_seq        = 0;
 /* ACK cache */
 static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
 static time_t g_last_ack_query = 0;  /* when we last queried the shipper */
-static int    g_frozen         = 0;
 
 /* Background monitor thread — freezes graphical (non-tty) programs via
  * SIGSTOP/SIGCONT when ACKs go stale.  Also provides a second line of
@@ -289,7 +288,7 @@ static int ack_is_fresh_locked(void)
 /*
  * Background monitor thread.
  *
- * Polls ACK state every 500 ms and sends SIGSTOP/SIGCONT to the child's
+ * Polls ACK state every 150 ms and sends SIGSTOP/SIGCONT to the child's
  * entire process group.  Using the process group rather than a single PID
  * is required because sudo forks a monitor process ([sudo]) as its direct
  * child, which in turn forks the actual command (e.g. okular).  Sending
@@ -306,21 +305,48 @@ static void *monitor_thread_fn(void *arg)
     struct timespec wait = { .tv_sec = 0, .tv_nsec = 300000000L };
     nanosleep(&wait, NULL);
 
-    pid_t child = find_child_pid(g_sudo_pid);
+    /* Wait for sudo to fork its monitor child.  sudo forks after session_open()
+     * returns so the child may not appear immediately.  Poll for up to 5 s. */
+    pid_t child = -1;
+    for (int i = 0; i < 100 && !g_monitor_stop; i++) {
+        struct timespec w = { .tv_sec = 0, .tv_nsec = 50000000L }; /* 50 ms */
+        nanosleep(&w, NULL);
+        child = find_child_pid(g_sudo_pid);
+        if (child > 0)
+            break;
+    }
     if (child < 0)
         return NULL;
 
-    /* Freeze the child's entire process group so grandchildren (the actual
-     * command) are also stopped.  Verify the pgid differs from our own so
-     * we don't accidentally freeze the sudo parent itself. */
+    /* sudo forks a monitor process ([sudo]) as its direct child; the monitor
+     * in turn forks the actual command (bash, vi, ...) in a NEW process group.
+     * Stopping only child's group misses bash because interactive bash calls
+     * setpgrp() and creates its own group.  Find the grandchild (bash) and
+     * stop its group as well. */
+    pid_t grandchild = -1;
+    for (int i = 0; i < 40 && !g_monitor_stop; i++) {
+        struct timespec w = { .tv_sec = 0, .tv_nsec = 50000000L }; /* 50 ms */
+        nanosleep(&w, NULL);
+        grandchild = find_child_pid(child);
+        if (grandchild > 0)
+            break;
+    }
+
     pid_t child_pgid = getpgid(child);
     if (child_pgid <= 0 || child_pgid == getpgid(g_sudo_pid))
-        child_pgid = 0; /* same group — fall back to single-process kill */
+        child_pgid = 0; /* same group as sudo — fall back to single-PID kill */
+
+    pid_t bash_pgid = 0;
+    if (grandchild > 0) {
+        pid_t gp = getpgid(grandchild);
+        if (gp > 0 && gp != getpgid(g_sudo_pid) && gp != child_pgid)
+            bash_pgid = gp;
+    }
 
     int was_stopped = 0;
 
     while (!g_monitor_stop) {
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 500000000L };
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 150000000L };
         nanosleep(&ts, NULL);
 
         if (g_monitor_stop)
@@ -328,19 +354,27 @@ static void *monitor_thread_fn(void *arg)
 
         int fresh = ack_is_fresh_locked();
 
-        if (!fresh && !was_stopped) {
-            if (g_tty_fd >= 0)
-                write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+        if (!fresh) {
+            if (!was_stopped) {
+                if (g_tty_fd >= 0)
+                    write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+                was_stopped = 1;
+            }
+            /* Re-send SIGSTOP every poll so that job-control SIGCONT
+             * from the parent shell (fg) cannot escape the freeze. */
             if (child_pgid > 0)
                 kill(-child_pgid, SIGSTOP);
             else
                 kill(child, SIGSTOP);
-            was_stopped = 1;
+            if (bash_pgid > 0)
+                kill(-bash_pgid, SIGSTOP);
         } else if (fresh && was_stopped) {
             if (child_pgid > 0)
                 kill(-child_pgid, SIGCONT);
             else
                 kill(child, SIGCONT);
+            if (bash_pgid > 0)
+                kill(-bash_pgid, SIGCONT);
             if (g_tty_fd >= 0)
                 write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
             was_stopped = 0;
@@ -353,6 +387,8 @@ static void *monitor_thread_fn(void *arg)
             kill(-child_pgid, SIGCONT);
         else
             kill(child, SIGCONT);
+        if (bash_pgid > 0)
+            kill(-bash_pgid, SIGCONT);
     }
 
     return NULL;
@@ -406,7 +442,6 @@ static int plugin_open(unsigned int        version,
     g_conv    = conversation;
     g_printf  = sudo_plugin_printf;
     g_seq     = 0;
-    g_frozen  = 0;
     g_last_ack_time  = 0;
     g_last_ack_query = 0;
 

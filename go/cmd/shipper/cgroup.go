@@ -33,9 +33,13 @@ import (
 	"time"
 )
 
-var cgroupBase string
+var (
+	cgroupBase  string
+	shipperPgid int // our own process group — never signal this
+)
 
 func init() {
+	shipperPgid = syscall.Getpgrp() // always exclude our own process group
 	data, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil {
 		return
@@ -50,6 +54,18 @@ func init() {
 			}
 			return
 		}
+	}
+}
+
+// signalGroup sends sig to the entire process group of pid.
+// This ensures that bash and any subprocess it is currently running are both
+// reached.  Falls back to signalling pid directly if pgid lookup fails or if
+// the pgid belongs to the shipper itself.
+func signalGroup(pid int, sig syscall.Signal) {
+	if pgid, err := syscall.Getpgid(pid); err == nil && pgid > 1 && pgid != shipperPgid {
+		syscall.Kill(-pgid, sig)
+	} else {
+		syscall.Kill(pid, sig)
 	}
 }
 
@@ -212,7 +228,7 @@ func (cg *cgroupSession) trackDescendants() {
 					log.Printf("cgroup %s: pid %d escaped to foreign cgroup, tracking via SIGSTOP",
 						cg.cgName, pid)
 					if isFrozen {
-						syscall.Kill(pid, syscall.SIGSTOP)
+						signalGroup(pid, syscall.SIGSTOP)
 					}
 				}
 				cg.escapedMu.Unlock()
@@ -293,7 +309,7 @@ func (cg *cgroupSession) freeze() {
 	cg.mu.Unlock()
 	cg.escapedMu.Lock()
 	for pid := range cg.escaped {
-		syscall.Kill(pid, syscall.SIGSTOP)
+		signalGroup(pid, syscall.SIGSTOP)
 	}
 	cg.escapedMu.Unlock()
 }
@@ -317,7 +333,7 @@ func (cg *cgroupSession) unfreeze() {
 	cg.mu.Unlock()
 	cg.escapedMu.Lock()
 	for pid := range cg.escaped {
-		syscall.Kill(pid, syscall.SIGCONT)
+		signalGroup(pid, syscall.SIGCONT)
 	}
 	cg.escapedMu.Unlock()
 }
@@ -331,7 +347,7 @@ func (cg *cgroupSession) remove() {
 	_ = os.WriteFile(filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644)
 	cg.escapedMu.Lock()
 	for pid := range cg.escaped {
-		syscall.Kill(pid, syscall.SIGCONT)
+		signalGroup(pid, syscall.SIGCONT)
 	}
 	cg.escapedMu.Unlock()
 	parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")

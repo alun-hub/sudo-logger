@@ -196,7 +196,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	}()
 
 	// ── Step 3: per-session ACK tracking ──────────────────────────────────
-	const ackLagLimit = int64(4 * time.Second)
+	const ackLagLimit = int64(2 * time.Second)
 
 	var (
 		sessionAckMu    sync.Mutex
@@ -210,6 +210,7 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	updateAck := func(ts int64, seq uint64) {
 		sessionAckMu.Lock()
+		serverConnAlive = true // connection recovered
 		sessionAckSeq = seq
 		ackDebtStartNs = 0
 		sessionAckMu.Unlock()
@@ -247,7 +248,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	if sc, scErr := rawTCP.SyscallConn(); scErr == nil {
 		sc.Control(func(fd uintptr) {
 			syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, 1)
-			syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, 3)
+			syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, 1)
 		})
 	}
 	tlsClientCfg := tlsCfg.Clone()
@@ -273,6 +274,31 @@ func handlePluginConn(pluginConn net.Conn) {
 		cg.freeze() // nil-safe; freezes all session processes via cgroup
 	}
 
+	markAlive := func() {
+		sessionAckMu.Lock()
+		wasAlive := serverConnAlive
+		serverConnAlive = true
+		sessionAckMu.Unlock()
+		if !wasAlive {
+			cg.unfreeze()
+		}
+	}
+
+	// serverWriteMu serialises writes to serverBuf from the main loop and
+	// the heartbeat goroutine so that frames are not interleaved.
+	var serverWriteMu sync.Mutex
+
+	// lastServerMsg tracks when we last received any message from the server.
+	// Updated on MsgAck and MsgHeartbeatAck.  Used by the heartbeat goroutine
+	// to detect a silent server-side or network failure.
+	var lastServerMsgMu sync.Mutex
+	lastServerMsg := time.Now()
+	touchServerMsg := func() {
+		lastServerMsgMu.Lock()
+		lastServerMsg = time.Now()
+		lastServerMsgMu.Unlock()
+	}
+
 	sessionAckMu.Lock()
 	serverConnAlive = true
 	sessionAckMu.Unlock()
@@ -294,7 +320,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	// Sudo is now cleared to fork the child — which inherits the cgroup.
 	protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
 
-	// ── Step 6: read ACKs from server ─────────────────────────────────────
+	// ── Step 6: read messages from server (ACKs + heartbeat replies) ──────
 	go func() {
 		defer func() {
 			serverConn.Close()
@@ -310,19 +336,56 @@ func handlePluginConn(pluginConn net.Conn) {
 			if err != nil {
 				return
 			}
-			if msgType != protocol.MsgAck {
-				continue
+			switch msgType {
+			case protocol.MsgAck:
+				ack, err := protocol.ParseAck(payload)
+				if err != nil {
+					log.Printf("parse ack: %v", err)
+					continue
+				}
+				if !verifyAckHMAC(ack) {
+					log.Printf("ack HMAC mismatch seq=%d — ignoring", ack.Seq)
+					continue
+				}
+				touchServerMsg()
+				updateAck(time.Now().UnixNano(), ack.Seq)
+			case protocol.MsgHeartbeatAck:
+				touchServerMsg()
+				markAlive()
 			}
-			ack, err := protocol.ParseAck(payload)
-			if err != nil {
-				log.Printf("parse ack: %v", err)
-				continue
+		}
+	}()
+
+	// ── Step 6b: heartbeat goroutine ──────────────────────────────────────
+	// Sends MsgHeartbeat every 400 ms.
+	//   • No reply in 800 ms → markDead() (freeze), but keep pinging.
+	//   • Reply arrives after dead period → markAlive() (unfreeze).
+	//   • Write fails → TCP truly dead, exit goroutine.
+	const hbInterval = 400 * time.Millisecond
+	go func() {
+		ticker := time.NewTicker(hbInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			serverWriteMu.Lock()
+			serverConn.SetWriteDeadline(time.Now().Add(hbInterval))
+			werr := protocol.WriteMessage(serverBuf, protocol.MsgHeartbeat, nil)
+			serverConn.SetWriteDeadline(time.Time{})
+			serverWriteMu.Unlock()
+
+			if werr != nil {
+				// TCP connection is gone — no recovery possible.
+				markDead()
+				return
 			}
-			if !verifyAckHMAC(ack) {
-				log.Printf("ack HMAC mismatch seq=%d — ignoring", ack.Seq)
-				continue
+
+			lastServerMsgMu.Lock()
+			age := time.Since(lastServerMsg)
+			lastServerMsgMu.Unlock()
+			if age > 2*hbInterval {
+				// No response from server — freeze, but keep pinging.
+				// Recovery happens in the ACK reader via markAlive().
+				markDead()
 			}
-			updateAck(time.Now().UnixNano(), ack.Seq)
 		}
 	}()
 
@@ -333,15 +396,13 @@ func handlePluginConn(pluginConn net.Conn) {
 		if !alive {
 			return
 		}
+		serverWriteMu.Lock()
 		serverConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		defer serverConn.SetWriteDeadline(time.Time{})
-		if err := protocol.WriteMessage(serverBuf, msgType, payload); err != nil {
-			log.Printf("forward to server: %v", err)
-			markDead()
-			return
-		}
-		if err := serverBuf.Flush(); err != nil {
-			log.Printf("flush to server: %v", err)
+		werr := protocol.WriteMessage(serverBuf, msgType, payload)
+		serverConn.SetWriteDeadline(time.Time{})
+		serverWriteMu.Unlock()
+		if werr != nil {
+			log.Printf("forward to server: %v", werr)
 			markDead()
 			return
 		}
@@ -399,8 +460,8 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 	defer cg.remove()
 	log.Printf("cgroup %s: lingering (GUI processes remain)", cg.path)
 
-	const pollInterval = 3 * time.Second
-	const dialTimeout = 4 * time.Second
+	const pollInterval = 2 * time.Second
+	const dialTimeout = 2 * time.Second
 
 	serverReachable := func() bool {
 		tcpAddr, err := net.ResolveTCPAddr("tcp", server)

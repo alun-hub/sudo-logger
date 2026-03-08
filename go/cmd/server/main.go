@@ -174,6 +174,11 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				return
 			}
 
+		case protocol.MsgHeartbeat:
+			if err := protocol.WriteMessage(w, protocol.MsgHeartbeatAck, nil); err != nil {
+				return
+			}
+
 		case protocol.MsgSessionEnd:
 			end, err := protocol.ParseSessionEnd(payload)
 			if err != nil {
