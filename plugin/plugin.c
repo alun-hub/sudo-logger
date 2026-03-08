@@ -52,9 +52,14 @@
 
 /* ---------- freeze warning written to /dev/tty ---------- */
 #define FREEZE_MSG \
-    "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable — input frozen ]\033[0m\r\n"
+    "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable — input frozen ]\033[0m\r\n" \
+    "\033[33mWaiting for log server to come back — press Ctrl+C to abort.\033[0m\r\n"
 #define UNFREEZE_MSG \
     "\r\n\033[42;97;1m[ SUDO-LOGGER: log server reconnected — input resumed ]\033[0m\r\n"
+
+/* Re-display the freeze banner every N monitor polls (~3 s at 150 ms/poll)
+ * so that it remains visible after any bash output following a fg attempt. */
+#define FREEZE_REMIND_INTERVAL 20
 
 /* ---------- plugin globals ---------- */
 static sudo_conv_t   g_conv;
@@ -343,7 +348,8 @@ static void *monitor_thread_fn(void *arg)
             bash_pgid = gp;
     }
 
-    int was_stopped = 0;
+    int  was_stopped       = 0;
+    int  freeze_poll_count = 0;
 
     while (!g_monitor_stop) {
         struct timespec ts = { .tv_sec = 0, .tv_nsec = 150000000L };
@@ -355,19 +361,27 @@ static void *monitor_thread_fn(void *arg)
         int fresh = ack_is_fresh_locked();
 
         if (!fresh) {
-            if (!was_stopped) {
-                if (g_tty_fd >= 0)
-                    write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
-                was_stopped = 1;
-            }
-            /* Re-send SIGSTOP every poll so that job-control SIGCONT
-             * from the parent shell (fg) cannot escape the freeze. */
+            /* Send SIGSTOP first so that any bash output triggered by a
+             * preceding fg/SIGCONT has already been delivered.  We then
+             * write the freeze banner AFTER, ensuring it appears below
+             * that output and is clearly visible. */
             if (child_pgid > 0)
                 kill(-child_pgid, SIGSTOP);
             else
                 kill(child, SIGSTOP);
             if (bash_pgid > 0)
                 kill(-bash_pgid, SIGSTOP);
+
+            /* Display the freeze banner:
+             *   • always on the first frozen poll (was_stopped == 0)
+             *   • again every FREEZE_REMIND_INTERVAL polls (~3 s) so it
+             *     re-appears after any bash output following a fg attempt */
+            if (!was_stopped || freeze_poll_count % FREEZE_REMIND_INTERVAL == 0) {
+                if (g_tty_fd >= 0)
+                    write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+            }
+            was_stopped = 1;
+            freeze_poll_count++;
         } else if (fresh && was_stopped) {
             if (child_pgid > 0)
                 kill(-child_pgid, SIGCONT);
@@ -377,7 +391,8 @@ static void *monitor_thread_fn(void *arg)
                 kill(-bash_pgid, SIGCONT);
             if (g_tty_fd >= 0)
                 write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
-            was_stopped = 0;
+            was_stopped       = 0;
+            freeze_poll_count = 0;
         }
     }
 
