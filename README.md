@@ -73,9 +73,9 @@ is unreachable at this point, sudo is blocked entirely — the command never
 runs. If the connection succeeds, sudo proceeds and all I/O is streamed to
 the server in real time. The server acknowledges every chunk and replies to
 periodic heartbeat probes. If ACKs and heartbeats stop arriving (network
-loss, server crash), the child process is frozen via SIGSTOP within ~1 second
-— no further input reaches it until ACKs resume or the session is killed
-with Ctrl+C.
+loss, server crash), the child process is frozen within ~1 second — no
+further input reaches it until ACKs resume or the session is killed with
+Ctrl+C.
 
 ---
 
@@ -108,8 +108,9 @@ sudo session:
   dead if no HEARTBEAT_ACK arrives within 800 ms (~1 s freeze latency)
 - Recovers automatically if the network comes back within ~2 seconds
   (before TCP keepalive closes the connection)
-- Creates a per-session cgroup subtree; freezes escaped processes
-  (GUI programs moved by systemd/GNOME) via SIGSTOP/SIGCONT
+- Creates a per-session cgroup subtree to freeze all child processes
+- Tracks processes that escape to foreign cgroups (moved by GNOME/systemd)
+  and freezes them via SIGSTOP when safe (see [Freeze mechanism](#freeze-mechanism))
 
 ### Go log server (`go/cmd/server/`)
 
@@ -129,7 +130,7 @@ A TLS server running on a dedicated machine. For each client connection:
 | Property | Detail |
 |----------|--------|
 | **Sudo blocked at start** | If the log server is unreachable when sudo runs, the session is rejected before the command executes |
-| **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen via SIGSTOP within ~1 second |
+| **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen within ~1 second |
 | **Freeze cannot be escaped with `fg`** | SIGSTOP is re-sent every 150 ms; job-control SIGCONT from the parent shell cannot keep bash running |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
@@ -147,7 +148,8 @@ A TLS server running on a dedicated machine. For each client connection:
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
 - Freeze within ~1 s of network loss; automatic recovery when network returns
-- GUI programs (gvim, okular, etc.) frozen via cgroup freeze + SIGSTOP tracking
+- Terminal sessions (bash, zsh, …) frozen via `cgroup.freeze` — no job control triggered
+- GUI programs with own process group (gvim, okular, …) frozen via direct SIGSTOP/SIGCONT
 - Scalable: designed for 50+ simultaneous sessions
 - RPM packages for Fedora/RHEL with proper systemd integration
 - Automatic sudo.conf configuration on client RPM install/uninstall
@@ -179,10 +181,11 @@ A TLS server running on a dedicated machine. For each client connection:
 - **No log rotation**: `/var/log/sudoreplay/` grows without bound. Implement
   external rotation (logrotate, cron) as needed.
 
-- **GUI programs discovered late may not be tracked**: programs are tracked
-  via the shipper's cgroup descendant scanner. Programs forked more than
-  5 seconds after session start, or those not visible via
-  `/proc/PID/task/PID/children`, may not be frozen.
+- **GUI programs that share bash's process group are not frozen**: helper
+  processes launched by bash that share its process group are dropped from
+  freeze tracking — sending SIGSTOP to their group would also stop bash and
+  trigger job control. Only GUI apps that have their own process group
+  (e.g. gvim after setsid) are frozen via direct SIGSTOP.
 
 - **TTY dimensions not recorded**: terminal size (rows/cols) is not sent to
   the server. Replay will use default dimensions.
@@ -283,7 +286,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.1-20.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.1-22.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -434,7 +437,7 @@ sudo-logger/
 │   ├── cmd/
 │   │   ├── shipper/
 │   │   │   ├── main.go     # Local shipper daemon
-│   │   │   └── cgroup.go   # Per-session cgroup management + SIGSTOP tracking
+│   │   │   └── cgroup.go   # Per-session cgroup management + freeze tracking
 │   │   └── server/
 │   │       └── main.go     # Remote log server
 │   └── internal/
@@ -442,6 +445,9 @@ sudo-logger/
 │       │   └── protocol.go # Shared wire protocol
 │       └── iolog/
 │           └── iolog.go    # sudo iolog directory writer
+├── rpm/
+│   ├── sudo-logger-client.spec  # RPM spec for client package
+│   └── sudo-logger-server.spec  # RPM spec for server package
 ├── setup.sh                # PKI bootstrap script
 ├── sudo-shipper.service    # systemd unit for shipper
 ├── sudo-logserver.service  # systemd unit for server
@@ -534,7 +540,9 @@ Recovery: when a `HEARTBEAT_ACK` or `ACK` arrives after a dead period,
 
 ### Freeze mechanism
 
-The plugin runs a background monitor thread that polls `ack_is_fresh()` every
+Two complementary freeze mechanisms work together:
+
+**Plugin-side (C):** the background monitor thread polls `ack_is_fresh()` every
 150 ms. When ACKs are stale it sends SIGSTOP to the child process groups:
 
 ```
@@ -551,30 +559,61 @@ monitor thread (every 150 ms)
                    write UNFREEZE banner to /dev/tty
 ```
 
-The shipper also freezes sessions via `cgroup.freeze = 1` and SIGSTOP for
-any processes that escaped to foreign cgroups (GUI programs, etc.).
+**Shipper-side (Go):** the shipper manages a per-session cgroup subtree and
+freezes processes at the cgroup level:
+
+```
+cgroup.freeze=1  →  all processes in the session cgroup are suspended
+```
+
+For processes that escape the session cgroup (moved by GNOME/systemd to
+`app-*.scope`), the shipper tracks them and applies per-process SIGSTOP if
+safe. Safety is determined by process group membership:
+
+- **Shell processes** (bash, zsh, …): reclaimed back into the session cgroup
+  so `cgroup.freeze` covers them. SIGSTOP is never sent to shells — it would
+  trigger job control and background the session.
+- **Escaped GUI apps with own process group** (e.g. gvim after `setsid`):
+  frozen via `syscall.Kill(pid, SIGSTOP)` targeting only that PID directly.
+  On unfreeze, `syscall.Kill(pid, SIGCONT)` resumes them.
+- **Escaped helpers sharing bash's process group**: dropped from tracking.
+  Sending SIGSTOP to their process group would also stop bash and trigger
+  job control, so they are left alone.
+
+During a freeze, bash sessions are suspended by the plugin's group SIGSTOP.
+The terminal shows a freeze banner. When the network returns, the session
+resumes automatically and input is re-enabled. If bash was backgrounded by
+job control (visible as `[1]+ Stopped`), `fg` restores it.
 
 `log_ttyin()` always returns 1 and never blocks. Blocking there would
 prevent sudo's event loop from processing signals, breaking Ctrl+C.
 
 ### Building RPMs
 
+The RPM spec files are in `rpm/` in the repository.
+
 ```bash
-# Create source tarball from the repo
-cd /path/to/sudo-logger
-tar czf ~/rpmbuild/SOURCES/sudo-logger-1.1.tar.gz \
-    --transform 's,^,sudo-logger-1.1/,' \
-    --exclude='.git' \
-    --exclude='go/sudo-shipper' \
-    --exclude='go/sudo-logserver' \
-    --exclude='plugin/sudo_logger_plugin.so' \
-    .
+# Set up rpmbuild tree (once)
+rpmdev-setuptree
+
+# Copy spec files
+cp rpm/sudo-logger-client.spec rpm/sudo-logger-server.spec ~/rpmbuild/SPECS/
+
+# Create source tarball from the repo root
+VERSION=1.1
+tar czf ~/rpmbuild/SOURCES/sudo-logger-${VERSION}.tar.gz \
+    --transform "s,^,sudo-logger-${VERSION}/," \
+    go/ plugin/ sudo-shipper.service sudo-logserver.service \
+    shipper.conf server.conf
 
 # Build client RPM
 rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-client.spec
 
 # Build server RPM
 rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-server.spec
+
+# RPMs end up in:
+ls ~/rpmbuild/RPMS/x86_64/
 ```
 
 **Version bump:** increment `Release:` in the spec file(s) for patch changes.
@@ -664,14 +703,19 @@ ls /run/sudo-logger/plugin.sock
 - **`x509: certificate signed by unknown authority`**: CA cert mismatch
   between client and server.
 
-### Terminal freezes and `fg` does not resume
+### Terminal freezes and network has returned
 
-If the network was down for > 2 s, the TCP connection is gone and the session
-cannot recover. Use Ctrl+C to kill the frozen session, wait for the network
-to return, then start a new `sudo` session.
+If the freeze banner is visible and the network is back, the session should
+resume automatically within ~1 second once a `HEARTBEAT_ACK` arrives.
 
-If the network recovered quickly (< 2 s), `fg` should resume automatically
-once a `HEARTBEAT_ACK` arrives from the server.
+If bash was suspended by job control (visible as `[1]+ Stopped sudo bash`
+in the parent shell), run `fg` to bring it back to the foreground.
+
+### Terminal freezes and `fg`/network does not resume
+
+If the network was down for > 2 s, the TCP connection is gone and the
+session cannot recover. Use Ctrl+C to kill the frozen session, wait for
+the network to return, then start a new `sudo` session.
 
 ### Terminal freezes immediately on session start
 
@@ -684,5 +728,5 @@ journalctl -u sudo-logserver -n 50
 
 ### Freeze is too slow after network loss
 
-Ensure you are running client ≥ 1.1-20 and server ≥ 1.1-6. Earlier versions
+Ensure you are running client ≥ 1.1-22 and server ≥ 1.1-6. Earlier versions
 used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).
