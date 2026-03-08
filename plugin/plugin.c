@@ -25,9 +25,7 @@
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
-#include <dirent.h>
 #include <pthread.h>
-#include <signal.h>
 
 /* ---------- tunables ---------- */
 #define SHIPPER_SOCK_PATH    "/run/sudo-logger/plugin.sock"
@@ -53,13 +51,14 @@
 /* ---------- freeze warning written to /dev/tty ---------- */
 #define FREEZE_MSG \
     "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable — input frozen ]\033[0m\r\n" \
-    "\033[33mWaiting for log server to come back — press Ctrl+C to abort.\033[0m\r\n"
+    "\033[33mWaiting for log server to come back...\033[0m\r\n"
 #define UNFREEZE_MSG \
     "\r\n\033[42;97;1m[ SUDO-LOGGER: log server reconnected — input resumed ]\033[0m\r\n"
-
-/* Re-display the freeze banner every N monitor polls (~3 s at 150 ms/poll)
- * so that it remains visible after any bash output following a fg attempt. */
-#define FREEZE_REMIND_INTERVAL 20
+#define BLOCKED_HDR \
+    "\r\n\033[41;97;1m[ SUDO-LOGGER: cannot reach log server — sudo blocked ]\033[0m\r\n" \
+    "\033[33m"
+#define BLOCKED_TAIL \
+    "\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
 static sudo_conv_t   g_conv;
@@ -73,14 +72,11 @@ static uint64_t      g_seq        = 0;
 static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
 static time_t g_last_ack_query = 0;  /* when we last queried the shipper */
 
-/* Background monitor thread — freezes graphical (non-tty) programs via
- * SIGSTOP/SIGCONT when ACKs go stale.  Also provides a second line of
- * defence for tty sessions alongside the log_ttyin blocking. */
-static pid_t          g_sudo_pid       = -1;
-static volatile int   g_monitor_stop   = 0;
+/* Background monitor thread */
+static volatile int   g_monitor_stop  = 0;
 static int            g_monitor_started = 0;
 static pthread_t      g_monitor_thread;
-static pthread_mutex_t g_ack_mu        = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------- helpers ---------- */
 
@@ -229,53 +225,6 @@ static int ack_is_fresh(void)
     return (now - g_last_ack_time) <= ACK_TIMEOUT_SECS;
 }
 
-/*
- * Find the PID of a direct child of parent_pid.
- * First tries /proc/<pid>/task/<pid>/children (Linux 3.5+),
- * then falls back to scanning /proc/<N>/status for PPid.
- */
-static pid_t find_child_pid(pid_t parent_pid)
-{
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/%d/task/%d/children",
-             (int)parent_pid, (int)parent_pid);
-    FILE *f = fopen(path, "r");
-    if (f) {
-        pid_t child = -1;
-        fscanf(f, "%d", &child);
-        fclose(f);
-        if (child > 0)
-            return child;
-    }
-
-    /* Fallback: scan /proc for PPid == parent_pid */
-    DIR *proc = opendir("/proc");
-    if (!proc)
-        return -1;
-    struct dirent *e;
-    pid_t found = -1;
-    while ((e = readdir(proc)) != NULL && found < 0) {
-        char *end;
-        long pid = strtol(e->d_name, &end, 10);
-        if (*end != '\0' || pid <= 0)
-            continue;
-        snprintf(path, sizeof(path), "/proc/%ld/status", pid);
-        FILE *sf = fopen(path, "r");
-        if (!sf)
-            continue;
-        char line[128];
-        while (fgets(line, sizeof(line), sf)) {
-            if (strncmp(line, "PPid:", 5) == 0) {
-                if (strtol(line + 5, NULL, 10) == (long)parent_pid)
-                    found = (pid_t)pid;
-                break;
-            }
-        }
-        fclose(sf);
-    }
-    closedir(proc);
-    return found;
-}
 
 /*
  * Thread-safe wrapper around ack_is_fresh().
@@ -293,63 +242,24 @@ static int ack_is_fresh_locked(void)
 /*
  * Background monitor thread.
  *
- * Polls ACK state every 150 ms and sends SIGSTOP/SIGCONT to the child's
- * entire process group.  Using the process group rather than a single PID
- * is required because sudo forks a monitor process ([sudo]) as its direct
- * child, which in turn forks the actual command (e.g. okular).  Sending
- * SIGSTOP to only the direct child would leave the command running.
+ * Polls ACK state every 150 ms.  On freeze, sets g_frozen (which makes
+ * log_ttyin drop keyboard input) and writes the freeze banner directly to
+ * the tty.
  *
- * This is the sole freeze enforcement path.  log_ttyin always returns 1
- * so sudo's main event loop stays responsive and Ctrl+C works correctly.
+ * We deliberately do NOT send SIGSTOP.  SIGSTOP triggers the kernel's job-
+ * control machinery: the shell receives SIGCHLD with CLD_STOPPED, prints
+ * "[1]+ Stopped", and reclaims the terminal — making g_tty_fd inaccessible
+ * for writes and forcing the user to use "fg" to see anything.
+ *
+ * Instead we rely on the shipper's cgroup freeze (cgroup.freeze = 1), which
+ * suspends the process without changing its job-control state.  The session
+ * stays in the foreground, and the banner can be written immediately.
  */
 static void *monitor_thread_fn(void *arg)
 {
     (void)arg;
 
-    /* Give sudo time to fork the child before we try to find its PID. */
-    struct timespec wait = { .tv_sec = 0, .tv_nsec = 300000000L };
-    nanosleep(&wait, NULL);
-
-    /* Wait for sudo to fork its monitor child.  sudo forks after session_open()
-     * returns so the child may not appear immediately.  Poll for up to 5 s. */
-    pid_t child = -1;
-    for (int i = 0; i < 100 && !g_monitor_stop; i++) {
-        struct timespec w = { .tv_sec = 0, .tv_nsec = 50000000L }; /* 50 ms */
-        nanosleep(&w, NULL);
-        child = find_child_pid(g_sudo_pid);
-        if (child > 0)
-            break;
-    }
-    if (child < 0)
-        return NULL;
-
-    /* sudo forks a monitor process ([sudo]) as its direct child; the monitor
-     * in turn forks the actual command (bash, vi, ...) in a NEW process group.
-     * Stopping only child's group misses bash because interactive bash calls
-     * setpgrp() and creates its own group.  Find the grandchild (bash) and
-     * stop its group as well. */
-    pid_t grandchild = -1;
-    for (int i = 0; i < 40 && !g_monitor_stop; i++) {
-        struct timespec w = { .tv_sec = 0, .tv_nsec = 50000000L }; /* 50 ms */
-        nanosleep(&w, NULL);
-        grandchild = find_child_pid(child);
-        if (grandchild > 0)
-            break;
-    }
-
-    pid_t child_pgid = getpgid(child);
-    if (child_pgid <= 0 || child_pgid == getpgid(g_sudo_pid))
-        child_pgid = 0; /* same group as sudo — fall back to single-PID kill */
-
-    pid_t bash_pgid = 0;
-    if (grandchild > 0) {
-        pid_t gp = getpgid(grandchild);
-        if (gp > 0 && gp != getpgid(g_sudo_pid) && gp != child_pgid)
-            bash_pgid = gp;
-    }
-
-    int  was_stopped       = 0;
-    int  freeze_poll_count = 0;
+    int was_frozen = 0;
 
     while (!g_monitor_stop) {
         struct timespec ts = { .tv_sec = 0, .tv_nsec = 150000000L };
@@ -360,50 +270,15 @@ static void *monitor_thread_fn(void *arg)
 
         int fresh = ack_is_fresh_locked();
 
-        if (!fresh) {
-            /* Send SIGSTOP first so that any bash output triggered by a
-             * preceding fg/SIGCONT has already been delivered.  We then
-             * write the freeze banner AFTER, ensuring it appears below
-             * that output and is clearly visible. */
-            if (child_pgid > 0)
-                kill(-child_pgid, SIGSTOP);
-            else
-                kill(child, SIGSTOP);
-            if (bash_pgid > 0)
-                kill(-bash_pgid, SIGSTOP);
-
-            /* Display the freeze banner:
-             *   • always on the first frozen poll (was_stopped == 0)
-             *   • again every FREEZE_REMIND_INTERVAL polls (~3 s) so it
-             *     re-appears after any bash output following a fg attempt */
-            if (!was_stopped || freeze_poll_count % FREEZE_REMIND_INTERVAL == 0) {
-                if (g_tty_fd >= 0)
-                    write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
-            }
-            was_stopped = 1;
-            freeze_poll_count++;
-        } else if (fresh && was_stopped) {
-            if (child_pgid > 0)
-                kill(-child_pgid, SIGCONT);
-            else
-                kill(child, SIGCONT);
-            if (bash_pgid > 0)
-                kill(-bash_pgid, SIGCONT);
+        if (!fresh && !was_frozen) {
+            if (g_tty_fd >= 0)
+                write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+            was_frozen = 1;
+        } else if (fresh && was_frozen) {
             if (g_tty_fd >= 0)
                 write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
-            was_stopped       = 0;
-            freeze_poll_count = 0;
+            was_frozen = 0;
         }
-    }
-
-    /* Unfreeze on clean session end so the child doesn't remain stopped. */
-    if (was_stopped) {
-        if (child_pgid > 0)
-            kill(-child_pgid, SIGCONT);
-        else
-            kill(child, SIGCONT);
-        if (bash_pgid > 0)
-            kill(-bash_pgid, SIGCONT);
     }
 
     return NULL;
@@ -515,8 +390,14 @@ static int plugin_open(unsigned int        version,
         if (elen > 0 && elen < 512) {
             char errbuf[512] = {0};
             read_exact(g_shipper_fd, errbuf, elen);
-            g_printf(SUDO_CONV_ERROR_MSG,
-                "sudo-logger: cannot reach log server: %s\n", errbuf);
+            if (g_tty_fd >= 0) {
+                write(g_tty_fd, BLOCKED_HDR,  sizeof(BLOCKED_HDR)  - 1);
+                write(g_tty_fd, errbuf, elen);
+                write(g_tty_fd, BLOCKED_TAIL, sizeof(BLOCKED_TAIL) - 1);
+            } else {
+                g_printf(SUDO_CONV_ERROR_MSG,
+                    "sudo-logger: cannot reach log server: %s\n", errbuf);
+            }
         }
         *errstr = "sudo-logger: log server unreachable — sudo blocked";
         return -1;
@@ -531,9 +412,7 @@ static int plugin_open(unsigned int        version,
     /* Seed ack time so the freeze window starts from now */
     g_last_ack_time = now_sec();
 
-    /* Start background monitor thread that handles graphical (non-tty)
-     * programs via SIGSTOP/SIGCONT. */
-    g_sudo_pid      = getpid();
+    /* Start background monitor thread. */
     g_monitor_stop  = 0;
     g_monitor_started = (pthread_create(&g_monitor_thread, NULL,
                                         monitor_thread_fn, NULL) == 0);
@@ -572,11 +451,15 @@ static void plugin_close(int exit_status, int error)
 /*
  * Called for input typed by the user (terminal → child process).
  *
- * Always returns 1 (forward to child).  Freeze enforcement is handled
- * entirely by the background monitor thread via SIGSTOP/SIGCONT on the
- * child process group.  Blocking here would prevent sudo's main event
- * loop from processing signals, causing Ctrl+C to stop working and the
- * terminal to hang.
+ * Always returns 1.  Freeze enforcement is handled entirely by the cgroup
+ * (cgroup.freeze = 1 prevents bash from executing anything).  Returning 0
+ * from this hook has the wrong semantics in the sudo plugin API: it
+ * permanently disables the hook rather than dropping a single byte, which
+ * caused sudo to send SIGHUP to the session on the first keypress.
+ *
+ * Any input typed during a freeze is buffered in the pty but bash cannot
+ * process it until the cgroup unfreezes.  For an interactive prompt this
+ * is harmless (blank Enter presses do nothing).
  */
 static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
