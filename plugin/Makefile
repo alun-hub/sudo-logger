@@ -14,9 +14,9 @@ $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) -o $@ $^
 
 install: $(TARGET)
-	install -m 0644 $(TARGET) /usr/lib/sudo/
+	install -m 0755 $(TARGET) /usr/libexec/sudo/
 	@echo "Add to /etc/sudo.conf:"
-	@echo "  Plugin io_logger $(TARGET)"
+	@echo "  Plugin sudo_logger_plugin $(TARGET)"
 
 clean:
 	rm -f $(TARGET)

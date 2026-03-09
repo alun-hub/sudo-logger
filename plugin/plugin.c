@@ -2,11 +2,20 @@
  * sudo-logger: I/O plugin for sudo that ships session recordings to a
  * remote log server via a local shipper daemon.
  *
- * Freeze behaviour: if ACK from the log server is stale (> ACK_TIMEOUT_SECS),
- * log_ttyin returns 0 which prevents input from reaching the child process.
+ * Architecture:
+ *   plugin_open()  → connects to sudo-shipper (Unix socket), sends SESSION_START,
+ *                    waits for SESSION_READY, starts background monitor thread.
+ *   log_ttyin/out  → called by sudo for every I/O chunk; forwards to shipper.
+ *   plugin_close() → stops monitor thread, sends SESSION_END, closes socket.
  *
- * Build:  see Makefile
- * Install: copy .so to /usr/lib/sudo/, add Plugin line to /etc/sudo.conf
+ * Freeze behaviour:
+ *   The background monitor thread polls ACK state every 150 ms.  If no fresh
+ *   ACK has arrived within ACK_TIMEOUT_SECS, it writes the freeze banner to
+ *   /dev/tty.  The actual process freeze is performed by sudo-shipper via
+ *   cgroup.freeze=1 on the kernel side — the plugin only shows the banner.
+ *
+ * Build:  see Makefile (or rpm/sudo-logger-client.spec)
+ * Install: copy .so to /usr/libexec/sudo/, add Plugin line to /etc/sudo.conf
  */
 
 #include <sudo_plugin.h>
@@ -313,6 +322,23 @@ static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
 
 /* ---------- plugin API ---------- */
 
+/*
+ * plugin_open — called once per sudo invocation before the command runs.
+ *
+ * Responsibilities:
+ *   1. Open /dev/tty for banner output (non-blocking; failure is non-fatal).
+ *   2. Build a unique session ID from host + user + pid + nanosecond timestamp.
+ *   3. Connect to sudo-shipper via Unix socket and send SESSION_START.
+ *   4. Block until shipper replies SESSION_READY (server reachable) or
+ *      SESSION_ERROR (server unreachable) — sudo is blocked during this wait.
+ *   5. Start the background monitor thread that polls ACK state every 150 ms
+ *      and writes freeze/unfreeze banners to /dev/tty.
+ *
+ * Returns 1 on success, -1 on any error (blocks the sudo command).
+ *
+ * Thread safety: called in the sudo main thread before any child is forked;
+ *   no concurrent access to globals at this point.
+ */
 static int plugin_open(unsigned int        version,
                        sudo_conv_t         conversation,
                        sudo_printf_t       sudo_plugin_printf,
@@ -418,6 +444,14 @@ static int plugin_open(unsigned int        version,
     return 1;
 }
 
+/*
+ * plugin_close — called by sudo when the session ends (command exits or
+ *   is killed).
+ *
+ * Stops the monitor thread (pthread_join guarantees it has exited before
+ * g_tty_fd is closed — no race on the tty fd), sends SESSION_END with the
+ * exit code, and closes the shipper socket and /dev/tty.
+ */
 static void plugin_close(int exit_status, int error)
 {
     (void)error;
@@ -447,17 +481,15 @@ static void plugin_close(int exit_status, int error)
 }
 
 /*
- * Called for input typed by the user (terminal → child process).
+ * log_ttyin — called for every byte typed by the user (terminal → child).
  *
- * Always returns 1.  Freeze enforcement is handled entirely by the cgroup
- * (cgroup.freeze = 1 prevents bash from executing anything).  Returning 0
- * from this hook has the wrong semantics in the sudo plugin API: it
- * permanently disables the hook rather than dropping a single byte, which
- * caused sudo to send SIGHUP to the session on the first keypress.
+ * Always returns 1 (pass the input through to the child).  Freeze enforcement
+ * is handled entirely by cgroup.freeze in sudo-shipper.  Returning 0 would
+ * permanently disable this hook rather than drop a single byte, and caused
+ * sudo to send SIGHUP to the session on the first keypress.
  *
- * Any input typed during a freeze is buffered in the pty but bash cannot
- * process it until the cgroup unfreezes.  For an interactive prompt this
- * is harmless (blank Enter presses do nothing).
+ * Input typed during a freeze is buffered in the pty; bash cannot process it
+ * until the cgroup unfreezes.
  */
 static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
@@ -466,6 +498,7 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
     return 1;
 }
 
+/* log_ttyout — called for every byte written to the terminal by the child. */
 static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
@@ -473,6 +506,7 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
     return 1;
 }
 
+/* log_stdin — called for non-tty standard input (piped commands, heredocs). */
 static int log_stdin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
@@ -480,6 +514,7 @@ static int log_stdin(const char *buf, unsigned int len, const char **errstr)
     return 1;
 }
 
+/* log_stdout — called for non-tty standard output. */
 static int log_stdout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
@@ -487,6 +522,7 @@ static int log_stdout(const char *buf, unsigned int len, const char **errstr)
     return 1;
 }
 
+/* log_stderr — called for standard error output. */
 static int log_stderr(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
@@ -494,6 +530,7 @@ static int log_stderr(const char *buf, unsigned int len, const char **errstr)
     return 1;
 }
 
+/* show_version — called by "sudo -V"; prints the plugin version. */
 static int show_version(int verbose)
 {
     (void)verbose;

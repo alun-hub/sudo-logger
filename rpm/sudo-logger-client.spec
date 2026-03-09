@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.1
-Release:        24%{?dist}
+Release:        25%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -56,7 +56,7 @@ install -D -m 0644 sudo-shipper.service \
 # Config directory (certs placed here by admin)
 install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
 
-# Konfigfil med defaultvärden
+# Default client config (LOGSERVER address)
 install -D -m 0640 shipper.conf \
     %{buildroot}%{_sysconfdir}/sudo-logger/shipper.conf
 
@@ -88,6 +88,15 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Mon Mar 09 2026 sudo-logger 1.1-25
+- Remove dead code: displaySocketInodes/isGUIApp were defined but never called
+- Add unit tests for protocol and iolog packages
+- Fix README: plugin-side freeze description was wrong (plugin only shows
+  banners; cgroup.freeze in shipper does the actual freezing)
+- Fix Makefile install path (/usr/lib/sudo → /usr/libexec/sudo)
+- Translate shipper.conf comments to English
+- Add function-level doc comments to plugin.c
+
 * Sun Mar 08 2026 sudo-logger 1.1-24
 - Security: fix nil-ptr dereference in server on malformed SESSION_END
 - Security: reject duplicate session IDs in server (prevents file handle leak)

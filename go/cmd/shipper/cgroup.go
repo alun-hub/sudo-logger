@@ -158,62 +158,6 @@ func hasControllingTTY(pid int) bool {
 	return err == nil && ttyNr != 0
 }
 
-// displaySocketInodes returns the kernel inode numbers of all X11 and Wayland
-// display server sockets currently listed in /proc/net/unix.  Called once per
-// tracker tick so the result can be reused for every PID check in that tick.
-func displaySocketInodes() map[uint64]bool {
-	result := make(map[uint64]bool)
-	data, err := os.ReadFile("/proc/net/unix")
-	if err != nil {
-		return result
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		// Format: Num RefCount Protocol Flags Type St Inode Path
-		if len(fields) < 8 {
-			continue
-		}
-		path := fields[7]
-		if strings.Contains(path, "/.X11-unix/") || strings.Contains(path, "/wayland-") {
-			if inode, err := strconv.ParseUint(fields[6], 10, 64); err == nil {
-				result[inode] = true
-			}
-		}
-	}
-	return result
-}
-
-// isGUIApp reports whether pid has an open connection to an X11 or Wayland
-// display server.  Such processes must not be frozen via cgroup.freeze or
-// SIGSTOP: they cannot respond to compositor pings while frozen, so the
-// compositor (GNOME/mutter) eventually sends SIGTERM, killing the app on
-// unfreeze.  Detection via display socket is more reliable than TTY presence
-// because GUI apps may inherit a controlling terminal from their parent shell.
-func isGUIApp(pid int, displayInodes map[uint64]bool) bool {
-	if len(displayInodes) == 0 {
-		return false
-	}
-	fds, err := os.ReadDir(fmt.Sprintf("/proc/%d/fd", pid))
-	if err != nil {
-		return false
-	}
-	for _, fd := range fds {
-		target, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%s", pid, fd.Name()))
-		if err != nil || !strings.HasPrefix(target, "socket:[") {
-			continue
-		}
-		inodeStr := strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]")
-		inode, err := strconv.ParseUint(inodeStr, 10, 64)
-		if err != nil {
-			continue
-		}
-		if displayInodes[inode] {
-			return true
-		}
-	}
-	return false
-}
-
 // inOurCgroup reports whether pid's current cgroup is our session cgroup.
 func (cg *cgroupSession) inOurCgroup(pid int) bool {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))

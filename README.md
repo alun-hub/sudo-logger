@@ -89,10 +89,11 @@ API. Hooks into every sudo session to:
 - Connect to the local shipper over a Unix socket at session open
 - Forward all terminal input (`log_ttyin`), output (`log_ttyout`), stdin,
   stdout, and stderr as framed chunks
-- Run a background monitor thread that polls ACK state every 150 ms
-- Freeze the child process via SIGSTOP when ACKs go stale; re-send SIGSTOP
-  every 150 ms to prevent job-control SIGCONT (`fg`) from escaping the freeze
+- Run a background monitor thread that polls ACK state every 150 ms and
+  writes freeze/unfreeze banners to `/dev/tty` when ACK state changes
 - Block sudo entirely if the shipper/server is unreachable at startup
+- Actual process freezing is performed by the shipper via cgroup.freeze (see
+  [Freeze mechanism](#freeze-mechanism))
 
 ### Go shipper (`go/cmd/shipper/`)
 
@@ -131,7 +132,7 @@ A TLS server running on a dedicated machine. For each client connection:
 |----------|--------|
 | **Sudo blocked at start** | If the log server is unreachable when sudo runs, the session is rejected before the command executes |
 | **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen within ~1 second |
-| **Freeze cannot be escaped with `fg`** | SIGSTOP is re-sent every 150 ms; job-control SIGCONT from the parent shell cannot keep bash running |
+| **Freeze cannot be escaped with `fg`** | Terminal sessions are frozen via `cgroup.freeze=1` — no job-control signals involved, so `fg` cannot escape the freeze |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
 | **HMAC-signed ACKs** | Server signs each ACK with HMAC-SHA256; forged ACKs from a network attacker are detected and discarded |
@@ -178,8 +179,10 @@ A TLS server running on a dedicated machine. For each client connection:
   `/etc/sudo.conf`. This system is designed to deter and audit, not to
   prevent a fully compromised root from disabling logging.
 
-- **No log rotation**: `/var/log/sudoreplay/` grows without bound. Implement
-  external rotation (logrotate, cron) as needed.
+- **No log rotation**: `/var/log/sudoreplay/` grows without bound. A sample
+  logrotate configuration is provided in `sudo-logserver.logrotate` — install
+  it to `/etc/logrotate.d/sudo-logserver`. To enforce a maximum session age,
+  add a cron job: `find /var/log/sudoreplay -mindepth 3 -maxdepth 3 -type d -mtime +365 -exec rm -rf {} +`
 
 - **GUI programs that share bash's process group are not frozen**: helper
   processes launched by bash that share its process group are dropped from
@@ -543,21 +546,19 @@ Recovery: when a `HEARTBEAT_ACK` or `ACK` arrives after a dead period,
 Two complementary freeze mechanisms work together:
 
 **Plugin-side (C):** the background monitor thread polls `ack_is_fresh()` every
-150 ms. When ACKs are stale it sends SIGSTOP to the child process groups:
+150 ms and writes banners to `/dev/tty` on state transitions:
 
 ```
 monitor thread (every 150 ms)
     │
     ├── ack stale → write FREEZE banner to /dev/tty (once)
-    │              kill(-child_pgid, SIGSTOP)     # sudo monitor group
-    │              kill(-bash_pgid, SIGSTOP)      # bash/command group
-    │              [re-sent every poll — fg cannot escape the freeze]
     │
-    └── ack fresh again (after markAlive)
-                   kill(-child_pgid, SIGCONT)
-                   kill(-bash_pgid, SIGCONT)
-                   write UNFREEZE banner to /dev/tty
+    └── ack fresh again → write UNFREEZE banner to /dev/tty
 ```
+
+The plugin does **not** send any signals. All process freezing is delegated
+to the shipper (cgroup-based), keeping the plugin simple and avoiding any
+interaction with the kernel's job-control machinery.
 
 **Shipper-side (Go):** the shipper manages a per-session cgroup subtree and
 freezes processes at the cgroup level:
@@ -580,10 +581,11 @@ safe. Safety is determined by process group membership:
   Sending SIGSTOP to their process group would also stop bash and trigger
   job control, so they are left alone.
 
-During a freeze, bash sessions are suspended by the plugin's group SIGSTOP.
-The terminal shows a freeze banner. When the network returns, the session
-resumes automatically and input is re-enabled. If bash was backgrounded by
-job control (visible as `[1]+ Stopped`), `fg` restores it.
+During a freeze, terminal sessions are suspended via `cgroup.freeze=1` and
+the plugin writes the freeze banner to the terminal. When the network returns,
+the cgroup is unfrozen and the banner clears automatically. If bash was moved
+out of the session cgroup and ended up backgrounded (visible as
+`[1]+ Stopped sudo bash` in the parent shell), run `fg` to restore it.
 
 `log_ttyin()` always returns 1 and never blocks. Blocking there would
 prevent sudo's event loop from processing signals, breaking Ctrl+C.

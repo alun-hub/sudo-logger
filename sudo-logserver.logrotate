@@ -1,0 +1,27 @@
+# logrotate configuration for sudo-logserver session logs.
+#
+# Install: cp sudo-logserver.logrotate /etc/logrotate.d/sudo-logserver
+#
+# This rotates the top-level log directory on a monthly basis.
+# Individual session directories are preserved intact (they are not
+# log files but directory trees used by sudoreplay).
+#
+# To also enforce a maximum age, add a cron job such as:
+#   find /var/log/sudoreplay -mindepth 3 -maxdepth 3 -type d \
+#        -mtime +365 -exec rm -rf {} +
+# (remove session directories older than 365 days)
+
+/var/log/sudoreplay {
+    monthly
+    missingok
+    notifempty
+    create 0750 sudologger sudologger
+    # Do not compress — session data is already binary/mixed;
+    # compression yields little benefit and makes sudoreplay slower.
+    nocompress
+    # Keep 12 months of history
+    rotate 12
+    # sudo-logserver writes directly to files without buffering,
+    # so no postrotate signal is needed.
+    sharedscripts
+}

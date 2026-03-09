@@ -1,6 +1,6 @@
 Name:           sudo-logger-server
 Version:        1.1
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Remote log server for sudo session recordings
 
 License:        MIT
@@ -46,6 +46,10 @@ install -D -m 0640 server.conf \
 # Log directory
 install -d -m 0750 %{buildroot}%{_localstatedir}/log/sudoreplay
 
+# Logrotate configuration
+install -D -m 0644 sudo-logserver.logrotate \
+    %{buildroot}%{_sysconfdir}/logrotate.d/sudo-logserver
+
 %pre
 getent group sudologger >/dev/null || groupadd -r sudologger
 getent passwd sudologger >/dev/null || \
@@ -67,7 +71,11 @@ getent passwd sudologger >/dev/null || \
 %dir %attr(0750, root, sudologger) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/server.conf
 %dir %attr(0750, sudologger, sudologger) %{_localstatedir}/log/sudoreplay
+%config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 
 %changelog
+* Mon Mar 09 2026 sudo-logger 1.1-7
+- Add logrotate configuration for /var/log/sudoreplay
+
 * Sat Mar 07 2026 sudo-logger 1.1-1
 - Initial release

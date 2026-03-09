@@ -2,15 +2,29 @@
 // the local shipper daemon, and the remote log server.
 //
 // Frame format (all integers big-endian):
-//   [1 byte: type][4 bytes: payload length][N bytes: payload]
+//
+//	[1 byte: type][4 bytes: payload length][N bytes: payload]
 //
 // Message types:
-//   0x01  SESSION_START  plugin→shipper→server  JSON payload
-//   0x02  CHUNK          plugin→shipper→server  binary payload
-//   0x03  SESSION_END    plugin→shipper→server  binary payload
-//   0x04  ACK            server→shipper          binary payload
-//   0x05  ACK_QUERY      plugin→shipper          empty
-//   0x06  ACK_RESPONSE   shipper→plugin          binary payload
+//
+//	0x01  SESSION_START   plugin→shipper→server  JSON payload (SessionStart)
+//	0x02  CHUNK           plugin→shipper→server  binary payload (Chunk)
+//	0x03  SESSION_END     plugin→shipper→server  binary payload (SessionEnd)
+//	0x04  ACK             server→shipper          binary payload (Ack)
+//	0x05  ACK_QUERY       plugin→shipper          empty
+//	0x06  ACK_RESPONSE    shipper→plugin          binary: last_ack_ts_ns(8) + last_seq(8)
+//	0x07  SESSION_READY   shipper→plugin          empty — server connection OK, sudo may proceed
+//	0x08  SESSION_ERROR   shipper→plugin          string error message — sudo blocked
+//	0x09  HEARTBEAT       shipper→server          empty — keepalive probe (every 400 ms)
+//	0x0a  HEARTBEAT_ACK   server→shipper          empty — immediate reply to HEARTBEAT
+//
+// CHUNK stream types map to sudo's iolog event types (see iolog/iolog.go):
+//
+//	0x00  STREAM_STDIN    non-tty standard input
+//	0x01  STREAM_STDOUT   non-tty standard output
+//	0x02  STREAM_STDERR   standard error
+//	0x03  STREAM_TTYIN    terminal input  (iolog EventTtyIn)
+//	0x04  STREAM_TTYOUT   terminal output (iolog EventTtyOut)
 package protocol
 
 import (
