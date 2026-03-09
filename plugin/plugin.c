@@ -320,6 +320,45 @@ static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
     free(p);
 }
 
+/* ---------- helpers ---------- */
+
+/*
+ * build_cmdline_json — writes a JSON-safe, space-joined argv string into buf.
+ *
+ * Characters that are illegal inside a JSON string (backslash, double-quote,
+ * and ASCII control characters) are escaped.  The result is NUL-terminated
+ * and truncated to fit within bufsz bytes (including the NUL).
+ */
+static void build_cmdline_json(char *buf, size_t bufsz,
+                               int argc, char * const argv[])
+{
+    if (bufsz == 0)
+        return;
+
+    size_t pos = 0;
+    for (int i = 0; i < argc && pos + 1 < bufsz; i++) {
+        if (i > 0 && pos + 1 < bufsz)
+            buf[pos++] = ' ';
+
+        for (const char *p = argv[i]; *p && pos + 2 < bufsz; p++) {
+            unsigned char c = (unsigned char)*p;
+            if (c == '\\' || c == '"') {
+                buf[pos++] = '\\';
+                buf[pos++] = (char)c;
+            } else if (c < 0x20) {
+                /* Escape control characters as \uXXXX — needs 6 bytes */
+                if (pos + 6 < bufsz) {
+                    pos += (size_t)snprintf(buf + pos, bufsz - pos,
+                                            "\\u%04x", c);
+                }
+            } else {
+                buf[pos++] = (char)c;
+            }
+        }
+    }
+    buf[pos] = '\0';
+}
+
 /* ---------- plugin API ---------- */
 
 /*
@@ -370,7 +409,11 @@ static int plugin_open(unsigned int        version,
             host = user_info[i] + 5;
     }
 
-    const char *cmd = (argc > 0) ? argv[0] : "unknown";
+    char cmd[256];
+    if (argc > 0)
+        build_cmdline_json(cmd, sizeof(cmd), argc, argv);
+    else
+        strncpy(cmd, "unknown", sizeof(cmd));
 
     snprintf(g_session_id, sizeof(g_session_id),
              "%s-%s-%d-%lld", host, user, (int)getpid(),

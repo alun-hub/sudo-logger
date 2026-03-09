@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.1
-Release:        25%{?dist}
+Release:        26%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -88,6 +88,10 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Mon Mar 09 2026 sudo-logger 1.1-26
+- plugin: capture full argv (all arguments) in SESSION_START, not just argv[0];
+  command with options now visible in sudoreplay and the web replay interface
+
 * Mon Mar 09 2026 sudo-logger 1.1-25
 - Remove dead code: displaySocketInodes/isGUIApp were defined but never called
 - Add unit tests for protocol and iolog packages
