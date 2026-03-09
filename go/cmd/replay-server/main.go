@@ -135,7 +135,7 @@ func validateTSID(tsid string) error {
 // listSessions scans the log directory for all session subdirectories and
 // returns their metadata sorted by start time descending (newest first).
 func listSessions(logDir string) ([]SessionInfo, error) {
-	var sessions []SessionInfo
+	sessions := make([]SessionInfo, 0)
 
 	userEntries, err := os.ReadDir(logDir)
 	if err != nil {
@@ -260,7 +260,7 @@ func readEvents(sessDir string) ([]PlaybackEvent, error) {
 	ttyout, _ := os.ReadFile(filepath.Join(sessDir, "ttyout"))
 	ttyin, _ := os.ReadFile(filepath.Join(sessDir, "ttyin"))
 
-	var events []PlaybackEvent
+	events := make([]PlaybackEvent, 0)
 	var cumTime float64
 	var outOffset, inOffset int
 
