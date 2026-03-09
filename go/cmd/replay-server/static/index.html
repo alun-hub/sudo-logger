@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sudo-replay</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #09090f;
+      --surface:     #0f1117;
+      --card:        #161921;
+      --card-hover:  #1c1f2e;
+      --card-active: #1a2035;
+      --border:      #1e2230;
+      --border-mid:  #2a2f42;
+      --text:        #d4daf0;
+      --text-sub:    #8890a8;
+      --text-dim:    #4a5068;
+      --green:       #00e87a;
+      --green-dim:   #003d20;
+      --green-glow:  rgba(0, 232, 122, 0.12);
+      --blue:        #4da8ff;
+      --red:         #ff5f6d;
+      --font:        'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text);
+      font-family: var(--font); font-size: 13px; line-height: 1.5; overflow: hidden; }
+
+    .layout {
+      display: grid;
+      grid-template-rows: 42px 1fr;
+      grid-template-columns: 300px 1fr;
+      grid-template-areas: "header header" "sidebar main";
+      height: 100vh;
+    }
+
+    /* Header */
+    .topbar {
+      grid-area: header;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; background: var(--surface);
+      border-bottom: 1px solid var(--border); gap: 12px;
+    }
+    .logo { display: flex; align-items: center; gap: 8px; color: var(--green);
+      font-weight: 700; font-size: 14px; letter-spacing: 0.04em; }
+    .logo-icon { font-size: 16px; filter: drop-shadow(0 0 6px var(--green)); }
+    .badge { font-size: 11px; color: var(--text-sub); background: var(--card);
+      border: 1px solid var(--border); padding: 2px 8px; border-radius: 3px; }
+
+    /* Sidebar */
+    .sidebar { grid-area: sidebar; display: flex; flex-direction: column;
+      background: var(--surface); border-right: 1px solid var(--border); overflow: hidden; }
+    .search-wrap { padding: 10px; border-bottom: 1px solid var(--border); }
+    .search-input {
+      width: 100%; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 6px 10px 6px 28px; border-radius: 4px; outline: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234a5068' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: 8px center;
+      transition: border-color 0.15s;
+    }
+    .search-input:focus { border-color: var(--green); }
+    .search-input::placeholder { color: var(--text-dim); }
+    .session-list { flex: 1; overflow-y: auto; overflow-x: hidden;
+      scrollbar-width: thin; scrollbar-color: var(--border-mid) transparent; }
+    .session-list::-webkit-scrollbar { width: 4px; }
+    .session-list::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 2px; }
+    .session-card { padding: 10px 12px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background 0.1s; border-left: 2px solid transparent; }
+    .session-card:hover { background: var(--card-hover); }
+    .session-card.active { background: var(--card-active); border-left-color: var(--green); }
+    .session-card.active .sc-user { color: var(--green); }
+    .sc-user { font-size: 12px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sc-cmd { font-size: 11px; color: var(--text-sub); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .sc-meta { display: flex; justify-content: space-between; align-items: center;
+      margin-top: 4px; gap: 6px; }
+    .sc-date { font-size: 10px; color: var(--text-dim); }
+    .sc-dur { font-size: 10px; color: var(--text-dim); background: var(--card);
+      border: 1px solid var(--border); padding: 1px 5px; border-radius: 2px; flex-shrink: 0; }
+    .session-card.active .sc-dur { border-color: var(--green-dim); color: var(--green); }
+    .list-msg { padding: 16px; text-align: center; color: var(--text-dim);
+      font-size: 12px; line-height: 1.8; }
+    .list-msg.error { color: var(--red); text-align: left; }
+
+    /* Player */
+    .player { grid-area: main; display: flex; flex-direction: column;
+      background: var(--bg); overflow: hidden; }
+    .info-bar { display: flex; align-items: center; padding: 0 14px; height: 36px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      gap: 16px; flex-shrink: 0; overflow: hidden; }
+    .info-item { display: flex; align-items: center; gap: 5px;
+      font-size: 11px; color: var(--text-sub); white-space: nowrap; min-width: 0; }
+    .info-item.grow { min-width: 0; overflow: hidden; }
+    .info-item.grow .iv { overflow: hidden; text-overflow: ellipsis; }
+    .il { color: var(--text-dim); flex-shrink: 0; }
+    .iv { color: var(--text); }
+    .iv.green { color: var(--green); }
+    .no-sel { color: var(--text-dim); font-size: 12px; }
+
+    /* Terminal */
+    .terminal-wrap { flex: 1; overflow: hidden; padding: 10px; }
+    .terminal-wrap .xterm { height: 100%; }
+
+    /* Controls */
+    .controls { display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+      background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+    .btn-play { background: var(--green-dim); border: 1px solid var(--green);
+      color: var(--green); font-family: var(--font); font-size: 13px;
+      width: 30px; height: 26px; border-radius: 4px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s; flex-shrink: 0; line-height: 1; }
+    .btn-play:hover:not(:disabled) { background: rgba(0,232,122,0.25); }
+    .btn-play:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-icon { background: var(--card); border: 1px solid var(--border);
+      color: var(--text-sub); font-family: var(--font); font-size: 12px;
+      width: 26px; height: 26px; border-radius: 4px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: background 0.15s, color 0.15s; }
+    .btn-icon:hover:not(:disabled) { background: var(--card-hover); color: var(--text); }
+    .btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
+    .time-cur { font-size: 11px; color: var(--green); min-width: 34px;
+      text-align: center; flex-shrink: 0; }
+    .time-tot { font-size: 11px; color: var(--text-sub); min-width: 34px;
+      text-align: center; flex-shrink: 0; }
+    .scrubber-wrap { flex: 1; display: flex; align-items: center; }
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%;
+      height: 3px; background: var(--border-mid); border-radius: 2px;
+      outline: none; cursor: pointer; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+      width: 11px; height: 11px; background: var(--green); border-radius: 50%;
+      cursor: pointer; box-shadow: 0 0 6px var(--green-glow); }
+    input[type=range]::-moz-range-thumb { width: 11px; height: 11px;
+      background: var(--green); border: none; border-radius: 50%; cursor: pointer; }
+    input[type=range]:disabled { opacity: 0.3; cursor: not-allowed; }
+    .speed-select { background: var(--card); border: 1px solid var(--border);
+      color: var(--text-sub); font-family: var(--font); font-size: 11px;
+      padding: 3px 5px; border-radius: 4px; outline: none; cursor: pointer; flex-shrink: 0; }
+    .speed-select:disabled { opacity: 0.35; cursor: not-allowed; }
+    .speed-select:focus { border-color: var(--green); }
+    .spinner { display: inline-block; width: 12px; height: 12px;
+      border: 2px solid var(--border-mid); border-top-color: var(--green);
+      border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-row { display: flex; align-items: center; gap: 8px;
+      padding: 14px 16px; font-size: 12px; color: var(--text-sub); }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <header class="topbar">
+    <div class="logo"><span class="logo-icon">◈</span> sudo-replay</div>
+    <span class="badge" id="session-count">loading…</span>
+  </header>
+
+  <aside class="sidebar">
+    <div class="search-wrap">
+      <input type="text" id="search" class="search-input" placeholder="Search user, host, command…">
+    </div>
+    <div class="session-list" id="session-list">
+      <div class="loading-row"><div class="spinner"></div> Loading sessions…</div>
+    </div>
+  </aside>
+
+  <main class="player">
+    <div class="info-bar" id="info-bar">
+      <span class="no-sel">← Select a session</span>
+    </div>
+    <div class="terminal-wrap"><div id="terminal"></div></div>
+    <div class="controls">
+      <button class="btn-play" id="btn-play" disabled title="Play / Pause (Space)">▶</button>
+      <button class="btn-icon"  id="btn-restart" disabled title="Restart (R)">↺</button>
+      <span class="time-cur" id="time-current">0:00</span>
+      <div class="scrubber-wrap">
+        <input type="range" id="scrubber" min="0" max="10000" value="0" disabled>
+      </div>
+      <span class="time-tot" id="time-total">0:00</span>
+      <select class="speed-select" id="speed-select" disabled>
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="8">8×</option>
+        <option value="16">16×</option>
+      </select>
+    </div>
+  </main>
+
+</div>
+<script>
+'use strict';
+
+// ── Terminal ─────────────────────────────────────────────────────────────────
+
+const term = new Terminal({
+  theme: {
+    background: '#09090f', foreground: '#d4daf0',
+    cursor: '#00e87a', cursorAccent: '#09090f',
+    selectionBackground: 'rgba(77,168,255,0.25)',
+    black:'#1e2230',red:'#ff5f6d',green:'#00e87a',yellow:'#ffd666',
+    blue:'#4da8ff',magenta:'#c984f8',cyan:'#4dd5f8',white:'#d4daf0',
+    brightBlack:'#4a5068',brightRed:'#ff8089',brightGreen:'#33ffaa',
+    brightYellow:'#ffe080',brightBlue:'#80c4ff',brightMagenta:'#d9aaff',
+    brightCyan:'#80e8ff',brightWhite:'#eef0ff',
+  },
+  fontFamily: "'JetBrains Mono','Fira Code','Cascadia Code',monospace",
+  fontSize: 13, lineHeight: 1.3, convertEol: true, scrollback: 5000,
+});
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(document.getElementById('terminal'));
+fitAddon.fit();
+window.addEventListener('resize', () => fitAddon.fit());
+
+// ── State ─────────────────────────────────────────────────────────────────────
+
+let allSessions   = [];
+let events        = [];
+let totalDuration = 0;
+let currentTSID   = null;
+
+const player = {
+  playing: false, currentIndex: 0, speed: 1.0,
+  startWallMs: 0, startEventSec: 0,
+  rafId: null, timeoutId: null,
+};
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+
+const elSessionList  = document.getElementById('session-list');
+const elSessionCount = document.getElementById('session-count');
+const elInfoBar      = document.getElementById('info-bar');
+const elBtnPlay      = document.getElementById('btn-play');
+const elBtnRestart   = document.getElementById('btn-restart');
+const elScrubber     = document.getElementById('scrubber');
+const elSpeedSelect  = document.getElementById('speed-select');
+const elTimeCurrent  = document.getElementById('time-current');
+const elTimeTotal    = document.getElementById('time-total');
+const elSearch       = document.getElementById('search');
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+
+const fmt = s => {
+  s = Math.max(0, s);
+  return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+};
+
+const fmtDate = unix => {
+  const d = new Date(unix * 1000);
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})
+       + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+};
+
+const b64toBytes = b64 => {
+  const bin = atob(b64);
+  const a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return a;
+};
+
+// Create a text element with safe textContent (no innerHTML)
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+
+// ── Session list ──────────────────────────────────────────────────────────────
+
+async function loadSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allSessions = await res.json();
+    elSessionCount.textContent =
+      allSessions.length === 1 ? '1 session' : `${allSessions.length} sessions`;
+    renderSessionList(allSessions);
+  } catch (err) {
+    elSessionCount.textContent = 'error';
+    elSessionList.textContent = '';
+    const msg = el('div','list-msg error');
+    msg.textContent = `⚠ Failed to load: ${err.message}`;
+    elSessionList.appendChild(msg);
+  }
+}
+
+function renderSessionList(sessions) {
+  elSessionList.textContent = '';
+  if (sessions.length === 0) {
+    const msg = el('div','list-msg','No sessions found.');
+    elSessionList.appendChild(msg);
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const s of sessions) {
+    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : ''));
+    card.dataset.tsid = s.tsid;
+
+    const user = el('div','sc-user');
+    user.textContent = `${s.user}@${s.host}`;
+
+    const cmd = el('div','sc-cmd', s.command);
+
+    const meta = el('div','sc-meta');
+    meta.appendChild(el('span','sc-date', fmtDate(s.start_time)));
+    meta.appendChild(el('span','sc-dur',  fmt(s.duration)));
+
+    card.appendChild(user);
+    card.appendChild(cmd);
+    card.appendChild(meta);
+    card.addEventListener('click', () => selectSession(s.tsid));
+    frag.appendChild(card);
+  }
+  elSessionList.appendChild(frag);
+}
+
+elSearch.addEventListener('input', () => {
+  const q = elSearch.value.toLowerCase().trim();
+  renderSessionList(q
+    ? allSessions.filter(s =>
+        s.user.toLowerCase().includes(q) ||
+        s.host.toLowerCase().includes(q) ||
+        s.command.toLowerCase().includes(q))
+    : allSessions);
+});
+
+// ── Session selection ─────────────────────────────────────────────────────────
+
+async function selectSession(tsid) {
+  if (tsid === currentTSID) return;
+  stopPlayer();
+  currentTSID = tsid;
+
+  elSessionList.querySelectorAll('.session-card').forEach(c =>
+    c.classList.toggle('active', c.dataset.tsid === tsid));
+
+  const sess = allSessions.find(s => s.tsid === tsid);
+  renderInfoBar(sess);
+  setControlsEnabled(false);
+  term.reset();
+  term.write('\x1b[2;37mLoading…\x1b[0m');
+
+  try {
+    const res = await fetch(`/api/session/events?tsid=${encodeURIComponent(tsid)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    events = await res.json();
+    totalDuration = sess ? sess.duration
+      : (events.length ? events[events.length-1].t : 0);
+    elTimeTotal.textContent = fmt(totalDuration);
+    term.reset();
+    setControlsEnabled(true);
+    resetPlayer();
+    play();
+  } catch (err) {
+    term.reset();
+    term.writeln(`\x1b[31mFailed to load: ${err.message}\x1b[0m`);
+  }
+}
+
+function renderInfoBar(sess) {
+  elInfoBar.textContent = '';
+  if (!sess) {
+    elInfoBar.appendChild(el('span','no-sel','← Select a session'));
+    return;
+  }
+  const items = [
+    ['user', sess.user, true],
+    ['host', sess.host, false],
+    ['cmd',  sess.command, true],
+    ['tty',  sess.tty, false],
+  ];
+  for (const [label, value, green] of items) {
+    const wrap = el('div', 'info-item' + (label === 'cmd' ? ' grow' : ''));
+    const lbl  = el('span','il', label);
+    const val  = el('span','iv' + (green ? ' green' : ''), value);
+    wrap.appendChild(lbl);
+    wrap.appendChild(val);
+    elInfoBar.appendChild(wrap);
+  }
+}
+
+function setControlsEnabled(on) {
+  elBtnPlay.disabled      = !on;
+  elBtnRestart.disabled   = !on;
+  elScrubber.disabled     = !on;
+  elSpeedSelect.disabled  = !on;
+}
+
+// ── Player ────────────────────────────────────────────────────────────────────
+
+function resetPlayer() {
+  stopPlayer();
+  player.currentIndex = 0; player.startEventSec = 0;
+  elScrubber.value = 0; elTimeCurrent.textContent = '0:00';
+}
+
+function play() {
+  if (player.playing || !events.length) return;
+  if (player.currentIndex >= events.length) { resetPlayer(); term.reset(); }
+  player.playing = true;
+  player.startWallMs   = performance.now();
+  player.startEventSec = currentEventSec();
+  elBtnPlay.textContent = '⏸';
+  scheduleNext();
+  startRaf();
+}
+
+function pause() {
+  if (!player.playing) return;
+  player.startEventSec = elapsedSec();
+  stopPlayer();
+  elBtnPlay.textContent = '▶';
+  updateProgress();
+}
+
+function stopPlayer() {
+  player.playing = false;
+  clearTimeout(player.timeoutId);
+  cancelAnimationFrame(player.rafId);
+}
+
+const currentEventSec = () =>
+  player.currentIndex >= events.length ? totalDuration : events[player.currentIndex].t;
+
+const elapsedSec = () => player.playing
+  ? player.startEventSec + (performance.now() - player.startWallMs) * player.speed / 1000
+  : player.startEventSec;
+
+function scheduleNext() {
+  if (!player.playing || player.currentIndex >= events.length) {
+    if (player.currentIndex >= events.length) {
+      stopPlayer(); elBtnPlay.textContent = '▶'; updateProgress();
+    }
+    return;
+  }
+  const delay = Math.max(0, (events[player.currentIndex].t - elapsedSec()) * 1000 / player.speed);
+  player.timeoutId = setTimeout(() => {
+    if (!player.playing) return;
+    const now = elapsedSec();
+    while (player.currentIndex < events.length && events[player.currentIndex].t <= now + 0.002) {
+      const e = events[player.currentIndex++];
+      if (e.type === 4) term.write(b64toBytes(e.data)); // TtyOut only
+    }
+    scheduleNext();
+  }, delay);
+}
+
+function startRaf() {
+  const tick = () => { if (!player.playing) return; updateProgress(); player.rafId = requestAnimationFrame(tick); };
+  player.rafId = requestAnimationFrame(tick);
+}
+
+function updateProgress() {
+  const t = Math.min(Math.max(elapsedSec(), 0), totalDuration);
+  elTimeCurrent.textContent = fmt(t);
+  if (totalDuration > 0) elScrubber.value = Math.round(t / totalDuration * 10000);
+}
+
+function seekTo(targetSec) {
+  const wasPlaying = player.playing;
+  stopPlayer();
+  term.reset();
+  player.currentIndex = 0;
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].t > targetSec) { player.currentIndex = i; break; }
+    if (events[i].type === 4) term.write(b64toBytes(events[i].data));
+    if (i === events.length - 1) player.currentIndex = events.length;
+  }
+  player.startEventSec = targetSec;
+  player.startWallMs   = performance.now();
+  elTimeCurrent.textContent = fmt(targetSec);
+  if (totalDuration > 0) elScrubber.value = Math.round(targetSec / totalDuration * 10000);
+  if (wasPlaying) { player.playing = true; elBtnPlay.textContent = '⏸'; scheduleNext(); startRaf(); }
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+
+elBtnPlay.addEventListener('click', () => player.playing ? pause() : play());
+
+elBtnRestart.addEventListener('click', () => { resetPlayer(); term.reset(); play(); });
+
+elScrubber.addEventListener('input', () =>
+  seekTo((elScrubber.value / 10000) * totalDuration));
+
+elSpeedSelect.addEventListener('change', () => {
+  if (player.playing) {
+    player.startEventSec = elapsedSec();
+    player.startWallMs   = performance.now();
+  }
+  player.speed = parseFloat(elSpeedSelect.value);
+});
+
+document.addEventListener('keydown', e => {
+  if (e.target === elSearch || e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space')      { e.preventDefault(); player.playing ? pause() : play(); }
+  if (e.code === 'ArrowLeft')  { e.preventDefault(); seekTo(Math.max(0, elapsedSec() - 5)); }
+  if (e.code === 'ArrowRight') { e.preventDefault(); seekTo(Math.min(totalDuration, elapsedSec() + 5)); }
+  if (e.code === 'KeyR' && !elBtnRestart.disabled) { e.preventDefault(); resetPlayer(); term.reset(); play(); }
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+term.writeln('\x1b[2;37m  sudo-replay  —  select a session from the sidebar\x1b[0m');
+term.writeln('');
+term.writeln('\x1b[2;37m  Keyboard shortcuts:\x1b[0m');
+term.writeln('\x1b[2;37m    Space      play / pause\x1b[0m');
+term.writeln('\x1b[2;37m    ← / →     seek ±5 seconds\x1b[0m');
+term.writeln('\x1b[2;37m    R          restart\x1b[0m');
+
+loadSessions();
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+[Unit]
+Description=sudo-replay web interface for session log playback
+After=network.target
+
+[Service]
+Type=simple
+User=sudologger
+ExecStart=/usr/bin/sudo-replay-server \
+    -listen :8080 \
+    -logdir /var/log/sudoreplay
+Restart=on-failure
+RestartSec=3s
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/var/log/sudoreplay
+
+# sudo-replay-server only needs to read log files
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

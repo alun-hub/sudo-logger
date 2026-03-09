@@ -392,6 +392,41 @@ LOG_DIR=/var/log/sudoreplay
 
 ---
 
+## Web replay interface
+
+`sudo-replay-server` is a lightweight HTTP server that provides a browser-based
+terminal player for recorded sessions.  It reads the same iolog directories as
+`sudoreplay` and requires no database.
+
+```bash
+# Install RPM on the log server
+dnf install sudo-logger-replay-1.1-1.fc43.x86_64.rpm
+
+# Start the service (runs as sudologger, reads /var/log/sudoreplay)
+systemctl enable --now sudo-replay
+
+# Open in browser
+xdg-open http://localhost:8080
+```
+
+Or run manually:
+```bash
+sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
+```
+
+**Features:**
+- Session list with search by user, host, or command
+- Terminal player with play/pause, scrubbing, and speed control (0.25×–16×)
+- Keyboard shortcuts: `Space` play/pause, `←`/`→` seek ±5 s, `R` restart
+- No authentication built in — restrict to a management network or put behind a
+  reverse proxy with HTTP basic auth
+
+> **Security note:** sudo session recordings may contain sensitive data
+> (passwords typed, private keys, etc.).  Restrict access to the replay
+> interface accordingly.
+
+---
+
 ## Viewing and replaying sessions
 
 Sessions are stored on the server in sudo's native iolog format under
@@ -441,8 +476,12 @@ sudo-logger/
 │   │   ├── shipper/
 │   │   │   ├── main.go     # Local shipper daemon
 │   │   │   └── cgroup.go   # Per-session cgroup management + freeze tracking
-│   │   └── server/
-│   │       └── main.go     # Remote log server
+│   │   ├── server/
+│   │   │   └── main.go     # Remote log server
+│   │   └── replay-server/
+│   │       ├── main.go     # Web replay interface (HTTP + embedded SPA)
+│   │       └── static/
+│   │           └── index.html  # Single-page terminal player (xterm.js)
 │   └── internal/
 │       ├── protocol/
 │       │   └── protocol.go # Shared wire protocol
@@ -450,10 +489,13 @@ sudo-logger/
 │           └── iolog.go    # sudo iolog directory writer
 ├── rpm/
 │   ├── sudo-logger-client.spec  # RPM spec for client package
-│   └── sudo-logger-server.spec  # RPM spec for server package
+│   ├── sudo-logger-server.spec  # RPM spec for server package
+│   └── sudo-logger-replay.spec  # RPM spec for replay web interface
 ├── setup.sh                # PKI bootstrap script
 ├── sudo-shipper.service    # systemd unit for shipper
 ├── sudo-logserver.service  # systemd unit for server
+├── sudo-replay.service     # systemd unit for replay web interface
+├── sudo-logserver.logrotate # logrotate config for /var/log/sudoreplay
 ├── shipper.conf            # Default client config
 └── server.conf             # Default server config
 ```
@@ -468,12 +510,11 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
     -D_GNU_SOURCE \
     -o sudo_logger_plugin.so plugin.c
 
-# Build the shipper
+# Build the shipper, server, and replay interface
 cd go
-go build -o sudo-shipper ./cmd/shipper
-
-# Build the server
-go build -o sudo-logserver ./cmd/server
+go build -o sudo-shipper       ./cmd/shipper
+go build -o sudo-logserver     ./cmd/server
+go build -o sudo-replay-server ./cmd/replay-server
 ```
 
 ### Wire protocol
