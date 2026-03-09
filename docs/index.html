@@ -476,7 +476,64 @@ body::after {
 }
 
 /* ════════════════════════════════════════════
-   SLIDE 6 — FEATURES / CLOSE
+   SLIDE 6 — WEB REPLAY
+════════════════════════════════════════════ */
+.s-replay { flex-direction: column; width: 100%; max-width: 1100px; }
+
+.replay-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: start;
+}
+
+.replay-desc h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(48px, 6vw, 76px);
+  line-height: 0.9;
+  color: var(--green);
+  margin-bottom: 24px;
+  letter-spacing: 0.03em;
+}
+
+.replay-desc .lead {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text);
+  margin-bottom: 20px;
+}
+
+.replay-feat-list {
+  list-style: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 2.1;
+}
+
+.replay-feat-list li::before {
+  content: '→ ';
+  color: var(--green);
+}
+
+.replay-feat-list .new::before { color: var(--amber); content: '★ '; }
+
+.replay-screenshot {
+  border: 1px solid var(--border);
+  background: var(--card);
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(0,232,122,0.06);
+}
+
+.replay-screenshot img,
+.replay-screenshot svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* ════════════════════════════════════════════
+   SLIDE 7 — FEATURES / CLOSE
 ════════════════════════════════════════════ */
 .s-features { flex-direction: column; width: 100%; max-width: 860px; text-align: center; }
 
@@ -533,7 +590,7 @@ body::after {
 <div class="corner c-tr"></div>
 <div class="corner c-bl"></div>
 <div class="corner c-br"></div>
-<div id="counter">01 / 06</div>
+<div id="counter">01 / 07</div>
 <div id="progress"></div>
 <div class="nav-hint">← → navigate</div>
 
@@ -750,8 +807,45 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 6: DEPLOY ░░ -->
+  <!-- ░░ SLIDE 6: WEB REPLAY ░░ -->
   <div class="slide" id="s5">
+    <div class="s-replay">
+      <div class="slide-heading" style="margin-bottom:36px;">WEB REPLAY INTERFACE</div>
+      <div class="replay-layout">
+
+        <div class="replay-desc">
+          <h2>BROWSER<br>PLAYBACK</h2>
+          <p class="lead">
+            A self-contained HTTP server reads the same iolog directories
+            as <code style="font-family:'JetBrains Mono',monospace;color:var(--green)">sudoreplay</code>
+            and serves a full terminal player — no database, no dependencies.
+          </p>
+          <ul class="replay-feat-list">
+            <li class="new">Full command + arguments in session list</li>
+            <li>Live search by user, host, or command</li>
+            <li>Play / pause · seek · speed 0.25×–16×</li>
+            <li>Keyboard: Space · ← / → · R</li>
+            <li>xterm.js — pixel-accurate terminal replay</li>
+            <li>Single binary with embedded frontend</li>
+            <li>Runs as <code style="color:var(--green)">sudologger</code>, read-only access</li>
+          </ul>
+          <div style="margin-top:20px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);line-height:2;">
+            <span style="color:var(--green-dim)">$</span> dnf install sudo-logger-replay-1.1-2.fc43.x86_64.rpm<br>
+            <span style="color:var(--green-dim)">$</span> systemctl enable --now sudo-replay<br>
+            <span style="color:var(--text-dim)">→ http://localhost:8080</span>
+          </div>
+        </div>
+
+        <div class="replay-screenshot">
+          <img src="replay-ui.svg" alt="sudo-replay web interface" width="550">
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 7: DEPLOY ░░ -->
+  <div class="slide" id="s6">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
       <div class="sub">▸ RPM · systemd · mTLS · sudoreplay</div>
@@ -763,7 +857,7 @@ body::after {
         <div class="feat"><span class="arr">→</span> Automatic recovery when network returns</div>
         <div class="feat"><span class="arr">→</span> GUI app freeze via SIGSTOP (pgid-aware)</div>
         <div class="feat"><span class="arr">→</span> RPM packages with systemd integration</div>
-        <div class="feat"><span class="arr">→</span> Kubernetes / LoadBalancer deployment</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
@@ -777,7 +871,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 6;
+  const N = 7;
   let cur = 0, busy = false;
 
   /* cursor */

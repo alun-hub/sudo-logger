@@ -398,9 +398,11 @@ LOG_DIR=/var/log/sudoreplay
 terminal player for recorded sessions.  It reads the same iolog directories as
 `sudoreplay` and requires no database.
 
+![sudo-replay web interface showing session list and terminal player](docs/replay-ui.svg)
+
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.1-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.1-2.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -415,11 +417,20 @@ sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
 ```
 
 **Features:**
-- Session list with search by user, host, or command
+- Session list with live search by user, host, or command
+- **Full command with all arguments** shown in the session list and info bar
+  (e.g. `vim /etc/nginx/nginx.conf`, `pg_dump -U postgres mydb -f backup.sql`)
 - Terminal player with play/pause, scrubbing, and speed control (0.25×–16×)
 - Keyboard shortcuts: `Space` play/pause, `←`/`→` seek ±5 s, `R` restart
 - No authentication built in — restrict to a management network or put behind a
   reverse proxy with HTTP basic auth
+
+**How it works:**
+
+The plugin now captures the full `argv` array (not just `argv[0]`) in every
+`SESSION_START` message.  The shipper forwards this verbatim to the server,
+which writes it as line 3 of the iolog `log` file — the same field that
+`sudoreplay -l` and the web interface read as the session command.
 
 > **Security note:** sudo session recordings may contain sensitive data
 > (passwords typed, private keys, etc.).  Restrict access to the replay
