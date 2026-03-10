@@ -1,6 +1,6 @@
 Name:           sudo-logger-server
-Version:        1.1
-Release:        7%{?dist}
+Version:        1.3.0
+Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
 License:        MIT
@@ -74,6 +74,11 @@ getent passwd sudologger >/dev/null || \
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 
 %changelog
+* Mon Mar 09 2026 sudo-logger 1.3.0-1
+- New versioning: all packages now use MAJOR.MINOR.PATCH (semver) aligned
+  with the GitHub release tag; RPM Release resets to 1 for each new Version
+- Add logrotate configuration for /var/log/sudoreplay (from 1.1-7)
+
 * Mon Mar 09 2026 sudo-logger 1.1-7
 - Add logrotate configuration for /var/log/sudoreplay
 

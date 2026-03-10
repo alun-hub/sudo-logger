@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
-Version:        1.1
-Release:        26%{?dist}
+Version:        1.3.0
+Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -88,6 +88,15 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Mon Mar 09 2026 sudo-logger 1.3.0-1
+- New versioning: all packages now use MAJOR.MINOR.PATCH (semver) aligned
+  with the GitHub release tag; RPM Release resets to 1 for each new Version
+- plugin: capture full argv array in SESSION_START (all arguments, not just
+  argv[0]); full command now visible in sudoreplay and web replay interface
+- Codebase audit: remove dead code, fix nil-ptr dereference, add unit tests
+- Translate config file comments to English; fix Makefile install path
+- Web replay interface layout fix: terminal fills full available area
+
 * Mon Mar 09 2026 sudo-logger 1.1-26
 - plugin: capture full argv (all arguments) in SESSION_START, not just argv[0];
   command with options now visible in sudoreplay and the web replay interface

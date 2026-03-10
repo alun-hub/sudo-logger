@@ -1,6 +1,6 @@
 Name:           sudo-logger-replay
-Version:        1.1
-Release:        2%{?dist}
+Version:        1.3.0
+Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
 License:        MIT
@@ -48,6 +48,14 @@ install -D -m 0644 sudo-replay.service \
 %{_unitdir}/sudo-replay.service
 
 %changelog
+* Mon Mar 09 2026 sudo-logger 1.3.0-1
+- New versioning: all packages now use MAJOR.MINOR.PATCH (semver) aligned
+  with the GitHub release tag; RPM Release resets to 1 for each new Version
+- Terminal player fills full available area (min-height:0, min-width:0)
+- Scrubber/progress bar extends to full window width
+- SVG mockup of web UI added to README and presentation slide
+- Presentation gains Web Replay Interface slide (7 slides total)
+
 * Mon Mar 09 2026 sudo-logger 1.1-2
 - Fix JSON null serialization: initialize slices with make() so empty session/event
   lists serialize as [] instead of null, preventing JS crash on first load
