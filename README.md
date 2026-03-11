@@ -675,6 +675,128 @@ Increment `Version:` and the tarball name for new minor/major versions.
 
 ---
 
+## Container deployment (Podman)
+
+The repository includes a `Dockerfile` and `docker-compose.yaml` for running
+the log server and web replay interface as containers. The plugin and shipper
+still run natively on client machines — only the server side is containerised.
+
+Containers run as the distroless nonroot user (UID 65532). Because rootless
+Podman uses a user namespace, file ownership on bind mounts and named volumes
+must be set up once with `podman unshare` before first start.
+
+### Prerequisites
+
+- `podman` and `podman-compose`
+- A `pki/` directory with the server-side certificates (see
+  [PKI bootstrap](#1-pki-bootstrap))
+
+```
+pki/
+├── ca.crt
+├── server.crt
+├── server.key    ← must be readable only by the container user
+├── hmac.key      ← must be readable only by the container user
+└── server.conf   ← optional: override LISTEN_ADDR / LOG_DIR
+```
+
+### First-time setup
+
+Run once after creating the `pki/` directory:
+
+```bash
+# 1. Fix ownership of pki/ so the nonroot container user (65532) can read it
+podman unshare chown -R 65532:65532 ./pki/
+
+# 2. Lock down private keys
+podman unshare chmod 600 ./pki/server.key ./pki/hmac.key
+
+# 3. Build the image
+podman-compose build
+
+# 4. Pre-create the log volume and fix its ownership before first start
+podman volume create sudo-logger_sudologs
+podman unshare chown -R 65532:65532 \
+    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}')
+
+# 5. Start
+podman-compose up -d
+```
+
+### Start
+
+```bash
+podman-compose up -d
+```
+
+### Stop
+
+```bash
+podman-compose down        # stop and remove containers, keep logs
+podman-compose down -v     # also delete the session log volume
+```
+
+### View logs
+
+```bash
+podman-compose logs -f             # both services
+podman logs -f sudo-logserver      # logserver only
+podman logs -f sudo-replay-server  # replay server only
+```
+
+### Rebuild after code changes
+
+```bash
+podman-compose down
+podman-compose build --no-cache
+podman-compose up -d
+```
+
+### Access session logs from the host
+
+Session recordings are stored in the named volume `sudo-logger_sudologs`.
+To find the path on disk (e.g. for `sudoreplay` or backup):
+
+```bash
+podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}'
+```
+
+To replay a session directly from the host:
+
+```bash
+sudoreplay -d \
+    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}') \
+    alun/fedora_20260311-175401
+```
+
+### Fixing permission errors after a failed start
+
+If containers were previously started as root (`user: "0:0"`) or files were
+created with wrong ownership, fix recursively and restart:
+
+```bash
+podman-compose down
+podman unshare chown -R 65532:65532 \
+    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}')
+podman unshare chown -R 65532:65532 ./pki/
+podman-compose up -d
+```
+
+### Production readiness
+
+| # | Item | Status |
+|---|------|--------|
+| ✅ | Distroless base image (minimal attack surface) | Good |
+| ✅ | Runs as nonroot UID 65532 | Good |
+| ✅ | Named volume (no bind mount permission issues) | Good |
+| ✅ | Replay server mounts log volume read-only | Good |
+| ⚠️ | Replay server has no authentication | Put behind a reverse proxy with HTTP basic auth before exposing beyond localhost |
+| ⚠️ | No `no-new-privileges` / `cap_drop: ALL` | Add to both services for defence in depth |
+| ⚠️ | No resource limits | Add `deploy.resources.limits` for memory/CPU |
+| ⚠️ | No healthcheck | `depends_on` does not wait for logserver to be ready |
+
+---
+
 ## Kubernetes deployment
 
 ### Why not standard Ingress?

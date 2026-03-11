@@ -1,0 +1,27 @@
+services:
+  logserver:
+    build: .
+    image: sudo-logger:latest
+    container_name: sudo-logserver
+    ports:
+      - "9876:9876"
+    volumes:
+      - ./pki:/etc/sudo-logger:ro,Z
+      - sudologs:/var/log/sudoreplay
+    restart: always
+
+  replay-server:
+    image: sudo-logger:latest
+    container_name: sudo-replay-server
+    depends_on:
+      - logserver
+    ports:
+      - "8080:8080"
+    entrypoint: ["/usr/local/bin/sudo-replay-server"]
+    command: ["-logdir=/var/log/sudoreplay", "-listen=:8080"]
+    volumes:
+      - sudologs:/var/log/sudoreplay:ro
+    restart: always
+
+volumes:
+  sudologs:
