@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.3.0
+Version:        1.3.1
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -48,6 +48,9 @@ install -D -m 0644 sudo-replay.service \
 %{_unitdir}/sudo-replay.service
 
 %changelog
+* Thu Mar 12 2026 sudo-logger 1.3.1-1
+- Version bump to stay in sync with client (no replay-side changes)
+
 * Mon Mar 09 2026 sudo-logger 1.3.0-1
 - New versioning: all packages now use MAJOR.MINOR.PATCH (semver) aligned
   with the GitHub release tag; RPM Release resets to 1 for each new Version

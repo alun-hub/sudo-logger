@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.3.0
+Version:        1.3.1
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -88,6 +88,11 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Thu Mar 12 2026 sudo-logger 1.3.1-1
+- plugin: fix terminal trap when user does "fg" into a cgroup-frozen bash
+  session; monitor thread now reclaims terminal foreground (tcsetpgrp) every
+  150 ms while frozen so Ctrl+C/Z remain functional
+
 * Mon Mar 09 2026 sudo-logger 1.3.0-1
 - New versioning: all packages now use MAJOR.MINOR.PATCH (semver) aligned
   with the GitHub release tag; RPM Release resets to 1 for each new Version

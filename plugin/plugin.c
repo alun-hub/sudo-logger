@@ -28,10 +28,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/un.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -286,6 +288,33 @@ static void *monitor_thread_fn(void *arg)
             if (g_tty_fd >= 0)
                 write(g_tty_fd, UNFREEZE_MSG, sizeof(UNFREEZE_MSG) - 1);
             was_frozen = 0;
+        }
+
+        /*
+         * Terminal-reclaim: while the session is frozen, sudo may hand the
+         * terminal foreground to the child (bash) via tcsetpgrp() — e.g. when
+         * the user does "fg" after being placed in background by a previous
+         * SIGSTOP.  Since the child cgroup is frozen, Ctrl+C/Z signals sent to
+         * the child's pgrp are queued but never delivered, leaving the user
+         * completely trapped.
+         *
+         * Fix: every 150 ms when frozen, check whether a child has become the
+         * terminal foreground.  If so, reclaim the terminal back to sudo's
+         * pgrp.  Block SIGTTOU in this thread only (pthread_sigmask is
+         * per-thread) so the tcsetpgrp() call does not stop the sudo process.
+         */
+        if (!fresh && g_tty_fd >= 0) {
+            pid_t fg_pgrp  = tcgetpgrp(g_tty_fd);
+            pid_t our_pgrp = getpgrp();
+            if (fg_pgrp > 0 && fg_pgrp != (pid_t)-1 && fg_pgrp != our_pgrp) {
+                sigset_t block, old;
+                sigemptyset(&block);
+                sigaddset(&block, SIGTTOU);
+                pthread_sigmask(SIG_BLOCK, &block, &old);
+                if (tcsetpgrp(g_tty_fd, our_pgrp) == 0)
+                    write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+                pthread_sigmask(SIG_SETMASK, &old, NULL);
+            }
         }
     }
 
