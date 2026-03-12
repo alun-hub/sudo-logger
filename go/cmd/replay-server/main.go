@@ -51,6 +51,12 @@ type PlaybackEvent struct {
 	Data string  `json:"data"` // base64-encoded bytes
 }
 
+// SessionList is the envelope returned by /api/sessions.
+type SessionList struct {
+	Sessions []SessionInfo `json:"sessions"`
+	Total    int           `json:"total"`
+}
+
 func main() {
 	flag.Parse()
 
@@ -73,14 +79,36 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	sessions, err := listSessions(*flagLogDir)
+
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	sortBy := r.URL.Query().Get("sort")
+	order := r.URL.Query().Get("order")
+
+	limit := 200
+	offset := 0
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
+		limit = v
+	}
+	if v, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && v >= 0 {
+		offset = v
+	}
+
+	var from, to int64
+	if v, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64); err == nil {
+		from = v
+	}
+	if v, err := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64); err == nil {
+		to = v
+	}
+
+	result, err := listSessions(*flagLogDir, q, sortBy, order, from, to, limit, offset)
 	if err != nil {
 		log.Printf("list sessions: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sessions)
+	json.NewEncoder(w).Encode(result)
 }
 
 func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
@@ -132,15 +160,15 @@ func validateTSID(tsid string) error {
 	return nil
 }
 
-// listSessions scans the log directory for all session subdirectories and
-// returns their metadata sorted by start time descending (newest first).
-func listSessions(logDir string) ([]SessionInfo, error) {
+// listSessions scans the log directory, applies filter/sort/pagination, and
+// returns a SessionList with the requested page and the unfiltered total count.
+func listSessions(logDir, q, sortBy, order string, from, to int64, limit, offset int) (*SessionList, error) {
 	sessions := make([]SessionInfo, 0)
 
 	userEntries, err := os.ReadDir(logDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return sessions, nil
+			return &SessionList{Sessions: sessions, Total: 0}, nil
 		}
 		return nil, fmt.Errorf("read logdir: %w", err)
 	}
@@ -165,14 +193,71 @@ func listSessions(logDir string) ([]SessionInfo, error) {
 				log.Printf("parse session %s: %v", sessDir, err)
 				continue
 			}
+			if from > 0 && info.StartTime < from {
+				continue
+			}
+			if to > 0 && info.StartTime > to {
+				continue
+			}
+			if q != "" && !matchesAll(*info, q) {
+				continue
+			}
 			sessions = append(sessions, *info)
 		}
 	}
 
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].StartTime > sessions[j].StartTime
-	})
-	return sessions, nil
+	switch sortBy {
+	case "user":
+		if order == "asc" {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].User < sessions[j].User })
+		} else {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].User > sessions[j].User })
+		}
+	case "host":
+		if order == "asc" {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].Host < sessions[j].Host })
+		} else {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].Host > sessions[j].Host })
+		}
+	case "duration":
+		if order == "asc" {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].Duration < sessions[j].Duration })
+		} else {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].Duration > sessions[j].Duration })
+		}
+	default: // "time" or ""
+		if order == "asc" {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].StartTime < sessions[j].StartTime })
+		} else {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].StartTime > sessions[j].StartTime })
+		}
+	}
+
+	total := len(sessions)
+	if offset >= total {
+		return &SessionList{Sessions: make([]SessionInfo, 0), Total: total}, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return &SessionList{Sessions: sessions[offset:end], Total: total}, nil
+}
+
+// matchesAll returns true if every space-separated term in q appears in at
+// least one of user, host, or command (case-insensitive AND logic).
+func matchesAll(s SessionInfo, q string) bool {
+	user := strings.ToLower(s.User)
+	host := strings.ToLower(s.Host)
+	cmd  := strings.ToLower(s.Command)
+	for _, term := range strings.Fields(q) {
+		if !strings.Contains(user, term) &&
+			!strings.Contains(host, term) &&
+			!strings.Contains(cmd, term) {
+			return false
+		}
+	}
+	return true
 }
 
 // parseSession reads the iolog "log" file and timing file for a session directory.

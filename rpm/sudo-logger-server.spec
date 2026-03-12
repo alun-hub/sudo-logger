@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.3.1
+Version:        1.4.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -74,6 +74,9 @@ getent passwd sudologger >/dev/null || \
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 
 %changelog
+* Thu Mar 12 2026 sudo-logger 1.4.0-1
+- Version bump to stay in sync with replay (no server-side changes)
+
 * Thu Mar 12 2026 sudo-logger 1.3.1-1
 - Version bump to stay in sync with client (no server-side changes)
 

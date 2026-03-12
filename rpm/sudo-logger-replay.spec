@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.3.1
+Version:        1.4.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -48,6 +48,17 @@ install -D -m 0644 sudo-replay.service \
 %{_unitdir}/sudo-replay.service
 
 %changelog
+* Thu Mar 12 2026 sudo-logger 1.4.0-1
+- Web UI: sort sessions by date/user/host/duration with direction toggle
+- Web UI: date range filter (from/to) in sidebar
+- Web UI: deep link — URL tracks selected session and playback position (?tsid=&t=)
+- Web UI: search highlighting marks matched terms in user/host/command
+- Web UI: AND search — space-separated terms all must match (e.g. "alun dnf")
+- Web UI: load more pagination (200 sessions per page, server-side)
+- Web UI: playback speed persisted in localStorage
+- Web UI: / key focuses search; date/duration colors improved
+- Backend: server-side filtering, sorting and pagination for /api/sessions
+
 * Thu Mar 12 2026 sudo-logger 1.3.1-1
 - Version bump to stay in sync with client (no replay-side changes)
 
