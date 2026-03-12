@@ -422,6 +422,8 @@ sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
   (e.g. `vim /etc/nginx/nginx.conf`, `pg_dump -U postgres mydb -f backup.sql`)
 - Terminal player with play/pause, scrubbing, and speed control (0.25×–16×)
 - Keyboard shortcuts: `Space` play/pause, `←`/`→` seek ±5 s, `R` restart
+- **No external dependencies** — xterm.js and CSS are vendored into the binary;
+  works in air-gapped environments with no internet access
 - No authentication built in — restrict to a management network or put behind a
   reverse proxy with HTTP basic auth
 
