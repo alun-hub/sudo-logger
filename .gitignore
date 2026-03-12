@@ -8,3 +8,4 @@ plugin/sudo_logger_plugin.so
 # Source tarballs
 *.tar.gz
 go/sudo-replay-server
+go/replay-server
