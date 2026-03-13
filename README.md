@@ -390,6 +390,36 @@ LOG_DIR=/var/log/sudoreplay
 | `ackLagLimit` | `2s` | Unacknowledged chunk age before reporting dead to plugin |
 | `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
 
+### Blocking GUI applications (sudoers)
+
+Graphical applications started via `sudo` (e.g. `sudo gvim`, `sudo nautilus`)
+cannot be meaningfully audited: they produce no terminal I/O, so the session
+recording is empty. If the log server becomes unreachable, the GUI window
+freezes silently with no indication to the user, and the only recovery is
+`kill -9` from another terminal.
+
+To prevent this, remove the `DISPLAY` variable from all sudo sessions. Without
+`DISPLAY`, GUI programs fail immediately with *"cannot open display"* instead of
+hanging, while all terminal-based commands continue to work normally.
+
+Add the following to `/etc/sudoers` (use `visudo`):
+
+```
+Defaults env_delete += DISPLAY
+```
+
+To restrict this to specific users or hosts only:
+
+```
+Defaults:alice  env_delete += DISPLAY
+Defaults@webservers  env_delete += DISPLAY
+```
+
+> **Why this matters for auditability:** a user who can launch a graphical
+> file manager as root bypasses the session log entirely — there are no
+> keystrokes or terminal output to record. Removing `DISPLAY` ensures that
+> all privileged actions go through a terminal and are captured in full.
+
 ---
 
 ## Web replay interface
