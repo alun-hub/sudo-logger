@@ -1,6 +1,6 @@
 Name:           sudo-logger-server
 Version:        1.6.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Remote log server for sudo session recordings
 
 License:        MIT
@@ -88,6 +88,10 @@ fi
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.6.0-2
+- fix: cert-vs-host check warns by default, hard-rejects only with -strict-cert-host
+  (shared client certificate setups, e.g. CN="sudo-client", were incorrectly rejected)
+
 * Sat Mar 14 2026 sudo-logger 1.6.0-1
 - security: ACK signature now binds to session ID (prevents cross-session replay)
 - security: host field in SESSION_START verified against TLS client certificate CN/SAN
