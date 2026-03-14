@@ -1,0 +1,168 @@
+.TH SUDO\-LOGSERVER 8 "2026-03-15" "sudo-logger 1.6.0" "System Administration"
+.SH NAME
+sudo\-logserver \- remote TLS server for sudo session recordings
+.SH SYNOPSIS
+.B sudo\-logserver
+[\fB\-listen\fR \fIaddr\fR]
+[\fB\-logdir\fR \fIdir\fR]
+[\fB\-cert\fR \fIfile\fR]
+[\fB\-key\fR \fIfile\fR]
+[\fB\-ca\fR \fIfile\fR]
+[\fB\-signkey\fR \fIfile\fR]
+[\fB\-strict\-cert\-host\fR]
+.SH DESCRIPTION
+.B sudo\-logserver
+is a TLS server that receives sudo session recordings from one or more
+.BR sudo\-shipper (8)
+instances and writes them to disk in sudo's native iolog format.
+.PP
+Each client connection must present a certificate signed by the configured CA
+(mutual TLS).
+For each session the server:
+.IP \(bu 4
+Validates the session ID, user, and host fields.
+.IP \(bu
+Creates a session directory under
+.IB logdir / user / host _ timestamp /\c
+\&.
+.IP \(bu
+Streams terminal I/O into
+.BR ttyout ,
+.BR ttyin ,
+and
+.B timing
+files compatible with
+.BR sudoreplay (8).
+.IP \(bu
+Sends an ed25519-signed ACK for every received chunk.
+The signature covers the session ID, sequence number, and timestamp,
+binding each ACK to the specific session.
+.PP
+Sessions can be replayed with
+.BR sudoreplay (8)
+or the web interface provided by
+.BR sudo\-replay\-server (8).
+.SH OPTIONS
+.TP
+.BI \-listen " addr"
+Address to listen on in
+.I host:port
+format.
+Use
+.B :9876
+to listen on all interfaces.
+Default:
+.BR :9876 .
+.TP
+.BI \-logdir " dir"
+Base directory for session log storage.
+Sessions are written to
+.IB dir / user / host _ YYYYMMDD\- HHMMSS /\c
+\&.
+Default:
+.BR /var/log/sudoreplay .
+.TP
+.BI \-cert " file"
+Path to the PEM-encoded server TLS certificate.
+Default:
+.BR /etc/sudo-logger/server.crt .
+.TP
+.BI \-key " file"
+Path to the PEM-encoded server TLS private key.
+Permissions should be 0640 (root:sudologger).
+Default:
+.BR /etc/sudo-logger/server.key .
+.TP
+.BI \-ca " file"
+Path to the PEM-encoded CA certificate used to verify client certificates.
+Default:
+.BR /etc/sudo-logger/ca.crt .
+.TP
+.BI \-signkey " file"
+Path to the PEM-encoded PKCS8 ed25519 private key used to sign ACKs.
+Generated automatically by the RPM
+.B %post
+scriptlet on first install.
+Permissions must be 0640 (root:sudologger).
+Default:
+.BR /etc/sudo-logger/ack-sign.key .
+.TP
+.B \-strict\-cert\-host
+Reject
+.B SESSION_START
+messages where the claimed
+.B host
+field does not match the CN or a DNS SAN of the presenting client certificate.
+.IP
+Disabled by default to support the common case of a single shared client
+certificate (e.g.\& CN=\fIsudo-client\fR).
+Enable this flag when each machine has its own certificate to prevent a
+compromised shipper on host A from forging log entries attributed to host B.
+.SH FILES
+.TP
+.B /etc/sudo-logger/server.conf
+Configuration file read by the systemd unit.
+Sets
+.B LISTEN_ADDR=
+and
+.B LOG_DIR=\&.
+.TP
+.B /etc/sudo-logger/server.crt
+Server TLS certificate.
+.TP
+.B /etc/sudo-logger/server.key
+Server TLS private key.
+Permissions: 0640, owner root:sudologger.
+.TP
+.B /etc/sudo-logger/ca.crt
+CA certificate for verifying client certificates.
+.TP
+.B /etc/sudo-logger/ack-sign.key
+ed25519 private key (PEM PKCS8) for signing ACKs.
+Generated automatically on first RPM install.
+Permissions: 0640, owner root:sudologger.
+.TP
+.B /etc/sudo-logger/ack-verify.key
+Corresponding ed25519 public key (PEM PKIX).
+Generated alongside
+.BR ack-sign.key .
+Copy this file to all client machines after installation.
+.TP
+.B /var/log/sudoreplay/
+Default log directory.
+Each session is stored as a subdirectory:
+.IR user / host _ YYYYMMDD\- HHMMSS /
+containing
+.BR log ,
+.BR timing ,
+.BR ttyout ,
+and
+.B ttyin
+files.
+.SH SECURITY
+.B sudo\-logserver
+requires mutual TLS for all connections.
+Clients that do not present a valid certificate signed by the configured CA
+are rejected at the TLS handshake.
+.PP
+If
+.B \-strict\-cert\-host
+is enabled, the
+.B host
+field in each
+.B SESSION_START
+message is additionally verified against the CN and DNS SANs of the client
+certificate.
+A mismatch is always logged as a
+.B WARNING
+even when the flag is not set.
+.PP
+Session and user/host fields are validated against
+.B [a-zA-Z0-9._-]
+before use in filesystem paths.
+.SH SEE ALSO
+.BR sudo\-shipper (8),
+.BR sudo\-replay\-server (8),
+.BR sudoreplay (8),
+.BR sudo_logger_plugin (8),
+.BR systemd.unit (5)

@@ -1,6 +1,6 @@
 Name:           sudo-logger-server
 Version:        1.6.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Remote log server for sudo session recordings
 
 License:        MIT
@@ -50,6 +50,10 @@ install -d -m 0750 %{buildroot}%{_localstatedir}/log/sudoreplay
 install -D -m 0644 sudo-logserver.logrotate \
     %{buildroot}%{_sysconfdir}/logrotate.d/sudo-logserver
 
+# Man page
+install -D -m 0644 man/sudo-logserver.8 \
+    %{buildroot}%{_mandir}/man8/sudo-logserver.8
+
 %pre
 getent group sudologger >/dev/null || groupadd -r sudologger
 getent passwd sudologger >/dev/null || \
@@ -86,8 +90,12 @@ fi
 %ghost %attr(0644, root, root)       %{_sysconfdir}/sudo-logger/ack-verify.key
 %dir %attr(0750, sudologger, sudologger) %{_localstatedir}/log/sudoreplay
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
+%{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.6.0-3
+- add man page: sudo-logserver(8)
+
 * Sun Mar 15 2026 sudo-logger 1.6.0-2
 - fix: cert-vs-host check warns by default, hard-rejects only with -strict-cert-host
   (shared client certificate setups, e.g. CN="sudo-client", were incorrectly rejected)

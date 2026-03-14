@@ -1,0 +1,144 @@
+.TH SUDO_LOGGER_PLUGIN 8 "2026-03-15" "sudo-logger 1.6.0" "System Administration"
+.SH NAME
+sudo_logger_plugin \- sudo I/O plugin for real-time remote session recording
+.SH SYNOPSIS
+In
+.BR /etc/sudo.conf :
+.PP
+.RS
+.B Plugin sudo_logger_plugin sudo_logger_plugin.so
+.RE
+.SH DESCRIPTION
+.B sudo_logger_plugin
+is a sudo I/O plugin (see
+.BR sudo_plugin (5))
+that records every sudo session and ships it in real time to a remote log
+server via the local
+.BR sudo\-shipper (8)
+daemon.
+.PP
+The plugin hooks into every sudo invocation at the I/O level,
+capturing stdin, stdout, stderr, terminal input, and terminal output.
+All I/O is forwarded as framed chunks over a Unix socket to
+.BR sudo\-shipper (8),
+which relays them to
+.BR sudo\-logserver (8)
+over a mutual TLS connection.
+.PP
+At session open
+.RB ( plugin_open ),
+the plugin:
+.IP 1. 4
+Opens
+.B /dev/tty
+for banner output.
+.IP 2.
+Generates a unique session ID from hostname, username, PID, nanosecond
+timestamp, and 4 cryptographically random bytes.
+.IP 3.
+Connects to
+.BR sudo\-shipper (8)
+via the Unix socket and sends a
+.B SESSION_START
+message containing session metadata.
+.IP 4.
+Blocks until the shipper replies with
+.B SESSION_READY
+(server reachable) or
+.B SESSION_ERROR
+(server unreachable).
+If the server is unreachable, the command is blocked and never executes.
+.IP 5.
+Starts a background monitor thread that polls ACK state every 150 ms.
+.PP
+During a session the monitor thread writes a freeze banner to the terminal
+when ACKs from the server stop arriving, and an unfreeze banner when they
+resume.
+Actual process freezing is performed by
+.BR sudo\-shipper (8)
+using cgroup.freeze, not by the plugin.
+.PP
+At session close
+.RB ( plugin_close ),
+a
+.B SESSION_END
+message with the exit code is sent to the shipper.
+.SH INSTALLATION
+The plugin is loaded via
+.BR /etc/sudo.conf .
+The client RPM adds this line automatically on install and removes it on
+uninstall:
+.PP
+.RS
+.B Plugin sudo_logger_plugin sudo_logger_plugin.so
+.RE
+.PP
+To add it manually:
+.RS
+.EX
+echo 'Plugin sudo_logger_plugin sudo_logger_plugin.so' >> /etc/sudo.conf
+.EE
+.RE
+The plugin shared object is installed at
+.BR /usr/libexec/sudo/sudo_logger_plugin.so .
+.SH CONFIGURATION
+The plugin itself has no configuration file.
+All runtime parameters (server address, certificates) are configured in
+.BR /etc/sudo-logger/shipper.conf
+and the
+.BR sudo\-shipper (8)
+service.
+.PP
+Compile-time tunables in
+.BR plugin/plugin.c :
+.TP
+.B SHIPPER_SOCK_PATH
+Unix socket path (default:
+.BR /run/sudo-logger/plugin.sock ).
+.TP
+.B ACK_TIMEOUT_SECS
+Seconds without a fresh ACK before the freeze banner is shown (default: 2).
+.TP
+.B ACK_QUERY_TIMEOUT_MS
+Maximum wait for an
+.B ACK_RESPONSE
+from the shipper (default: 100 ms).
+.SH BEHAVIOUR ON FAILURE
+.TP
+.B Server unreachable at session start
+The plugin returns \-1 from
+.BR plugin_open ,
+blocking the sudo command before execution.
+An error banner is displayed on the terminal or via
+.BR sudo_plugin_printf .
+.TP
+.B Server unreachable during session
+The shipper freezes the child process via cgroup.freeze within approximately
+one second.
+The plugin displays the freeze banner on
+.BR /dev/tty .
+The session resumes automatically if the server comes back within ~2 seconds.
+.TP
+.B Shipper daemon not running
+The plugin cannot connect to the Unix socket and blocks the command.
+.SH FILES
+.TP
+.B /usr/libexec/sudo/sudo_logger_plugin.so
+Plugin shared object loaded by sudo.
+.TP
+.B /etc/sudo.conf
+sudo configuration file.
+Must contain:
+.B Plugin sudo_logger_plugin sudo_logger_plugin.so
+.TP
+.B /run/sudo-logger/plugin.sock
+Unix domain socket for communication with
+.BR sudo\-shipper (8).
+Mode 0600; only root processes may connect.
+.SH SEE ALSO
+.BR sudo\-shipper (8),
+.BR sudo\-logserver (8),
+.BR sudo\-replay\-server (8),
+.BR sudo_plugin (5),
+.BR sudo.conf (5),
+.BR sudoreplay (8)

@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.6.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -60,6 +60,12 @@ install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
 install -D -m 0640 shipper.conf \
     %{buildroot}%{_sysconfdir}/sudo-logger/shipper.conf
 
+# Man pages
+install -D -m 0644 man/sudo-shipper.8 \
+    %{buildroot}%{_mandir}/man8/sudo-shipper.8
+install -D -m 0644 man/sudo_logger_plugin.8 \
+    %{buildroot}%{_mandir}/man8/sudo_logger_plugin.8
+
 %pre
 # Nothing needed on client
 
@@ -87,8 +93,13 @@ fi
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
+%{_mandir}/man8/sudo-shipper.8*
+%{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.6.0-2
+- add man pages: sudo-shipper(8), sudo_logger_plugin(8)
+
 * Sat Mar 14 2026 sudo-logger 1.6.0-1
 - security: ACK signature now binds to session ID (prevents cross-session replay)
 - security: session ID uses nanoseconds + 4 random bytes (eliminates collision risk)

@@ -1,0 +1,97 @@
+.TH SUDO\-REPLAY\-SERVER 8 "2026-03-15" "sudo-logger 1.6.0" "System Administration"
+.SH NAME
+sudo\-replay\-server \- web interface for replaying sudo session recordings
+.SH SYNOPSIS
+.B sudo\-replay\-server
+[\fB\-listen\fR \fIaddr\fR]
+[\fB\-logdir\fR \fIdir\fR]
+.SH DESCRIPTION
+.B sudo\-replay\-server
+is a self-contained HTTP server that reads sudo iolog directories written by
+.BR sudo\-logserver (8)
+and serves a browser-based terminal player.
+.PP
+No database or external dependencies are required.
+The frontend (xterm.js and supporting CSS) is embedded in the binary.
+.PP
+Features of the web interface:
+.IP \(bu 4
+Session list with live search by user, host, or command (AND logic).
+.IP \(bu
+Date range filter.
+.IP \(bu
+Sort by time, user, host, or duration.
+.IP \(bu
+Terminal player with play/pause, scrubbing, and speed control (0.25\(mu\(en16\(mu).
+.IP \(bu
+Keyboard shortcuts:
+.B Space
+(play/pause),
+.B \(la\(ra
+(seek \(+-5 s),
+.B R
+(restart).
+.IP \(bu
+Deep-link URLs track the selected session and playback position.
+.PP
+The server runs as the
+.B sudologger
+system user with read-only access to the log directory.
+.PP
+No authentication is built in.
+Deploy behind a reverse proxy with HTTP basic auth, or restrict access
+to a management network.
+.SH OPTIONS
+.TP
+.BI \-listen " addr"
+Address to listen on in
+.I host:port
+format.
+Default:
+.BR :8080 .
+.TP
+.BI \-logdir " dir"
+Base directory containing session logs, as written by
+.BR sudo\-logserver (8).
+Default:
+.BR /var/log/sudoreplay .
+.SH API
+The server exposes two JSON endpoints:
+.TP
+.B GET /api/sessions
+Returns a paginated, filtered list of sessions.
+Query parameters:
+.BR q ,
+.BR sort ,
+.BR order ,
+.BR limit ,
+.BR offset ,
+.BR from ,
+.BR to .
+.TP
+.B GET /api/session/events?tsid=\fITSID\fR
+Returns the playback events (tty I/O with timing) for the session identified
+by
+.IR TSID .
+The TSID format is
+.IR user / host _ YYYYMMDD\- HHMMSS .
+.SH FILES
+.TP
+.B /var/log/sudoreplay/
+Default log directory (read-only).
+.SH SECURITY
+The TSID path parameter is validated to contain only safe characters
+.RB ( [a-zA-Z0-9/_\-.] ,
+no
+.BR .. ).
+Symlinks are resolved with
+.BR EvalSymlinks (3)
+before verifying that the resolved path stays within the log directory.
+.PP
+Session recordings may contain sensitive data such as passwords typed at
+the terminal, private key material, or other confidential output.
+Restrict access to the web interface accordingly.
+.SH SEE ALSO
+.BR sudo\-logserver (8),
+.BR sudo\-shipper (8),
+.BR sudoreplay (8)

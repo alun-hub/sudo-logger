@@ -1,6 +1,6 @@
 Name:           sudo-logger-replay
 Version:        1.6.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
 License:        MIT
@@ -34,6 +34,10 @@ install -D -m 0755 go/sudo-replay-server \
 install -D -m 0644 sudo-replay.service \
     %{buildroot}%{_unitdir}/sudo-replay.service
 
+# Man page
+install -D -m 0644 man/sudo-replay-server.8 \
+    %{buildroot}%{_mandir}/man8/sudo-replay-server.8
+
 %post
 %systemd_post sudo-replay.service
 
@@ -46,8 +50,12 @@ install -D -m 0644 sudo-replay.service \
 %files
 %{_bindir}/sudo-replay-server
 %{_unitdir}/sudo-replay.service
+%{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.6.0-2
+- add man page: sudo-replay-server(8)
+
 * Sat Mar 14 2026 sudo-logger 1.6.0-1
 - fix: replay server uses EvalSymlinks for path traversal defence via symlinks
 - Version bump to stay in sync with client and server
