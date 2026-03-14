@@ -81,7 +81,7 @@ type SessionEnd struct {
 // Ack is a decoded ACK message (server → shipper).
 //
 // Payload layout: [8 seq][8 ts_ns][64 sig]
-// sig is an ed25519 signature over seq(8)+ts_ns(8).
+// sig is an ed25519 signature over AckSignMessage(sessionID, seq, ts_ns).
 type Ack struct {
 	Seq       uint64
 	Timestamp int64
@@ -196,6 +196,22 @@ func EncodeAck(seq uint64, ts int64, sig [64]byte) []byte {
 	binary.BigEndian.PutUint64(buf[8:], uint64(ts))
 	copy(buf[16:], sig[:])
 	return buf
+}
+
+// AckSignMessage returns the canonical byte string signed by the server and
+// verified by the shipper for each ACK.  Including the session ID prevents a
+// valid ACK for one session from being replayed against a different session.
+//
+// Layout: sessionID || 0x00 || seq_be(8) || ts_ns_be(8)
+// The null separator prevents length-extension confusion between a short
+// sessionID+long seq and a longer sessionID+shorter seq pair.
+func AckSignMessage(sessionID string, seq uint64, ts int64) []byte {
+	msg := make([]byte, len(sessionID)+1+8+8)
+	n := copy(msg, sessionID)
+	msg[n] = 0x00
+	binary.BigEndian.PutUint64(msg[n+1:], seq)
+	binary.BigEndian.PutUint64(msg[n+9:], uint64(ts))
+	return msg
 }
 
 // EncodeAckResponse encodes an ACK_RESPONSE payload for the plugin.

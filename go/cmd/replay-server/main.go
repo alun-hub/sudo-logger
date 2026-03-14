@@ -126,11 +126,21 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the resolved path stays within the log directory (path traversal defence).
-	absLogDir, _ := filepath.Abs(*flagLogDir)
+	// Verify the resolved path stays within the log directory.
+	// EvalSymlinks resolves all symlinks so a symlink pointing outside logdir
+	// is caught even when filepath.Abs would pass it through.
+	absLogDir, err := filepath.EvalSymlinks(*flagLogDir)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 	sessDir := filepath.Join(absLogDir, tsid)
-	absSessDir, err := filepath.Abs(sessDir)
-	if err != nil || !strings.HasPrefix(absSessDir, absLogDir+string(filepath.Separator)) {
+	absSessDir, err := filepath.EvalSymlinks(sessDir)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if !strings.HasPrefix(absSessDir, absLogDir+string(filepath.Separator)) {
 		http.Error(w, "invalid tsid", http.StatusBadRequest)
 		return
 	}

@@ -445,9 +445,18 @@ static int plugin_open(unsigned int        version,
     else
         strncpy(cmd, "unknown", sizeof(cmd));
 
+    /* Add 4 random bytes so two simultaneous sudo invocations from the same
+     * user on the same host within the same nanosecond still get distinct IDs. */
+    uint8_t rnd[4] = {0};
+    int rfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (rfd >= 0) {
+        (void)read(rfd, rnd, sizeof(rnd));
+        close(rfd);
+    }
     snprintf(g_session_id, sizeof(g_session_id),
-             "%s-%s-%d-%lld", host, user, (int)getpid(),
-             (long long)(now_ns() / 1000000LL));
+             "%s-%s-%d-%lld-%02x%02x%02x%02x",
+             host, user, (int)getpid(), (long long)now_ns(),
+             rnd[0], rnd[1], rnd[2], rnd[3]);
 
     g_shipper_fd = connect_shipper();
     if (g_shipper_fd < 0) {
@@ -455,6 +464,13 @@ static int plugin_open(unsigned int        version,
                   "(is sudo-shipper running?)";
         return -1;
     }
+
+    /* Prevent sudo from hanging indefinitely if the shipper stalls during
+     * the TLS handshake with the remote server.  30 s is generous; the
+     * shipper normally responds within a few hundred milliseconds. */
+    struct timeval rcv_timeout = { .tv_sec = 30, .tv_usec = 0 };
+    setsockopt(g_shipper_fd, SOL_SOCKET, SO_RCVTIMEO,
+               &rcv_timeout, sizeof(rcv_timeout));
 
     char payload[512];
     int plen = snprintf(payload, sizeof(payload),

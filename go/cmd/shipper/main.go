@@ -13,7 +13,6 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/binary"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -144,6 +143,11 @@ func main() {
 		conn, err := ln.Accept()
 		if err != nil {
 			log.Printf("accept: %v", err)
+			continue
+		}
+		if !isSudoConn(conn) {
+			log.Printf("rejected non-root connection on plugin socket")
+			conn.Close()
 			continue
 		}
 		go handlePluginConn(conn)
@@ -285,6 +289,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		sessionAckMu.Lock()
 		wasAlive := serverConnAlive
 		serverConnAlive = true
+		ackDebtStartNs = 0 // heartbeat proves server is alive; reset ACK debt
 		sessionAckMu.Unlock()
 		if !wasAlive {
 			cg.unfreeze()
@@ -350,7 +355,7 @@ func handlePluginConn(pluginConn net.Conn) {
 					log.Printf("parse ack: %v", err)
 					continue
 				}
-				if !verifyAckSig(ack) {
+				if !verifyAckSig(ack, start.SessionID) {
 					log.Printf("ack signature invalid seq=%d — ignoring", ack.Seq)
 					continue
 				}
@@ -509,14 +514,33 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 }
 
 // verifyAckSig checks the ed25519 signature attached to an ACK from the server.
-// The signed message is seq(8 bytes BE) + ts_ns(8 bytes BE).
-// Only the server's private key can produce a valid signature; the public key
-// held by the shipper cannot be used to forge ACKs.
-func verifyAckSig(ack *Ack) bool {
-	var msg [16]byte
-	binary.BigEndian.PutUint64(msg[0:], ack.Seq)
-	binary.BigEndian.PutUint64(msg[8:], uint64(ack.Timestamp))
-	return ed25519.Verify(verifyKey, msg[:], ack.Sig[:])
+// The signed message is AckSignMessage(sessionID, seq, ts_ns) which binds the
+// ACK to a specific session — an ACK captured from session A cannot be
+// replayed to unfreeze session B.
+func verifyAckSig(ack *Ack, sessionID string) bool {
+	msg := protocol.AckSignMessage(sessionID, ack.Seq, ack.Timestamp)
+	return ed25519.Verify(verifyKey, msg, ack.Sig[:])
+}
+
+// isSudoConn checks via SO_PEERCRED that the connecting process is running
+// as root (defence-in-depth on top of the 0600 socket permissions).
+func isSudoConn(conn net.Conn) bool {
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return false
+	}
+	rawConn, err := uc.SyscallConn()
+	if err != nil {
+		return false
+	}
+	var uid uint32 = ^uint32(0) // invalid sentinel
+	_ = rawConn.Control(func(fd uintptr) {
+		ucred, soErr := syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+		if soErr == nil {
+			uid = ucred.Uid
+		}
+	})
+	return uid == 0
 }
 
 // loadEd25519PubKey reads a PEM-encoded PKIX ed25519 public key.

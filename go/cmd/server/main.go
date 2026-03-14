@@ -11,7 +11,6 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/binary"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -28,6 +27,11 @@ import (
 // validName matches safe directory name components: alphanumeric plus .-_
 // Maximum 64 characters. Rejects empty strings, dots-only, and path separators.
 var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
+
+// validSessionID is a looser check for the full session ID, which includes
+// host, user, PID, nanosecond timestamp and a random hex suffix — and is
+// therefore longer than a single name component (up to 255 chars).
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
 
 func sanitizeName(s string) (string, error) {
 	if !validName.MatchString(s) {
@@ -168,7 +172,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 			sess.lastSeq = chunk.Seq
 
-			ackPayload := srv.buildACK(chunk.Seq)
+			ackPayload := srv.buildACK(sess.id, chunk.Seq)
 			if err := protocol.WriteMessage(w, protocol.MsgAck, ackPayload); err != nil {
 				log.Printf("[%s] write ack: %v", sess.id, err)
 				return
@@ -201,6 +205,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 }
 
 func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
+	if !validSessionID.MatchString(start.SessionID) {
+		return nil, fmt.Errorf("invalid session_id: %q", start.SessionID)
+	}
 	user, err := sanitizeName(start.User)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user field: %w", err)
@@ -258,14 +265,10 @@ func (srv *server) closeSession(sess *session) {
 	srv.mu.Unlock()
 }
 
-func (srv *server) buildACK(seq uint64) []byte {
+func (srv *server) buildACK(sessionID string, seq uint64) []byte {
 	ts := time.Now().UnixNano()
-
-	var msg [16]byte
-	binary.BigEndian.PutUint64(msg[0:], seq)
-	binary.BigEndian.PutUint64(msg[8:], uint64(ts))
-	sigSlice := ed25519.Sign(srv.signKey, msg[:])
-
+	msg := protocol.AckSignMessage(sessionID, seq, ts)
+	sigSlice := ed25519.Sign(srv.signKey, msg)
 	var sig [64]byte
 	copy(sig[:], sigSlice)
 	return protocol.EncodeAck(seq, ts, sig)

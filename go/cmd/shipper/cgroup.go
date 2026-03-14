@@ -30,12 +30,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
+
+// validCgroupName restricts session IDs used as cgroup directory names.
+// Prevents path traversal via session IDs containing '/' or '..'.
+var validCgroupName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
 
 var cgroupBase string
 
@@ -75,6 +80,10 @@ type cgroupSession struct {
 
 func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 	if cgroupBase == "" || sudoPid <= 0 {
+		return nil
+	}
+	if !validCgroupName.MatchString(sessionID) {
+		log.Printf("cgroup: invalid session ID %q — skipping cgroup creation", sessionID)
 		return nil
 	}
 	path := filepath.Join(cgroupBase, sessionID)

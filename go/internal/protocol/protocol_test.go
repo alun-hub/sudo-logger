@@ -126,19 +126,19 @@ func TestParseAckValid(t *testing.T) {
 	}
 }
 
-// TestEncodeAckRoundtrip verifies EncodeAck → ParseAck roundtrip with ed25519.
+// TestEncodeAckRoundtrip verifies EncodeAck → ParseAck roundtrip with ed25519,
+// using AckSignMessage so the session ID is included in the signed payload.
 func TestEncodeAckRoundtrip(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
+	sessionID := "testhost-alice-12345-1234567890123456789-abcd1234"
 	seq := uint64(123)
 	ts := int64(555000000000)
 
-	var msg [16]byte
-	binary.BigEndian.PutUint64(msg[0:], seq)
-	binary.BigEndian.PutUint64(msg[8:], uint64(ts))
-	sigSlice := ed25519.Sign(priv, msg[:])
+	msg := protocol.AckSignMessage(sessionID, seq, ts)
+	sigSlice := ed25519.Sign(priv, msg)
 
 	var sig [64]byte
 	copy(sig[:], sigSlice)
@@ -154,7 +154,7 @@ func TestEncodeAckRoundtrip(t *testing.T) {
 	if ack.Sig != sig {
 		t.Error("Sig mismatch after roundtrip")
 	}
-	if !ed25519.Verify(pub, msg[:], ack.Sig[:]) {
+	if !ed25519.Verify(pub, msg, ack.Sig[:]) {
 		t.Error("ed25519 signature verification failed after roundtrip")
 	}
 }
