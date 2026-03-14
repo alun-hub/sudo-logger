@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.4.1
+Version:        1.5.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -48,6 +48,12 @@ install -D -m 0644 sudo-replay.service \
 %{_unitdir}/sudo-replay.service
 
 %changelog
+* Sat Mar 14 2026 sudo-logger 1.5.0-1
+- security: replace shared HMAC-SHA256 with ed25519 asymmetric ACK signing
+- shipper uses public key only (ack-verify.key); private key stays on server
+- ACK payload: 48 --> 80 bytes (64-byte ed25519 signature)
+- --hmackey replaced by --verifykey (shipper) and --signkey (server)
+
 * Sat Mar 14 2026 sudo-logger 1.4.1-1
 - Version bump to align with client 1.4.1 (no replay-server changes)
 * Thu Mar 12 2026 sudo-logger 1.4.0-1

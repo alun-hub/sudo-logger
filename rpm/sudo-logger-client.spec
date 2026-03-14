@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.4.1
+Version:        1.5.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -88,6 +88,12 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Sat Mar 14 2026 sudo-logger 1.5.0-1
+- security: replace shared HMAC-SHA256 with ed25519 asymmetric ACK signing
+- shipper uses public key only (ack-verify.key); private key stays on server
+- ACK payload: 48 --> 80 bytes (64-byte ed25519 signature)
+- --hmackey replaced by --verifykey (shipper) and --signkey (server)
+
 * Sat Mar 14 2026 sudo-logger 1.4.1-1
 - fix: handle snprintf negative return before uint32_t cast in plugin_open
 - fix: g_monitor_stop changed from volatile int to _Atomic int for correct C11 memory ordering

@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.4.1
+Version:        1.5.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -74,6 +74,12 @@ getent passwd sudologger >/dev/null || \
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 
 %changelog
+* Sat Mar 14 2026 sudo-logger 1.5.0-1
+- security: replace shared HMAC-SHA256 with ed25519 asymmetric ACK signing
+- shipper uses public key only (ack-verify.key); private key stays on server
+- ACK payload: 48 --> 80 bytes (64-byte ed25519 signature)
+- --hmackey replaced by --verifykey (shipper) and --signkey (server)
+
 * Sat Mar 14 2026 sudo-logger 1.4.1-1
 - Version bump to align with client 1.4.1 (no server changes)
 * Thu Mar 12 2026 sudo-logger 1.4.0-1
