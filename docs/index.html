@@ -698,7 +698,7 @@ body::after {
           <div class="a-name">LOGSERVER</div>
           <div class="a-desc">
             Central log receiver.<br>
-            HMAC-signed ACKs per chunk.<br>
+            ed25519-signed ACKs per chunk.<br>
             sudoreplay-compatible storage.
           </div>
         </div>
@@ -779,8 +779,8 @@ body::after {
         <div class="sec-card">
           <div class="sec-icon">✍</div>
           <div>
-            <div class="sec-title">HMAC-signed ACKs</div>
-            <div class="sec-desc">The server signs every ACK with HMAC-SHA256. A network attacker cannot forge ACKs to allow unlogged sudo activity.</div>
+            <div class="sec-title">ed25519-signed ACKs</div>
+            <div class="sec-desc">The server signs every ACK with an ed25519 private key. Clients hold only the public key — a compromised client cannot forge ACKs fleet-wide.</div>
           </div>
         </div>
 
