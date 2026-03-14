@@ -42,12 +42,15 @@ func sanitizeName(s string) (string, error) {
 }
 
 var (
-	flagListen = flag.String("listen", ":9876", "Listen address (TLS)")
-	flagLogDir = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
-	flagCert   = flag.String("cert", "/etc/sudo-logger/server.crt", "Server TLS certificate")
-	flagKey    = flag.String("key", "/etc/sudo-logger/server.key", "Server TLS key")
-	flagCA     = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate (for client auth)")
-	flagSignKey = flag.String("signkey", "/etc/sudo-logger/ack-sign.key", "ed25519 private key for ACK signing (PEM)")
+	flagListen         = flag.String("listen", ":9876", "Listen address (TLS)")
+	flagLogDir         = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
+	flagCert           = flag.String("cert", "/etc/sudo-logger/server.crt", "Server TLS certificate")
+	flagKey            = flag.String("key", "/etc/sudo-logger/server.key", "Server TLS key")
+	flagCA             = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate (for client auth)")
+	flagSignKey        = flag.String("signkey", "/etc/sudo-logger/ack-sign.key", "ed25519 private key for ACK signing (PEM)")
+	flagStrictCertHost = flag.Bool("strict-cert-host", false,
+		"Reject sessions where the claimed host does not match the client certificate CN/SAN. "+
+			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
 )
 
 type server struct {
@@ -142,13 +145,18 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				return
 			}
 			// Verify the claimed host matches the presenting TLS certificate.
-			// A compromised shipper on host A cannot forge log entries that
-			// claim to come from host B — its certificate will not match.
+			// With shared client certificates (default setup) this is advisory only
+			// and logs a warning.  Enable -strict-cert-host to reject mismatches
+			// when each machine has its own certificate (stronger isolation).
 			certs := conn.ConnectionState().PeerCertificates
 			if len(certs) > 0 && !certMatchesHost(certs[0], start.Host) {
-				log.Printf("SECURITY: %s claimed host=%q but cert CN=%q DNSNames=%v — closing",
+				if *flagStrictCertHost {
+					log.Printf("SECURITY: %s claimed host=%q but cert CN=%q DNSNames=%v — closing",
+						remote, start.Host, certs[0].Subject.CommonName, certs[0].DNSNames)
+					return
+				}
+				log.Printf("WARNING: %s claimed host=%q but cert CN=%q DNSNames=%v (use -strict-cert-host to enforce)",
 					remote, start.Host, certs[0].Subject.CommonName, certs[0].DNSNames)
-				return
 			}
 			sess, err = srv.openSession(start)
 			if err != nil {
