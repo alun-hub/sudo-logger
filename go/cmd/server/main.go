@@ -1,6 +1,6 @@
 // sudo-logserver: remote TLS server that receives sudo session recordings
 // from sudo-shipper instances, writes sudo I/O log directories compatible
-// with sudoreplay(8), and sends HMAC-signed ACKs back to the shipper.
+// with sudoreplay(8), and sends ed25519-signed ACKs back to the shipper.
 //
 // Sessions are stored under -logdir/<user>/<host>_<timestamp>/
 // and replayed with: sudoreplay -d <logdir> <session-dir>
@@ -17,6 +17,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,6 +139,15 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			start, err := protocol.ParseSessionStart(payload)
 			if err != nil {
 				log.Printf("parse session start from %s: %v", remote, err)
+				return
+			}
+			// Verify the claimed host matches the presenting TLS certificate.
+			// A compromised shipper on host A cannot forge log entries that
+			// claim to come from host B — its certificate will not match.
+			certs := conn.ConnectionState().PeerCertificates
+			if len(certs) > 0 && !certMatchesHost(certs[0], start.Host) {
+				log.Printf("SECURITY: %s claimed host=%q but cert CN=%q DNSNames=%v — closing",
+					remote, start.Host, certs[0].Subject.CommonName, certs[0].DNSNames)
 				return
 			}
 			sess, err = srv.openSession(start)
@@ -272,6 +282,22 @@ func (srv *server) buildACK(sessionID string, seq uint64) []byte {
 	var sig [64]byte
 	copy(sig[:], sigSlice)
 	return protocol.EncodeAck(seq, ts, sig)
+}
+
+// certMatchesHost returns true if the TLS client certificate was issued for
+// the given host name.  It checks DNS SANs first (per RFC 6125) then falls
+// back to the Common Name.  A short hostname matches a fully-qualified cert
+// name: host "gnarg" matches CN/SAN "gnarg.example.com".
+func certMatchesHost(cert *x509.Certificate, host string) bool {
+	h := strings.ToLower(host)
+	for _, san := range cert.DNSNames {
+		s := strings.ToLower(san)
+		if s == h || strings.HasPrefix(s, h+".") {
+			return true
+		}
+	}
+	cn := strings.ToLower(cert.Subject.CommonName)
+	return cn == h || strings.HasPrefix(cn, h+".")
 }
 
 // loadEd25519PrivKey reads a PEM-encoded PKCS8 ed25519 private key.
