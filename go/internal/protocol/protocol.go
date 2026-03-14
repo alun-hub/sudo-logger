@@ -80,11 +80,12 @@ type SessionEnd struct {
 
 // Ack is a decoded ACK message (server → shipper).
 //
-// Payload layout: [8 seq][8 ts_ns][32 hmac]
+// Payload layout: [8 seq][8 ts_ns][64 sig]
+// sig is an ed25519 signature over seq(8)+ts_ns(8).
 type Ack struct {
 	Seq       uint64
 	Timestamp int64
-	HMAC      [32]byte
+	Sig       [64]byte
 }
 
 // WriteMessage writes a framed message to w.
@@ -174,26 +175,26 @@ func ParseSessionEnd(payload []byte) (*SessionEnd, error) {
 }
 
 // ParseAck decodes an ACK payload.
-// Layout: [8 seq][8 ts_ns][32 hmac]
+// Layout: [8 seq][8 ts_ns][64 sig]
 func ParseAck(payload []byte) (*Ack, error) {
-	if len(payload) < 48 {
+	if len(payload) < 80 {
 		return nil, fmt.Errorf("ack payload too short")
 	}
 	a := &Ack{
 		Seq:       binary.BigEndian.Uint64(payload[0:8]),
 		Timestamp: int64(binary.BigEndian.Uint64(payload[8:16])),
 	}
-	copy(a.HMAC[:], payload[16:48])
+	copy(a.Sig[:], payload[16:80])
 	return a, nil
 }
 
-// EncodeAck encodes an ACK payload with the given timestamp.
-// ts must be the same value used when computing the HMAC.
-func EncodeAck(seq uint64, ts int64, hmacBytes [32]byte) []byte {
-	buf := make([]byte, 48)
+// EncodeAck encodes an ACK payload with the given ed25519 signature.
+// ts must be the same value used when computing sig.
+func EncodeAck(seq uint64, ts int64, sig [64]byte) []byte {
+	buf := make([]byte, 80)
 	binary.BigEndian.PutUint64(buf[0:], seq)
 	binary.BigEndian.PutUint64(buf[8:], uint64(ts))
-	copy(buf[16:], hmacBytes[:])
+	copy(buf[16:], sig[:])
 	return buf
 }
 

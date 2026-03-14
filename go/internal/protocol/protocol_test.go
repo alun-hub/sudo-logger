@@ -3,8 +3,8 @@ package protocol_test
 import (
 	"bufio"
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/binary"
 	"testing"
 
@@ -107,10 +107,10 @@ func TestParseSessionEndTooShort(t *testing.T) {
 
 // TestParseAckValid decodes a well-formed ACK payload.
 func TestParseAckValid(t *testing.T) {
-	var payload [48]byte
+	var payload [80]byte
 	binary.BigEndian.PutUint64(payload[0:], 7)           // seq
 	binary.BigEndian.PutUint64(payload[8:], 9876543210)  // ts_ns
-	for i := 16; i < 48; i++ {
+	for i := 16; i < 80; i++ {
 		payload[i] = byte(i)
 	}
 
@@ -126,21 +126,24 @@ func TestParseAckValid(t *testing.T) {
 	}
 }
 
-// TestEncodeAckRoundtrip verifies EncodeAck → ParseAck roundtrip.
+// TestEncodeAckRoundtrip verifies EncodeAck → ParseAck roundtrip with ed25519.
 func TestEncodeAckRoundtrip(t *testing.T) {
-	key := []byte("test-hmac-key-32-bytes-padding!!")
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
 	seq := uint64(123)
 	ts := int64(555000000000)
 
-	mac := hmac.New(sha256.New, key)
-	var buf [16]byte
-	binary.BigEndian.PutUint64(buf[0:], seq)
-	binary.BigEndian.PutUint64(buf[8:], uint64(ts))
-	mac.Write(buf[:])
-	var h [32]byte
-	copy(h[:], mac.Sum(nil))
+	var msg [16]byte
+	binary.BigEndian.PutUint64(msg[0:], seq)
+	binary.BigEndian.PutUint64(msg[8:], uint64(ts))
+	sigSlice := ed25519.Sign(priv, msg[:])
 
-	encoded := protocol.EncodeAck(seq, ts, h)
+	var sig [64]byte
+	copy(sig[:], sigSlice)
+
+	encoded := protocol.EncodeAck(seq, ts, sig)
 	ack, err := protocol.ParseAck(encoded)
 	if err != nil {
 		t.Fatalf("ParseAck: %v", err)
@@ -148,8 +151,11 @@ func TestEncodeAckRoundtrip(t *testing.T) {
 	if ack.Seq != seq {
 		t.Errorf("Seq: got %d, want %d", ack.Seq, seq)
 	}
-	if ack.HMAC != h {
-		t.Error("HMAC mismatch after roundtrip")
+	if ack.Sig != sig {
+		t.Error("Sig mismatch after roundtrip")
+	}
+	if !ed25519.Verify(pub, msg[:], ack.Sig[:]) {
+		t.Error("ed25519 signature verification failed after roundtrip")
 	}
 }
 

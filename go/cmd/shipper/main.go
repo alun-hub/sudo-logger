@@ -10,11 +10,11 @@ package main
 
 import (
 	"bufio"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"log"
@@ -34,7 +34,7 @@ var (
 	flagCert    = flag.String("cert", "/etc/sudo-logger/client.crt", "Client TLS certificate")
 	flagKey     = flag.String("key", "/etc/sudo-logger/client.key", "Client TLS key")
 	flagCA      = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate")
-	flagHMAC    = flag.String("hmackey", "/etc/sudo-logger/hmac.key", "HMAC key file")
+	flagVerifyKey = flag.String("verifykey", "/etc/sudo-logger/ack-verify.key", "ed25519 public key for ACK verification (PEM)")
 	flagDebug   = flag.Bool("debug", false, "Enable verbose debug logging")
 )
 
@@ -42,8 +42,8 @@ var (
 var debugLog = func(format string, args ...any) {}
 
 var (
-	hmacKey []byte
-	tlsCfg  *tls.Config
+	verifyKey ed25519.PublicKey
+	tlsCfg    *tls.Config
 )
 
 // activeCgs tracks all live session cgroups so they can be cleaned up on
@@ -99,9 +99,9 @@ func main() {
 	}
 
 	var err error
-	hmacKey, err = os.ReadFile(*flagHMAC)
+	verifyKey, err = loadEd25519PubKey(*flagVerifyKey)
 	if err != nil {
-		log.Fatalf("read hmac key: %v", err)
+		log.Fatalf("load verify key: %v", err)
 	}
 
 	tlsCfg, err = buildTLSConfig()
@@ -350,8 +350,8 @@ func handlePluginConn(pluginConn net.Conn) {
 					log.Printf("parse ack: %v", err)
 					continue
 				}
-				if !verifyAckHMAC(ack) {
-					log.Printf("ack HMAC mismatch seq=%d — ignoring", ack.Seq)
+				if !verifyAckSig(ack) {
+					log.Printf("ack signature invalid seq=%d — ignoring", ack.Seq)
 					continue
 				}
 				touchServerMsg()
@@ -508,19 +508,36 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 	}
 }
 
-// verifyAckHMAC checks the HMAC attached to an ACK from the server.
-// The server signs: sessionID (not available here) + seq + ts_ns.
-// For the shipper we verify using seq + ts_ns only (no session binding).
-// The server includes the session ID in its HMAC — full verification
-// happens conceptually at the server; here we do a lightweight check.
-func verifyAckHMAC(ack *Ack) bool {
-	mac := hmac.New(sha256.New, hmacKey)
-	var buf [16]byte
-	binary.BigEndian.PutUint64(buf[0:], ack.Seq)
-	binary.BigEndian.PutUint64(buf[8:], uint64(ack.Timestamp))
-	mac.Write(buf[:])
-	expected := mac.Sum(nil)
-	return hmac.Equal(expected, ack.HMAC[:])
+// verifyAckSig checks the ed25519 signature attached to an ACK from the server.
+// The signed message is seq(8 bytes BE) + ts_ns(8 bytes BE).
+// Only the server's private key can produce a valid signature; the public key
+// held by the shipper cannot be used to forge ACKs.
+func verifyAckSig(ack *Ack) bool {
+	var msg [16]byte
+	binary.BigEndian.PutUint64(msg[0:], ack.Seq)
+	binary.BigEndian.PutUint64(msg[8:], uint64(ack.Timestamp))
+	return ed25519.Verify(verifyKey, msg[:], ack.Sig[:])
+}
+
+// loadEd25519PubKey reads a PEM-encoded PKIX ed25519 public key.
+func loadEd25519PubKey(path string) (ed25519.PublicKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block in %s", path)
+	}
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse public key: %w", err)
+	}
+	ed, ok := key.(ed25519.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("key in %s is not ed25519", path)
+	}
+	return ed, nil
 }
 
 func buildTLSConfig() (*tls.Config, error) {

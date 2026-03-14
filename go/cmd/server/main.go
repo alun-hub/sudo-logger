@@ -8,11 +8,11 @@ package main
 
 import (
 	"bufio"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"log"
@@ -42,11 +42,11 @@ var (
 	flagCert   = flag.String("cert", "/etc/sudo-logger/server.crt", "Server TLS certificate")
 	flagKey    = flag.String("key", "/etc/sudo-logger/server.key", "Server TLS key")
 	flagCA     = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate (for client auth)")
-	flagHMAC   = flag.String("hmackey", "/etc/sudo-logger/hmac.key", "HMAC key file")
+	flagSignKey = flag.String("signkey", "/etc/sudo-logger/ack-sign.key", "ed25519 private key for ACK signing (PEM)")
 )
 
 type server struct {
-	hmacKey []byte
+	signKey ed25519.PrivateKey
 	logDir  string
 
 	mu       sync.Mutex
@@ -66,9 +66,9 @@ type session struct {
 func main() {
 	flag.Parse()
 
-	hmacKey, err := os.ReadFile(*flagHMAC)
+	signKey, err := loadEd25519PrivKey(*flagSignKey)
 	if err != nil {
-		log.Fatalf("read hmac key: %v", err)
+		log.Fatalf("load signing key: %v", err)
 	}
 
 	tlsCfg, err := buildTLSConfig()
@@ -87,8 +87,8 @@ func main() {
 	defer ln.Close()
 
 	srv := &server{
-		hmacKey:  hmacKey,
-		logDir:   *flagLogDir,
+		signKey: signKey,
+		logDir:  *flagLogDir,
 		sessions: make(map[string]*session),
 	}
 
@@ -261,15 +261,35 @@ func (srv *server) closeSession(sess *session) {
 func (srv *server) buildACK(seq uint64) []byte {
 	ts := time.Now().UnixNano()
 
-	mac := hmac.New(sha256.New, srv.hmacKey)
-	var buf [16]byte
-	binary.BigEndian.PutUint64(buf[0:], seq)
-	binary.BigEndian.PutUint64(buf[8:], uint64(ts))
-	mac.Write(buf[:])
+	var msg [16]byte
+	binary.BigEndian.PutUint64(msg[0:], seq)
+	binary.BigEndian.PutUint64(msg[8:], uint64(ts))
+	sigSlice := ed25519.Sign(srv.signKey, msg[:])
 
-	var h [32]byte
-	copy(h[:], mac.Sum(nil))
-	return protocol.EncodeAck(seq, ts, h)
+	var sig [64]byte
+	copy(sig[:], sigSlice)
+	return protocol.EncodeAck(seq, ts, sig)
+}
+
+// loadEd25519PrivKey reads a PEM-encoded PKCS8 ed25519 private key.
+func loadEd25519PrivKey(path string) (ed25519.PrivateKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block in %s", path)
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse private key: %w", err)
+	}
+	ed, ok := key.(ed25519.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("key in %s is not ed25519", path)
+	}
+	return ed, nil
 }
 
 func buildTLSConfig() (*tls.Config, error) {
