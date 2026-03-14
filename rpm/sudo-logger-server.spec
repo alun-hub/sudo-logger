@@ -58,6 +58,18 @@ getent passwd sudologger >/dev/null || \
 
 %post
 %systemd_post sudo-logserver.service
+# Generate ed25519 signing key on first install
+if [ ! -f %{_sysconfdir}/sudo-logger/ack-sign.key ]; then
+    openssl genpkey -algorithm ed25519 \
+        -out %{_sysconfdir}/sudo-logger/ack-sign.key 2>/dev/null
+    chown root:sudologger %{_sysconfdir}/sudo-logger/ack-sign.key
+    chmod 0640 %{_sysconfdir}/sudo-logger/ack-sign.key
+    openssl pkey -in %{_sysconfdir}/sudo-logger/ack-sign.key \
+        -pubout -out %{_sysconfdir}/sudo-logger/ack-verify.key 2>/dev/null
+    chmod 0644 %{_sysconfdir}/sudo-logger/ack-verify.key
+    echo "sudo-logserver: ACK signing key generated."
+    echo "  Copy %{_sysconfdir}/sudo-logger/ack-verify.key to all clients."
+fi
 
 %preun
 %systemd_preun sudo-logserver.service
@@ -70,6 +82,8 @@ getent passwd sudologger >/dev/null || \
 %{_unitdir}/sudo-logserver.service
 %dir %attr(0750, root, sudologger) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/server.conf
+%ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/ack-sign.key
+%ghost %attr(0644, root, root)       %{_sysconfdir}/sudo-logger/ack-verify.key
 %dir %attr(0750, sudologger, sudologger) %{_localstatedir}/log/sudoreplay
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 

@@ -86,6 +86,7 @@ fi
 %{_unitdir}/sudo-shipper.service
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
+%ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 
 %changelog
 * Sat Mar 14 2026 sudo-logger 1.5.0-1
