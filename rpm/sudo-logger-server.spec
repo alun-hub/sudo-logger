@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.5.0
+Version:        1.6.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -88,6 +88,14 @@ fi
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 
 %changelog
+* Sat Mar 14 2026 sudo-logger 1.6.0-1
+- security: ACK signature now binds to session ID (prevents cross-session replay)
+- security: host field in SESSION_START verified against TLS client certificate CN/SAN
+  (a compromised shipper on host A cannot forge log entries for host B)
+- security: session ID validated on server before creating iolog directory
+- fix: ackDebtStartNs reset on HEARTBEAT_ACK (prevents false freeze banner)
+- fix: replay server uses EvalSymlinks for path traversal defence
+
 * Sat Mar 14 2026 sudo-logger 1.5.0-1
 - security: replace shared HMAC-SHA256 with ed25519 asymmetric ACK signing
 - shipper uses public key only (ack-verify.key); private key stays on server

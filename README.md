@@ -135,11 +135,15 @@ A TLS server running on a dedicated machine. For each client connection:
 | **Freeze cannot be escaped with `fg`** | Terminal sessions are frozen via `cgroup.freeze=1` — no job-control signals involved, so `fg` cannot escape the freeze |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
-| **Asymmetric ACK signing (ed25519)** | Server signs each ACK with its ed25519 private key; clients hold only the public key — a compromised client cannot forge ACKs for other clients |
+| **Asymmetric ACK signing (ed25519)** | Server signs each ACK with its ed25519 private key over `sessionID \|\| seq \|\| ts_ns`; a compromised client cannot forge ACKs for other sessions or other clients |
+| **ACK bound to session** | Session ID is included in every ACK signature — a valid ACK for session A cannot be replayed to unfreeze session B |
+| **Host field verified against TLS certificate** | Server rejects SESSION_START if the claimed `host` does not match the CN or DNS SANs of the presenting client certificate; a compromised shipper on host A cannot forge log entries attributed to host B |
+| **Plugin socket peer verification** | Shipper verifies via `SO_PEERCRED` that only root processes (sudo) may connect to the Unix socket, as a second layer beyond file permissions |
+| **Session ID collision resistance** | Session IDs include nanosecond precision and 4 cryptographically random bytes — simultaneous sessions on the same host are always distinct |
 | **Tamper-evident log storage** | Logs are written on a separate server that the sudo-running user has no access to |
 | **All I/O captured** | stdin, stdout, stderr, tty input and tty output are all recorded |
-| **Path traversal prevention** | User and host fields are validated against `[a-zA-Z0-9._-]{1,64}` before use in filesystem paths |
-| **Log directory confinement** | iolog writer verifies the resolved session path stays within the base log directory |
+| **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
+| **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 
 ---
 
@@ -267,7 +271,7 @@ The ACK signing key pair is generated automatically on the server when the
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.1-6.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.6.0-1.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -301,7 +305,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.1-22.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.6.0-1.fc43.x86_64.rpm
 
 # Install certificates and ACK verify key
 cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
@@ -444,7 +448,7 @@ terminal player for recorded sessions.  It reads the same iolog directories as
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.1-2.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.6.0-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -607,17 +611,25 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 
 **ACK signing (ed25519):**
 
-The server signs each ACK with its ed25519 private key over the 16-byte message:
+The server signs each ACK with its ed25519 private key over:
 ```
-seq_be(8 bytes) || ts_ns_be(8 bytes)
+sessionID || 0x00 || seq_be(8 bytes) || ts_ns_be(8 bytes)
 ```
+The null byte separates the variable-length session ID from the fixed fields.
 The shipper verifies the signature using the server's public key before
-accepting the ACK. This prevents a network attacker from injecting fake ACKs
-to unfreeze sessions.
+accepting the ACK.
+
+This design provides two layers of protection:
+
+1. **Network attacker** cannot inject fake ACKs to unfreeze sessions — they
+   lack the server's private key.
+2. **Replay attack** is prevented — an ACK captured from session A cannot be
+   replayed against session B because the session ID is part of the signed
+   message. Both must match for the signature to verify.
 
 Unlike the previous HMAC-SHA256 design (symmetric shared secret), the private
 key never leaves the server. A compromised client holds only the public key
-and cannot forge valid ACKs for other clients.
+and cannot forge valid ACKs for any session on any client.
 
 ### ACK mechanism
 
@@ -639,7 +651,8 @@ The shipper's `readAck()` returns:
 3. `(time.Now(), lastSeq)` otherwise — server is alive and responding
 
 Recovery: when a `HEARTBEAT_ACK` or `ACK` arrives after a dead period,
-`markAlive()` sets `serverConnAlive = true` and calls `cg.unfreeze()`.
+`markAlive()` sets `serverConnAlive = true`, resets `ackDebtStartNs = 0`,
+and calls `cg.unfreeze()`.
 
 ### Freeze mechanism
 
@@ -698,28 +711,28 @@ The RPM spec files are in `rpm/` in the repository.
 # Set up rpmbuild tree (once)
 rpmdev-setuptree
 
+# Set the version (must match Version: in the spec files)
+VERSION=1.6.0
+
+# Create source tarball from git (preserves correct directory prefix)
+git archive --prefix=sudo-logger-${VERSION}/ HEAD \
+    | gzip > ~/rpmbuild/SOURCES/sudo-logger-${VERSION}.tar.gz
+
 # Copy spec files
-cp rpm/sudo-logger-client.spec rpm/sudo-logger-server.spec ~/rpmbuild/SPECS/
+cp rpm/*.spec ~/rpmbuild/SPECS/
 
-# Create source tarball from the repo root
-VERSION=1.1
-tar czf ~/rpmbuild/SOURCES/sudo-logger-${VERSION}.tar.gz \
-    --transform "s,^,sudo-logger-${VERSION}/," \
-    go/ plugin/ sudo-shipper.service sudo-logserver.service \
-    shipper.conf server.conf
-
-# Build client RPM
+# Build all three packages
 rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-client.spec
-
-# Build server RPM
 rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-server.spec
+rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-replay.spec
 
 # RPMs end up in:
 ls ~/rpmbuild/RPMS/x86_64/
 ```
 
-**Version bump:** increment `Release:` in the spec file(s) for patch changes.
-Increment `Version:` and the tarball name for new minor/major versions.
+**Version bump:** increment `Release:` in the spec files for spec-only fixes.
+Increment `Version:` (same value in all three specs) for code changes — reset
+`Release:` back to `1%{?dist}` each time `Version:` changes.
 
 ---
 
@@ -953,5 +966,5 @@ journalctl -u sudo-logserver -n 50
 
 ### Freeze is too slow after network loss
 
-Ensure you are running client ≥ 1.1-22 and server ≥ 1.1-6. Earlier versions
+Ensure you are running client ≥ 1.3.0 and server ≥ 1.3.0. Earlier versions
 used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).

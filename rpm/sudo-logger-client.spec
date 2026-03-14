@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.5.0
+Version:        1.6.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -89,6 +89,16 @@ fi
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 
 %changelog
+* Sat Mar 14 2026 sudo-logger 1.6.0-1
+- security: ACK signature now binds to session ID (prevents cross-session replay)
+- security: session ID uses nanoseconds + 4 random bytes (eliminates collision risk)
+- security: plugin socket verifies peer UID==0 via SO_PEERCRED
+- security: cgroup name validated before directory creation (path traversal)
+- security: plugin socket read timeout (SO_RCVTIMEO 30s, prevents sudo hang)
+- fix: ackDebtStartNs reset on HEARTBEAT_ACK (prevents false freeze banner)
+- fix: replay server uses EvalSymlinks for path traversal defence
+- security: session ID validated on server before creating iolog directory
+
 * Sat Mar 14 2026 sudo-logger 1.5.0-1
 - security: replace shared HMAC-SHA256 with ed25519 asymmetric ACK signing
 - shipper uses public key only (ack-verify.key); private key stays on server
