@@ -58,7 +58,7 @@ User runs sudo
 │  sudo-logserver     │  Central server (separate machine).
 │  (Go)               │  Receives session data.
 │                     │  Writes sudo iolog directories.
-│                     │  Sends HMAC-signed ACKs per chunk.
+│                     │  Sends ed25519-signed ACKs per chunk.
 │                     │  Replies to heartbeats immediately.
 └─────────────────────┘
          │
@@ -103,7 +103,7 @@ sudo session:
 
 - Opens a TLS connection to the server for each new session
 - Forwards SESSION_START, CHUNK, SESSION_END messages
-- Receives and HMAC-verifies ACKs from the server
+- Receives and ed25519-verifies ACKs from the server
 - Tracks ACK state per session; responds instantly to plugin ACK queries
 - Sends a HEARTBEAT to the server every 400 ms; declares the connection
   dead if no HEARTBEAT_ACK arrives within 800 ms (~1 s freeze latency)
@@ -119,7 +119,7 @@ A TLS server running on a dedicated machine. For each client connection:
 
 - Receives session metadata and writes a sudo iolog log file
 - Streams terminal I/O into `ttyout`/`ttyin` files with timing data
-- Acknowledges every chunk with an HMAC-signed ACK
+- Acknowledges every chunk with an ed25519-signed ACK
 - Replies to HEARTBEAT probes immediately with HEARTBEAT_ACK
 - Sessions stored as sudoreplay-compatible directories under
   `/var/log/sudoreplay/<user>/<host>_<timestamp>/`
@@ -135,7 +135,7 @@ A TLS server running on a dedicated machine. For each client connection:
 | **Freeze cannot be escaped with `fg`** | Terminal sessions are frozen via `cgroup.freeze=1` — no job-control signals involved, so `fg` cannot escape the freeze |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
-| **HMAC-signed ACKs** | Server signs each ACK with HMAC-SHA256; forged ACKs from a network attacker are detected and discarded |
+| **Asymmetric ACK signing (ed25519)** | Server signs each ACK with its ed25519 private key; clients hold only the public key — a compromised client cannot forge ACKs for other clients |
 | **Tamper-evident log storage** | Logs are written on a separate server that the sudo-running user has no access to |
 | **All I/O captured** | stdin, stdout, stderr, tty input and tty output are all recorded |
 | **Path traversal prevention** | User and host fields are validated against `[a-zA-Z0-9._-]{1,64}` before use in filesystem paths |
@@ -239,7 +239,14 @@ This generates:
   server/server.key     # Server TLS private key
   client/client.crt     # Client TLS certificate
   client/client.key     # Client TLS private key
-  hmac.key              # 32-byte HMAC key (distributed to all machines)
+```
+
+The ACK signing key pair is generated automatically on the server when the
+`sudo-logger-server` RPM is installed for the first time:
+
+```
+/etc/sudo-logger/ack-sign.key    # ed25519 private key (server only, root:sudologger 0640)
+/etc/sudo-logger/ack-verify.key  # ed25519 public key  (copy to all clients)
 ```
 
 **File distribution:**
@@ -251,7 +258,8 @@ This generates:
 | `server/server.key` | Yes | No |
 | `client/client.crt` | No | Yes |
 | `client/client.key` | No | Yes |
-| `hmac.key` | Yes | Yes |
+| `ack-sign.key` | Yes — auto-generated | No |
+| `ack-verify.key` | Yes — auto-generated | Yes — copy from server |
 
 ---
 
@@ -265,11 +273,15 @@ dnf install sudo-logger-server-1.1-6.fc43.x86_64.rpm
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
 cp /tmp/pki/server/server.crt   /etc/sudo-logger/
 cp /tmp/pki/server/server.key   /etc/sudo-logger/
-cp /tmp/pki/hmac.key            /etc/sudo-logger/
 
-# Secure private key and HMAC key
-chown sudologger:sudologger /etc/sudo-logger/server.key /etc/sudo-logger/hmac.key
-chmod 600 /etc/sudo-logger/server.key /etc/sudo-logger/hmac.key
+# Secure TLS private key
+chown root:sudologger /etc/sudo-logger/server.key
+chmod 640 /etc/sudo-logger/server.key
+
+# ack-sign.key and ack-verify.key are generated automatically by the RPM %post
+# scriptlet if they do not exist. After first start, distribute ack-verify.key
+# to all clients:
+#   scp /etc/sudo-logger/ack-verify.key client:/etc/sudo-logger/
 
 # Configure listen address and log directory if needed
 # Defaults: LISTEN_ADDR=:9876  LOG_DIR=/var/log/sudoreplay
@@ -291,14 +303,14 @@ journalctl -u sudo-logserver -f
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
 dnf install sudo-logger-client-1.1-22.fc43.x86_64.rpm
 
-# Install certificates
-cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
-cp /tmp/pki/client/client.crt   /etc/sudo-logger/
-cp /tmp/pki/client/client.key   /etc/sudo-logger/
-cp /tmp/pki/hmac.key            /etc/sudo-logger/
+# Install certificates and ACK verify key
+cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
+cp /tmp/pki/client/client.crt            /etc/sudo-logger/
+cp /tmp/pki/client/client.key            /etc/sudo-logger/
+scp logserver:/etc/sudo-logger/ack-verify.key /etc/sudo-logger/
 
-# Secure private key and HMAC key
-chmod 600 /etc/sudo-logger/client.key /etc/sudo-logger/hmac.key
+# Secure TLS private key
+chmod 600 /etc/sudo-logger/client.key
 
 # Set the log server address
 vim /etc/sudo-logger/shipper.conf
@@ -353,7 +365,7 @@ To enable verbose logging for troubleshooting, add `-debug` to the service:
 [Service]
 ExecStart=
 ExecStart=/usr/bin/sudo-shipper -debug \
-    -server ... -socket ... -cert ... -key ... -ca ... -hmackey ...
+    -server ... -socket ... -cert ... -key ... -ca ... -verifykey ...
 ```
 
 Or temporarily on the command line:
@@ -575,7 +587,7 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `SESSION_START` | `0x01` | plugin → shipper → server | JSON: session_id, user, host, command, ts, pid |
 | `CHUNK` | `0x02` | plugin → shipper → server | Binary: seq(8) + ts_ns(8) + stream(1) + len(4) + data |
 | `SESSION_END` | `0x03` | plugin → shipper → server | Binary: final_seq(8) + exit_code(4) |
-| `ACK` | `0x04` | server → shipper | Binary: seq(8) + ts_ns(8) + hmac(32) |
+| `ACK` | `0x04` | server → shipper | Binary: seq(8) + ts_ns(8) + sig(64) |
 | `ACK_QUERY` | `0x05` | plugin → shipper | Empty — plugin requests latest ACK state |
 | `ACK_RESPONSE` | `0x06` | shipper → plugin | Binary: last_ack_ts_ns(8) + last_seq(8) |
 | `SESSION_READY` | `0x07` | shipper → plugin | Empty — server connection established, sudo may proceed |
@@ -593,15 +605,19 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `0x03` | `STREAM_TTYIN` | Terminal input (what user typed) |
 | `0x04` | `STREAM_TTYOUT` | Terminal output (what user saw) |
 
-**ACK HMAC:**
+**ACK signing (ed25519):**
 
-The server signs each ACK with HMAC-SHA256 over the 16-byte sequence:
+The server signs each ACK with its ed25519 private key over the 16-byte message:
 ```
 seq_be(8 bytes) || ts_ns_be(8 bytes)
 ```
-using the shared HMAC key. The shipper verifies this before accepting the
-ACK. This prevents a network attacker from injecting fake ACKs to allow
-unlogged sudo activity.
+The shipper verifies the signature using the server's public key before
+accepting the ACK. This prevents a network attacker from injecting fake ACKs
+to unfreeze sessions.
+
+Unlike the previous HMAC-SHA256 design (symmetric shared secret), the private
+key never leaves the server. A compromised client holds only the public key
+and cannot forge valid ACKs for other clients.
 
 ### ACK mechanism
 
@@ -727,9 +743,9 @@ must be set up once with `podman unshare` before first start.
 pki/
 ├── ca.crt
 ├── server.crt
-├── server.key    ← must be readable only by the container user
-├── hmac.key      ← must be readable only by the container user
-└── server.conf   ← optional: override LISTEN_ADDR / LOG_DIR
+├── server.key      ← must be readable only by the container user
+├── ack-sign.key    ← must be readable only by the container user
+└── server.conf     ← optional: override LISTEN_ADDR / LOG_DIR
 ```
 
 ### First-time setup
@@ -741,7 +757,7 @@ Run once after creating the `pki/` directory:
 podman unshare chown -R 65532:65532 ./pki/
 
 # 2. Lock down private keys
-podman unshare chmod 600 ./pki/server.key ./pki/hmac.key
+podman unshare chmod 600 ./pki/server.key ./pki/ack-sign.key
 
 # 3. Build the image
 podman-compose build
@@ -860,7 +876,7 @@ kubectl get svc -n sudo-logger sudo-logserver
 
 - The container runs as UID 65532 (distroless `nonroot`) with a read-only
   root filesystem and all Linux capabilities dropped.
-- TLS private key and HMAC key are mounted read-only from a Kubernetes
+- TLS private key and ACK signing key are mounted read-only from a Kubernetes
   Secret (`defaultMode: 0400`).
 - Consider using `loadBalancerSourceRanges` in `service.yaml` to restrict
   which IP ranges can reach port 9876.
@@ -927,7 +943,8 @@ the network to return, then start a new `sudo` session.
 
 ### Terminal freezes immediately on session start
 
-The shipper cannot reach the server or the HMAC key differs:
+The shipper cannot reach the server, or the `ack-verify.key` on the client
+does not match the `ack-sign.key` on the server:
 ```bash
 journalctl -u sudo-shipper -n 50
 # On the server:
