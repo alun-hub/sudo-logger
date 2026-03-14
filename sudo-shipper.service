@@ -11,7 +11,7 @@ ExecStart=/usr/bin/sudo-shipper \
     -cert     /etc/sudo-logger/client.crt \
     -key      /etc/sudo-logger/client.key \
     -ca       /etc/sudo-logger/ca.crt \
-    -hmackey  /etc/sudo-logger/hmac.key
+    -verifykey /etc/sudo-logger/ack-verify.key
 
 RuntimeDirectory=sudo-logger
 RuntimeDirectoryMode=0750

@@ -10,7 +10,7 @@ ExecStart=/usr/bin/sudo-logserver \
     -cert     /etc/sudo-logger/server.crt \
     -key      /etc/sudo-logger/server.key \
     -ca       /etc/sudo-logger/ca.crt \
-    -hmackey  /etc/sudo-logger/hmac.key
+    -signkey  /etc/sudo-logger/ack-sign.key
 
 Restart=always
 RestartSec=5
