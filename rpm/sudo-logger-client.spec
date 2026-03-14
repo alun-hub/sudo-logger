@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.4.0
+Version:        1.4.1
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -88,6 +88,9 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 
 %changelog
+* Sat Mar 14 2026 sudo-logger 1.4.1-1
+- fix: handle snprintf negative return before uint32_t cast in plugin_open
+- fix: g_monitor_stop changed from volatile int to _Atomic int for correct C11 memory ordering
 * Thu Mar 12 2026 sudo-logger 1.4.0-1
 - Version bump to stay in sync with replay (no client-side changes)
 

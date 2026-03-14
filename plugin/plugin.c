@@ -24,6 +24,7 @@
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,7 +84,7 @@ static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
 static time_t g_last_ack_query = 0;  /* when we last queried the shipper */
 
 /* Background monitor thread */
-static volatile int   g_monitor_stop  = 0;
+static _Atomic int    g_monitor_stop  = 0;
 static int            g_monitor_started = 0;
 static pthread_t      g_monitor_thread;
 static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
@@ -466,7 +467,9 @@ static int plugin_open(unsigned int        version,
      * which may exceed sizeof(payload) if the input was truncated.
      * Cap to the actual number of bytes written to avoid over-reading the
      * stack buffer in send_msg/writev. */
-    if (plen >= (int)sizeof(payload))
+    if (plen < 0)
+        plen = 0;
+    else if (plen >= (int)sizeof(payload))
         plen = (int)sizeof(payload) - 1;
 
     send_msg(g_shipper_fd, MSG_SESSION_START, payload, (uint32_t)plen);
