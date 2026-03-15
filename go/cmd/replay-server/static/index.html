@@ -52,6 +52,10 @@
     .logo-icon { font-size: 16px; filter: drop-shadow(0 0 6px var(--green)); }
     .badge { font-size: 11px; color: var(--text-sub); background: var(--card);
       border: 1px solid var(--border); padding: 2px 8px; border-radius: 3px; }
+    .autoplay-label { display: flex; align-items: center; gap: 5px;
+      font-size: 11px; color: var(--text-sub); cursor: pointer; user-select: none;
+      margin-left: auto; }
+    .autoplay-label input[type=checkbox] { accent-color: var(--green); cursor: pointer; width: 13px; height: 13px; }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────────── */
     .sidebar { grid-area: sidebar; display: flex; flex-direction: column;
@@ -208,6 +212,7 @@
   <header class="topbar">
     <div class="logo"><span class="logo-icon">◈</span> sudo-replay</div>
     <span class="badge" id="session-count">loading…</span>
+    <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
   </header>
 
   <aside class="sidebar">
@@ -289,6 +294,7 @@ let allSessions   = [];
 let events        = [];
 let totalDuration = 0;
 let currentTSID   = null;
+let autoplay      = true;
 
 const fetchState = {
   q: '', sort: 'time', order: 'desc',
@@ -304,6 +310,7 @@ const player = {
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
+const elAutoplayToggle = document.getElementById('autoplay-toggle');
 const elSessionList  = document.getElementById('session-list');
 const elSessionCount = document.getElementById('session-count');
 const elInfoBar      = document.getElementById('info-bar');
@@ -328,8 +335,8 @@ const fmt = s => {
 
 const fmtDate = unix => {
   const d = new Date(unix * 1000);
-  return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})
-       + ' ' + d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
 const b64toBytes = b64 => {
@@ -531,7 +538,7 @@ async function selectSession(tsid, initialSeek = 0) {
     setControlsEnabled(true);
     resetPlayer();
     if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
-    else play();
+    else if (autoplay) play();
   } catch (err) {
     term.reset();
     term.writeln(`\x1b[31mFailed to load: ${err.message}\x1b[0m`);
@@ -647,6 +654,7 @@ const elapsedSec = () => player.playing
 function scheduleNext() {
   if (!player.playing || player.currentIndex >= events.length) {
     if (player.currentIndex >= events.length) {
+      player.startEventSec = totalDuration;
       stopPlayer(); elBtnPlay.textContent = '▶'; updateProgress(); updateURL();
     }
     return;
@@ -731,6 +739,20 @@ document.addEventListener('keydown', e => {
     if (opt) opt.selected = true;
   }
 })();
+
+// Restore autoplay preference
+(function () {
+  const saved = localStorage.getItem('sudo-replay-autoplay');
+  if (saved !== null) {
+    autoplay = saved === 'true';
+    elAutoplayToggle.checked = autoplay;
+  }
+})();
+
+elAutoplayToggle.addEventListener('change', () => {
+  autoplay = elAutoplayToggle.checked;
+  localStorage.setItem('sudo-replay-autoplay', autoplay);
+});
 
 term.writeln('\x1b[2;37m  sudo-replay  —  select a session from the sidebar\x1b[0m');
 term.writeln('');

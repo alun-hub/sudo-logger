@@ -182,7 +182,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 
 			switch chunk.Stream {
-			case protocol.StreamTtyOut, protocol.StreamStdout:
+			case protocol.StreamTtyOut, protocol.StreamStdout, protocol.StreamStderr:
 				if err := sess.writer.WriteOutput(chunk.Data, chunk.Timestamp); err != nil {
 					log.Printf("[%s] write output: %v", sess.id, err)
 				}
