@@ -34,15 +34,17 @@ var (
 
 // SessionInfo is the metadata returned for each session in the list API.
 type SessionInfo struct {
-	TSID      string  `json:"tsid"`
-	User      string  `json:"user"`
-	Host      string  `json:"host"`
-	Runas     string  `json:"runas"`
-	TTY       string  `json:"tty"`
-	Command   string  `json:"command"`
-	Cwd       string  `json:"cwd"`
-	StartTime int64   `json:"start_time"` // unix seconds
-	Duration  float64 `json:"duration"`   // seconds
+	TSID            string  `json:"tsid"`
+	User            string  `json:"user"`
+	Host            string  `json:"host"`
+	Runas           string  `json:"runas"`
+	TTY             string  `json:"tty"`
+	Command         string  `json:"command"`
+	ResolvedCommand string  `json:"resolved_command,omitempty"`
+	Cwd             string  `json:"cwd,omitempty"`
+	Flags           string  `json:"flags,omitempty"`
+	StartTime       int64   `json:"start_time"` // unix seconds
+	Duration        float64 `json:"duration"`   // seconds
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -311,7 +313,7 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 		host = dirName[:len(dirName)-16]
 	}
 
-	return &SessionInfo{
+	info := &SessionInfo{
 		TSID:      tsid,
 		User:      user,
 		Host:      host,
@@ -321,7 +323,21 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 		Cwd:       cwd,
 		StartTime: ts,
 		Duration:  calcDuration(filepath.Join(sessDir, "timing")),
-	}, nil
+	}
+
+	// Merge extra metadata written by sudo-logserver (not in sudoreplay format).
+	var meta struct {
+		ResolvedCommand string `json:"resolved_command"`
+		Flags           string `json:"flags"`
+	}
+	if b, err := os.ReadFile(filepath.Join(sessDir, "meta.json")); err == nil {
+		if json.Unmarshal(b, &meta) == nil {
+			info.ResolvedCommand = meta.ResolvedCommand
+			info.Flags = meta.Flags
+		}
+	}
+
+	return info, nil
 }
 
 // calcDuration sums all delta values in a timing file to get total duration.

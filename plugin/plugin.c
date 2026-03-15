@@ -452,25 +452,25 @@ static int plugin_open(unsigned int        version,
 
     g_tty_fd = open("/dev/tty", O_WRONLY | O_NOCTTY | O_CLOEXEC);
 
-    const char *user = "unknown";
-    const char *host = "unknown";
+    const char *user    = "unknown";
+    const char *host    = "unknown";
+    const char *raw_cwd = "/";   /* user_info[cwd] = the invoking user's cwd */
     for (int i = 0; user_info[i] != NULL; i++) {
-        if (strncmp(user_info[i], "user=", 5) == 0)
+        if      (strncmp(user_info[i], "user=", 5) == 0)
             user = user_info[i] + 5;
         else if (strncmp(user_info[i], "host=", 5) == 0)
             host = user_info[i] + 5;
+        else if (strncmp(user_info[i], "cwd=",  4) == 0)
+            raw_cwd = user_info[i] + 4;
     }
 
     /* ── Extract metadata from command_info[] ─────────────────────────── */
     const char *raw_resolved = "";
-    const char *raw_cwd      = "/";
     int         runas_uid    = 0;
     int         runas_gid    = 0;
     for (int i = 0; command_info[i] != NULL; i++) {
         if      (strncmp(command_info[i], "command=",   8) == 0)
             raw_resolved = command_info[i] + 8;
-        else if (strncmp(command_info[i], "cwd=",       4) == 0)
-            raw_cwd = command_info[i] + 4;
         else if (strncmp(command_info[i], "runas_uid=", 10) == 0)
             runas_uid = atoi(command_info[i] + 10);
         else if (strncmp(command_info[i], "runas_gid=", 10) == 0)

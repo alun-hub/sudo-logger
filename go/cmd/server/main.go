@@ -11,6 +11,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -261,6 +262,23 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create iolog: %w", err)
+	}
+
+	// Write extra metadata that doesn't fit in the sudoreplay-compatible log file.
+	// The replay server reads this alongside the iolog log file.
+	type metaJSON struct {
+		ResolvedCommand string `json:"resolved_command,omitempty"`
+		RunasUID        int    `json:"runas_uid"`
+		RunasGID        int    `json:"runas_gid"`
+		Flags           string `json:"flags,omitempty"`
+	}
+	if b, err := json.Marshal(metaJSON{
+		ResolvedCommand: start.ResolvedCommand,
+		RunasUID:        start.RunasUID,
+		RunasGID:        start.RunasGID,
+		Flags:           start.Flags,
+	}); err == nil {
+		_ = os.WriteFile(w.Dir()+"/meta.json", b, 0640)
 	}
 
 	sess := &session{
