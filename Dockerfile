@@ -30,4 +30,4 @@ CMD ["-listen=:9876", \
      "-cert=/etc/sudo-logger/server.crt", \
      "-key=/etc/sudo-logger/server.key", \
      "-ca=/etc/sudo-logger/ca.crt", \
-     "-hmackey=/etc/sudo-logger/hmac.key"]
+     "-signkey=/etc/sudo-logger/ack-sign.key"]

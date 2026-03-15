@@ -5,6 +5,13 @@ services:
     container_name: sudo-logserver
     ports:
       - "9876:9876"
+    command:
+      - "-listen=:9876"
+      - "-logdir=/var/log/sudoreplay"
+      - "-cert=/etc/sudo-logger/server.crt"
+      - "-key=/etc/sudo-logger/server.key"
+      - "-ca=/etc/sudo-logger/ca.crt"
+      - "-signkey=/etc/sudo-logger/ack-sign.key"
     volumes:
       - ./pki:/etc/sudo-logger:ro,Z
       - sudologs:/var/log/sudoreplay
