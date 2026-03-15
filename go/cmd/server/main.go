@@ -65,6 +65,8 @@ type session struct {
 	id        string
 	user      string
 	host      string
+	runas     string
+	cwd       string
 	command   string
 	startTime time.Time
 	writer    *iolog.Writer
@@ -163,8 +165,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("open session %s: %v", start.SessionID, err)
 				return
 			}
-			log.Printf("[%s] start user=%s host=%s cmd=%s dir=%s",
-				sess.id, sess.user, sess.host, sess.command, sess.writer.Dir())
+			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s dir=%s",
+				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
+				sess.command, start.ResolvedCommand, sess.cwd, sess.writer.Dir())
 
 		case protocol.MsgChunk:
 			if sess == nil {
@@ -237,13 +240,23 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 
 	startTime := time.Unix(start.Ts, 0)
 
+	runasUser := start.RunasUser
+	if runasUser == "" {
+		runasUser = "root"
+	}
+	cwd := start.Cwd
+	if cwd == "" {
+		cwd = "/"
+	}
+
 	w, err := iolog.NewWriter(
 		srv.logDir,
 		user,
 		host,
-		"root",        // runas — always root for now
-		"unknown",     // tty — not yet sent by plugin
+		runasUser,
+		"unknown", // tty — not yet sent by plugin
 		start.Command,
+		cwd,
 		startTime,
 	)
 	if err != nil {
@@ -254,6 +267,8 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 		id:        start.SessionID,
 		user:      start.User,
 		host:      start.Host,
+		runas:     runasUser,
+		cwd:       cwd,
 		command:   start.Command,
 		startTime: startTime,
 		writer:    w,

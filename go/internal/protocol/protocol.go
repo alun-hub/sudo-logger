@@ -62,6 +62,14 @@ type SessionStart struct {
 	Command   string `json:"command"`
 	Ts        int64  `json:"ts"`  // unix seconds
 	Pid       int    `json:"pid"` // sudo process PID — used by the shipper for cgroup setup
+	// Extended metadata — populated by plugin v1.7.0+.
+	// Older clients omit these fields; receivers must tolerate zero values.
+	ResolvedCommand string `json:"resolved_command,omitempty"` // full binary path from command_info[]
+	RunasUser       string `json:"runas_user,omitempty"`       // target user (-u), default "root"
+	RunasUID        int    `json:"runas_uid"`                  // numeric UID from command_info[]
+	RunasGID        int    `json:"runas_gid"`                  // numeric GID from command_info[]
+	Cwd             string `json:"cwd,omitempty"`              // working directory from command_info[]
+	Flags           string `json:"flags,omitempty"`            // set sudo flags: login_shell, preserve_env, implied_shell
 }
 
 // Chunk is a decoded CHUNK message.

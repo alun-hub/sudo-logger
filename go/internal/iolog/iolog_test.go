@@ -14,7 +14,7 @@ func newTestWriter(t *testing.T) (*iolog.Writer, string) {
 	t.Helper()
 	dir := t.TempDir()
 	start := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	w, err := iolog.NewWriter(dir, "alice", "host1", "root", "/dev/pts/0", "/bin/bash", start)
+	w, err := iolog.NewWriter(dir, "alice", "host1", "root", "/dev/pts/0", "/bin/bash", "/home/alice", start)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestClose(t *testing.T) {
 func TestCommandNewlineStripping(t *testing.T) {
 	dir := t.TempDir()
 	start := time.Now()
-	w, err := iolog.NewWriter(dir, "bob", "host2", "root", "unknown", "evil\ninjected", start)
+	w, err := iolog.NewWriter(dir, "bob", "host2", "root", "unknown", "evil\ninjected", "/tmp", start)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestPathConfinement(t *testing.T) {
 	// Attempting to escape via a crafted user name is prevented by the server's
 	// sanitizeName check, but iolog itself should also be safe with filepath.Join.
 	// Test with a normal nested path to confirm confinement logic works.
-	_, err := iolog.NewWriter(dir, "validuser", "host3", "root", "unknown", "cmd", start)
+	_, err := iolog.NewWriter(dir, "validuser", "host3", "root", "unknown", "cmd", "/", start)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

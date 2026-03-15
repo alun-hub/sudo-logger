@@ -40,6 +40,7 @@ type SessionInfo struct {
 	Runas     string  `json:"runas"`
 	TTY       string  `json:"tty"`
 	Command   string  `json:"command"`
+	Cwd       string  `json:"cwd"`
 	StartTime int64   `json:"start_time"` // unix seconds
 	Duration  float64 `json:"duration"`   // seconds
 }
@@ -299,6 +300,7 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 	user := parts[1]
 	runas := parts[2]
 	tty := parts[4]
+	cwd := lines[1]
 	command := lines[2]
 
 	// Extract host from session directory name "host_YYYYMMDD-HHMMSS".
@@ -316,6 +318,7 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 		Runas:     runas,
 		TTY:       tty,
 		Command:   command,
+		Cwd:       cwd,
 		StartTime: ts,
 		Duration:  calcDuration(filepath.Join(sessDir, "timing")),
 	}, nil

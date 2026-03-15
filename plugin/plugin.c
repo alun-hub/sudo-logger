@@ -353,6 +353,28 @@ static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
 /* ---------- helpers ---------- */
 
 /*
+ * json_escape_into — writes a JSON-escaped copy of src into buf[0..bufsz-1].
+ * Result is always NUL-terminated.
+ */
+static void json_escape_into(char *buf, size_t bufsz, const char *src)
+{
+    size_t pos = 0;
+    for (const char *p = src; *p && pos + 2 < bufsz; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '\\' || c == '"') {
+            buf[pos++] = '\\';
+            buf[pos++] = (char)c;
+        } else if (c < 0x20) {
+            if (pos + 6 < bufsz)
+                pos += (size_t)snprintf(buf + pos, bufsz - pos, "\\u%04x", c);
+        } else {
+            buf[pos++] = (char)c;
+        }
+    }
+    if (pos < bufsz) buf[pos] = '\0';
+}
+
+/*
  * build_cmdline_json — writes a JSON-safe, space-joined argv string into buf.
  *
  * Characters that are illegal inside a JSON string (backslash, double-quote,
@@ -420,7 +442,7 @@ static int plugin_open(unsigned int        version,
                        char * const        plugin_options[],
                        const char        **errstr)
 {
-    (void)version; (void)conversation; (void)settings; (void)command_info;
+    (void)version; (void)conversation;
     (void)user_env; (void)plugin_options;
 
     g_printf  = sudo_plugin_printf;
@@ -438,6 +460,50 @@ static int plugin_open(unsigned int        version,
         else if (strncmp(user_info[i], "host=", 5) == 0)
             host = user_info[i] + 5;
     }
+
+    /* ── Extract metadata from command_info[] ─────────────────────────── */
+    const char *raw_resolved = "";
+    const char *raw_cwd      = "/";
+    int         runas_uid    = 0;
+    int         runas_gid    = 0;
+    for (int i = 0; command_info[i] != NULL; i++) {
+        if      (strncmp(command_info[i], "command=",   8) == 0)
+            raw_resolved = command_info[i] + 8;
+        else if (strncmp(command_info[i], "cwd=",       4) == 0)
+            raw_cwd = command_info[i] + 4;
+        else if (strncmp(command_info[i], "runas_uid=", 10) == 0)
+            runas_uid = atoi(command_info[i] + 10);
+        else if (strncmp(command_info[i], "runas_gid=", 10) == 0)
+            runas_gid = atoi(command_info[i] + 10);
+    }
+
+    /* ── Extract metadata from settings[] ───────────────────────────────
+     * runas_user is only present when -u was given; defaults to "root".
+     * Boolean flags are accumulated into a comma-separated string.        */
+    const char *runas_user = "root";
+    char        flags[128] = "";
+    for (int i = 0; settings[i] != NULL; i++) {
+        if      (strncmp(settings[i], "runas_user=",  11) == 0)
+            runas_user = settings[i] + 11;
+        else if (strcmp(settings[i],  "login_shell=true")          == 0)
+            strncat(flags, "login_shell,",   sizeof(flags) - strlen(flags) - 1);
+        else if (strcmp(settings[i],  "preserve_environment=true") == 0)
+            strncat(flags, "preserve_env,",  sizeof(flags) - strlen(flags) - 1);
+        else if (strcmp(settings[i],  "implied_shell=true")        == 0)
+            strncat(flags, "implied_shell,", sizeof(flags) - strlen(flags) - 1);
+    }
+    /* Strip trailing comma */
+    size_t flen = strlen(flags);
+    if (flen > 0 && flags[flen - 1] == ',')
+        flags[flen - 1] = '\0';
+
+    /* JSON-escape fields that may contain backslashes, quotes, or spaces */
+    char resolved_j[512];
+    char cwd_j[512];
+    char runas_user_j[128];
+    json_escape_into(resolved_j,   sizeof(resolved_j),   raw_resolved);
+    json_escape_into(cwd_j,        sizeof(cwd_j),        raw_cwd);
+    json_escape_into(runas_user_j, sizeof(runas_user_j), runas_user);
 
     char cmd[256];
     if (argc > 0)
@@ -472,11 +538,18 @@ static int plugin_open(unsigned int        version,
     setsockopt(g_shipper_fd, SOL_SOCKET, SO_RCVTIMEO,
                &rcv_timeout, sizeof(rcv_timeout));
 
-    char payload[512];
+    char payload[2048];
     int plen = snprintf(payload, sizeof(payload),
         "{\"session_id\":\"%s\",\"user\":\"%s\",\"host\":\"%s\","
-        "\"command\":\"%s\",\"ts\":%lld,\"pid\":%d}",
+        "\"command\":\"%s\","
+        "\"resolved_command\":\"%s\",\"runas_user\":\"%s\","
+        "\"runas_uid\":%d,\"runas_gid\":%d,"
+        "\"cwd\":\"%s\",\"flags\":\"%s\","
+        "\"ts\":%lld,\"pid\":%d}",
         g_session_id, user, host, cmd,
+        resolved_j, runas_user_j,
+        runas_uid, runas_gid,
+        cwd_j, flags,
         (long long)now_sec(), (int)getpid());
 
     /* snprintf returns the number of bytes that *would* have been written,

@@ -48,8 +48,9 @@ type Writer struct {
 //   runas     - the user sudo ran as (typically "root")
 //   tty       - terminal name (e.g. "/dev/pts/0") or "unknown"
 //   command   - full command path and arguments
+//   cwd       - working directory at the time sudo was invoked
 //   startTime - session start time
-func NewWriter(baseDir, user, host, runas, tty, command string, startTime time.Time) (*Writer, error) {
+func NewWriter(baseDir, user, host, runas, tty, command, cwd string, startTime time.Time) (*Writer, error) {
 	ts := startTime.UTC().Format("20060102-150405")
 	dir := filepath.Join(baseDir, user, fmt.Sprintf("%s_%s", host, ts))
 
@@ -81,8 +82,12 @@ func NewWriter(baseDir, user, host, runas, tty, command string, startTime time.T
 		return nil, err
 	}
 	safeCmd := strings.NewReplacer("\n", " ", "\r", " ").Replace(command)
-	fmt.Fprintf(logF, "%d:%s:%s::%s\n/\n%s\n",
-		startTime.Unix(), user, runas, tty, safeCmd)
+	safeCwd := strings.NewReplacer("\n", " ", "\r", " ").Replace(cwd)
+	if safeCwd == "" {
+		safeCwd = "/"
+	}
+	fmt.Fprintf(logF, "%d:%s:%s::%s\n%s\n%s\n",
+		startTime.Unix(), user, runas, tty, safeCwd, safeCmd)
 	logF.Close()
 
 	ttyoutF, err := os.Create(filepath.Join(dir, "ttyout"))
