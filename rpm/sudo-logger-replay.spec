@@ -1,6 +1,6 @@
 Name:           sudo-logger-replay
 Version:        1.7.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
 License:        MIT
@@ -53,6 +53,9 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.7.0-6
+- feat: light/dark mode toggle in topbar; preference saved in localStorage
+
 * Sun Mar 15 2026 sudo-logger 1.7.0-5
 - perf: in-memory session index with 30s TTL eliminates per-request directory scan
 - perf: ttyout/ttyin read as streaming chunks (io.ReadFull) instead of full os.ReadFile

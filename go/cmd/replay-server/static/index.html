@@ -29,6 +29,24 @@
       --font:        'JetBrains Mono', 'Fira Code', monospace;
     }
 
+    [data-theme="light"] {
+      --bg:          #f0f2f8;
+      --surface:     #ffffff;
+      --card:        #f7f8fc;
+      --card-hover:  #eef0f8;
+      --card-active: #e4eaff;
+      --border:      #dde0ea;
+      --border-mid:  #c2c6d8;
+      --text:        #1a1d2e;
+      --text-sub:    #5a6080;
+      --text-dim:    #9099b8;
+      --green:       #007a40;
+      --green-dim:   #d8f5e8;
+      --green-glow:  rgba(0, 122, 64, 0.12);
+      --blue:        #1a6fd4;
+      --red:         #c0212c;
+    }
+
     html, body { height: 100%; background: var(--bg); color: var(--text);
       font-family: var(--font); font-size: 13px; line-height: 1.5; overflow: hidden; }
 
@@ -56,6 +74,10 @@
       font-size: 11px; color: var(--text-sub); cursor: pointer; user-select: none;
       margin-left: auto; }
     .autoplay-label input[type=checkbox] { accent-color: var(--green); cursor: pointer; width: 13px; height: 13px; }
+    .theme-btn { background: none; border: 1px solid var(--border); color: var(--text-dim);
+      cursor: pointer; font-size: 13px; padding: 2px 7px; border-radius: 3px;
+      flex-shrink: 0; transition: color 0.12s, border-color 0.12s; line-height: 1.4; }
+    .theme-btn:hover { color: var(--text-sub); border-color: var(--border-mid); }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────────── */
     .sidebar { grid-area: sidebar; display: flex; flex-direction: column;
@@ -87,6 +109,7 @@
       color: var(--text-sub); font-family: var(--font); font-size: 10px;
       padding: 3px 4px; border-radius: 3px; flex: 1; outline: none; min-width: 0;
       color-scheme: dark; }
+    [data-theme="light"] .date-input { color-scheme: light; }
     .date-input:focus { border-color: var(--green); }
     .date-sep { color: var(--text-dim); font-size: 10px; flex-shrink: 0; }
     .date-clear { background: none; border: none; color: var(--text-dim);
@@ -129,6 +152,9 @@
 
     mark { background: rgba(0,232,122,0.18); color: var(--green);
       border-radius: 2px; padding: 0 1px; font-style: normal; }
+    [data-theme="light"] mark { background: rgba(0, 122, 64, 0.14); }
+
+    [data-theme="light"] .terminal-wrap { background: #09090f; }
 
     .load-more { flex-shrink: 0; display: none; width: 100%; background: none;
       border: none; border-top: 1px solid var(--border); padding: 9px;
@@ -213,6 +239,7 @@
     <div class="logo"><span class="logo-icon">◈</span> sudo-replay</div>
     <span class="badge" id="session-count">loading…</span>
     <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
+    <button class="theme-btn" id="theme-toggle" title="Toggle light / dark mode">☀</button>
   </header>
 
   <aside class="sidebar">
@@ -757,6 +784,23 @@ elAutoplayToggle.addEventListener('change', () => {
   autoplay = elAutoplayToggle.checked;
   localStorage.setItem('sudo-replay-autoplay', autoplay);
 });
+
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+
+(function () {
+  const btn = document.getElementById('theme-toggle');
+  const apply = theme => {
+    document.documentElement.dataset.theme = theme;
+    btn.textContent = theme === 'light' ? '🌙' : '☀';
+    btn.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+  };
+  apply(localStorage.getItem('sudo-replay-theme') === 'light' ? 'light' : 'dark');
+  btn.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    localStorage.setItem('sudo-replay-theme', next);
+    apply(next);
+  });
+})();
 
 term.writeln('\x1b[2;37m  sudo-replay  —  select a session from the sidebar\x1b[0m');
 term.writeln('');
