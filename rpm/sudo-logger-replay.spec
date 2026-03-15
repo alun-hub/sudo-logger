@@ -1,6 +1,6 @@
 Name:           sudo-logger-replay
 Version:        1.7.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
 License:        MIT
@@ -53,6 +53,9 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.7.0-8
+- feat: light mode uses One Light colour scheme (UI + terminal)
+
 * Sun Mar 15 2026 sudo-logger 1.7.0-7
 - feat: terminal also switches theme (light/dark) when toggling mode
 
