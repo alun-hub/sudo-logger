@@ -1,6 +1,6 @@
 Name:           sudo-logger-replay
 Version:        1.7.0
-Release:        1%{?dist}
+Release:        5%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
 License:        MIT
@@ -53,6 +53,19 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.7.0-5
+- perf: in-memory session index with 30s TTL eliminates per-request directory scan
+- perf: ttyout/ttyin read as streaming chunks (io.ReadFull) instead of full os.ReadFile
+
+* Sun Mar 15 2026 sudo-logger 1.7.0-4
+- fix: call fitAddon.fit() after term.reset() so terminal renders on first card select
+
+* Sun Mar 15 2026 sudo-logger 1.7.0-3
+- fix: race condition — stale fetch response no longer overwrites active session
+
+* Sun Mar 15 2026 sudo-logger 1.7.0-2
+- fix: revert date range inputs to type=date (native calendar picker)
+
 * Sun Mar 15 2026 sudo-logger 1.7.0-1
 - feat: /api/sessions now returns cwd field per session
 

@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.7.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -97,6 +97,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.7.0-2
+- security: add SOCK_CLOEXEC to shipper socket so child process cannot inherit it
+- security: increase session ID buffer 128→320 bytes to prevent random suffix truncation
+- fix: refresh_ack_cache drains extra socket bytes to prevent protocol desync
+- cleanup: remove redundant serverBuf.Flush() after WriteMessage in shipper
+
 * Sun Mar 15 2026 sudo-logger 1.7.0-1
 - feat: SESSION_START now includes resolved_command (full binary path),
   runas_user, runas_uid, runas_gid, cwd, and sudo flags (login_shell,

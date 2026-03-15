@@ -85,9 +85,9 @@
       border-bottom: 1px solid var(--border); flex-shrink: 0; }
     .date-input { background: var(--card); border: 1px solid var(--border);
       color: var(--text-sub); font-family: var(--font); font-size: 10px;
-      padding: 3px 4px; border-radius: 3px; flex: 1; outline: none; min-width: 0; }
+      padding: 3px 4px; border-radius: 3px; flex: 1; outline: none; min-width: 0;
+      color-scheme: dark; }
     .date-input:focus { border-color: var(--green); }
-    .date-input.invalid { border-color: var(--red); }
     .date-sep { color: var(--text-dim); font-size: 10px; flex-shrink: 0; }
     .date-clear { background: none; border: none; color: var(--text-dim);
       cursor: pointer; font-size: 13px; padding: 0 2px; flex-shrink: 0;
@@ -226,9 +226,9 @@
       <button class="sort-btn" data-sort="duration">Dur</button>
     </div>
     <div class="date-range">
-      <input type="text" id="date-from" class="date-input" placeholder="yyyy-mm-dd" maxlength="10" title="From date">
+      <input type="date" id="date-from" class="date-input" title="From date">
       <span class="date-sep">→</span>
-      <input type="text" id="date-to" class="date-input" placeholder="yyyy-mm-dd" maxlength="10" title="To date">
+      <input type="date" id="date-to" class="date-input" title="To date">
       <button class="date-clear" id="date-clear" title="Clear date filter">✕</button>
     </div>
     <div class="session-list" id="session-list">
@@ -285,7 +285,7 @@ const term = new Terminal({
 const fitAddon = new FitAddon.FitAddon();
 term.loadAddon(fitAddon);
 term.open(document.getElementById('terminal'));
-fitAddon.fit();
+requestAnimationFrame(() => fitAddon.fit());
 window.addEventListener('resize', () => fitAddon.fit());
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -483,28 +483,10 @@ document.querySelectorAll('.sort-btn').forEach(btn => {
 
 // ── Date range ────────────────────────────────────────────────────────────────
 
-const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-
-function applyDateInput(el, key) {
-  const v = el.value.trim();
-  if (v === '') {
-    el.classList.remove('invalid');
-    fetchState[key] = '';
-    fetchSessions(true);
-  } else if (dateRe.test(v) && !isNaN(new Date(v).getTime())) {
-    el.classList.remove('invalid');
-    fetchState[key] = v;
-    fetchSessions(true);
-  } else {
-    el.classList.add('invalid');
-  }
-}
-
-elDateFrom.addEventListener('change', () => applyDateInput(elDateFrom, 'from'));
-elDateTo.addEventListener('change',   () => applyDateInput(elDateTo,   'to'));
+elDateFrom.addEventListener('change', () => { fetchState.from = elDateFrom.value; fetchSessions(true); });
+elDateTo.addEventListener('change',   () => { fetchState.to   = elDateTo.value;   fetchSessions(true); });
 elDateClear.addEventListener('click', () => {
   elDateFrom.value = ''; elDateTo.value = '';
-  elDateFrom.classList.remove('invalid'); elDateTo.classList.remove('invalid');
   fetchState.from = ''; fetchState.to = '';
   fetchSessions(true);
 });
@@ -548,16 +530,20 @@ async function selectSession(tsid, initialSeek = 0) {
   try {
     const res = await fetch(`/api/session/events?tsid=${encodeURIComponent(tsid)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    events = await res.json();
+    const data = await res.json();
+    if (currentTSID !== tsid) return; // another session was selected while fetching
+    events = data;
     totalDuration = sess ? sess.duration
       : (events.length ? events[events.length-1].t : 0);
     elTimeTotal.textContent = fmt(totalDuration);
     term.reset();
+    fitAddon.fit();
     setControlsEnabled(true);
     resetPlayer();
     if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
     else if (autoplay) play();
   } catch (err) {
+    if (currentTSID !== tsid) return;
     term.reset();
     term.writeln(`\x1b[31mFailed to load: ${err.message}\x1b[0m`);
   }

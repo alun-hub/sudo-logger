@@ -452,7 +452,6 @@ func handlePluginConn(pluginConn net.Conn) {
 
 		case protocol.MsgSessionEnd:
 			forward(protocol.MsgSessionEnd, payload)
-			serverBuf.Flush()
 			serverConn.Close()
 			return
 

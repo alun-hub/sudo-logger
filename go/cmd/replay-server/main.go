@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -22,6 +23,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 //go:embed static
@@ -60,6 +63,95 @@ type SessionList struct {
 	Total    int           `json:"total"`
 }
 
+// sessionIndex is an in-memory cache of all parsed session metadata.
+// It is rebuilt from disk at most once per indexTTL to avoid a full directory
+// scan on every /api/sessions request.
+type sessionIndex struct {
+	mu       sync.RWMutex
+	sessions []SessionInfo
+	built    bool
+	lastScan time.Time
+}
+
+const indexTTL = 30 * time.Second
+
+var index = &sessionIndex{}
+
+// get returns a snapshot of all sessions, rebuilding the index if stale.
+func (idx *sessionIndex) get(logDir string) ([]SessionInfo, error) {
+	idx.mu.RLock()
+	if idx.built && time.Since(idx.lastScan) < indexTTL {
+		snap := make([]SessionInfo, len(idx.sessions))
+		copy(snap, idx.sessions)
+		idx.mu.RUnlock()
+		return snap, nil
+	}
+	idx.mu.RUnlock()
+	return idx.rebuild(logDir)
+}
+
+// rebuild scans the log directory and replaces the cached session list.
+// Double-checked locking prevents redundant scans when multiple requests
+// arrive simultaneously after cache expiry.
+func (idx *sessionIndex) rebuild(logDir string) ([]SessionInfo, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	// Another goroutine may have rebuilt while we waited for the write lock.
+	if idx.built && time.Since(idx.lastScan) < indexTTL {
+		snap := make([]SessionInfo, len(idx.sessions))
+		copy(snap, idx.sessions)
+		return snap, nil
+	}
+	sessions, err := scanAllSessions(logDir)
+	if err != nil {
+		return nil, err
+	}
+	idx.sessions = sessions
+	idx.built = true
+	idx.lastScan = time.Now()
+	log.Printf("session index rebuilt: %d sessions", len(sessions))
+	snap := make([]SessionInfo, len(sessions))
+	copy(snap, sessions)
+	return snap, nil
+}
+
+// scanAllSessions walks the two-level logDir/<user>/<session> hierarchy and
+// returns metadata for every parseable session directory.
+func scanAllSessions(logDir string) ([]SessionInfo, error) {
+	sessions := make([]SessionInfo, 0)
+	userEntries, err := os.ReadDir(logDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return sessions, nil
+		}
+		return nil, fmt.Errorf("read logdir: %w", err)
+	}
+	for _, userEntry := range userEntries {
+		if !userEntry.IsDir() {
+			continue
+		}
+		userDir := filepath.Join(logDir, userEntry.Name())
+		sessEntries, err := os.ReadDir(userDir)
+		if err != nil {
+			continue
+		}
+		for _, sessEntry := range sessEntries {
+			if !sessEntry.IsDir() {
+				continue
+			}
+			tsid := userEntry.Name() + "/" + sessEntry.Name()
+			sessDir := filepath.Join(userDir, sessEntry.Name())
+			info, err := parseSession(sessDir, tsid)
+			if err != nil {
+				log.Printf("parse session %s: %v", sessDir, err)
+				continue
+			}
+			sessions = append(sessions, *info)
+		}
+	}
+	return sessions, nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -72,6 +164,13 @@ func main() {
 		log.Fatalf("embed static: %v", err)
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+
+	// Pre-warm the session index so the first request is served from cache.
+	go func() {
+		if _, err := index.rebuild(*flagLogDir); err != nil {
+			log.Printf("initial session index build: %v", err)
+		}
+	}()
 
 	log.Printf("sudo-replay-server listening on %s, logdir=%s", *flagListen, *flagLogDir)
 	log.Fatal(http.ListenAndServe(*flagListen, mux))
@@ -173,50 +272,25 @@ func validateTSID(tsid string) error {
 	return nil
 }
 
-// listSessions scans the log directory, applies filter/sort/pagination, and
-// returns a SessionList with the requested page and the unfiltered total count.
+// listSessions filters, sorts and paginates sessions from the in-memory index.
 func listSessions(logDir, q, sortBy, order string, from, to int64, limit, offset int) (*SessionList, error) {
-	sessions := make([]SessionInfo, 0)
-
-	userEntries, err := os.ReadDir(logDir)
+	all, err := index.get(logDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return &SessionList{Sessions: sessions, Total: 0}, nil
-		}
-		return nil, fmt.Errorf("read logdir: %w", err)
+		return nil, err
 	}
 
-	for _, userEntry := range userEntries {
-		if !userEntry.IsDir() {
+	sessions := make([]SessionInfo, 0, len(all))
+	for _, s := range all {
+		if from > 0 && s.StartTime < from {
 			continue
 		}
-		userDir := filepath.Join(logDir, userEntry.Name())
-		sessEntries, err := os.ReadDir(userDir)
-		if err != nil {
+		if to > 0 && s.StartTime > to {
 			continue
 		}
-		for _, sessEntry := range sessEntries {
-			if !sessEntry.IsDir() {
-				continue
-			}
-			tsid := userEntry.Name() + "/" + sessEntry.Name()
-			sessDir := filepath.Join(userDir, sessEntry.Name())
-			info, err := parseSession(sessDir, tsid)
-			if err != nil {
-				log.Printf("parse session %s: %v", sessDir, err)
-				continue
-			}
-			if from > 0 && info.StartTime < from {
-				continue
-			}
-			if to > 0 && info.StartTime > to {
-				continue
-			}
-			if q != "" && !matchesAll(*info, q) {
-				continue
-			}
-			sessions = append(sessions, *info)
+		if q != "" && !matchesAll(s, q) {
+			continue
 		}
+		sessions = append(sessions, s)
 	}
 
 	switch sortBy {
@@ -359,8 +433,9 @@ func calcDuration(timingPath string) float64 {
 	return total
 }
 
-// readEvents parses the timing file and reads the corresponding raw bytes from
-// the ttyout (EventTtyOut=4) and ttyin (EventTtyIn=3) data files.
+// readEvents parses the timing file and streams the corresponding bytes from
+// ttyout (EventTtyOut=4) and ttyin (EventTtyIn=3) — only the bytes referenced
+// by each timing entry are read, avoiding loading entire data files into memory.
 //
 // The timing file format (one entry per line):
 //
@@ -371,12 +446,17 @@ func readEvents(sessDir string) ([]PlaybackEvent, error) {
 		return nil, fmt.Errorf("read timing: %w", err)
 	}
 
-	ttyout, _ := os.ReadFile(filepath.Join(sessDir, "ttyout"))
-	ttyin, _ := os.ReadFile(filepath.Join(sessDir, "ttyin"))
+	outF, _ := os.Open(filepath.Join(sessDir, "ttyout"))
+	if outF != nil {
+		defer outF.Close()
+	}
+	inF, _ := os.Open(filepath.Join(sessDir, "ttyin"))
+	if inF != nil {
+		defer inF.Close()
+	}
 
 	events := make([]PlaybackEvent, 0)
 	var cumTime float64
-	var outOffset, inOffset int
 
 	for _, line := range strings.Split(string(timingData), "\n") {
 		fields := strings.Fields(line)
@@ -388,31 +468,32 @@ func readEvents(sessDir string) ([]PlaybackEvent, error) {
 		nbytes, _ := strconv.Atoi(fields[2])
 		cumTime += delta
 
-		var chunk []byte
-		switch eventType {
-		case 4: // TtyOut — what the user sees
-			end := outOffset + nbytes
-			if end <= len(ttyout) {
-				chunk = make([]byte, nbytes)
-				copy(chunk, ttyout[outOffset:end])
-				outOffset = end
-			}
-		case 3: // TtyIn — what the user typed
-			end := inOffset + nbytes
-			if end <= len(ttyin) {
-				chunk = make([]byte, nbytes)
-				copy(chunk, ttyin[inOffset:end])
-				inOffset = end
-			}
+		if nbytes <= 0 {
+			continue
 		}
 
-		if len(chunk) > 0 {
-			events = append(events, PlaybackEvent{
-				T:    cumTime,
-				Type: eventType,
-				Data: base64.StdEncoding.EncodeToString(chunk),
-			})
+		var f *os.File
+		switch eventType {
+		case 4: // TtyOut — what the user sees
+			f = outF
+		case 3: // TtyIn — what the user typed
+			f = inF
+		default:
+			continue
 		}
+		if f == nil {
+			continue
+		}
+
+		chunk := make([]byte, nbytes)
+		if _, err := io.ReadFull(f, chunk); err != nil {
+			continue
+		}
+		events = append(events, PlaybackEvent{
+			T:    cumTime,
+			Type: eventType,
+			Data: base64.StdEncoding.EncodeToString(chunk),
+		})
 	}
 
 	return events, nil

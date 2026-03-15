@@ -76,7 +76,7 @@
 static sudo_printf_t g_printf;
 static int           g_shipper_fd = -1;
 static int           g_tty_fd     = -1;
-static char          g_session_id[128];
+static char          g_session_id[320];
 static uint64_t      g_seq        = 0;
 
 /* ACK cache */
@@ -149,7 +149,7 @@ static int read_exact(int fd, void *buf, size_t n)
  */
 static int connect_shipper(void)
 {
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0)
         return -1;
 
@@ -197,13 +197,26 @@ static void refresh_ack_cache(void)
     uint32_t plen;
     memcpy(&plen, hdr + 1, 4);
     plen = be32toh(plen);
-    if (plen < 16)
+    if (plen < 16) {
+        /* Drain undersized payload to keep the socket in sync. */
+        uint8_t drain[16];
+        if (plen > 0)
+            read_exact(g_shipper_fd, drain, plen);
         return;
+    }
 
     /* Payload: [8 bytes last_ack_ts_ns BE][8 bytes last_seq BE] */
     uint8_t payload[16];
     if (read_exact(g_shipper_fd, payload, 16) < 0)
         return;
+    /* Drain any extra bytes beyond the 16 we consumed. */
+    for (uint32_t rem = plen - 16; rem > 0; ) {
+        uint8_t discard[64];
+        uint32_t n = rem < (uint32_t)sizeof(discard) ? rem : (uint32_t)sizeof(discard);
+        if (read_exact(g_shipper_fd, discard, (size_t)n) < 0)
+            return;
+        rem -= n;
+    }
 
     int64_t last_ack_ts_ns;
     memcpy(&last_ack_ts_ns, payload, 8);
