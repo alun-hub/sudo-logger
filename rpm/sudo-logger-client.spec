@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
-Version:        1.6.0
-Release:        2%{?dist}
+Version:        1.7.0
+Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -97,6 +97,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.7.0-1
+- feat: SESSION_START now includes resolved_command (full binary path),
+  runas_user, runas_uid, runas_gid, cwd, and sudo flags (login_shell,
+  preserve_env, implied_shell) — enables accurate replay metadata
+
 * Sun Mar 15 2026 sudo-logger 1.6.0-2
 - add man pages: sudo-shipper(8), sudo_logger_plugin(8)
 

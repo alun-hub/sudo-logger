@@ -1,6 +1,6 @@
 Name:           sudo-logger-server
-Version:        1.6.0
-Release:        3%{?dist}
+Version:        1.7.0
+Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
 License:        MIT
@@ -93,6 +93,11 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.7.0-1
+- feat: iolog log file now records actual runas_user and cwd from client
+  (previously hardcoded to "root" and "/")
+- feat: server log line includes resolved_command, runas uid, and cwd
+
 * Sun Mar 15 2026 sudo-logger 1.6.0-3
 - add man page: sudo-logserver(8)
 

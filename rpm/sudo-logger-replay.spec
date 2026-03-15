@@ -1,6 +1,6 @@
 Name:           sudo-logger-replay
-Version:        1.6.0
-Release:        2%{?dist}
+Version:        1.7.0
+Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
 License:        MIT
@@ -53,6 +53,9 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Mar 15 2026 sudo-logger 1.7.0-1
+- feat: /api/sessions now returns cwd field per session
+
 * Sun Mar 15 2026 sudo-logger 1.6.0-2
 - add man page: sudo-replay-server(8)
 
