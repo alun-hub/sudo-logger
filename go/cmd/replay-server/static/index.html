@@ -154,8 +154,6 @@
       border-radius: 2px; padding: 0 1px; font-style: normal; }
     [data-theme="light"] mark { background: rgba(0, 122, 64, 0.14); }
 
-    [data-theme="light"] .terminal-wrap { background: #09090f; }
-
     .load-more { flex-shrink: 0; display: none; width: 100%; background: none;
       border: none; border-top: 1px solid var(--border); padding: 9px;
       color: var(--text-sub); font-family: var(--font); font-size: 11px;
@@ -295,8 +293,8 @@
 
 // ── Terminal ──────────────────────────────────────────────────────────────────
 
-const term = new Terminal({
-  theme: {
+const termThemes = {
+  dark: {
     background: '#09090f', foreground: '#d4daf0',
     cursor: '#00e87a', cursorAccent: '#09090f',
     selectionBackground: 'rgba(77,168,255,0.25)',
@@ -306,6 +304,20 @@ const term = new Terminal({
     brightYellow:'#ffe080',brightBlue:'#80c4ff',brightMagenta:'#d9aaff',
     brightCyan:'#80e8ff',brightWhite:'#eef0ff',
   },
+  light: {
+    background: '#f7f8fc', foreground: '#1a1d2e',
+    cursor: '#007a40', cursorAccent: '#f7f8fc',
+    selectionBackground: 'rgba(26,111,212,0.2)',
+    black:'#1a1d2e',red:'#c0212c',green:'#007a40',yellow:'#8a6500',
+    blue:'#1a6fd4',magenta:'#7c3aad',cyan:'#0e7490',white:'#e8eaf2',
+    brightBlack:'#5a6080',brightRed:'#e02d38',brightGreen:'#009950',
+    brightYellow:'#b08000',brightBlue:'#2980e8',brightMagenta:'#9d50d4',
+    brightCyan:'#0891b2',brightWhite:'#ffffff',
+  },
+};
+
+const term = new Terminal({
+  theme: termThemes.dark,
   fontFamily: "'JetBrains Mono','Fira Code','Cascadia Code',monospace",
   fontSize: 13, lineHeight: 1.3, convertEol: true, scrollback: 5000,
 });
@@ -793,6 +805,7 @@ elAutoplayToggle.addEventListener('change', () => {
     document.documentElement.dataset.theme = theme;
     btn.textContent = theme === 'light' ? '🌙' : '☀';
     btn.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+    term.options.theme = termThemes[theme];
   };
   apply(localStorage.getItem('sudo-replay-theme') === 'light' ? 'light' : 'dark');
   btn.addEventListener('click', () => {
