@@ -144,12 +144,16 @@ A TLS server running on a dedicated machine. For each client connection:
 | **All I/O captured** | stdin, stdout, stderr, tty input and tty output are all recorded |
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
+| **SELinux domain confinement** | `sudo-shipper` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the shipper process can access |
+| **Incomplete session detection** | If the shipper is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session |
 
 ---
 
 ## Features
 
 - Full session replay with `sudoreplay` (native sudo iolog format)
+- Incomplete session detection — replay UI flags sessions where the shipper was killed mid-recording
+- SELinux policy for `sudo-shipper` (enforcing mode, ships in the `selinux/` directory)
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
 - Freeze within ~1 s of network loss; automatic recovery when network returns
@@ -178,10 +182,12 @@ A TLS server running on a dedicated machine. For each client connection:
   `setup.sh` generates one client certificate shared across all machines.
   For stronger isolation, generate per-machine client certificates.
 
-- **Root on the client machine is not constrained**: the shipper runs as
-  root and can be killed, or the plugin .so can be removed from
-  `/etc/sudo.conf`. This system is designed to deter and audit, not to
-  prevent a fully compromised root from disabling logging.
+- **Root on the client machine is not fully constrained**: the shipper runs as
+  root and can be killed by a user with a `sudo bash` shell (`unconfined_t`
+  in Fedora's targeted SELinux policy). `Restart=always` brings the shipper
+  back within 2 seconds, and a killed-mid-session shipper leaves an
+  `INCOMPLETE` marker in the server log. This system is designed to deter and
+  audit, not to prevent a fully compromised root from disabling logging.
 
 - **No log rotation**: `/var/log/sudoreplay/` grows without bound. A sample
   logrotate configuration is provided in `sudo-logserver.logrotate` — install
