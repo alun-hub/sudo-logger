@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.7.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -97,6 +97,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Mar 16 2026 sudo-logger 1.7.0-3
+- hardening: add RefuseManualStop=yes to sudo-shipper.service
+- hardening: add PrivateDevices, ProtectKernelTunables, ProtectKernelModules,
+  ProtectControlGroups, LockPersonality, RestrictNamespaces, RestrictSUIDSGID
+
 * Sun Mar 15 2026 sudo-logger 1.7.0-2
 - security: add SOCK_CLOEXEC to shipper socket so child process cannot inherit it
 - security: increase session ID buffer 128→320 bytes to prevent random suffix truncation
