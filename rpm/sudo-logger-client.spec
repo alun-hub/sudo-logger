@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
-Version:        1.8.0
-Release:        2%{?dist}
+Version:        1.9.0
+Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -120,6 +120,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Mar 16 2026 sudo-logger 1.9.0-1
+- security: plugin terminates active sudo session when shipper socket drops
+  (EPIPE/ECONNRESET/EOF); monitor thread sends SIGTERM to sudo within 150 ms,
+  I/O hooks return 0 immediately — closes the logging gap where an existing
+  session continued unlogged after the shipper was killed
+
 * Mon Mar 16 2026 sudo-logger 1.8.0-2
 - fix: use systemctl kill in %%postun instead of %%systemd_postun_with_restart
   to bypass RefuseManualStop=yes during RPM upgrade

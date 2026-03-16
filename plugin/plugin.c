@@ -71,6 +71,8 @@
     "\033[33m"
 #define BLOCKED_TAIL \
     "\033[0m\r\n"
+#define TERMINATE_MSG \
+    "\r\n\033[41;97;1m[ SUDO-LOGGER: shipper lost — session terminated ]\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
 static sudo_printf_t g_printf;
@@ -85,6 +87,7 @@ static time_t g_last_ack_query = 0;  /* when we last queried the shipper */
 
 /* Background monitor thread */
 static _Atomic int    g_monitor_stop  = 0;
+static _Atomic int    g_shipper_dead  = 0;  /* set when socket drops; triggers session termination */
 static int            g_monitor_started = 0;
 static pthread_t      g_monitor_thread;
 static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
@@ -124,9 +127,19 @@ static int send_msg(int fd, uint8_t type, const void *payload, uint32_t plen)
     if (plen > 0) {
         iov[1].iov_base = (void *)payload;
         iov[1].iov_len  = plen;
-        return writev(fd, iov, 2) < 0 ? -1 : 0;
+        if (writev(fd, iov, 2) < 0) {
+            if (errno == EPIPE || errno == ECONNRESET)
+                atomic_store(&g_shipper_dead, 1);
+            return -1;
+        }
+        return 0;
     }
-    return write(fd, hdr, 5) < 0 ? -1 : 0;
+    if (write(fd, hdr, 5) < 0) {
+        if (errno == EPIPE || errno == ECONNRESET)
+            atomic_store(&g_shipper_dead, 1);
+        return -1;
+    }
+    return 0;
 }
 
 /*
@@ -137,8 +150,11 @@ static int read_exact(int fd, void *buf, size_t n)
     size_t got = 0;
     while (got < n) {
         ssize_t r = read(fd, (char *)buf + got, n - got);
-        if (r <= 0)
+        if (r <= 0) {
+            if (r == 0)  /* EOF: peer closed connection */
+                atomic_store(&g_shipper_dead, 1);
             return -1;
+        }
         got += (size_t)r;
     }
     return 0;
@@ -293,6 +309,16 @@ static void *monitor_thread_fn(void *arg)
             break;
 
         int fresh = ack_is_fresh_locked();
+
+        /* Shipper socket dropped — terminate the session immediately.
+         * kill(getpid(), SIGTERM) sends SIGTERM to sudo, which cleans up
+         * and sends SIGHUP to the child (bash), ending the session. */
+        if (atomic_load(&g_shipper_dead)) {
+            if (g_tty_fd >= 0)
+                write(g_tty_fd, TERMINATE_MSG, sizeof(TERMINATE_MSG) - 1);
+            kill(getpid(), SIGTERM);
+            return NULL;
+        }
 
         if (!fresh && !was_frozen) {
             if (g_tty_fd >= 0)
@@ -462,6 +488,7 @@ static int plugin_open(unsigned int        version,
     g_seq     = 0;
     g_last_ack_time  = 0;
     g_last_ack_query = 0;
+    atomic_store(&g_shipper_dead, 0);
 
     g_tty_fd = open("/dev/tty", O_WRONLY | O_NOCTTY | O_CLOEXEC);
 
@@ -671,6 +698,8 @@ static void plugin_close(int exit_status, int error)
 static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
+    if (atomic_load(&g_shipper_dead))
+        return 0;
     ship_chunk(STREAM_TTYIN, buf, len);
     return 1;
 }
@@ -679,6 +708,8 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
+    if (atomic_load(&g_shipper_dead))
+        return 0;
     ship_chunk(STREAM_TTYOUT, buf, len);
     return 1;
 }
@@ -687,6 +718,8 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 static int log_stdin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
+    if (atomic_load(&g_shipper_dead))
+        return 0;
     ship_chunk(STREAM_STDIN, buf, len);
     return 1;
 }
@@ -695,6 +728,8 @@ static int log_stdin(const char *buf, unsigned int len, const char **errstr)
 static int log_stdout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
+    if (atomic_load(&g_shipper_dead))
+        return 0;
     ship_chunk(STREAM_STDOUT, buf, len);
     return 1;
 }
@@ -703,6 +738,8 @@ static int log_stdout(const char *buf, unsigned int len, const char **errstr)
 static int log_stderr(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
+    if (atomic_load(&g_shipper_dead))
+        return 0;
     ship_chunk(STREAM_STDERR, buf, len);
     return 1;
 }
