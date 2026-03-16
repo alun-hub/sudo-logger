@@ -92,6 +92,8 @@ API. Hooks into every sudo session to:
 - Run a background monitor thread that polls ACK state every 150 ms and
   writes freeze/unfreeze banners to `/dev/tty` when ACK state changes
 - Block sudo entirely if the shipper/server is unreachable at startup
+- Terminate the active sudo session if the shipper socket drops mid-session
+  (EPIPE/ECONNRESET/EOF detected by monitor thread → SIGTERM to sudo within 150 ms)
 - Actual process freezing is performed by the shipper via cgroup.freeze (see
   [Freeze mechanism](#freeze-mechanism))
 
@@ -145,6 +147,7 @@ A TLS server running on a dedicated machine. For each client connection:
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-shipper` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the shipper process can access |
+| **Active session terminated if shipper dies** | If the shipper socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the shipper restarts (~2 s). |
 | **Incomplete session detection** | If the shipper is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session |
 
 ---
@@ -152,6 +155,7 @@ A TLS server running on a dedicated machine. For each client connection:
 ## Features
 
 - Full session replay with `sudoreplay` (native sudo iolog format)
+- Active session terminated if shipper is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the shipper was killed mid-recording
 - SELinux policy for `sudo-shipper` (enforcing mode, ships in the `selinux/` directory)
 - Real-time streaming — no local buffering on the client
@@ -184,10 +188,13 @@ A TLS server running on a dedicated machine. For each client connection:
 
 - **Root on the client machine is not fully constrained**: the shipper runs as
   root and can be killed by a user with a `sudo bash` shell (`unconfined_t`
-  in Fedora's targeted SELinux policy). `Restart=always` brings the shipper
-  back within 2 seconds, and a killed-mid-session shipper leaves an
-  `INCOMPLETE` marker in the server log. This system is designed to deter and
-  audit, not to prevent a fully compromised root from disabling logging.
+  in Fedora's targeted SELinux policy). When the shipper dies, the plugin
+  detects the socket drop (EPIPE/ECONNRESET) and terminates the active sudo
+  session within 150 ms — the kill command itself is already in the log.
+  `Restart=always` brings the shipper back within 2 seconds; until then,
+  new sudo sessions are fail-closed. The server also writes an `INCOMPLETE`
+  marker. This system is designed to deter and audit; a fully compromised
+  root at the kernel level is out of scope for any software solution.
 
 - **No log rotation**: `/var/log/sudoreplay/` grows without bound. A sample
   logrotate configuration is provided in `sudo-logserver.logrotate` — install

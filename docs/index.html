@@ -792,6 +792,22 @@ body::after {
           </div>
         </div>
 
+        <div class="sec-card">
+          <div class="sec-icon">⚡</div>
+          <div>
+            <div class="sec-title">Session terminated if shipper is killed</div>
+            <div class="sec-desc">If the shipper socket drops mid-session (EPIPE / ECONNRESET), the plugin sends SIGTERM to sudo within 150 ms. The attacker's shell is terminated — they cannot continue unlogged. The kill command itself is already in the log.</div>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-icon">⚠️</div>
+          <div>
+            <div class="sec-title">Incomplete session detection</div>
+            <div class="sec-desc">If the shipper is killed mid-session, the server writes an <code>INCOMPLETE</code> marker and logs a <code>SECURITY:</code> warning. The replay UI flags the session with a red border and warning badge.</div>
+          </div>
+        </div>
+
         <div class="sec-card full">
           <div class="sec-icon">⌨</div>
           <div>
@@ -858,6 +874,7 @@ body::after {
         <div class="feat"><span class="arr">→</span> GUI app freeze via SIGSTOP (pgid-aware)</div>
         <div class="feat"><span class="arr">→</span> RPM packages with systemd integration</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if shipper killed (&lt;150 ms)</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
