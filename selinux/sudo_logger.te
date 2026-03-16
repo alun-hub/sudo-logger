@@ -32,7 +32,7 @@ allow sudo_shipper_t self:fifo_file rw_fifo_file_perms;
 allow sudo_shipper_t self:unix_stream_socket create_stream_socket_perms;
 allow sudo_shipper_t self:tcp_socket create_stream_socket_perms;
 allow sudo_shipper_t self:process { fork sigchld sigkill sigstop signull signal };
-allow sudo_shipper_t self:capability { kill net_bind_service sys_admin };
+allow sudo_shipper_t self:capability { kill net_bind_service sys_admin sys_ptrace };
 
 # Manage the Unix socket and PID file in /run/sudo-logger/
 manage_dirs_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
@@ -54,9 +54,29 @@ sysnet_dns_name_resolve(sudo_shipper_t)
 # Write to cgroup files for session freeze (Delegate=yes in service unit)
 # sudo-shipper suspends processes by writing to cgroup.freeze
 fs_rw_cgroup_files(sudo_shipper_t)
+# Create and remove per-session sub-cgroups under the delegated subtree.
+# fs_rw_cgroup_files only grants dir { getattr open search }; mkdir/rmdir
+# require write, add_name, remove_name, create, and rmdir on cgroup_t dirs.
+# The kernel also auto-creates cgroup.procs/cgroup.freeze inside the new
+# sub-cgroup, which triggers a file create check attributed to this process.
+require { type cgroup_t; }
+allow sudo_shipper_t cgroup_t:dir { write add_name remove_name create rmdir };
+allow sudo_shipper_t cgroup_t:file { create };
 
-# Send SIGSTOP/SIGCONT to session processes
-allow sudo_shipper_t domain:process { signal sigstop sigcont };
+# Read /proc/<pid> entries for tracked session processes.
+# The shipper polls /proc/<pid>/{cgroup,comm,stat,task/PID/children} to track
+# session processes (bash, GUI apps) for cgroup membership checks and freeze.
+# Processes in a sudo session run under various domains (typically unconfined_t);
+# allow search and getattr on any domain's /proc/<pid> directory.
+allow sudo_shipper_t domain:dir { search getattr };
+allow sudo_shipper_t domain:file { read open getattr };
+# getpgid: used by cgroup tracker to check if a process has its own process
+# group (pgid == pid) before deciding whether SIGSTOP is safe to send.
+allow sudo_shipper_t domain:process { getpgid };
+
+# Send signals (including SIGSTOP/SIGCONT) to session processes.
+# sigcont is not a separate SELinux permission — it is covered by signal.
+allow sudo_shipper_t domain:process { signal sigstop };
 
 # Logging
 logging_send_syslog_msg(sudo_shipper_t)
@@ -65,16 +85,29 @@ logging_send_syslog_msg(sudo_shipper_t)
 kernel_read_system_state(sudo_shipper_t)
 kernel_read_network_state(sudo_shipper_t)
 
+# Read /proc/sys/net/core/somaxconn (Go runtime reads this at startup)
+kernel_read_net_sysctls(sudo_shipper_t)
+
 ########################################
 #
 # sudo_t policy additions
 # (what the sudo process with loaded plugin needs to do)
 #
+# sudo_t is defined in the sudo module of the reference policy.
+# optional_policy() makes these rules conditional on that module being loaded —
+# the build succeeds even if sudo_t is not present in the base policy.
+#
 
-# Allow sudo to read/mmap the plugin .so
-allow sudo_t sudo_logger_plugin_t:file { read open execute map getattr };
+optional_policy(`
+    gen_require(`
+        type sudo_t;
+    ')
 
-# Allow sudo (running plugin) to connect to shipper socket
-allow sudo_t sudo_shipper_var_run_t:dir search;
-allow sudo_t sudo_shipper_var_run_t:sock_file write;
-allow sudo_t sudo_shipper_t:unix_stream_socket connectto;
+    # Allow sudo to read/mmap the plugin .so
+    allow sudo_t sudo_logger_plugin_t:file { read open execute map getattr };
+
+    # Allow sudo (running plugin) to connect to shipper socket
+    allow sudo_t sudo_shipper_var_run_t:dir search;
+    allow sudo_t sudo_shipper_var_run_t:sock_file write;
+    allow sudo_t sudo_shipper_t:unix_stream_socket connectto;
+')

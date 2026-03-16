@@ -48,6 +48,7 @@ type SessionInfo struct {
 	Flags           string  `json:"flags,omitempty"`
 	StartTime       int64   `json:"start_time"` // unix seconds
 	Duration        float64 `json:"duration"`   // seconds
+	Incomplete      bool    `json:"incomplete,omitempty"` // true if shipper was killed mid-session
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -409,6 +410,11 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 			info.ResolvedCommand = meta.ResolvedCommand
 			info.Flags = meta.Flags
 		}
+	}
+
+	// Mark sessions where the shipper was killed without sending session_end.
+	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {
+		info.Incomplete = true
 	}
 
 	return info, nil

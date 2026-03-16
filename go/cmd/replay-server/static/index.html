@@ -145,6 +145,12 @@
     .sc-dur { font-size: 10px; color: var(--blue); background: var(--card);
       border: 1px solid var(--border); padding: 1px 5px; border-radius: 2px; flex-shrink: 0; }
     .session-card.active .sc-dur { border-color: var(--green-dim); color: var(--green); }
+    .sc-incomplete { font-size: 10px; color: var(--red); background: rgba(255,80,80,0.08);
+      border: 1px solid rgba(255,80,80,0.3); padding: 1px 5px; border-radius: 2px; flex-shrink: 0; }
+    .session-card.incomplete { border-left-color: var(--red) !important; }
+    .warn-bar { display: flex; align-items: center; gap: 6px; padding: 5px 14px;
+      background: rgba(255,80,80,0.07); border-bottom: 1px solid rgba(255,80,80,0.2);
+      font-size: 11px; color: var(--red); }
 
     .list-msg { padding: 16px; text-align: center; color: var(--text-dim);
       font-size: 12px; line-height: 1.8; }
@@ -462,7 +468,7 @@ function renderSessionList(sessions) {
   const q = fetchState.q;
   const frag = document.createDocumentFragment();
   for (const s of sessions) {
-    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : ''));
+    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : '') + (s.incomplete ? ' incomplete' : ''));
     card.dataset.tsid = s.tsid;
 
     // user@host row with runas badge
@@ -482,6 +488,7 @@ function renderSessionList(sessions) {
     const meta = el('div', 'sc-meta');
     meta.appendChild(el('span', 'sc-date', fmtDate(s.start_time)));
     meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
+    if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
 
     card.appendChild(userRow);
     card.appendChild(cmd);
@@ -608,6 +615,12 @@ function renderInfoBar(sess) {
   if (sess.runas) addItem(row1, 'runas', sess.runas, sess.runas !== 'root' ? 'blue' : 'dim', '');
   addItem(row1, 'cmd', sess.command, 'green', 'grow');
   elInfoBar.appendChild(row1);
+
+  // Warning bar for incomplete sessions (shipper killed mid-session)
+  if (sess.incomplete) {
+    const warn = el('div', 'warn-bar', '⚠ Session incomplete — shipper was killed or crashed before session_end. Recording may be truncated.');
+    elInfoBar.appendChild(warn);
+  }
 
   // Row 2: bin · cwd · flags — only rendered when at least one field is present
   const hasRow2 = sess.resolved_command || sess.cwd || sess.flags;

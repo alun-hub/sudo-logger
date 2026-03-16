@@ -2,6 +2,11 @@
 Description=Sudo log shipper (bridges sudo plugin to remote log server)
 After=network-online.target
 Wants=network-online.target
+# Prevent "systemctl stop/disable sudo-shipper" from succeeding.
+# The service can only be stopped by the system (shutdown/reboot) or by
+# explicitly overriding this with --force.  This closes the attack vector
+# where a sudoer stops the shipper to avoid session logging.
+RefuseManualStop=yes
 
 [Service]
 EnvironmentFile=/etc/sudo-logger/shipper.conf
@@ -19,21 +24,22 @@ RuntimeDirectoryMode=0750
 KillMode=process
 Restart=always
 RestartSec=2
-# Prevent "systemctl stop/disable sudo-shipper" from succeeding.
-# The service can only be stopped by the system (shutdown/reboot) or by
-# explicitly overriding this with --force.  This closes the attack vector
-# where a sudoer stops the shipper to avoid session logging.
-RefuseManualStop=yes
 
 User=root
-NoNewPrivileges=yes
+# SELinuxContext causes systemd to set the process context before exec.
+# NoNewPrivileges is omitted: the kernel rejects the exec with EPERM when
+# no_new_privs and SELinuxContext are combined (requires typebounds).
+# The SELinux policy for sudo_shipper_t provides confinement instead.
+SELinuxContext=system_u:system_r:sudo_shipper_t:s0-s0:c0.c1023
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
-ProtectControlGroups=yes
+# ProtectControlGroups is intentionally omitted: the shipper needs to create
+# sub-cgroups under its delegated slice (Delegate=yes) to freeze sessions.
+# SELinux policy (sudo_shipper_t) provides confinement instead.
 LockPersonality=yes
 RestrictNamespaces=yes
 RestrictSUIDSGID=yes

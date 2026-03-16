@@ -128,7 +128,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		msgType, plen, err := protocol.ReadHeader(r)
 		if err != nil {
 			if sess != nil {
-				log.Printf("[%s] %s disconnected: %v", sess.id, remote, err)
+				log.Printf("SECURITY: [%s] %s dropped connection without session_end — session may be incomplete (shipper killed?): %v",
+					sess.id, remote, err)
+				_ = os.WriteFile(sess.writer.Dir()+"/INCOMPLETE",
+					[]byte("connection lost without session_end\n"), 0640)
 				srv.closeSession(sess)
 			}
 			return
