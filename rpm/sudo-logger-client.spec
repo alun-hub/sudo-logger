@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
-Version:        1.7.0
-Release:        4%{?dist}
+Version:        1.8.0
+Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -110,6 +110,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Mar 16 2026 sudo-logger 1.8.0-1
+- hardening: complete SELinux policy for sudo_shipper_t (enforcing mode)
+- hardening: fix RefuseManualStop=yes placement (must be in [Unit] section)
+- hardening: remove ProtectControlGroups=yes (conflicts with Delegate=yes)
+- hardening: raise SELinuxContext MCS range to s0-s0:c0.c1023
+
 * Mon Mar 16 2026 sudo-logger 1.7.0-4
 - hardening: %pre removes chattr +i before upgrade, %posttrans re-applies it
 - hardening: %preun removes chattr +i before uninstall so RPM can delete files

@@ -1,6 +1,6 @@
 Name:           sudo-logger-replay
-Version:        1.7.0
-Release:        8%{?dist}
+Version:        1.8.0
+Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
 License:        MIT
@@ -53,6 +53,10 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Mon Mar 16 2026 sudo-logger 1.8.0-1
+- feat: show INCOMPLETE badge and warning bar for sessions where shipper
+  was killed mid-session (connection dropped without session_end)
+
 * Sun Mar 15 2026 sudo-logger 1.7.0-8
 - feat: light mode uses One Light colour scheme (UI + terminal)
 

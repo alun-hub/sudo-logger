@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.7.0
+Version:        1.8.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -93,6 +93,10 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Mon Mar 16 2026 sudo-logger 1.8.0-1
+- security: log SECURITY warning and write INCOMPLETE marker when shipper
+  drops connection without session_end (shipper killed mid-session)
+
 * Sun Mar 15 2026 sudo-logger 1.7.0-1
 - feat: iolog log file now records actual runas_user and cwd from client
   (previously hardcoded to "root" and "/")
