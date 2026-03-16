@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.7.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -67,7 +67,11 @@ install -D -m 0644 man/sudo_logger_plugin.8 \
     %{buildroot}%{_mandir}/man8/sudo_logger_plugin.8
 
 %pre
-# Nothing needed on client
+# Remove immutable flag from our binaries before RPM writes new files.
+# This is needed for upgrades — on first install the files don't exist yet
+# so the commands silently fail (|| true).
+chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so 2>/dev/null || true
+chattr -i %{_bindir}/sudo-shipper                   2>/dev/null || true
 
 %post
 # Add plugin line to sudo.conf if not already present
@@ -76,7 +80,16 @@ if ! grep -q 'Plugin sudo_logger_plugin sudo_logger_plugin.so' /etc/sudo.conf 2>
 fi
 %systemd_post sudo-shipper.service
 
+%posttrans
+# Make plugin binary and shipper immutable so they cannot be silently replaced
+# or removed without first running chattr -i (which requires root intent).
+chattr +i %{_libexecdir}/sudo/sudo_logger_plugin.so 2>/dev/null || true
+chattr +i %{_bindir}/sudo-shipper                   2>/dev/null || true
+
 %preun
+# Remove immutable flag so RPM can delete the files on uninstall.
+chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so 2>/dev/null || true
+chattr -i %{_bindir}/sudo-shipper                   2>/dev/null || true
 %systemd_preun sudo-shipper.service
 # Remove plugin line from sudo.conf on uninstall
 if [ $1 -eq 0 ]; then
@@ -97,6 +110,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Mar 16 2026 sudo-logger 1.7.0-4
+- hardening: %pre removes chattr +i before upgrade, %posttrans re-applies it
+- hardening: %preun removes chattr +i before uninstall so RPM can delete files
+- plugin binary and sudo-shipper are now immutable after install/upgrade
+
 * Mon Mar 16 2026 sudo-logger 1.7.0-3
 - hardening: add RefuseManualStop=yes to sudo-shipper.service
 - hardening: add PrivateDevices, ProtectKernelTunables, ProtectKernelModules,
