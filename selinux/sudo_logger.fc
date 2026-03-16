@@ -1,0 +1,21 @@
+# File contexts for sudo-logger
+#
+# After changing this file, run:
+#   make -f /usr/share/selinux/devel/Makefile sudo_logger.pp
+#   semodule -i sudo_logger.pp
+#   restorecon -Rv /usr/bin/sudo-shipper \
+#                  /usr/libexec/sudo/sudo_logger_plugin.so \
+#                  /run/sudo-logger \
+#                  /etc/sudo-logger
+
+# sudo-shipper daemon binary
+/usr/bin/sudo-shipper                   --  gen_context(system_u:object_r:sudo_shipper_exec_t,s0)
+
+# Plugin shared library loaded by sudo
+/usr/libexec/sudo/sudo_logger_plugin\.so  --  gen_context(system_u:object_r:sudo_logger_plugin_t,s0)
+
+# Runtime directory and socket  (/run/sudo-logger/)
+/run/sudo-logger(/.*)?                  gen_context(system_u:object_r:sudo_shipper_var_run_t,s0)
+
+# Configuration and key material  (/etc/sudo-logger/)
+/etc/sudo-logger(/.*)?                  gen_context(system_u:object_r:sudo_shipper_etc_t,s0)

@@ -1,0 +1,80 @@
+policy_module(sudo_logger, 1.0.0)
+
+########################################
+#
+# Declarations
+#
+
+## sudo-shipper daemon
+type sudo_shipper_t;
+type sudo_shipper_exec_t;
+init_daemon_domain(sudo_shipper_t, sudo_shipper_exec_t)
+
+## Files under /run/sudo-logger/
+type sudo_shipper_var_run_t;
+files_pid_file(sudo_shipper_var_run_t)
+
+## Files under /etc/sudo-logger/  (certs, keys, config)
+type sudo_shipper_etc_t;
+files_config_file(sudo_shipper_etc_t)
+
+## The plugin .so loaded by sudo
+type sudo_logger_plugin_t;
+files_type(sudo_logger_plugin_t)
+
+########################################
+#
+# sudo_shipper_t local policy
+#
+
+# Basic self permissions
+allow sudo_shipper_t self:fifo_file rw_fifo_file_perms;
+allow sudo_shipper_t self:unix_stream_socket create_stream_socket_perms;
+allow sudo_shipper_t self:tcp_socket create_stream_socket_perms;
+allow sudo_shipper_t self:process { fork sigchld sigkill sigstop signull signal };
+allow sudo_shipper_t self:capability { kill net_bind_service sys_admin };
+
+# Manage the Unix socket and PID file in /run/sudo-logger/
+manage_dirs_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
+manage_files_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
+manage_sock_files_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
+files_pid_filetrans(sudo_shipper_t, sudo_shipper_var_run_t, { dir file sock_file })
+
+# Read config files and TLS certificates
+list_dirs_pattern(sudo_shipper_t, sudo_shipper_etc_t, sudo_shipper_etc_t)
+read_files_pattern(sudo_shipper_t, sudo_shipper_etc_t, sudo_shipper_etc_t)
+read_lnk_files_pattern(sudo_shipper_t, sudo_shipper_etc_t, sudo_shipper_etc_t)
+files_search_etc(sudo_shipper_t)
+
+# Outbound TLS connection to sudo-logserver
+corenet_tcp_connect_generic_port(sudo_shipper_t)
+corenet_sendrecv_generic_client_packets(sudo_shipper_t)
+sysnet_dns_name_resolve(sudo_shipper_t)
+
+# Write to cgroup files for session freeze (Delegate=yes in service unit)
+# sudo-shipper suspends processes by writing to cgroup.freeze
+fs_rw_cgroup_files(sudo_shipper_t)
+
+# Send SIGSTOP/SIGCONT to session processes
+allow sudo_shipper_t domain:process { signal sigstop sigcont };
+
+# Logging
+logging_send_syslog_msg(sudo_shipper_t)
+
+# Read /proc for process state (pids, cgroup membership)
+kernel_read_system_state(sudo_shipper_t)
+kernel_read_network_state(sudo_shipper_t)
+
+########################################
+#
+# sudo_t policy additions
+# (what the sudo process with loaded plugin needs to do)
+#
+
+# Allow sudo to read/mmap the plugin .so
+allow sudo_t sudo_logger_plugin_t:file { read open execute map getattr };
+
+# Allow sudo (running plugin) to connect to shipper socket
+allow sudo_t sudo_shipper_var_run_t:dir search;
+allow sudo_t sudo_shipper_var_run_t:sock_file write;
+allow sudo_t sudo_shipper_t:unix_stream_socket connectto;

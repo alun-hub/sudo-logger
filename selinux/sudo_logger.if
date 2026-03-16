@@ -1,0 +1,35 @@
+## <summary>sudo-logger session recording plugin and shipper</summary>
+
+########################################
+## <summary>
+##   Allow a domain to connect to the sudo-shipper socket.
+##   Used by sudo when the plugin calls connect_shipper().
+## </summary>
+## <param name="domain">
+##   <summary>Domain allowed to connect.</summary>
+## </param>
+#
+interface(`sudo_logger_connect_shipper',`
+    gen_require(`
+        type sudo_shipper_t;
+        type sudo_shipper_var_run_t;
+    ')
+    allow $1 sudo_shipper_var_run_t:dir search;
+    allow $1 sudo_shipper_var_run_t:sock_file write;
+    allow $1 sudo_shipper_t:unix_stream_socket connectto;
+')
+
+########################################
+## <summary>
+##   Allow a domain to load the sudo_logger plugin .so.
+## </summary>
+## <param name="domain">
+##   <summary>Domain allowed to load the plugin.</summary>
+## </param>
+#
+interface(`sudo_logger_load_plugin',`
+    gen_require(`
+        type sudo_logger_plugin_t;
+    ')
+    allow $1 sudo_logger_plugin_t:file { read open execute map getattr };
+')
