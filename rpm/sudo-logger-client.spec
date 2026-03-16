@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
 Version:        1.8.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
@@ -97,7 +97,17 @@ if [ $1 -eq 0 ]; then
 fi
 
 %postun
-%systemd_postun_with_restart sudo-shipper.service
+# On upgrade: reload unit and signal the running shipper to restart.
+# We cannot use %systemd_postun_with_restart / systemctl try-restart because
+# RefuseManualStop=yes blocks those operations.  Instead, send SIGTERM via
+# systemctl kill (not blocked by RefuseManualStop) and let Restart=always
+# pick up the new binary after daemon-reload.
+if [ $1 -ge 1 ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl kill sudo-shipper.service >/dev/null 2>&1 || true
+else
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
 
 %files
 %{_libexecdir}/sudo/sudo_logger_plugin.so
@@ -110,6 +120,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Mar 16 2026 sudo-logger 1.8.0-2
+- fix: use systemctl kill in %postun instead of %systemd_postun_with_restart
+  to bypass RefuseManualStop=yes during RPM upgrade
+
 * Mon Mar 16 2026 sudo-logger 1.8.0-1
 - hardening: complete SELinux policy for sudo_shipper_t (enforcing mode)
 - hardening: fix RefuseManualStop=yes placement (must be in [Unit] section)
