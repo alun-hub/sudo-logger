@@ -98,7 +98,7 @@ fi
 
 %postun
 # On upgrade: reload unit and signal the running shipper to restart.
-# We cannot use %systemd_postun_with_restart / systemctl try-restart because
+# We cannot use %%systemd_postun_with_restart / systemctl try-restart because
 # RefuseManualStop=yes blocks those operations.  Instead, send SIGTERM via
 # systemctl kill (not blocked by RefuseManualStop) and let Restart=always
 # pick up the new binary after daemon-reload.
@@ -121,7 +121,7 @@ fi
 
 %changelog
 * Mon Mar 16 2026 sudo-logger 1.8.0-2
-- fix: use systemctl kill in %postun instead of %systemd_postun_with_restart
+- fix: use systemctl kill in %%postun instead of %%systemd_postun_with_restart
   to bypass RefuseManualStop=yes during RPM upgrade
 
 * Mon Mar 16 2026 sudo-logger 1.8.0-1
