@@ -86,9 +86,14 @@ func NewWriter(baseDir, user, host, runas, tty, command, cwd string, startTime t
 	if safeCwd == "" {
 		safeCwd = "/"
 	}
-	fmt.Fprintf(logF, "%d:%s:%s::%s\n%s\n%s\n",
-		startTime.Unix(), user, runas, tty, safeCwd, safeCmd)
-	logF.Close()
+	if _, err = fmt.Fprintf(logF, "%d:%s:%s::%s\n%s\n%s\n",
+		startTime.Unix(), user, runas, tty, safeCwd, safeCmd); err != nil {
+		_ = logF.Close()
+		return nil, fmt.Errorf("write log header: %w", err)
+	}
+	if err = logF.Close(); err != nil {
+		return nil, fmt.Errorf("close log file: %w", err)
+	}
 
 	ttyoutF, err := os.Create(filepath.Join(dir, "ttyout"))
 	if err != nil {

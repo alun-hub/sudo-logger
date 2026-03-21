@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.9.0
+Version:        1.9.1
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -53,6 +53,9 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sat Mar 21 2026 sudo-logger 1.9.1-1
+- fix: log json.Encode errors in HTTP handlers
+
 * Mon Mar 16 2026 sudo-logger 1.8.0-1
 - feat: show INCOMPLETE badge and warning bar for sessions where shipper
   was killed mid-session (connection dropped without session_end)

@@ -109,7 +109,9 @@ func main() {
 	}
 
 	// Remove stale socket from previous run
-	os.Remove(*flagSocket)
+	if err := os.Remove(*flagSocket); err != nil && !os.IsNotExist(err) {
+		log.Printf("remove stale socket: %v", err)
+	}
 
 	if err := os.MkdirAll("/run/sudo-logger", 0750); err != nil {
 		log.Fatalf("mkdir /run/sudo-logger: %v", err)
@@ -532,7 +534,7 @@ func isSudoConn(conn net.Conn) bool {
 	if err != nil {
 		return false
 	}
-	var uid uint32 = ^uint32(0) // invalid sentinel
+	var uid = ^uint32(0) // invalid sentinel
 	_ = rawConn.Control(func(fd uintptr) {
 		ucred, soErr := syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
 		if soErr == nil {

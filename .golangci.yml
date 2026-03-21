@@ -1,0 +1,28 @@
+version: "2"
+
+run:
+  timeout: 10m
+
+linters:
+  enable:
+    - govet        # go vet — misstänkta konstruktioner
+    - ineffassign  # onödiga variabeltilldelningar (snabb)
+    - staticcheck  # statisk analys
+    - errcheck     # ej hanterade errors
+    - gosec        # säkerhetsproblem (långsam, kör i CI)
+    - unused       # oanvänd kod (långsam, kör i CI)
+
+issues:
+  exclude-rules:
+    # defer/cleanup Close() är idiomatic Go
+    - linters: [errcheck]
+      text: "Error return value of .*(Close).* is not checked"
+    # Signaler och socket-inställningar — ej åtgärdbar error
+    - linters: [errcheck]
+      text: "Error return value of .*(Kill|SetsockoptInt|SetKeepAlive|SetKeepAlivePeriod|SetWriteDeadline|SetDeadline|Control).* is not checked"
+    # WriteMessage på felvägar — anslutningen är redan bruten
+    - linters: [errcheck]
+      text: "Error return value of .*WriteMessage.* is not checked"
+    # QF = quickfix-stilförslag, inte buggar
+    - linters: [staticcheck]
+      text: "^QF"

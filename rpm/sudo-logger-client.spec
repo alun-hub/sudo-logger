@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.9.0
+Version:        1.9.1
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat Mar 21 2026 sudo-logger 1.9.1-1
+- fix: replace atoi with strtol for runas_uid/runas_gid in plugin (CWE-190)
+- fix: propagate write errors in iolog log header (fmt.Fprintf, logF.Close)
+- fix: log os.Remove error for stale shipper socket on startup
+- fix: log json.Encode errors in replay-server HTTP handlers
+- chore: add pre-commit hooks (golangci-lint, cppcheck, flawfinder, trivy, detect-secrets)
+
 * Mon Mar 16 2026 sudo-logger 1.9.0-1
 - security: plugin terminates active sudo session when shipper socket drops
   (EPIPE/ECONNRESET/EOF); monitor thread sends SIGTERM to sudo within 150 ms,

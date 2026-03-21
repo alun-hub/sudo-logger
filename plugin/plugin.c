@@ -512,9 +512,9 @@ static int plugin_open(unsigned int        version,
         if      (strncmp(command_info[i], "command=",   8) == 0)
             raw_resolved = command_info[i] + 8;
         else if (strncmp(command_info[i], "runas_uid=", 10) == 0)
-            runas_uid = atoi(command_info[i] + 10);
+            runas_uid = (int)strtol(command_info[i] + 10, NULL, 10);
         else if (strncmp(command_info[i], "runas_gid=", 10) == 0)
-            runas_gid = atoi(command_info[i] + 10);
+            runas_gid = (int)strtol(command_info[i] + 10, NULL, 10);
     }
 
     /* ── Extract metadata from settings[] ───────────────────────────────

@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.9.0
+Version:        1.9.1
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -93,6 +93,9 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sat Mar 21 2026 sudo-logger 1.9.1-1
+- fix: propagate write errors in iolog log header (fmt.Fprintf, logF.Close)
+
 * Mon Mar 16 2026 sudo-logger 1.8.0-1
 - security: log SECURITY warning and write INCOMPLETE marker when shipper
   drops connection without session_end (shipper killed mid-session)

@@ -211,7 +211,9 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("encode session list: %v", err)
+	}
 }
 
 func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +257,9 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(events)
+	if err := json.NewEncoder(w).Encode(events); err != nil {
+		log.Printf("encode session events: %v", err)
+	}
 }
 
 // validateTSID ensures the TSID (e.g. "alice/host1_20260307-112244") contains
@@ -265,7 +269,7 @@ func validateTSID(tsid string) error {
 		return fmt.Errorf("path traversal attempt")
 	}
 	for _, c := range tsid {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || //nolint:staticcheck // allowlist form is more readable than De Morgan
 			(c >= '0' && c <= '9') || c == '/' || c == '_' || c == '-' || c == '.') {
 			return fmt.Errorf("invalid character: %q", c)
 		}
