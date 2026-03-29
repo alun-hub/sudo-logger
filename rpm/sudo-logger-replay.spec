@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.9.1
+Version:        1.9.2
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -53,6 +53,10 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Mar 29 2026 sudo-logger 1.9.2-1
+- feat: add Summary and Anomalies tabs with /api/report endpoint
+  (per-user stats, incomplete/after-hours/long-session/root-shell detection)
+
 * Sat Mar 21 2026 sudo-logger 1.9.1-1
 - fix: log json.Encode errors in HTTP handlers
 
