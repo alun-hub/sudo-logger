@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/sudo-logserver ./c
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/sudo-replay-server ./cmd/replay-server
 
 # ---- Runtime stage ----
-# distroless/static-debian12:nonroot contains only minimal binaries, 
+# distroless/static-debian12:nonroot contains only minimal binaries,
 # certs, and a non-privileged user (UID 65532).
 FROM gcr.io/distroless/static-debian12:nonroot
 

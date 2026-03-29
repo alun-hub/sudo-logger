@@ -421,14 +421,15 @@ body::after {
 
 /* Glitch */
 @keyframes glitch-anim {
-  0%   { transform: translateX(0);  clip-path: inset(0 0 100% 0); filter: none; }
-  5%   { clip-path: inset(20% 0 60% 0); transform: translateX(-4px); filter: hue-rotate(90deg) brightness(1.8); }
-  10%  { clip-path: inset(50% 0 20% 0); transform: translateX(4px); }
-  15%  { clip-path: inset(0 0 0 0); transform: translateX(0); filter: none; }
+  0%   { transform: translateX(0);   clip-path: inset(0 0 100% 0); filter: none; }
+  10%  { clip-path: inset(15% 0 55% 0); transform: translateX(-6px); filter: hue-rotate(90deg) brightness(1.9); }
+  20%  { clip-path: inset(55% 0 15% 0); transform: translateX(6px);  filter: hue-rotate(-40deg) brightness(1.4); }
+  30%  { clip-path: inset(30% 0 40% 0); transform: translateX(-4px); filter: hue-rotate(130deg) brightness(1.7); }
+  38%  { clip-path: inset(0 0 0 0);    transform: translateX(0);     filter: none; }
   100% { transform: translateX(0); filter: none; }
 }
 
-.glitch-run { animation: glitch-anim 0.55s ease forwards; }
+.glitch-run { animation: glitch-anim 2.2s ease forwards; }
 
 /* ════════════════════════════════════════════
    SLIDE 5 — SECURITY
@@ -580,6 +581,235 @@ body::after {
 }
 
 .gh-link:hover { border-color: var(--green); color: var(--green); }
+
+/* ════════════════════════════════════════════
+   DENSE INFO SLIDES — tighter outer padding
+════════════════════════════════════════════ */
+#s5, #s6, #s7 { padding: 20px 48px; }
+#s5 .slide-heading, #s6 .slide-heading, #s7 .slide-heading {
+  font-size: 40px; margin-bottom: 14px;
+}
+
+/* ════════════════════════════════════════════
+   SLIDE 5 (new) — HEARTBEAT & ACK PROTOCOL
+════════════════════════════════════════════ */
+.s-proto { flex-direction: column; width: 100%; max-width: 1160px; }
+
+.proto-actors {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 10px;
+}
+
+.proto-actor-box {
+  background: var(--card);
+  border: 1px solid var(--green-dim);
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.proto-actor-box .pa-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px; font-weight: 700;
+  color: var(--green); letter-spacing: 0.05em;
+}
+
+.proto-actor-box .pa-sub {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--text-dim);
+  letter-spacing: 0.12em; margin-top: 3px;
+}
+
+.proto-conn { text-align: center; padding: 0 8px; }
+
+.proto-conn .pc-line {
+  height: 1px; background: var(--green-dim); margin-bottom: 4px;
+}
+
+.proto-conn .pc-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--text-dim);
+  letter-spacing: 0.1em; white-space: nowrap;
+}
+
+.proto-messages {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 2px 14px;
+  margin-bottom: 10px;
+}
+
+.proto-row {
+  display: grid;
+  grid-template-columns: 1fr 1.8fr 1fr;
+  align-items: center;
+  gap: 8px; padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+
+.proto-row:last-child { border-bottom: none; }
+
+.proto-row .pr-dir  { color: var(--text-dim); font-size: 12px; }
+.proto-row .pr-msg  { color: var(--green); text-align: center; }
+.proto-row .pr-note { color: var(--text-dim); text-align: right; font-size: 12px; }
+.proto-row.ack .pr-msg { color: var(--amber); }
+.proto-row.hb  .pr-msg { color: rgba(0,232,122,0.55); }
+.proto-row.hba .pr-msg { color: rgba(255,180,84,0.55); }
+
+.proto-timing {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.pt-box {
+  background: var(--card); border: 1px solid var(--border);
+  padding: 9px 12px; text-align: center;
+}
+
+.pt-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 28px; color: var(--green); font-weight: 700;
+}
+
+.pt-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--text-dim);
+  letter-spacing: 0.15em; text-transform: uppercase; margin-top: 4px;
+}
+
+/* ════════════════════════════════════════════
+   SLIDE 6 (new) — CRYPTOGRAPHY
+════════════════════════════════════════════ */
+.s-crypto { flex-direction: column; width: 100%; max-width: 1160px; }
+
+.crypto-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.crypto-panel {
+  background: var(--card); border: 1px solid var(--border);
+  padding: 14px 16px;
+}
+
+.crypto-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--green);
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border); padding-bottom: 8px;
+}
+
+.crypto-item {
+  font-size: 14px; color: var(--text-dim);
+  line-height: 1.65; margin-bottom: 5px;
+  padding-left: 16px; position: relative;
+}
+
+.crypto-item::before { content: '▸'; color: var(--green); position: absolute; left: 0; }
+.crypto-item code {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--green); font-size: 13px;
+}
+
+.crypto-payload {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; background: #080d08;
+  border: 1px solid var(--border);
+  padding: 10px 14px; margin-top: 10px; line-height: 2;
+}
+
+.crypto-payload .cp-label   { color: var(--text-dim); }
+.crypto-payload .cp-field   { color: var(--green); }
+.crypto-payload .cp-bytes   { color: var(--amber); }
+.crypto-payload .cp-comment { color: rgba(255,255,255,0.2); }
+
+/* ════════════════════════════════════════════
+   SLIDE 7 (new) — CGROUP FREEZE INTERNALS
+════════════════════════════════════════════ */
+.s-cgroup { flex-direction: column; width: 100%; max-width: 1160px; }
+
+.cgroup-layout {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.cgroup-tree {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px; background: var(--card);
+  border: 1px solid var(--border);
+  padding: 14px 16px; line-height: 1.9;
+}
+
+.cgroup-proc-table {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; margin-top: 8px;
+}
+
+.cpt-col {
+  background: var(--card); border: 1px solid var(--border);
+  border-top: 2px solid var(--green-dim);
+  padding: 9px 12px;
+}
+
+.cpt-col.cpt-gui { border-top-color: var(--amber); }
+
+.cpt-head {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.15em;
+  text-transform: uppercase; color: var(--green); margin-bottom: 6px;
+}
+
+.cpt-col.cpt-gui .cpt-head { color: var(--amber); }
+
+.cpt-body {
+  font-size: 13px; color: var(--text-dim); line-height: 1.65;
+}
+
+.cpt-body code {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--green); font-size: 12px;
+}
+
+.cgroup-tree .ct-path    { color: var(--green); }
+.cgroup-tree .ct-file    { color: var(--amber); }
+.cgroup-tree .ct-val     { color: #fff; font-weight: 700; }
+.cgroup-tree .ct-dim     { color: rgba(255,255,255,0.2); }
+.cgroup-tree .ct-comment { color: rgba(255,255,255,0.3); font-size: 11px; }
+
+.cgroup-steps {
+  display: flex; flex-direction: column; gap: 5px;
+}
+
+.cg-step {
+  background: var(--card); border: 1px solid var(--border);
+  border-left: 3px solid var(--green-dim);
+  padding: 7px 11px;
+}
+
+.cg-step.s-ok     { border-left-color: var(--green); }
+.cg-step.s-warn   { border-left-color: var(--amber); }
+.cg-step.s-danger { border-left-color: var(--red); }
+
+.cg-step-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; letter-spacing: 0.15em;
+  text-transform: uppercase; color: var(--green); margin-bottom: 3px;
+}
+
+.cg-step.s-warn   .cg-step-label { color: var(--amber); }
+.cg-step.s-danger .cg-step-label { color: var(--red); }
+
+.cg-step-text { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+.cg-step-text code {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--green); font-size: 12px;
+}
 </style>
 </head>
 <body>
@@ -590,7 +820,7 @@ body::after {
 <div class="corner c-tr"></div>
 <div class="corner c-bl"></div>
 <div class="corner c-br"></div>
-<div id="counter">01 / 07</div>
+<div id="counter">01 / 10</div>
 <div id="progress"></div>
 <div class="nav-hint">← → navigate</div>
 
@@ -823,8 +1053,183 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 6: WEB REPLAY ░░ -->
+  <!-- ░░ SLIDE 5 (new): HEARTBEAT & ACK PROTOCOL ░░ -->
   <div class="slide" id="s5">
+    <div class="s-proto">
+      <div class="slide-heading">HEARTBEAT &amp; ACK PROTOCOL</div>
+
+      <div class="proto-actors">
+        <div class="proto-actor-box">
+          <div class="pa-name">PLUGIN</div>
+          <div class="pa-sub">C · per sudo pid</div>
+        </div>
+        <div class="proto-conn">
+          <div class="pc-line"></div>
+          <div class="pc-label">Unix socket</div>
+        </div>
+        <div class="proto-actor-box">
+          <div class="pa-name">SHIPPER</div>
+          <div class="pa-sub">Go · local daemon</div>
+        </div>
+        <div class="proto-conn">
+          <div class="pc-line"></div>
+          <div class="pc-label">mutual TLS · 9876</div>
+        </div>
+        <div class="proto-actor-box">
+          <div class="pa-name">LOGSERVER</div>
+          <div class="pa-sub">Go · remote</div>
+        </div>
+      </div>
+
+      <div class="proto-messages">
+        <div class="proto-row">
+          <div class="pr-dir">plugin → shipper → server</div>
+          <div class="pr-msg">SESSION_START / tty_output (seq=N)</div>
+          <div class="pr-note">chunk + sequence number</div>
+        </div>
+        <div class="proto-row ack">
+          <div class="pr-dir">server → shipper → plugin</div>
+          <div class="pr-msg">ACK (seq=N · 64-byte ed25519 sig)</div>
+          <div class="pr-note">server signs; plugin verifies</div>
+        </div>
+        <div class="proto-row hb">
+          <div class="pr-dir">shipper → server &nbsp; every 400 ms</div>
+          <div class="pr-msg">HEARTBEAT</div>
+          <div class="pr-note">liveness probe</div>
+        </div>
+        <div class="proto-row hba">
+          <div class="pr-dir">server → shipper</div>
+          <div class="pr-msg">HEARTBEAT_ACK</div>
+          <div class="pr-note">missing &gt; 800 ms → freeze</div>
+        </div>
+      </div>
+
+      <div class="proto-timing">
+        <div class="pt-box">
+          <div class="pt-val">400 ms</div>
+          <div class="pt-label">heartbeat interval</div>
+        </div>
+        <div class="pt-box">
+          <div class="pt-val">800 ms</div>
+          <div class="pt-label">dead threshold → cgroup.freeze</div>
+        </div>
+        <div class="pt-box">
+          <div class="pt-val">150 ms</div>
+          <div class="pt-label">plugin monitor poll · socket drop → SIGTERM</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 6 (new): CRYPTOGRAPHY ░░ -->
+  <div class="slide" id="s6">
+    <div class="s-crypto">
+      <div class="slide-heading">CRYPTOGRAPHY</div>
+
+      <div class="crypto-grid">
+
+        <div class="crypto-panel">
+          <div class="crypto-title">🔐 &nbsp; Mutual TLS (mTLS)</div>
+          <div class="crypto-item">A private CA issues certificates for both server and all clients.</div>
+          <div class="crypto-item">TLS handshake requires a valid <code>client cert</code> — unknown shippers are rejected before any data is exchanged.</div>
+          <div class="crypto-item">Client certificate CN is verified against the <code>host</code> field in SESSION_START — a compromised shipper on host A cannot forge logs for host B.</div>
+          <div class="crypto-item">All session I/O is encrypted in transit — no plaintext on the wire.</div>
+          <div class="crypto-payload">
+            <span class="cp-label">server cert</span>  CN=sudo-logserver <span class="cp-comment">← signed by shared CA</span><br>
+            <span class="cp-label">client cert</span>  CN=&lt;hostname&gt;    <span class="cp-comment">← signed by shared CA</span><br>
+            <span class="cp-label">cert CN</span>  verified vs SESSION_START <span class="cp-field">host</span> field
+          </div>
+        </div>
+
+        <div class="crypto-panel">
+          <div class="crypto-title">✍ &nbsp; ed25519 ACK Signing</div>
+          <div class="crypto-item">Server holds the <code>ed25519 private key</code> — never distributed to clients.</div>
+          <div class="crypto-item">Each ACK is signed over a payload binding session ID, sequence number, and nanosecond timestamp — prevents replay of old ACKs.</div>
+          <div class="crypto-item">Shipper holds only the <code>public key</code> (ack-verify.key): can verify but cannot forge.</div>
+          <div class="crypto-item">Even a fully compromised shipper cannot generate valid ACKs fleet-wide.</div>
+          <div class="crypto-payload">
+            <span class="cp-label">ACK payload signed by server</span><br>
+            &nbsp; <span class="cp-field">session_id</span>   <span class="cp-bytes">variable  </span> <span class="cp-comment">← ties ACK to session</span><br>
+            &nbsp; <span class="cp-field">seq</span>          <span class="cp-bytes">8 bytes   </span> <span class="cp-comment">← prevents replay of old ACK</span><br>
+            &nbsp; <span class="cp-field">timestamp_ns</span> <span class="cp-bytes">8 bytes   </span> <span class="cp-comment">← freshness</span><br>
+            &nbsp; <span class="cp-field">signature</span>    <span class="cp-bytes">64 bytes  </span> <span class="cp-comment">← ed25519 over above</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 7 (new): CGROUP FREEZE INTERNALS ░░ -->
+  <div class="slide" id="s7">
+    <div class="s-cgroup">
+      <div class="slide-heading">CGROUP FREEZE — INTERNALS</div>
+
+      <div class="cgroup-layout">
+
+        <div>
+          <div class="cgroup-tree">
+            <span class="ct-comment"># shipper creates one cgroup per session</span><br>
+            /sys/fs/cgroup/<br>
+            &nbsp;&nbsp;<span class="ct-path">sudo_logger/&lt;session_id&gt;/</span><br>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="ct-file">cgroup.procs</span> <span class="ct-dim">←</span> <span class="ct-val">PID</span><span class="ct-comment"> # sudo pid; children inherit</span><br>
+            <br>
+            <span class="ct-comment"># suspends every task in the cgroup instantly</span><br>
+            <span class="ct-file">cgroup.freeze</span> <span class="ct-dim">=</span> <span class="ct-val">1</span><br>
+            <span class="ct-comment"># resumes all tasks instantly</span><br>
+            <span class="ct-file">cgroup.freeze</span> <span class="ct-dim">=</span> <span class="ct-val">0</span>
+          </div>
+
+          <div class="cgroup-proc-table">
+            <div class="cpt-col">
+              <div class="cpt-head">Terminal (bash, vi, …)</div>
+              <div class="cpt-body">
+                Stays in cgroup — <code>cgroup.freeze=1</code> is enough.<br>
+                Plugin already blocks TTY input, SIGSTOP not needed
+                (would trigger job control → bash to background).
+              </div>
+            </div>
+            <div class="cpt-col cpt-gui">
+              <div class="cpt-head">GUI apps (gvim, okular, …)</div>
+              <div class="cpt-body">
+                systemd/GNOME <em>moves</em> them to <code>app-*.scope</code>
+                — outside our cgroup. No controlling TTY →
+                shipper sends <code>SIGSTOP</code> directly (freeze, not kill).
+                On resume: <code>SIGCONT</code>.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cgroup-steps">
+          <div class="cg-step s-ok">
+            <div class="cg-step-label">① session starts</div>
+            <div class="cg-step-text">Shipper creates cgroup and adds the sudo PID. All child processes inherit the cgroup. Shipper polls every 10 ms to catch GUI apps that systemd moves out.</div>
+          </div>
+          <div class="cg-step">
+            <div class="cg-step-label">② normal operation</div>
+            <div class="cg-step-text">I/O chunks flow, server replies with signed ACKs. Heartbeat every 400 ms.</div>
+          </div>
+          <div class="cg-step s-danger">
+            <div class="cg-step-label">③ ACK timeout — 800 ms</div>
+            <div class="cg-step-text">Shipper writes <code>1</code> to <code>cgroup.freeze</code> — kernel suspends all tasks. GUI apps outside the cgroup receive <code>SIGSTOP</code>. Banner shown on <code>/dev/tty</code>.</div>
+          </div>
+          <div class="cg-step s-warn">
+            <div class="cg-step-label">④ frozen — input blocked</div>
+            <div class="cg-step-text">No keystrokes reach the shell. <code>Ctrl+C / Ctrl+Z</code> still work — monitor thread reclaims terminal foreground group every 150 ms.</div>
+          </div>
+          <div class="cg-step s-ok">
+            <div class="cg-step-label">⑤ network returns</div>
+            <div class="cg-step-text">ACK received → <code>cgroup.freeze=0</code>, <code>SIGCONT</code> to any SIGSTOP'd processes. Session resumes with no data loss.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 8: WEB REPLAY ░░ -->
+  <div class="slide" id="s8">
     <div class="s-replay">
       <div class="slide-heading" style="margin-bottom:36px;">WEB REPLAY INTERFACE</div>
       <div class="replay-layout">
@@ -860,8 +1265,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 7: DEPLOY ░░ -->
-  <div class="slide" id="s6">
+  <!-- ░░ SLIDE 10: DEPLOY ░░ -->
+  <div class="slide" id="s9">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
       <div class="sub">▸ RPM · systemd · mTLS · sudoreplay</div>
@@ -888,7 +1293,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 7;
+  const N = 10;
   let cur = 0, busy = false;
 
   /* cursor */
