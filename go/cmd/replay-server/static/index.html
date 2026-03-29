@@ -234,6 +234,64 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .loading-row { display: flex; align-items: center; gap: 8px;
       padding: 14px 16px; font-size: 12px; color: var(--text-sub); }
+
+    /* ── Tabs ───────────────────────────────────────────────────────────────── */
+    .tab-nav { display: flex; gap: 2px; }
+    .tab-btn { background: none; border: 1px solid transparent; color: var(--text-dim);
+      font-family: var(--font); font-size: 11px; padding: 3px 12px; border-radius: 3px;
+      cursor: pointer; transition: all 0.12s; }
+    .tab-btn:hover { color: var(--text-sub); border-color: var(--border); }
+    .tab-btn.active { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+
+    /* ── Report panels ──────────────────────────────────────────────────────── */
+    .report-panel { grid-area: main; overflow-y: auto; padding: 24px 28px;
+      background: var(--bg); display: none; }
+    .layout.report-view .sidebar { display: none; }
+    .layout.report-view .player  { display: none; }
+    .layout.report-view .report-panel.active {
+      display: block;
+      grid-column: 1 / -1;
+    }
+
+    .report-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+    .report-filter label { font-size: 11px; color: var(--text-dim); }
+
+    .rc-period { font-size: 11px; color: var(--text-dim); margin-bottom: 18px; }
+
+    .report-cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+    .report-card { background: var(--card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 16px 22px; min-width: 130px; }
+    .report-card.warn { border-color: rgba(255,80,80,0.45); }
+    .rc-value { font-size: 30px; font-weight: 700; color: var(--green); line-height: 1.1; }
+    .report-card.warn .rc-value { color: var(--red); }
+    .rc-label { font-size: 11px; color: var(--text-sub); margin-top: 5px; }
+
+    .report-section { margin-bottom: 28px; }
+    .report-section h2 { font-size: 11px; color: var(--text-dim); letter-spacing: 0.08em;
+      text-transform: uppercase; margin-bottom: 10px; }
+
+    .report-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .report-table th { text-align: left; color: var(--text-dim); font-weight: 500;
+      padding: 5px 10px; border-bottom: 1px solid var(--border); font-size: 11px;
+      letter-spacing: 0.04em; white-space: nowrap; }
+    .report-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
+    .report-table tr:hover td { background: var(--card-hover); }
+    .td-warn  { color: var(--red) !important; }
+    .td-green { color: var(--green) !important; }
+    .td-dim   { color: var(--text-sub) !important; }
+    .td-cmd   { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .anomaly-kind { display: inline-block; font-size: 10px; padding: 1px 6px;
+      border-radius: 3px; border: 1px solid; font-weight: 600; white-space: nowrap; }
+    .ak-incomplete   { color: var(--red);  border-color: rgba(255,80,80,0.4);   background: rgba(255,80,80,0.08); }
+    .ak-after_hours  { color: #ffd666;     border-color: rgba(255,214,102,0.4); background: rgba(255,214,102,0.07); }
+    .ak-long_session { color: var(--blue); border-color: rgba(77,168,255,0.4);  background: rgba(77,168,255,0.07); }
+    .ak-root_shell   { color: #c984f8;     border-color: rgba(201,132,248,0.4); background: rgba(201,132,248,0.07); }
+
+    .report-link { color: var(--green); cursor: pointer; font-size: 11px;
+      background: none; border: none; font-family: var(--font); padding: 0; }
+    .report-link:hover { text-decoration: underline; }
+    .report-empty { text-align: center; color: var(--text-dim); padding: 20px; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -242,6 +300,11 @@
   <header class="topbar">
     <div class="logo"><span class="logo-icon">◈</span> sudo-replay</div>
     <span class="badge" id="session-count">loading…</span>
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="sessions">Sessions</button>
+      <button class="tab-btn" data-tab="summary">Summary</button>
+      <button class="tab-btn" data-tab="anomalies">Anomalies</button>
+    </nav>
     <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
     <button class="theme-btn" id="theme-toggle" title="Toggle light / dark mode">☀</button>
   </header>
@@ -292,6 +355,41 @@
       </select>
     </div>
   </main>
+
+  <!-- ── Summary tab ───────────────────────────────────────────────────────── -->
+  <div class="report-panel" id="tab-summary">
+    <div class="report-filter">
+      <label>From</label>
+      <input type="date" id="report-from" class="date-input" title="From date">
+      <label>To</label>
+      <input type="date" id="report-to" class="date-input" title="To date">
+      <button class="date-clear" id="report-clear" title="Clear date filter">✕</button>
+    </div>
+    <div class="rc-period" id="report-period"></div>
+    <div class="report-cards" id="report-cards"></div>
+    <div class="report-section">
+      <h2>Per User</h2>
+      <table class="report-table">
+        <thead><tr>
+          <th>User</th><th>Sessions</th><th>Hosts</th><th>Avg Duration</th><th>Top Commands</th><th>Incomplete</th>
+        </tr></thead>
+        <tbody id="report-user-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Anomalies tab ─────────────────────────────────────────────────────── -->
+  <div class="report-panel" id="tab-anomalies">
+    <div class="report-section">
+      <h2>Anomalies</h2>
+      <table class="report-table">
+        <thead><tr>
+          <th>Type</th><th>User</th><th>Host</th><th>Command</th><th>Time</th><th>Duration</th><th>Detail</th><th></th>
+        </tr></thead>
+        <tbody id="report-anomaly-tbody"></tbody>
+      </table>
+    </div>
+  </div>
 
 </div>
 <script>
@@ -835,6 +933,166 @@ term.writeln('\x1b[2;37m    Space      play / pause\x1b[0m');
 term.writeln('\x1b[2;37m    ← / →     seek ±5 seconds\x1b[0m');
 term.writeln('\x1b[2;37m    R          restart\x1b[0m');
 term.writeln('\x1b[2;37m    /          focus search\x1b[0m');
+
+// ── Report ───────────────────────────────────────────────────────────────────
+
+const elReportFrom  = document.getElementById('report-from');
+const elReportTo    = document.getElementById('report-to');
+const elReportClear = document.getElementById('report-clear');
+
+let reportFromVal = '';
+let reportToVal   = '';
+let reportCache   = null;
+let reportDirty   = true;
+
+const ANOMALY_LABELS = {
+  incomplete:   { label: 'INCOMPLETE',   cls: 'ak-incomplete'   },
+  after_hours:  { label: 'AFTER HOURS',  cls: 'ak-after_hours'  },
+  long_session: { label: 'LONG SESSION', cls: 'ak-long_session' },
+  root_shell:   { label: 'ROOT SHELL',   cls: 'ak-root_shell'   },
+};
+
+// td creates a <td> with optional class and text content (set via textContent — safe).
+function td(text, cls) {
+  const c = document.createElement('td');
+  if (cls) c.className = cls;
+  c.textContent = text != null ? String(text) : '';
+  return c;
+}
+
+async function fetchReport() {
+  if (!reportDirty && reportCache) { renderReport(reportCache); return; }
+  const p = new URLSearchParams();
+  if (reportFromVal) p.set('from', Math.floor(new Date(reportFromVal).getTime() / 1000));
+  if (reportToVal) {
+    const d = new Date(reportToVal); d.setHours(23, 59, 59, 999);
+    p.set('to', Math.floor(d.getTime() / 1000));
+  }
+  try {
+    const res = await fetch('/api/report?' + p);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    reportCache = await res.json();
+    reportDirty = false;
+    renderReport(reportCache);
+  } catch(err) {
+    const cards = document.getElementById('report-cards');
+    cards.textContent = '';
+    const msg = el('div', 'report-empty');
+    msg.style.color = 'var(--red)';
+    msg.textContent = `⚠ Failed to load: ${err.message}`;
+    cards.appendChild(msg);
+  }
+}
+
+function renderReport(data) {
+  renderSummaryCards(data.summary);
+  renderUserTable(data.per_user);
+  renderAnomalyTable(data.anomalies);
+}
+
+function renderSummaryCards(s) {
+  const period = document.getElementById('report-period');
+  period.textContent = (s.period_from && s.period_to)
+    ? `Period: ${fmtDate(s.period_from)} → ${fmtDate(s.period_to)}`
+    : 'No sessions in selected period.';
+
+  const cards = document.getElementById('report-cards');
+  cards.textContent = '';
+  const items = [
+    { value: s.total_sessions,      label: 'Total Sessions', warn: false },
+    { value: s.unique_users,        label: 'Unique Users',   warn: false },
+    { value: s.unique_hosts,        label: 'Unique Hosts',   warn: false },
+    { value: s.incomplete_sessions, label: 'Incomplete',     warn: s.incomplete_sessions > 0 },
+    { value: s.long_sessions,       label: 'Sessions > 2h',  warn: s.long_sessions > 0 },
+  ];
+  for (const item of items) {
+    const card = el('div', 'report-card' + (item.warn ? ' warn' : ''));
+    card.appendChild(el('div', 'rc-value', String(item.value)));
+    card.appendChild(el('div', 'rc-label', item.label));
+    cards.appendChild(card);
+  }
+}
+
+function renderUserTable(users) {
+  const tbody = document.getElementById('report-user-tbody');
+  tbody.textContent = '';
+  if (!users || !users.length) {
+    const tr = document.createElement('tr');
+    tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 6, className: 'report-empty', textContent: 'No data' }));
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const u of users) {
+    const tr = document.createElement('tr');
+    tr.appendChild(td(u.user, 'td-green'));
+    tr.appendChild(td(u.sessions));
+    tr.appendChild(td(u.hosts));
+    tr.appendChild(td(fmt(u.avg_duration), 'td-dim'));
+    tr.appendChild(td((u.top_commands || []).join(', '), 'td-dim'));
+    tr.appendChild(td(u.incomplete > 0 ? '⚠ ' + u.incomplete : '—', u.incomplete > 0 ? 'td-warn' : 'td-dim'));
+    tbody.appendChild(tr);
+  }
+}
+
+function renderAnomalyTable(anomalies) {
+  const tbody = document.getElementById('report-anomaly-tbody');
+  tbody.textContent = '';
+  if (!anomalies || !anomalies.length) {
+    const tr = document.createElement('tr');
+    tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 8, className: 'report-empty', textContent: 'No anomalies found.' }));
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const a of anomalies) {
+    const info = ANOMALY_LABELS[a.kind] || { label: a.kind.toUpperCase(), cls: '' };
+    const tr = document.createElement('tr');
+
+    // Type badge
+    const typeTd = document.createElement('td');
+    const badge = el('span', 'anomaly-kind ' + info.cls, info.label);
+    typeTd.appendChild(badge);
+    tr.appendChild(typeTd);
+
+    tr.appendChild(td(a.user,    'td-green'));
+    tr.appendChild(td(a.host,    'td-dim'));
+    tr.appendChild(td(a.command, 'td-dim td-cmd'));
+    tr.appendChild(Object.assign(td(fmtDate(a.start_time), 'td-dim'), { style: 'white-space:nowrap' }));
+    tr.appendChild(td(fmt(a.duration), 'td-dim'));
+    tr.appendChild(td(a.detail,  'td-dim'));
+
+    // View link
+    const linkTd = document.createElement('td');
+    const btn = document.createElement('button');
+    btn.className = 'report-link';
+    btn.textContent = 'view';
+    btn.addEventListener('click', () => { switchTab('sessions'); selectSession(a.tsid); });
+    linkTd.appendChild(btn);
+    tr.appendChild(linkTd);
+
+    tbody.appendChild(tr);
+  }
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
+  document.querySelectorAll('.report-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
+  if (tab === 'summary' || tab === 'anomalies') fetchReport();
+}
+
+document.querySelectorAll('.tab-btn').forEach(btn =>
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+elReportFrom.addEventListener('change', () => { reportFromVal = elReportFrom.value; reportDirty = true; fetchReport(); });
+elReportTo.addEventListener('change',   () => { reportToVal   = elReportTo.value;   reportDirty = true; fetchReport(); });
+elReportClear.addEventListener('click', () => {
+  elReportFrom.value = ''; elReportTo.value = '';
+  reportFromVal = ''; reportToVal = '';
+  reportDirty = true;
+  fetchReport();
+});
 
 fetchSessions();
 </script>

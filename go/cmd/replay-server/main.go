@@ -64,6 +64,46 @@ type SessionList struct {
 	Total    int           `json:"total"`
 }
 
+// ReportSummary holds aggregate statistics for a time period.
+type ReportSummary struct {
+	TotalSessions      int   `json:"total_sessions"`
+	UniqueUsers        int   `json:"unique_users"`
+	UniqueHosts        int   `json:"unique_hosts"`
+	IncompleteSessions int   `json:"incomplete_sessions"`
+	LongSessions       int   `json:"long_sessions"`
+	PeriodFrom         int64 `json:"period_from"`
+	PeriodTo           int64 `json:"period_to"`
+}
+
+// UserStat holds per-user aggregate statistics.
+type UserStat struct {
+	User        string   `json:"user"`
+	Sessions    int      `json:"sessions"`
+	Hosts       int      `json:"hosts"`
+	AvgDuration float64  `json:"avg_duration"`
+	TopCommands []string `json:"top_commands"`
+	Incomplete  int      `json:"incomplete"`
+}
+
+// Anomaly describes a session that triggered an anomaly rule.
+type Anomaly struct {
+	Kind      string  `json:"kind"`
+	TSID      string  `json:"tsid"`
+	User      string  `json:"user"`
+	Host      string  `json:"host"`
+	Command   string  `json:"command"`
+	StartTime int64   `json:"start_time"`
+	Duration  float64 `json:"duration"`
+	Detail    string  `json:"detail"`
+}
+
+// ReportData is the envelope returned by /api/report.
+type ReportData struct {
+	Summary   ReportSummary `json:"summary"`
+	PerUser   []UserStat    `json:"per_user"`
+	Anomalies []Anomaly     `json:"anomalies"`
+}
+
 // sessionIndex is an in-memory cache of all parsed session metadata.
 // It is rebuilt from disk at most once per indexTTL to avoid a full directory
 // scan on every /api/sessions request.
@@ -159,6 +199,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
+	mux.HandleFunc("/api/report", handleReport)
 
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -441,6 +482,202 @@ func calcDuration(timingPath string) float64 {
 		}
 	}
 	return total
+}
+
+func handleReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var from, to int64
+	if v, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64); err == nil {
+		from = v
+	}
+	if v, err := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64); err == nil {
+		to = v
+	}
+	report, err := buildReport(*flagLogDir, from, to)
+	if err != nil {
+		log.Printf("build report: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(report); err != nil {
+		log.Printf("encode report: %v", err)
+	}
+}
+
+func buildReport(logDir string, from, to int64) (*ReportData, error) {
+	all, err := index.get(logDir)
+	if err != nil {
+		return nil, err
+	}
+
+	sessions := make([]SessionInfo, 0, len(all))
+	for _, s := range all {
+		if from > 0 && s.StartTime < from {
+			continue
+		}
+		if to > 0 && s.StartTime > to {
+			continue
+		}
+		sessions = append(sessions, s)
+	}
+
+	// ── Summary ───────────────────────────────────────────────────────────────
+	userSet := make(map[string]struct{})
+	hostSet := make(map[string]struct{})
+	nIncomplete, nLong := 0, 0
+	var periodFrom, periodTo int64
+	for _, s := range sessions {
+		userSet[s.User] = struct{}{}
+		hostSet[s.Host] = struct{}{}
+		if s.Incomplete {
+			nIncomplete++
+		}
+		if s.Duration > 7200 {
+			nLong++
+		}
+		if periodFrom == 0 || s.StartTime < periodFrom {
+			periodFrom = s.StartTime
+		}
+		if s.StartTime > periodTo {
+			periodTo = s.StartTime
+		}
+	}
+
+	// ── Per-user ─────────────────────────────────────────────────────────────
+	type userAccum struct {
+		sessions   int
+		hosts      map[string]struct{}
+		totalDur   float64
+		commands   map[string]int
+		incomplete int
+	}
+	accums := make(map[string]*userAccum)
+	for _, s := range sessions {
+		a, ok := accums[s.User]
+		if !ok {
+			a = &userAccum{
+				hosts:    make(map[string]struct{}),
+				commands: make(map[string]int),
+			}
+			accums[s.User] = a
+		}
+		a.sessions++
+		a.hosts[s.Host] = struct{}{}
+		a.totalDur += s.Duration
+		if parts := strings.Fields(s.Command); len(parts) > 0 {
+			a.commands[filepath.Base(parts[0])]++
+		}
+		if s.Incomplete {
+			a.incomplete++
+		}
+	}
+
+	type kv struct {
+		k string
+		v int
+	}
+	perUser := make([]UserStat, 0, len(accums))
+	for user, a := range accums {
+		kvs := make([]kv, 0, len(a.commands))
+		for k, v := range a.commands {
+			kvs = append(kvs, kv{k, v})
+		}
+		sort.Slice(kvs, func(i, j int) bool { return kvs[i].v > kvs[j].v })
+		top := make([]string, 0, 3)
+		for i := 0; i < len(kvs) && i < 3; i++ {
+			top = append(top, kvs[i].k)
+		}
+		avg := 0.0
+		if a.sessions > 0 {
+			avg = a.totalDur / float64(a.sessions)
+		}
+		perUser = append(perUser, UserStat{
+			User:        user,
+			Sessions:    a.sessions,
+			Hosts:       len(a.hosts),
+			AvgDuration: avg,
+			TopCommands: top,
+			Incomplete:  a.incomplete,
+		})
+	}
+	sort.Slice(perUser, func(i, j int) bool { return perUser[i].Sessions > perUser[j].Sessions })
+
+	// ── Anomalies ─────────────────────────────────────────────────────────────
+	anomalies := make([]Anomaly, 0)
+	for _, s := range sessions {
+		if s.Incomplete {
+			anomalies = append(anomalies, Anomaly{
+				Kind: "incomplete", TSID: s.TSID, User: s.User, Host: s.Host,
+				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
+				Detail: "shipper killed mid-session",
+			})
+		}
+		t := time.Unix(s.StartTime, 0)
+		if h := t.Hour(); h < 6 || h >= 23 {
+			anomalies = append(anomalies, Anomaly{
+				Kind: "after_hours", TSID: s.TSID, User: s.User, Host: s.Host,
+				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
+				Detail: fmt.Sprintf("%02d:%02d local time", h, t.Minute()),
+			})
+		}
+		if s.Duration > 7200 {
+			anomalies = append(anomalies, Anomaly{
+				Kind: "long_session", TSID: s.TSID, User: s.User, Host: s.Host,
+				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
+				Detail: "duration " + fmtDur(s.Duration),
+			})
+		}
+		if s.Runas == "root" {
+			base := ""
+			if parts := strings.Fields(s.Command); len(parts) > 0 {
+				base = filepath.Base(parts[0])
+			}
+			switch base {
+			case "bash", "sh", "zsh", "fish", "ksh", "tcsh", "csh":
+				anomalies = append(anomalies, Anomaly{
+					Kind: "root_shell", TSID: s.TSID, User: s.User, Host: s.Host,
+					Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
+					Detail: "direct root shell",
+				})
+			}
+		}
+	}
+	kindOrder := map[string]int{"incomplete": 0, "after_hours": 1, "long_session": 2, "root_shell": 3}
+	sort.Slice(anomalies, func(i, j int) bool {
+		if anomalies[i].Kind != anomalies[j].Kind {
+			return kindOrder[anomalies[i].Kind] < kindOrder[anomalies[j].Kind]
+		}
+		return anomalies[i].StartTime > anomalies[j].StartTime
+	})
+
+	return &ReportData{
+		Summary: ReportSummary{
+			TotalSessions:      len(sessions),
+			UniqueUsers:        len(userSet),
+			UniqueHosts:        len(hostSet),
+			IncompleteSessions: nIncomplete,
+			LongSessions:       nLong,
+			PeriodFrom:         periodFrom,
+			PeriodTo:           periodTo,
+		},
+		PerUser:   perUser,
+		Anomalies: anomalies,
+	}, nil
+}
+
+// fmtDur formats a duration in seconds as a human-readable string.
+func fmtDur(secs float64) string {
+	d := time.Duration(secs) * time.Second
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m+1)
 }
 
 // readEvents parses the timing file and streams the corresponding bytes from
