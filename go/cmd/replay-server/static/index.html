@@ -371,7 +371,7 @@
       <h2>Per User</h2>
       <table class="report-table">
         <thead><tr>
-          <th>User</th><th>Sessions</th><th>Hosts</th><th>Avg Duration</th><th>Top Commands</th><th>Incomplete</th>
+          <th>User</th><th>Sessions</th><th>Avg Duration</th><th>Top Commands</th><th>Hosts</th><th>Incomplete</th>
         </tr></thead>
         <tbody id="report-user-tbody"></tbody>
       </table>
@@ -1026,9 +1026,26 @@ function renderUserTable(users) {
     const tr = document.createElement('tr');
     tr.appendChild(td(u.user, 'td-green'));
     tr.appendChild(td(u.sessions));
-    tr.appendChild(td(u.hosts));
     tr.appendChild(td(fmt(u.avg_duration), 'td-dim'));
     tr.appendChild(td((u.top_commands || []).join(', '), 'td-dim'));
+
+    // Hosts cell: "web-01 (12), db-01 (5)" sorted by count desc
+    const hostTd = document.createElement('td');
+    hostTd.className = 'td-dim';
+    const counts = u.host_counts || [];
+    const MAX_SHOWN = 5;
+    counts.slice(0, MAX_SHOWN).forEach((hc, i) => {
+      if (i > 0) hostTd.appendChild(document.createTextNode(', '));
+      const span = document.createElement('span');
+      span.style.whiteSpace = 'nowrap';
+      span.textContent = `${hc.host} (${hc.count})`;
+      hostTd.appendChild(span);
+    });
+    if (counts.length > MAX_SHOWN) {
+      hostTd.appendChild(document.createTextNode(` +${counts.length - MAX_SHOWN} more`));
+    }
+    tr.appendChild(hostTd);
+
     tr.appendChild(td(u.incomplete > 0 ? '⚠ ' + u.incomplete : '—', u.incomplete > 0 ? 'td-warn' : 'td-dim'));
     tbody.appendChild(tr);
   }

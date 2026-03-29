@@ -75,14 +75,21 @@ type ReportSummary struct {
 	PeriodTo           int64 `json:"period_to"`
 }
 
+// HostCount holds a host name and the number of sessions on that host.
+type HostCount struct {
+	Host  string `json:"host"`
+	Count int    `json:"count"`
+}
+
 // UserStat holds per-user aggregate statistics.
 type UserStat struct {
-	User        string   `json:"user"`
-	Sessions    int      `json:"sessions"`
-	Hosts       int      `json:"hosts"`
-	AvgDuration float64  `json:"avg_duration"`
-	TopCommands []string `json:"top_commands"`
-	Incomplete  int      `json:"incomplete"`
+	User        string      `json:"user"`
+	Sessions    int         `json:"sessions"`
+	Hosts       int         `json:"hosts"`
+	HostCounts  []HostCount `json:"host_counts"`
+	AvgDuration float64     `json:"avg_duration"`
+	TopCommands []string    `json:"top_commands"`
+	Incomplete  int         `json:"incomplete"`
 }
 
 // Anomaly describes a session that triggered an anomaly rule.
@@ -550,7 +557,7 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 	// ── Per-user ─────────────────────────────────────────────────────────────
 	type userAccum struct {
 		sessions   int
-		hosts      map[string]struct{}
+		hosts      map[string]int
 		totalDur   float64
 		commands   map[string]int
 		incomplete int
@@ -560,13 +567,13 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 		a, ok := accums[s.User]
 		if !ok {
 			a = &userAccum{
-				hosts:    make(map[string]struct{}),
+				hosts:    make(map[string]int),
 				commands: make(map[string]int),
 			}
 			accums[s.User] = a
 		}
 		a.sessions++
-		a.hosts[s.Host] = struct{}{}
+		a.hosts[s.Host]++
 		a.totalDur += s.Duration
 		if parts := strings.Fields(s.Command); len(parts) > 0 {
 			a.commands[filepath.Base(parts[0])]++
@@ -595,10 +602,21 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 		if a.sessions > 0 {
 			avg = a.totalDur / float64(a.sessions)
 		}
+		hostKVs := make([]kv, 0, len(a.hosts))
+		for h, n := range a.hosts {
+			hostKVs = append(hostKVs, kv{h, n})
+		}
+		sort.Slice(hostKVs, func(i, j int) bool { return hostKVs[i].v > hostKVs[j].v })
+		hostCounts := make([]HostCount, len(hostKVs))
+		for i, hkv := range hostKVs {
+			hostCounts[i] = HostCount{Host: hkv.k, Count: hkv.v}
+		}
+
 		perUser = append(perUser, UserStat{
 			User:        user,
 			Sessions:    a.sessions,
 			Hosts:       len(a.hosts),
+			HostCounts:  hostCounts,
 			AvgDuration: avg,
 			TopCommands: top,
 			Incomplete:  a.incomplete,
