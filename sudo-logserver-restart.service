@@ -1,0 +1,7 @@
+[Unit]
+Description=Daily restart of sudo-logserver (goroutine/FD leak mitigation)
+RefuseManualStart=yes
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart sudo-logserver.service

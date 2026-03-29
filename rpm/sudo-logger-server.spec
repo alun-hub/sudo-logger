@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.9.1
+Version:        1.9.2
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -32,9 +32,13 @@ go build -o sudo-logserver ./cmd/server
 install -D -m 0755 go/sudo-logserver \
     %{buildroot}%{_bindir}/sudo-logserver
 
-# Systemd service
+# Systemd service and daily restart timer
 install -D -m 0644 sudo-logserver.service \
     %{buildroot}%{_unitdir}/sudo-logserver.service
+install -D -m 0644 sudo-logserver-restart.timer \
+    %{buildroot}%{_unitdir}/sudo-logserver-restart.timer
+install -D -m 0644 sudo-logserver-restart.service \
+    %{buildroot}%{_unitdir}/sudo-logserver-restart.service
 
 # Config directory
 install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
@@ -61,7 +65,7 @@ getent passwd sudologger >/dev/null || \
             -d /var/log/sudoreplay sudologger
 
 %post
-%systemd_post sudo-logserver.service
+%systemd_post sudo-logserver.service sudo-logserver-restart.timer
 # Generate ed25519 signing key on first install
 if [ ! -f %{_sysconfdir}/sudo-logger/ack-sign.key ]; then
     openssl genpkey -algorithm ed25519 \
@@ -76,14 +80,16 @@ if [ ! -f %{_sysconfdir}/sudo-logger/ack-sign.key ]; then
 fi
 
 %preun
-%systemd_preun sudo-logserver.service
+%systemd_preun sudo-logserver.service sudo-logserver-restart.timer
 
 %postun
-%systemd_postun_with_restart sudo-logserver.service
+%systemd_postun_with_restart sudo-logserver.service sudo-logserver-restart.timer
 
 %files
 %{_bindir}/sudo-logserver
 %{_unitdir}/sudo-logserver.service
+%{_unitdir}/sudo-logserver-restart.timer
+%{_unitdir}/sudo-logserver-restart.service
 %dir %attr(0750, root, sudologger) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/server.conf
 %ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/ack-sign.key
@@ -93,6 +99,11 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Mar 29 2026 sudo-logger 1.9.2-1
+- feat: add daily 03:00 restart timer (sudo-logserver-restart.timer) to
+  reclaim leaked goroutines and file descriptors from sessions where the
+  shipper died without a clean TCP teardown
+
 * Sat Mar 21 2026 sudo-logger 1.9.1-1
 - fix: propagate write errors in iolog log header (fmt.Fprintf, logF.Close)
 
