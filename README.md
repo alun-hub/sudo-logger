@@ -109,8 +109,9 @@ sudo session:
 - Tracks ACK state per session; responds instantly to plugin ACK queries
 - Sends a HEARTBEAT to the server every 400 ms; declares the connection
   dead if no HEARTBEAT_ACK arrives within 800 ms (~1 s freeze latency)
-- Recovers automatically if the network comes back within ~2 seconds
-  (before TCP keepalive closes the connection)
+- Recovers automatically when the network returns; the TCP connection
+  remains alive as long as the OS retransmission timeout has not expired
+  (typically several minutes on Linux with default settings)
 - Creates a per-session cgroup subtree to freeze all child processes
 - Tracks processes that escape to foreign cgroups (moved by GNOME/systemd)
   and freezes them via SIGSTOP when safe (see [Freeze mechanism](#freeze-mechanism))
@@ -172,11 +173,13 @@ A TLS server running on a dedicated machine. For each client connection:
 
 ## Limitations
 
-- **Recovery requires fast network return**: if the network outage lasts
-  longer than ~2 seconds, TCP keepalive closes the underlying connection.
-  At that point the freeze is permanent for the current session — the user
-  must Ctrl+C and start a new sudo session. Brief outages (< 2 s) recover
-  automatically when the network returns.
+- **Recovery depends on TCP connection surviving**: the shipper keeps the
+  TCP connection alive by writing heartbeats into the kernel send buffer
+  even when the network is down. Recovery happens automatically when the
+  network returns, as long as the OS retransmission timeout has not expired.
+  On Linux with default settings this is typically several minutes. If the
+  connection is truly gone (OS gave up), the freeze is permanent for the
+  current session — the user must Ctrl+C and start a new sudo session.
 
 - **No session buffer on reconnect**: chunks sent during the window between
   network loss and freeze detection (~400–800 ms) may not be acknowledged.
@@ -284,7 +287,7 @@ The ACK signing key pair is generated automatically on the server when the
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.6.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.9.2-1.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -318,7 +321,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.6.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.9.2-1.fc43.x86_64.rpm
 
 # Install certificates and ACK verify key
 cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
@@ -403,6 +406,26 @@ LISTEN_ADDR=:9876
 LOG_DIR=/var/log/sudoreplay
 ```
 
+Additional flags can be passed via a systemd drop-in:
+
+```ini
+# /etc/systemd/system/sudo-logserver.service.d/override.conf
+[Service]
+ExecStart=
+ExecStart=/usr/bin/sudo-logserver \
+    -listen   ${LISTEN_ADDR} \
+    -logdir   ${LOG_DIR} \
+    -cert     /etc/sudo-logger/server.crt \
+    -key      /etc/sudo-logger/server.key \
+    -ca       /etc/sudo-logger/ca.crt \
+    -signkey  /etc/sudo-logger/ack-sign.key \
+    -strict-cert-host
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-strict-cert-host` | off | Reject sessions where the `host` field in SESSION_START does not match the CN or DNS SANs of the client's TLS certificate. Recommended when each machine has its own certificate; leave off for shared-certificate setups. |
+
 ### Tunable constants in `plugin/plugin.c`
 
 | Constant | Default | Description |
@@ -461,7 +484,7 @@ terminal player for recorded sessions.  It reads the same iolog directories as
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.6.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.9.2-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -481,6 +504,14 @@ sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
   (e.g. `vim /etc/nginx/nginx.conf`, `pg_dump -U postgres mydb -f backup.sql`)
 - Terminal player with play/pause, scrubbing, and speed control (0.25×–16×)
 - Keyboard shortcuts: `Space` play/pause, `←`/`→` seek ±5 s, `R` restart
+- **Summary tab** — aggregate statistics for a selectable date range: total
+  sessions, unique users and hosts, incomplete sessions, sessions > 2 h, and a
+  per-user breakdown with session count, average duration, top commands, and
+  host distribution (e.g. `web-01 (12), db-01 (5)`)
+- **Anomalies tab** — flagged sessions by rule: incomplete sessions, activity
+  outside working hours (23:00–06:00), sessions longer than 2 h, and direct
+  root shell invocations (`bash`/`sh`/`zsh`/…). Each anomaly links directly
+  to the session in the player
 - **No external dependencies** — xterm.js and CSS are vendored into the binary;
   works in air-gapped environments with no internet access
 - No authentication built in — restrict to a management network or put behind a
@@ -564,10 +595,12 @@ sudo-logger/
 │   ├── sudo-logger-server.spec  # RPM spec for server package
 │   └── sudo-logger-replay.spec  # RPM spec for replay web interface
 ├── setup.sh                # PKI bootstrap script
-├── sudo-shipper.service    # systemd unit for shipper
-├── sudo-logserver.service  # systemd unit for server
-├── sudo-replay.service     # systemd unit for replay web interface
-├── sudo-logserver.logrotate # logrotate config for /var/log/sudoreplay
+├── sudo-shipper.service         # systemd unit for shipper
+├── sudo-logserver.service       # systemd unit for server
+├── sudo-logserver-restart.timer # daily 03:00 restart timer (leak mitigation)
+├── sudo-logserver-restart.service # oneshot unit invoked by the timer
+├── sudo-replay.service          # systemd unit for replay web interface
+├── sudo-logserver.logrotate     # logrotate config for /var/log/sudoreplay
 ├── shipper.conf            # Default client config
 └── server.conf             # Default server config
 ```
@@ -718,34 +751,33 @@ prevent sudo's event loop from processing signals, breaking Ctrl+C.
 
 ### Building RPMs
 
-The RPM spec files are in `rpm/` in the repository.
+The RPM spec files are in `rpm/` in the repository. Always commit all changes
+before creating the tarball — `git archive` only includes committed files.
 
 ```bash
 # Set up rpmbuild tree (once)
 rpmdev-setuptree
 
 # Set the version (must match Version: in the spec files)
-VERSION=1.6.0
+VERSION=1.9.2
 
-# Create source tarball from git (preserves correct directory prefix)
-git archive --prefix=sudo-logger-${VERSION}/ HEAD \
-    | gzip > ~/rpmbuild/SOURCES/sudo-logger-${VERSION}.tar.gz
+# 1. Commit your changes first, then create the source tarball from HEAD
+git archive --format=tar.gz --prefix=sudo-logger-${VERSION}/ HEAD \
+    > ~/rpmbuild/SOURCES/sudo-logger-${VERSION}.tar.gz
 
-# Copy spec files
-cp rpm/*.spec ~/rpmbuild/SPECS/
-
-# Build all three packages
-rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-client.spec
-rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-server.spec
-rpmbuild -bb ~/rpmbuild/SPECS/sudo-logger-replay.spec
+# 2. Build packages directly from the repo directory
+rpmbuild -ba rpm/sudo-logger-client.spec
+rpmbuild -ba rpm/sudo-logger-server.spec
+rpmbuild -ba rpm/sudo-logger-replay.spec
 
 # RPMs end up in:
 ls ~/rpmbuild/RPMS/x86_64/
 ```
 
-**Version bump:** increment `Release:` in the spec files for spec-only fixes.
-Increment `Version:` (same value in all three specs) for code changes — reset
-`Release:` back to `1%{?dist}` each time `Version:` changes.
+**Version bump:** increment `Release:` in the spec file for spec-only fixes.
+Increment `Version:` for code changes and add a `%changelog` entry — reset
+`Release:` back to `1%{?dist}` each time `Version:` changes. The three
+packages are versioned independently; only bump the affected package.
 
 ---
 
@@ -921,10 +953,12 @@ kubectl get svc -n sudo-logger sudo-logserver
 1 024 caps at ~250 sessions. Add `LimitNOFILE=65536` to the server service
 file to raise this to ~15 000+ sessions.
 
-**Known resource leak:** a shipper that disappears without sending
-`SESSION_END` leaves a goroutine and 4 FDs open on the server. Add a
-`RuntimeMaxSec=` to the server's systemd unit or a Kubernetes liveness
-probe to restart periodically.
+**Known resource leak:** a shipper that is killed without sending
+`SESSION_END` and without the OS sending a TCP RST (e.g. VM hard-reset
+with network down) leaves a goroutine and 4 FDs open on the server.
+The included `sudo-logserver-restart.timer` restarts the server daily at
+03:00 to reclaim any leaked resources. For Kubernetes deployments, add a
+liveness probe instead.
 
 ---
 
