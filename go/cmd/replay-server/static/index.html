@@ -287,6 +287,17 @@
     .ak-after_hours  { color: #ffd666;     border-color: rgba(255,214,102,0.4); background: rgba(255,214,102,0.07); }
     .ak-long_session { color: var(--blue); border-color: rgba(77,168,255,0.4);  background: rgba(77,168,255,0.07); }
     .ak-root_shell   { color: #c984f8;     border-color: rgba(201,132,248,0.4); background: rgba(201,132,248,0.07); }
+    .ak-high_risk    { color: #ff9f40;     border-color: rgba(255,159,64,0.4);  background: rgba(255,159,64,0.08); }
+
+    /* ── Risk badges ────────────────────────────────────────────────────────── */
+    .risk-badge { font-size: 10px; font-weight: 600; padding: 1px 5px;
+      border-radius: 2px; border: 1px solid; flex-shrink: 0; white-space: nowrap; }
+    .risk-critical { color: #ff5f6d; border-color: rgba(255,95,109,0.45); background: rgba(255,95,109,0.09); }
+    .risk-high     { color: #ff9f40; border-color: rgba(255,159,64,0.45); background: rgba(255,159,64,0.08); }
+    .risk-medium   { color: #ffd666; border-color: rgba(255,214,102,0.4); background: rgba(255,214,102,0.07); }
+    .iv.risk-critical { color: #ff5f6d; }
+    .iv.risk-high     { color: #ff9f40; }
+    .iv.risk-medium   { color: #ffd666; }
 
     .report-link { color: var(--green); cursor: pointer; font-size: 11px;
       background: none; border: none; font-family: var(--font); padding: 0; }
@@ -318,6 +329,7 @@
       <button class="sort-btn" data-sort="user">User</button>
       <button class="sort-btn" data-sort="host">Host</button>
       <button class="sort-btn" data-sort="duration">Dur</button>
+      <button class="sort-btn" data-sort="risk">Risk</button>
     </div>
     <div class="date-range">
       <input type="date" id="date-from" class="date-input" title="From date">
@@ -384,7 +396,7 @@
       <h2>Anomalies</h2>
       <table class="report-table">
         <thead><tr>
-          <th>Type</th><th>User</th><th>Host</th><th>Command</th><th>Time</th><th>Duration</th><th>Detail</th><th></th>
+          <th>Type</th><th>Risk</th><th>User</th><th>Host</th><th>Command</th><th>Time</th><th>Duration</th><th>Detail</th><th></th>
         </tr></thead>
         <tbody id="report-anomaly-tbody"></tbody>
       </table>
@@ -586,6 +598,9 @@ function renderSessionList(sessions) {
     const meta = el('div', 'sc-meta');
     meta.appendChild(el('span', 'sc-date', fmtDate(s.start_time)));
     meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
+    if (s.risk_level && s.risk_level !== 'low') {
+      meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
+    }
     if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
 
     card.appendChild(userRow);
@@ -600,7 +615,14 @@ function renderSessionList(sessions) {
 
 // ── Sort bar ──────────────────────────────────────────────────────────────────
 
-const SORT_LABELS = { time: 'Date', user: 'User', host: 'Host', duration: 'Dur' };
+const SORT_LABELS = { time: 'Date', user: 'User', host: 'Host', duration: 'Dur', risk: 'Risk' };
+
+function riskLevel(score) {
+  if (score >= 75) return 'critical';
+  if (score >= 50) return 'high';
+  if (score >= 25) return 'medium';
+  return 'low';
+}
 
 function updateSortButtons() {
   document.querySelectorAll('.sort-btn').forEach(b => {
@@ -718,6 +740,20 @@ function renderInfoBar(sess) {
   if (sess.incomplete) {
     const warn = el('div', 'warn-bar', '⚠ Session incomplete — shipper was killed or crashed before session_end. Recording may be truncated.');
     elInfoBar.appendChild(warn);
+  }
+
+  // Risk row — shown for medium/high/critical sessions
+  if (sess.risk_score > 0 && sess.risk_level !== 'low') {
+    const riskRow = el('div', 'info-row');
+    const riskItem = el('div', 'info-item');
+    riskItem.appendChild(el('span', 'il', 'risk'));
+    const level = sess.risk_level || riskLevel(sess.risk_score);
+    riskItem.appendChild(el('span', `iv risk-${level}`, `${level.toUpperCase()} (${sess.risk_score})`));
+    if (sess.risk_reasons && sess.risk_reasons.length) {
+      riskItem.appendChild(el('span', 'iv dim', ' — ' + sess.risk_reasons.join(', ')));
+    }
+    riskRow.appendChild(riskItem);
+    elInfoBar.appendChild(riskRow);
   }
 
   // Row 2: bin · cwd · flags — only rendered when at least one field is present
@@ -950,6 +986,7 @@ const ANOMALY_LABELS = {
   after_hours:  { label: 'AFTER HOURS',  cls: 'ak-after_hours'  },
   long_session: { label: 'LONG SESSION', cls: 'ak-long_session' },
   root_shell:   { label: 'ROOT SHELL',   cls: 'ak-root_shell'   },
+  high_risk:    { label: 'HIGH RISK',    cls: 'ak-high_risk'    },
 };
 
 // td creates a <td> with optional class and text content (set via textContent — safe).
@@ -1004,6 +1041,8 @@ function renderSummaryCards(s) {
     { value: s.unique_hosts,        label: 'Unique Hosts',   warn: false },
     { value: s.incomplete_sessions, label: 'Incomplete',     warn: s.incomplete_sessions > 0 },
     { value: s.long_sessions,       label: 'Sessions > 2h',  warn: s.long_sessions > 0 },
+    { value: s.high_risk_sessions,  label: 'High Risk',      warn: s.high_risk_sessions > 0 },
+    { value: s.critical_sessions,   label: 'Critical',       warn: s.critical_sessions > 0 },
   ];
   for (const item of items) {
     const card = el('div', 'report-card' + (item.warn ? ' warn' : ''));
@@ -1056,7 +1095,7 @@ function renderAnomalyTable(anomalies) {
   tbody.textContent = '';
   if (!anomalies || !anomalies.length) {
     const tr = document.createElement('tr');
-    tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 8, className: 'report-empty', textContent: 'No anomalies found.' }));
+    tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 9, className: 'report-empty', textContent: 'No anomalies found.' }));
     tbody.appendChild(tr);
     return;
   }
@@ -1069,6 +1108,14 @@ function renderAnomalyTable(anomalies) {
     const badge = el('span', 'anomaly-kind ' + info.cls, info.label);
     typeTd.appendChild(badge);
     tr.appendChild(typeTd);
+
+    // Risk score badge
+    const riskTd = document.createElement('td');
+    if (a.risk_score > 0) {
+      const lvl = riskLevel(a.risk_score);
+      riskTd.appendChild(el('span', `risk-badge risk-${lvl}`, String(a.risk_score)));
+    }
+    tr.appendChild(riskTd);
 
     tr.appendChild(td(a.user,    'td-green'));
     tr.appendChild(td(a.host,    'td-dim'));

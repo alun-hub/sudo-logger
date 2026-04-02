@@ -1,0 +1,305 @@
+# sudo-replay risk scoring rules
+#
+# score: poäng som adderas till sessionens totalsumma (cap 100)
+# reason: visas i UI:t när regeln triggas
+#
+# command: matchas mot sudo-kommandoraden (case-insensitive)
+# content: matchas mot terminal-output (ttyout) i skalsessioner
+#   Har en regel BÅDA fälten räcker det att ett av dem matchar (OR).
+#
+# Inom command/content:
+#   contains_any – minst ett av dessa strängar måste finnas i texten (OR)
+#   also_any     – OCH minst ett av dessa strängar måste finnas (AND + OR)
+#
+# command_base_any: basename på binären som kördes (AND:as med övriga villkor)
+# runas: kräver att sudo kördes som denna användare (AND:as med övriga villkor)
+# incomplete: sant om sessionen avbröts utan session_end
+# after_hours: sant om sessionen startade 23:00–05:59 lokal tid
+# min_duration: minsta sessionslängd i sekunder
+
+rules:
+
+  # ── Loggning och audit-manipulering ────────────────────────────────────────
+
+  - id: stop_sudo_logger
+    score: 50
+    reason: "sudo-logger stopped or disabled"
+    command:
+      contains_any: [sudo-log, sudolog]
+      also_any:     [stop, disable, kill, "rm ", purge, uninstall]
+    content:
+      contains_any: [sudo-log, sudolog]
+      also_any:     [stop, disable, kill, purge, uninstall]
+
+  - id: stop_auditd
+    score: 45
+    reason: "audit daemon stopped"
+    command:
+      contains_any: [auditd]
+      also_any:     [stop, kill, disable]
+    content:
+      contains_any: [auditd]
+      also_any:     [stop, kill, disable]
+
+  - id: auditctl_disable
+    score: 45
+    reason: "audit disabled via auditctl"
+    command:
+      contains_any: [auditctl]
+      also_any:     ["-e 0", "-e0"]
+    content:
+      contains_any: [auditctl]
+      also_any:     ["-e 0", "-e0"]
+
+  - id: audit_log_tampered
+    score: 40
+    reason: "audit log tampered"
+    command:
+      contains_any: [/var/log/audit]
+      also_any:     ["rm ", "> ", truncate, shred, "dd "]
+    content:
+      contains_any: [/var/log/audit]
+      also_any:     ["rm ", truncate, shred, "dd "]
+
+  - id: selinux_disabled
+    score: 35
+    reason: "SELinux set to permissive/disabled"
+    command:
+      contains_any: [setenforce]
+      also_any:     [" 0", permissive]
+    content:
+      contains_any: [setenforce]
+      also_any:     [" 0", permissive]
+
+  - id: selinux_config_disabled
+    score: 35
+    reason: "SELinux disabled in config"
+    command:
+      contains_any: [/etc/selinux/config, /etc/sysconfig/selinux]
+    content:
+      contains_any: [selinux=disabled, selinux=permissive]
+
+  - id: apparmor_disabled
+    score: 35
+    reason: "AppArmor disabled"
+    command:
+      contains_any: [apparmor, aa-teardown, aa-disable]
+      also_any:     [stop, disable, teardown]
+    content:
+      contains_any: [apparmor, aa-teardown, aa-disable]
+      also_any:     [stop, disable, teardown]
+
+  # ── Autentisering och behörigheter ──────────────────────────────────────────
+
+  - id: sudoers_path
+    score: 40
+    reason: "sudoers file accessed"
+    command:
+      contains_any: [/etc/sudoers]
+    content:
+      contains_any: [/etc/sudoers]
+
+  - id: visudo
+    score: 40
+    reason: "sudoers edited via visudo"
+    command_base_any: [visudo]
+    content:
+      contains_any: [visudo]
+
+  - id: shadow_accessed
+    score: 35
+    reason: "shadow password file accessed"
+    command:
+      contains_any: [/etc/shadow]
+    content:
+      contains_any: [/etc/shadow]
+
+  - id: pam_modified
+    score: 30
+    reason: "PAM configuration accessed"
+    command:
+      contains_any: [/etc/pam.d/, /etc/pam.conf]
+    content:
+      contains_any: [/etc/pam.d/, /etc/pam.conf]
+
+  - id: ssh_authorized_keys
+    score: 30
+    reason: "SSH authorized keys modified"
+    command:
+      contains_any: [authorized_keys]
+    content:
+      contains_any: [authorized_keys]
+
+  - id: sshd_config
+    score: 25
+    reason: "SSH server config accessed"
+    command:
+      contains_any: [/etc/ssh/sshd_config]
+    content:
+      contains_any: [/etc/ssh/sshd_config]
+
+  - id: passwd_file_modified
+    score: 25
+    reason: "passwd file modified"
+    command:
+      contains_any: [/etc/passwd]
+      also_any:     [">>", "> ", "tee ", "sed -i", "awk "]
+    content:
+      contains_any: [/etc/passwd]
+      also_any:     [">>", "tee "]
+
+  - id: usermod_privileged_group
+    score: 25
+    reason: "user added to privileged group"
+    command:
+      contains_any: [usermod]
+      also_any:     [sudo, wheel]
+    content:
+      contains_any: [usermod]
+      also_any:     [sudo, wheel]
+
+  - id: user_created
+    score: 15
+    reason: "user account created"
+    command_base_any: [useradd, adduser]
+
+  - id: user_created_in_shell
+    score: 15
+    reason: "user account created"
+    content:
+      contains_any: [useradd, adduser]
+
+  - id: user_deleted
+    score: 15
+    reason: "user account deleted"
+    command_base_any: [userdel, deluser]
+
+  - id: user_deleted_in_shell
+    score: 15
+    reason: "user account deleted"
+    content:
+      contains_any: [userdel, deluser]
+
+  - id: password_changed
+    score: 15
+    reason: "user password changed"
+    command_base_any: [passwd, chpasswd]
+
+  - id: password_changed_in_shell
+    score: 15
+    reason: "user password changed"
+    content:
+      contains_any: [chpasswd, "passwd "]
+
+  # ── Brandvägg och nätverkssäkerhet ──────────────────────────────────────────
+
+  - id: iptables_flush
+    score: 30
+    reason: "iptables rules flushed"
+    command:
+      contains_any: [iptables, ip6tables]
+      also_any:     [" -f", --flush]
+    content:
+      contains_any: [iptables, ip6tables]
+      also_any:     [" -f", --flush]
+
+  - id: nft_flush
+    score: 30
+    reason: "nftables rules flushed"
+    command:
+      contains_any: [nft]
+      also_any:     ["flush ruleset", "flush table"]
+    content:
+      contains_any: [nft]
+      also_any:     ["flush ruleset", "flush table"]
+
+  - id: firewall_disabled
+    score: 25
+    reason: "firewall service disabled"
+    command:
+      contains_any: [firewalld, "ufw "]
+      also_any:     [stop, disable]
+    content:
+      contains_any: [firewalld, "ufw "]
+      also_any:     [stop, disable]
+
+  - id: ufw_disable
+    score: 25
+    reason: "firewall service disabled"
+    command:
+      contains_any: ["ufw disable"]
+    content:
+      contains_any: ["ufw disable"]
+
+  - id: intrusion_prevention_stopped
+    score: 25
+    reason: "intrusion prevention stopped"
+    command:
+      contains_any: [fail2ban, sshguard]
+      also_any:     [stop, disable, kill]
+    content:
+      contains_any: [fail2ban, sshguard]
+      also_any:     [stop, disable, kill]
+
+  # ── Systempersistens och körning ────────────────────────────────────────────
+
+  - id: crontab_modified
+    score: 15
+    reason: "cron schedule modified"
+    command_base_any: [crontab]
+
+  - id: crontab_modified_in_shell
+    score: 15
+    reason: "cron schedule modified"
+    content:
+      contains_any: [crontab, /etc/cron]
+
+  - id: kernel_module_loaded
+    score: 20
+    reason: "kernel module loaded"
+    command_base_any: [insmod, modprobe]
+
+  - id: kernel_module_loaded_in_shell
+    score: 20
+    reason: "kernel module loaded"
+    content:
+      contains_any: [insmod, modprobe]
+
+  - id: insecure_permissions
+    score: 15
+    reason: "insecure permissions on system files"
+    command:
+      contains_any: [chmod]
+      also_any:     ["777", "a+w", "o+w"]
+
+  - id: insecure_permissions_in_shell
+    score: 15
+    reason: "insecure permissions on system files"
+    content:
+      contains_any: [chmod]
+      also_any:     ["777", "a+w", "o+w"]
+
+  # ── Skalexekvering ───────────────────────────────────────────────────────────
+
+  - id: root_shell
+    score: 20
+    reason: "root shell invoked"
+    runas: root
+    command_base_any: [bash, sh, zsh, fish, ksh, tcsh, csh, dash]
+
+  # ── Beteendemönster ──────────────────────────────────────────────────────────
+
+  - id: incomplete_session
+    score: 15
+    reason: "session terminated unexpectedly"
+    incomplete: true
+
+  - id: after_hours
+    score: 10
+    reason: "access outside business hours"
+    after_hours: true
+
+  - id: long_session
+    score: 5
+    reason: "extended session duration"
+    min_duration: 7200

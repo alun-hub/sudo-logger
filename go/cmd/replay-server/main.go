@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"log"
@@ -25,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed static
@@ -33,6 +36,7 @@ var staticFiles embed.FS
 var (
 	flagListen = flag.String("listen", ":8080", "Listen address")
 	flagLogDir = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
+	flagRules  = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
 )
 
 // SessionInfo is the metadata returned for each session in the list API.
@@ -46,9 +50,12 @@ type SessionInfo struct {
 	ResolvedCommand string  `json:"resolved_command,omitempty"`
 	Cwd             string  `json:"cwd,omitempty"`
 	Flags           string  `json:"flags,omitempty"`
-	StartTime       int64   `json:"start_time"` // unix seconds
-	Duration        float64 `json:"duration"`   // seconds
-	Incomplete      bool    `json:"incomplete,omitempty"` // true if shipper was killed mid-session
+	StartTime       int64    `json:"start_time"` // unix seconds
+	Duration        float64  `json:"duration"`   // seconds
+	Incomplete      bool     `json:"incomplete,omitempty"` // true if shipper was killed mid-session
+	RiskScore       int      `json:"risk_score"`
+	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
+	RiskReasons     []string `json:"risk_reasons,omitempty"`
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -69,10 +76,12 @@ type ReportSummary struct {
 	TotalSessions      int   `json:"total_sessions"`
 	UniqueUsers        int   `json:"unique_users"`
 	UniqueHosts        int   `json:"unique_hosts"`
-	IncompleteSessions int   `json:"incomplete_sessions"`
-	LongSessions       int   `json:"long_sessions"`
-	PeriodFrom         int64 `json:"period_from"`
-	PeriodTo           int64 `json:"period_to"`
+	IncompleteSessions  int   `json:"incomplete_sessions"`
+	LongSessions        int   `json:"long_sessions"`
+	HighRiskSessions    int   `json:"high_risk_sessions"`
+	CriticalSessions    int   `json:"critical_sessions"`
+	PeriodFrom          int64 `json:"period_from"`
+	PeriodTo            int64 `json:"period_to"`
 }
 
 // HostCount holds a host name and the number of sessions on that host.
@@ -102,6 +111,7 @@ type Anomaly struct {
 	StartTime int64   `json:"start_time"`
 	Duration  float64 `json:"duration"`
 	Detail    string  `json:"detail"`
+	RiskScore int     `json:"risk_score,omitempty"`
 }
 
 // ReportData is the envelope returned by /api/report.
@@ -110,6 +120,53 @@ type ReportData struct {
 	PerUser   []UserStat    `json:"per_user"`
 	Anomalies []Anomaly     `json:"anomalies"`
 }
+
+// ── Risk scoring types ────────────────────────────────────────────────────────
+
+// MatchPattern holds substring conditions for a rule's command or content field.
+// ContainsAny items are ORed; AlsoAny items are ORed — both groups must match (AND).
+type MatchPattern struct {
+	ContainsAny []string `yaml:"contains_any"`
+	AlsoAny     []string `yaml:"also_any"`
+}
+
+// Rule is a single risk-scoring rule loaded from the rules YAML file.
+// All specified conditions are ANDed; command and content are ORed with each other.
+type Rule struct {
+	ID             string        `yaml:"id"`
+	Score          int           `yaml:"score"`
+	Reason         string        `yaml:"reason"`
+	Command        *MatchPattern `yaml:"command"`
+	Content        *MatchPattern `yaml:"content"`
+	CommandBaseAny []string      `yaml:"command_base_any"`
+	Runas          string        `yaml:"runas"`
+	Incomplete     *bool         `yaml:"incomplete"`
+	AfterHours     *bool         `yaml:"after_hours"`
+	MinDuration    float64       `yaml:"min_duration"`
+}
+
+// RuleSet is the top-level structure of the risk-rules YAML file.
+type RuleSet struct {
+	Rules []Rule `yaml:"rules"`
+}
+
+// riskCache is the on-disk cache written to risk.json beside each session directory.
+type riskCache struct {
+	RulesHash string   `json:"rules_hash"`
+	Score     int      `json:"score"`
+	Level     string   `json:"level"`
+	Reasons   []string `json:"reasons"`
+}
+
+// Global rule state — reloaded from disk when the rules file changes.
+var (
+	globalRules     []Rule
+	globalRulesHash string
+	rulesMu         sync.RWMutex
+)
+
+// maxTtyOutBytes is the maximum number of ttyout bytes read for content scanning.
+const maxTtyOutBytes = 512 * 1024
 
 // sessionIndex is an in-memory cache of all parsed session metadata.
 // It is rebuilt from disk at most once per indexTTL to avoid a full directory
@@ -149,6 +206,10 @@ func (idx *sessionIndex) rebuild(logDir string) ([]SessionInfo, error) {
 		snap := make([]SessionInfo, len(idx.sessions))
 		copy(snap, idx.sessions)
 		return snap, nil
+	}
+	// Reload rules if the file has changed (cheap — only re-parses on hash change).
+	if err := loadRules(*flagRules); err != nil {
+		log.Printf("risk rules reload: %v", err)
 	}
 	sessions, err := scanAllSessions(logDir)
 	if err != nil {
@@ -202,6 +263,10 @@ func scanAllSessions(logDir string) ([]SessionInfo, error) {
 
 func main() {
 	flag.Parse()
+
+	if err := loadRules(*flagRules); err != nil {
+		log.Fatalf("load risk rules: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sessions", handleListSessions)
@@ -365,6 +430,12 @@ func listSessions(logDir, q, sortBy, order string, from, to int64, limit, offset
 		} else {
 			sort.Slice(sessions, func(i, j int) bool { return sessions[i].Duration > sessions[j].Duration })
 		}
+	case "risk":
+		if order == "asc" {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].RiskScore < sessions[j].RiskScore })
+		} else {
+			sort.Slice(sessions, func(i, j int) bool { return sessions[i].RiskScore > sessions[j].RiskScore })
+		}
 	default: // "time" or ""
 		if order == "asc" {
 			sort.Slice(sessions, func(i, j int) bool { return sessions[i].StartTime < sessions[j].StartTime })
@@ -469,6 +540,9 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 		info.Incomplete = true
 	}
 
+	info.RiskScore, info.RiskReasons = scoreSession(info, sessDir)
+	info.RiskLevel = riskLevel(info.RiskScore)
+
 	return info, nil
 }
 
@@ -535,7 +609,7 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 	// ── Summary ───────────────────────────────────────────────────────────────
 	userSet := make(map[string]struct{})
 	hostSet := make(map[string]struct{})
-	nIncomplete, nLong := 0, 0
+	nIncomplete, nLong, nHighRisk, nCritical := 0, 0, 0, 0
 	var periodFrom, periodTo int64
 	for _, s := range sessions {
 		userSet[s.User] = struct{}{}
@@ -545,6 +619,11 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 		}
 		if s.Duration > 7200 {
 			nLong++
+		}
+		if s.RiskScore >= 75 {
+			nCritical++
+		} else if s.RiskScore >= 50 {
+			nHighRisk++
 		}
 		if periodFrom == 0 || s.StartTime < periodFrom {
 			periodFrom = s.StartTime
@@ -626,28 +705,32 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 
 	// ── Anomalies ─────────────────────────────────────────────────────────────
 	anomalies := make([]Anomaly, 0)
+	inAnomalies := make(map[string]bool)
 	for _, s := range sessions {
 		if s.Incomplete {
 			anomalies = append(anomalies, Anomaly{
 				Kind: "incomplete", TSID: s.TSID, User: s.User, Host: s.Host,
 				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
-				Detail: "shipper killed mid-session",
+				Detail: "shipper killed mid-session", RiskScore: s.RiskScore,
 			})
+			inAnomalies[s.TSID] = true
 		}
 		t := time.Unix(s.StartTime, 0)
 		if h := t.Hour(); h < 6 || h >= 23 {
 			anomalies = append(anomalies, Anomaly{
 				Kind: "after_hours", TSID: s.TSID, User: s.User, Host: s.Host,
 				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
-				Detail: fmt.Sprintf("%02d:%02d local time", h, t.Minute()),
+				Detail: fmt.Sprintf("%02d:%02d local time", h, t.Minute()), RiskScore: s.RiskScore,
 			})
+			inAnomalies[s.TSID] = true
 		}
 		if s.Duration > 7200 {
 			anomalies = append(anomalies, Anomaly{
 				Kind: "long_session", TSID: s.TSID, User: s.User, Host: s.Host,
 				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
-				Detail: "duration " + fmtDur(s.Duration),
+				Detail: "duration " + fmtDur(s.Duration), RiskScore: s.RiskScore,
 			})
+			inAnomalies[s.TSID] = true
 		}
 		if s.Runas == "root" {
 			base := ""
@@ -659,15 +742,29 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 				anomalies = append(anomalies, Anomaly{
 					Kind: "root_shell", TSID: s.TSID, User: s.User, Host: s.Host,
 					Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
-					Detail: "direct root shell",
+					Detail: "direct root shell", RiskScore: s.RiskScore,
 				})
+				inAnomalies[s.TSID] = true
 			}
 		}
+		// Flag high-risk sessions not already captured by other anomaly kinds.
+		if s.RiskScore >= 50 && !inAnomalies[s.TSID] {
+			detail := strings.Join(s.RiskReasons, "; ")
+			anomalies = append(anomalies, Anomaly{
+				Kind: "high_risk", TSID: s.TSID, User: s.User, Host: s.Host,
+				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
+				Detail: detail, RiskScore: s.RiskScore,
+			})
+			inAnomalies[s.TSID] = true
+		}
 	}
-	kindOrder := map[string]int{"incomplete": 0, "after_hours": 1, "long_session": 2, "root_shell": 3}
+	kindOrder := map[string]int{"incomplete": 0, "high_risk": 1, "root_shell": 2, "after_hours": 3, "long_session": 4}
 	sort.Slice(anomalies, func(i, j int) bool {
 		if anomalies[i].Kind != anomalies[j].Kind {
 			return kindOrder[anomalies[i].Kind] < kindOrder[anomalies[j].Kind]
+		}
+		if anomalies[i].RiskScore != anomalies[j].RiskScore {
+			return anomalies[i].RiskScore > anomalies[j].RiskScore
 		}
 		return anomalies[i].StartTime > anomalies[j].StartTime
 	})
@@ -679,6 +776,8 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 			UniqueHosts:        len(hostSet),
 			IncompleteSessions: nIncomplete,
 			LongSessions:       nLong,
+			HighRiskSessions:   nHighRisk,
+			CriticalSessions:   nCritical,
 			PeriodFrom:         periodFrom,
 			PeriodTo:           periodTo,
 		},
@@ -696,6 +795,244 @@ func fmtDur(secs float64) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m+1)
+}
+
+// ── Risk scoring ──────────────────────────────────────────────────────────────
+
+// riskLevel converts a numeric score to a level string.
+func riskLevel(score int) string {
+	switch {
+	case score >= 75:
+		return "critical"
+	case score >= 50:
+		return "high"
+	case score >= 25:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// computeRulesHash returns a short FNV-32 hex hash of the YAML content.
+func computeRulesHash(data []byte) string {
+	h := fnv.New32a()
+	h.Write(data)
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+// loadRules reads and parses the rules YAML file, updating the globals
+// only when the content hash has changed.
+func loadRules(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read rules file %s: %w", path, err)
+	}
+	hash := computeRulesHash(data)
+	rulesMu.RLock()
+	unchanged := hash == globalRulesHash
+	rulesMu.RUnlock()
+	if unchanged {
+		return nil
+	}
+	var rs RuleSet
+	if err := yaml.Unmarshal(data, &rs); err != nil {
+		return fmt.Errorf("parse rules file: %w", err)
+	}
+	rulesMu.Lock()
+	globalRules = rs.Rules
+	globalRulesHash = hash
+	rulesMu.Unlock()
+	log.Printf("risk rules loaded: %d rules (hash %s)", len(rs.Rules), hash)
+	return nil
+}
+
+// matchPattern returns true when text satisfies both ContainsAny and AlsoAny.
+func matchPattern(p *MatchPattern, text string) bool {
+	if len(p.ContainsAny) > 0 {
+		found := false
+		for _, s := range p.ContainsAny {
+			if strings.Contains(text, strings.ToLower(s)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	if len(p.AlsoAny) > 0 {
+		found := false
+		for _, s := range p.AlsoAny {
+			if strings.Contains(text, strings.ToLower(s)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesRule returns true when all conditions in the rule are satisfied.
+// Metadata conditions (runas, incomplete, etc.) are all ANDed.
+// command and content patterns are ORed with each other.
+func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func() string) bool {
+	if rule.Incomplete != nil && *rule.Incomplete != s.Incomplete {
+		return false
+	}
+	if rule.AfterHours != nil {
+		t := time.Unix(s.StartTime, 0)
+		h := t.Hour()
+		isAfterHours := h < 6 || h >= 23
+		if *rule.AfterHours != isAfterHours {
+			return false
+		}
+	}
+	if rule.MinDuration > 0 && s.Duration < rule.MinDuration {
+		return false
+	}
+	if rule.Runas != "" && !strings.EqualFold(s.Runas, rule.Runas) {
+		return false
+	}
+	if len(rule.CommandBaseAny) > 0 {
+		found := false
+		for _, b := range rule.CommandBaseAny {
+			if cmdBase == strings.ToLower(b) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	// command and content are ORed — at least one must match if either is defined.
+	hasCmd := rule.Command != nil
+	hasCon := rule.Content != nil
+	if hasCmd || hasCon {
+		cmdMatch := hasCmd && matchPattern(rule.Command, cmd)
+		conMatch := hasCon && matchPattern(rule.Content, getContent())
+		if !cmdMatch && !conMatch {
+			return false
+		}
+	}
+	return true
+}
+
+// stripANSI removes ANSI CSI escape sequences (ESC [ ... <letter>) from s.
+func stripANSI(s string) string {
+	out := make([]byte, 0, len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && (s[i] < 0x40 || s[i] > 0x7e) {
+				i++
+			}
+			if i < len(s) {
+				i++ // consume the final command byte
+			}
+		} else {
+			out = append(out, s[i])
+			i++
+		}
+	}
+	return string(out)
+}
+
+// loadTtyOut reads up to maxTtyOutBytes from the session's ttyout file,
+// strips ANSI codes, and returns lowercase text for pattern matching.
+func loadTtyOut(sessDir string) string {
+	f, err := os.Open(filepath.Join(sessDir, "ttyout"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	data, _ := io.ReadAll(io.LimitReader(f, maxTtyOutBytes))
+	return strings.ToLower(stripANSI(string(data)))
+}
+
+// loadRiskCache reads risk.json from sessDir and returns it if the
+// stored rules hash matches the currently loaded rules.
+func loadRiskCache(sessDir, rulesHash string) *riskCache {
+	data, err := os.ReadFile(filepath.Join(sessDir, "risk.json"))
+	if err != nil {
+		return nil
+	}
+	var rc riskCache
+	if err := json.Unmarshal(data, &rc); err != nil {
+		return nil
+	}
+	if rc.RulesHash != rulesHash {
+		return nil // rules changed — cache is stale
+	}
+	return &rc
+}
+
+// saveRiskCache writes the risk score to risk.json in sessDir.
+// Failure is silently ignored (replay server may lack write access).
+func saveRiskCache(sessDir, rulesHash string, score int, reasons []string) {
+	rc := riskCache{
+		RulesHash: rulesHash,
+		Score:     score,
+		Level:     riskLevel(score),
+		Reasons:   reasons,
+	}
+	data, err := json.Marshal(rc)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(sessDir, "risk.json"), data, 0o644)
+}
+
+// scoreSession computes a risk score (0–100) for a session using the
+// globally loaded rules.  Results are cached in risk.json next to the
+// session files so ttyout is only read once per session per rules version.
+func scoreSession(s *SessionInfo, sessDir string) (int, []string) {
+	rulesMu.RLock()
+	rules := globalRules
+	rulesHash := globalRulesHash
+	rulesMu.RUnlock()
+
+	if cached := loadRiskCache(sessDir, rulesHash); cached != nil {
+		return cached.Score, cached.Reasons
+	}
+
+	cmd := strings.ToLower(s.Command)
+	cmdBase := ""
+	if parts := strings.Fields(s.Command); len(parts) > 0 {
+		cmdBase = strings.ToLower(filepath.Base(parts[0]))
+	}
+
+	// Lazy ttyout loader — only read disk if a content rule is evaluated.
+	var contentOnce sync.Once
+	var contentText string
+	getContent := func() string {
+		contentOnce.Do(func() { contentText = loadTtyOut(sessDir) })
+		return contentText
+	}
+
+	score := 0
+	var reasons []string
+	for _, rule := range rules {
+		if score >= 100 {
+			break
+		}
+		if !matchesRule(rule, s, cmd, cmdBase, getContent) {
+			continue
+		}
+		pts := rule.Score
+		if score+pts > 100 {
+			pts = 100 - score
+		}
+		score += pts
+		reasons = append(reasons, rule.Reason)
+	}
+
+	saveRiskCache(sessDir, rulesHash, score, reasons)
+	return score, reasons
 }
 
 // readEvents parses the timing file and streams the corresponding bytes from
