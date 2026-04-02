@@ -1,25 +1,25 @@
 # sudo-replay risk scoring rules
 #
-# score: poäng som adderas till sessionens totalsumma (cap 100)
-# reason: visas i UI:t när regeln triggas
+# score: points added to session total (capped at 100)
+# reason: shown in the UI when this rule fires
 #
-# command: matchas mot sudo-kommandoraden (case-insensitive)
-# content: matchas mot terminal-output (ttyout) i skalsessioner
-#   Har en regel BÅDA fälten räcker det att ett av dem matchar (OR).
+# command: matched against the sudo command line (case-insensitive)
+# content: matched against terminal output (ttyout) in shell sessions
+#   Rules with both fields fire if EITHER matches (OR logic).
 #
-# Inom command/content:
-#   contains_any – minst ett av dessa strängar måste finnas i texten (OR)
-#   also_any     – OCH minst ett av dessa strängar måste finnas (AND + OR)
+# Within command/content:
+#   contains_any  – at least one of these strings must be present (OR)
+#   also_any      – AND at least one of these must also be present (AND + OR)
 #
-# command_base_any: basename på binären som kördes (AND:as med övriga villkor)
-# runas: kräver att sudo kördes som denna användare (AND:as med övriga villkor)
-# incomplete: sant om sessionen avbröts utan session_end
-# after_hours: sant om sessionen startade 23:00–05:59 lokal tid
-# min_duration: minsta sessionslängd i sekunder
+# command_base_any: basename of the executed binary (AND-ed with other conditions)
+# runas:            requires sudo to run as this user (AND-ed with other conditions)
+# incomplete:       true when session ended without a clean session_end
+# after_hours:      true when session started between 23:00 and 05:59 local time
+# min_duration:     minimum session length in seconds
 
 rules:
 
-  # ── Loggning och audit-manipulering ────────────────────────────────────────
+  # ── Logging and audit tampering ────────────────────────────────────────────
 
   - id: stop_sudo_logger
     score: 50
@@ -89,7 +89,7 @@ rules:
       contains_any: [apparmor, aa-teardown, aa-disable]
       also_any:     [stop, disable, teardown]
 
-  # ── Autentisering och behörigheter ──────────────────────────────────────────
+  # ── Authentication and access control ─────────────────────────────────────
 
   - id: sudoers_path
     score: 40
@@ -191,7 +191,7 @@ rules:
     content:
       contains_any: [chpasswd, "passwd "]
 
-  # ── Brandvägg och nätverkssäkerhet ──────────────────────────────────────────
+  # ── Firewall and network security ──────────────────────────────────────────
 
   - id: iptables_flush
     score: 30
@@ -241,7 +241,7 @@ rules:
       contains_any: [fail2ban, sshguard]
       also_any:     [stop, disable, kill]
 
-  # ── Systempersistens och körning ────────────────────────────────────────────
+  # ── Persistence and system modification ───────────────────────────────────
 
   - id: crontab_modified
     score: 15
@@ -279,7 +279,7 @@ rules:
       contains_any: [chmod]
       also_any:     ["777", "a+w", "o+w"]
 
-  # ── Skalexekvering ───────────────────────────────────────────────────────────
+  # ── Shell execution ────────────────────────────────────────────────────────
 
   - id: root_shell
     score: 20
@@ -287,7 +287,7 @@ rules:
     runas: root
     command_base_any: [bash, sh, zsh, fish, ksh, tcsh, csh, dash]
 
-  # ── Beteendemönster ──────────────────────────────────────────────────────────
+  # ── Behavioural patterns ───────────────────────────────────────────────────
 
   - id: incomplete_session
     score: 15

@@ -17,7 +17,8 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadOnlyPaths=/etc/sudo-logger
+# ReadWrite on config dir so Settings UI can update risk-rules.yaml
+ReadWritePaths=/etc/sudo-logger
 # ReadWrite so risk.json cache files can be written alongside session logs
 ReadWritePaths=/var/log/sudoreplay
 

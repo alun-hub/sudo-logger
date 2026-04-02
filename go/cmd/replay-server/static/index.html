@@ -303,6 +303,102 @@
       background: none; border: none; font-family: var(--font); padding: 0; }
     .report-link:hover { text-decoration: underline; }
     .report-empty { text-align: center; color: var(--text-dim); padding: 20px; font-size: 12px; }
+
+    /* Sortable column headers */
+    .report-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    .report-table th.sortable:hover { color: var(--text); }
+    .report-table th.sort-asc::after  { content: ' ↑'; color: var(--green); }
+    .report-table th.sort-desc::after { content: ' ↓'; color: var(--green); }
+
+    /* Clickable / active filter cards */
+    .report-card.filterable { cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+    .report-card.filterable:hover { border-color: var(--border-mid); }
+    .report-card.filterable.filter-active { border-color: var(--green) !important;
+      box-shadow: 0 0 0 1px var(--green); }
+    .report-card.filterable.filter-active .rc-label { color: var(--green); }
+
+    /* Summary search + filter bar */
+    .summary-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .summary-search { background: var(--card); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 5px 10px; border-radius: 4px; outline: none; width: 200px; }
+    .summary-search:focus { border-color: var(--green); }
+    .summary-search::placeholder { color: var(--text-dim); }
+
+    /* ── Modal overlay ────────────────────────────────────────────────────── */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal-box { background: var(--surface); border: 1px solid var(--border-mid);
+      border-radius: 8px; width: 640px; max-width: 95vw; max-height: 90vh;
+      display: flex; flex-direction: column; overflow: hidden; }
+    .modal-header { display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .modal-header h3 { font-size: 13px; font-weight: 600; color: var(--text); margin: 0; }
+    .modal-close { background: none; border: none; color: var(--text-dim);
+      font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1; }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+    .modal-footer { display: flex; align-items: center; gap: 8px; padding: 12px 18px;
+      border-top: 1px solid var(--border); flex-shrink: 0; }
+    .modal-footer .spacer { flex: 1; }
+
+    .form-row { display: flex; gap: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+    .form-group label { font-size: 11px; color: var(--text-dim); font-weight: 500; }
+    .form-input { background: var(--card); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 6px 9px; border-radius: 4px; outline: none; width: 100%; }
+    .form-input:focus { border-color: var(--green); }
+    .form-input::placeholder { color: var(--text-dim); }
+    .form-hint { font-size: 10px; color: var(--text-dim); }
+    .form-section { font-size: 10px; font-weight: 600; letter-spacing: 0.07em;
+      text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--border);
+      padding-bottom: 5px; margin-bottom: 2px; }
+
+    /* Tag input */
+    .tag-input-wrap { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 7px;
+      background: var(--card); border: 1px solid var(--border); border-radius: 4px;
+      min-height: 34px; cursor: text; }
+    .tag-input-wrap:focus-within { border-color: var(--green); }
+    .tag-pill { display: flex; align-items: center; gap: 4px; font-size: 11px;
+      background: var(--border-mid); color: var(--text); padding: 1px 7px;
+      border-radius: 3px; white-space: nowrap; }
+    .tag-pill-x { background: none; border: none; color: var(--text-dim);
+      cursor: pointer; font-size: 12px; padding: 0; line-height: 1; }
+    .tag-pill-x:hover { color: var(--red); }
+    .tag-bare-input { background: none; border: none; outline: none; color: var(--text);
+      font-family: var(--font); font-size: 12px; flex: 1; min-width: 80px; padding: 1px 2px; }
+
+    /* Checkbox toggle */
+    .toggle-row { display: flex; align-items: center; gap: 8px; }
+    .toggle-row input[type=checkbox] { accent-color: var(--green); width: 14px; height: 14px; }
+    .toggle-row label { font-size: 12px; color: var(--text-sub); cursor: pointer; }
+
+    /* Buttons */
+    .btn-primary { background: var(--green-dim); border: 1px solid var(--green);
+      color: var(--green); font-family: var(--font); font-size: 12px;
+      padding: 5px 14px; border-radius: 4px; cursor: pointer; transition: background 0.12s; }
+    .btn-primary:hover { background: rgba(0,232,122,0.2); }
+    .btn-secondary { background: var(--card); border: 1px solid var(--border);
+      color: var(--text-sub); font-family: var(--font); font-size: 12px;
+      padding: 5px 14px; border-radius: 4px; cursor: pointer; transition: background 0.12s; }
+    .btn-secondary:hover { background: var(--card-hover); }
+    .btn-danger { background: rgba(255,80,80,0.07); border: 1px solid rgba(255,80,80,0.35);
+      color: var(--red); font-family: var(--font); font-size: 12px;
+      padding: 5px 14px; border-radius: 4px; cursor: pointer; }
+    .btn-danger:hover { background: rgba(255,80,80,0.14); }
+
+    /* ── Settings panel ───────────────────────────────────────────────────── */
+    .settings-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .settings-path { font-size: 11px; color: var(--text-dim); flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .settings-status { font-size: 11px; padding: 3px 10px; border-radius: 3px; }
+    .settings-status.ok   { color: var(--green); background: var(--green-dim); }
+    .settings-status.err  { color: var(--red);   background: rgba(255,80,80,0.08); }
+    .rules-score { display: inline-block; font-size: 11px; font-weight: 700;
+      width: 32px; text-align: center; padding: 1px 0; border-radius: 3px; }
+    .rules-conds { font-size: 11px; color: var(--text-dim);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
   </style>
 </head>
 <body>
@@ -315,6 +411,7 @@
       <button class="tab-btn active" data-tab="sessions">Sessions</button>
       <button class="tab-btn" data-tab="summary">Summary</button>
       <button class="tab-btn" data-tab="anomalies">Anomalies</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
     </nav>
     <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
     <button class="theme-btn" id="theme-toggle" title="Toggle light / dark mode">☀</button>
@@ -380,14 +477,43 @@
     <div class="rc-period" id="report-period"></div>
     <div class="report-cards" id="report-cards"></div>
     <div class="report-section">
-      <h2>Per User</h2>
-      <table class="report-table">
+      <div class="summary-toolbar">
+        <h2 style="margin:0">Per User</h2>
+        <input type="text" id="summary-search" class="summary-search" placeholder="Search user…">
+      </div>
+      <table class="report-table" id="summary-user-table">
         <thead><tr>
-          <th>User</th><th>Sessions</th><th>Avg Duration</th><th>Top Commands</th><th>Hosts</th><th>Incomplete</th>
+          <th class="sortable" data-col="user">User</th>
+          <th class="sortable" data-col="sessions">Sessions</th>
+          <th class="sortable" data-col="avg_duration">Avg Duration</th>
+          <th>Top Commands</th>
+          <th class="sortable" data-col="hosts">Hosts</th>
+          <th class="sortable" data-col="incomplete">Incomplete</th>
+          <th class="sortable" data-col="long_sessions">Long (&gt;2h)</th>
+          <th class="sortable" data-col="high_risk">High Risk</th>
+          <th class="sortable" data-col="critical">Critical</th>
         </tr></thead>
         <tbody id="report-user-tbody"></tbody>
       </table>
     </div>
+  </div>
+
+  <!-- ── Settings tab ──────────────────────────────────────────────────────── -->
+  <div class="report-panel" id="tab-settings">
+    <div class="settings-toolbar">
+      <button class="btn-primary" id="btn-add-rule">+ Add rule</button>
+      <span class="settings-path" id="settings-path"></span>
+      <span class="settings-status" id="settings-status" style="display:none"></span>
+    </div>
+    <table class="report-table">
+      <thead><tr>
+        <th style="width:52px">Score</th>
+        <th>Reason / ID</th>
+        <th>Conditions</th>
+        <th style="width:70px"></th>
+      </tr></thead>
+      <tbody id="rules-tbody"></tbody>
+    </table>
   </div>
 
   <!-- ── Anomalies tab ─────────────────────────────────────────────────────── -->
@@ -396,7 +522,14 @@
       <h2>Anomalies</h2>
       <table class="report-table">
         <thead><tr>
-          <th>Type</th><th>Risk</th><th>User</th><th>Host</th><th>Command</th><th>Time</th><th>Duration</th><th>Detail</th><th></th>
+          <th class="sortable" data-col="kind">Type</th>
+          <th class="sortable" data-col="risk_score">Risk</th>
+          <th class="sortable" data-col="user">User</th>
+          <th class="sortable" data-col="host">Host</th>
+          <th>Command</th>
+          <th class="sortable" data-col="start_time">Time</th>
+          <th class="sortable" data-col="duration">Duration</th>
+          <th>Detail</th><th></th>
         </tr></thead>
         <tbody id="report-anomaly-tbody"></tbody>
       </table>
@@ -404,6 +537,85 @@
   </div>
 
 </div>
+
+<!-- ── Rule edit modal ──────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="rule-modal" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modal-title">Edit rule</h3>
+      <button class="modal-close" id="modal-close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group" style="flex:0 0 80px">
+          <label>Score</label>
+          <input type="number" class="form-input" id="f-score" min="1" max="100" value="20">
+        </div>
+        <div class="form-group" style="flex:0 0 140px">
+          <label>ID</label>
+          <input type="text" class="form-input" id="f-id" placeholder="unique_id">
+        </div>
+        <div class="form-group">
+          <label>Reason <span class="form-hint">(shown in UI)</span></label>
+          <input type="text" class="form-input" id="f-reason" placeholder="e.g. audit daemon stopped">
+        </div>
+      </div>
+
+      <div class="form-section">Command matching <span class="form-hint">— matched against the sudo command line</span></div>
+      <div class="form-group">
+        <label>Must contain one of <span class="form-hint">(contains_any — press Enter or comma to add)</span></label>
+        <div class="tag-input-wrap" id="f-cmd-contains"></div>
+      </div>
+      <div class="form-group">
+        <label>AND one of <span class="form-hint">(also_any)</span></label>
+        <div class="tag-input-wrap" id="f-cmd-also"></div>
+      </div>
+      <div class="form-group">
+        <label>Command name is one of <span class="form-hint">(command_base_any — e.g. bash, visudo)</span></label>
+        <div class="tag-input-wrap" id="f-cmd-base"></div>
+      </div>
+
+      <div class="form-section">Shell content matching <span class="form-hint">— matched against ttyout for shell sessions</span></div>
+      <div class="form-group">
+        <label>Must contain one of <span class="form-hint">(contains_any)</span></label>
+        <div class="tag-input-wrap" id="f-con-contains"></div>
+      </div>
+      <div class="form-group">
+        <label>AND one of <span class="form-hint">(also_any)</span></label>
+        <div class="tag-input-wrap" id="f-con-also"></div>
+      </div>
+
+      <div class="form-section">Session metadata</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:0 0 160px">
+          <label>Runas user</label>
+          <input type="text" class="form-input" id="f-runas" placeholder="root">
+        </div>
+        <div class="form-group" style="flex:0 0 180px">
+          <label>Min duration (seconds)</label>
+          <input type="number" class="form-input" id="f-mindur" min="0" placeholder="leave blank to ignore">
+        </div>
+        <div class="form-group" style="justify-content:flex-end; padding-bottom:4px">
+          <div class="toggle-row">
+            <input type="checkbox" id="f-incomplete">
+            <label for="f-incomplete">Incomplete session</label>
+          </div>
+          <div class="toggle-row" style="margin-top:6px">
+            <input type="checkbox" id="f-afterhours">
+            <label for="f-afterhours">After business hours (23:00–05:59)</label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-danger" id="modal-delete" hidden>Delete rule</button>
+      <div class="spacer"></div>
+      <button class="btn-secondary" id="modal-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-save">Save rule</button>
+    </div>
+  </div>
+</div>
+
 <script>
 'use strict';
 
@@ -981,6 +1193,18 @@ let reportToVal   = '';
 let reportCache   = null;
 let reportDirty   = true;
 
+// ── Summary state ─────────────────────────────────────────────────────────────
+
+const summarySort  = { col: 'sessions', order: 'desc' };
+let   summaryFilter = null;   // null | 'incomplete' | 'long' | 'high_risk' | 'critical'
+let   summarySearch = '';
+let   cachedPerUser = [];
+
+// ── Anomaly state ─────────────────────────────────────────────────────────────
+
+const anomalySort  = { col: 'risk_score', order: 'desc' };
+let   cachedAnomalies = [];
+
 const ANOMALY_LABELS = {
   incomplete:   { label: 'INCOMPLETE',   cls: 'ak-incomplete'   },
   after_hours:  { label: 'AFTER HOURS',  cls: 'ak-after_hours'  },
@@ -1036,39 +1260,77 @@ function renderSummaryCards(s) {
   const cards = document.getElementById('report-cards');
   cards.textContent = '';
   const items = [
-    { value: s.total_sessions,      label: 'Total Sessions', warn: false },
-    { value: s.unique_users,        label: 'Unique Users',   warn: false },
-    { value: s.unique_hosts,        label: 'Unique Hosts',   warn: false },
-    { value: s.incomplete_sessions, label: 'Incomplete',     warn: s.incomplete_sessions > 0 },
-    { value: s.long_sessions,       label: 'Sessions > 2h',  warn: s.long_sessions > 0 },
-    { value: s.high_risk_sessions,  label: 'High Risk',      warn: s.high_risk_sessions > 0 },
-    { value: s.critical_sessions,   label: 'Critical',       warn: s.critical_sessions > 0 },
+    { value: s.total_sessions,      label: 'Total Sessions', warn: false,                          filter: null },
+    { value: s.unique_users,        label: 'Unique Users',   warn: false,                          filter: null },
+    { value: s.unique_hosts,        label: 'Unique Hosts',   warn: false,                          filter: null },
+    { value: s.incomplete_sessions, label: 'Incomplete',     warn: s.incomplete_sessions > 0,      filter: 'incomplete' },
+    { value: s.long_sessions,       label: 'Sessions > 2h',  warn: s.long_sessions > 0,            filter: 'long' },
+    { value: s.high_risk_sessions,  label: 'High Risk',      warn: s.high_risk_sessions > 0,       filter: 'high_risk' },
+    { value: s.critical_sessions,   label: 'Critical',       warn: s.critical_sessions > 0,        filter: 'critical' },
   ];
   for (const item of items) {
-    const card = el('div', 'report-card' + (item.warn ? ' warn' : ''));
+    const filterable = item.filter !== null;
+    let cls = 'report-card' + (item.warn ? ' warn' : '') + (filterable ? ' filterable' : '');
+    if (filterable && summaryFilter === item.filter) cls += ' filter-active';
+    const card = el('div', cls);
     card.appendChild(el('div', 'rc-value', String(item.value)));
     card.appendChild(el('div', 'rc-label', item.label));
+    if (filterable) {
+      card.addEventListener('click', () => {
+        summaryFilter = (summaryFilter === item.filter) ? null : item.filter;
+        renderSummaryCards(s);
+        renderUserTable(cachedPerUser);
+      });
+    }
     cards.appendChild(card);
   }
 }
 
 function renderUserTable(users) {
+  cachedPerUser = users || [];
   const tbody = document.getElementById('report-user-tbody');
   tbody.textContent = '';
-  if (!users || !users.length) {
+
+  // Apply search filter
+  let rows = cachedPerUser;
+  if (summarySearch) {
+    const q = summarySearch.toLowerCase();
+    rows = rows.filter(u => u.user.toLowerCase().includes(q));
+  }
+
+  // Apply card filter
+  if (summaryFilter === 'incomplete') rows = rows.filter(u => u.incomplete > 0);
+  else if (summaryFilter === 'long')      rows = rows.filter(u => u.long_sessions > 0);
+  else if (summaryFilter === 'high_risk') rows = rows.filter(u => u.high_risk > 0);
+  else if (summaryFilter === 'critical')  rows = rows.filter(u => u.critical > 0);
+
+  // Apply sort
+  rows = [...rows].sort((a, b) => {
+    let va = a[summarySort.col], vb = b[summarySort.col];
+    if (typeof va === 'string') return summarySort.order === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    return summarySort.order === 'asc' ? va - vb : vb - va;
+  });
+
+  // Update header arrows
+  document.querySelectorAll('#summary-user-table th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === summarySort.col) th.classList.add('sort-' + summarySort.order);
+  });
+
+  if (!rows.length) {
     const tr = document.createElement('tr');
-    tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 6, className: 'report-empty', textContent: 'No data' }));
+    tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 9, className: 'report-empty', textContent: 'No data' }));
     tbody.appendChild(tr);
     return;
   }
-  for (const u of users) {
+  for (const u of rows) {
     const tr = document.createElement('tr');
     tr.appendChild(td(u.user, 'td-green'));
     tr.appendChild(td(u.sessions));
     tr.appendChild(td(fmt(u.avg_duration), 'td-dim'));
     tr.appendChild(td((u.top_commands || []).join(', '), 'td-dim'));
 
-    // Hosts cell: "web-01 (12), db-01 (5)" sorted by count desc
+    // Hosts cell
     const hostTd = document.createElement('td');
     hostTd.className = 'td-dim';
     const counts = u.host_counts || [];
@@ -1080,26 +1342,58 @@ function renderUserTable(users) {
       span.textContent = `${hc.host} (${hc.count})`;
       hostTd.appendChild(span);
     });
-    if (counts.length > MAX_SHOWN) {
-      hostTd.appendChild(document.createTextNode(` +${counts.length - MAX_SHOWN} more`));
-    }
+    if (counts.length > MAX_SHOWN) hostTd.appendChild(document.createTextNode(` +${counts.length - MAX_SHOWN} more`));
     tr.appendChild(hostTd);
 
-    tr.appendChild(td(u.incomplete > 0 ? '⚠ ' + u.incomplete : '—', u.incomplete > 0 ? 'td-warn' : 'td-dim'));
+    tr.appendChild(td(u.incomplete    > 0 ? '⚠ ' + u.incomplete    : '—', u.incomplete    > 0 ? 'td-warn' : 'td-dim'));
+    tr.appendChild(td(u.long_sessions > 0 ? u.long_sessions : '—',         u.long_sessions > 0 ? 'td-warn' : 'td-dim'));
+    tr.appendChild(td(u.high_risk     > 0 ? u.high_risk     : '—',         u.high_risk     > 0 ? 'td-warn' : 'td-dim'));
+    tr.appendChild(td(u.critical      > 0 ? u.critical      : '—',         u.critical      > 0 ? 'td-warn' : 'td-dim'));
     tbody.appendChild(tr);
   }
 }
 
+// Summary column sort
+document.querySelector('#summary-user-table thead').addEventListener('click', e => {
+  const th = e.target.closest('th.sortable');
+  if (!th) return;
+  const col = th.dataset.col;
+  if (summarySort.col === col) summarySort.order = summarySort.order === 'desc' ? 'asc' : 'desc';
+  else { summarySort.col = col; summarySort.order = col === 'user' ? 'asc' : 'desc'; }
+  renderUserTable(cachedPerUser);
+});
+
+// Summary search
+document.getElementById('summary-search').addEventListener('input', e => {
+  summarySearch = e.target.value.trim();
+  renderUserTable(cachedPerUser);
+});
+
 function renderAnomalyTable(anomalies) {
+  cachedAnomalies = anomalies || [];
   const tbody = document.getElementById('report-anomaly-tbody');
   tbody.textContent = '';
-  if (!anomalies || !anomalies.length) {
+
+  // Apply sort
+  const rows = [...cachedAnomalies].sort((a, b) => {
+    let va = a[anomalySort.col], vb = b[anomalySort.col];
+    if (typeof va === 'string') return anomalySort.order === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    return anomalySort.order === 'asc' ? (va||0) - (vb||0) : (vb||0) - (va||0);
+  });
+
+  // Update header arrows
+  document.querySelectorAll('#tab-anomalies th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === anomalySort.col) th.classList.add('sort-' + anomalySort.order);
+  });
+
+  if (!rows.length) {
     const tr = document.createElement('tr');
     tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 9, className: 'report-empty', textContent: 'No anomalies found.' }));
     tbody.appendChild(tr);
     return;
   }
-  for (const a of anomalies) {
+  for (const a of rows) {
     const info = ANOMALY_LABELS[a.kind] || { label: a.kind.toUpperCase(), cls: '' };
     const tr = document.createElement('tr');
 
@@ -1137,6 +1431,16 @@ function renderAnomalyTable(anomalies) {
   }
 }
 
+// Anomaly column sort
+document.querySelector('#tab-anomalies thead').addEventListener('click', e => {
+  const th = e.target.closest('th.sortable');
+  if (!th) return;
+  const col = th.dataset.col;
+  if (anomalySort.col === col) anomalySort.order = anomalySort.order === 'desc' ? 'asc' : 'desc';
+  else { anomalySort.col = col; anomalySort.order = col === 'user' || col === 'host' || col === 'kind' ? 'asc' : 'desc'; }
+  renderAnomalyTable(cachedAnomalies);
+});
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
@@ -1144,6 +1448,7 @@ function switchTab(tab) {
   document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
   document.querySelectorAll('.report-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
   if (tab === 'summary' || tab === 'anomalies') fetchReport();
+  if (tab === 'settings') fetchRules();
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
@@ -1157,6 +1462,263 @@ elReportClear.addEventListener('click', () => {
   reportDirty = true;
   fetchReport();
 });
+
+// ── Tag input helper ──────────────────────────────────────────────────────────
+
+function makeTagInput(container) {
+  container.textContent = '';
+  const inp = document.createElement('input');
+  inp.className = 'tag-bare-input';
+  inp.placeholder = 'type and press Enter…';
+  container.appendChild(inp);
+
+  function addTag(val) {
+    val = val.trim();
+    if (!val) return;
+    const pill = el('span', 'tag-pill');
+    const txt = document.createTextNode(val);
+    pill.appendChild(txt);
+    const x = el('button', 'tag-pill-x', '×');
+    x.type = 'button';
+    x.addEventListener('click', () => pill.remove());
+    pill.appendChild(x);
+    container.insertBefore(pill, inp);
+    inp.value = '';
+  }
+
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(inp.value.replace(/,$/, '')); }
+    if (e.key === 'Backspace' && !inp.value) {
+      const pills = container.querySelectorAll('.tag-pill');
+      if (pills.length) pills[pills.length - 1].remove();
+    }
+  });
+  inp.addEventListener('blur', () => addTag(inp.value));
+  container.addEventListener('click', () => inp.focus());
+  return {
+    setTags(tags) {
+      container.querySelectorAll('.tag-pill').forEach(p => p.remove());
+      (tags || []).forEach(addTag);
+    },
+    getTags() {
+      return [...container.querySelectorAll('.tag-pill')].map(p => {
+        // first text node is the tag value, second child is the × button
+        return p.firstChild.textContent.trim();
+      });
+    },
+  };
+}
+
+// ── Settings / rules UI ───────────────────────────────────────────────────────
+
+let rulesData  = [];   // current rules array
+let editingIdx = -1;   // -1 = new rule
+
+const tagInputs = {};
+
+function initTagInputs() {
+  ['f-cmd-contains','f-cmd-also','f-cmd-base','f-con-contains','f-con-also'].forEach(id => {
+    tagInputs[id] = makeTagInput(document.getElementById(id));
+  });
+}
+initTagInputs();
+
+function scoreColor(score) {
+  if (score >= 75) return '#ff5f6d';
+  if (score >= 50) return '#ff9f40';
+  if (score >= 25) return '#ffd666';
+  return 'var(--text-sub)';
+}
+
+function condSummary(rule) {
+  const parts = [];
+  if (rule.command) {
+    if (rule.command.contains_any?.length) parts.push('cmd\u2208[' + rule.command.contains_any.join(', ') + ']');
+    if (rule.command.also_any?.length)     parts.push('also[' + rule.command.also_any.join(', ')     + ']');
+  }
+  if (rule.command_base_any?.length) parts.push('base[' + rule.command_base_any.join(', ') + ']');
+  if (rule.content) {
+    if (rule.content.contains_any?.length) parts.push('content\u2208[' + rule.content.contains_any.join(', ') + ']');
+    if (rule.content.also_any?.length)     parts.push('also[' + rule.content.also_any.join(', ')              + ']');
+  }
+  if (rule.runas)        parts.push('runas=' + rule.runas);
+  if (rule.incomplete)   parts.push('incomplete');
+  if (rule.after_hours)  parts.push('after_hours');
+  if (rule.min_duration) parts.push('duration\u2265' + rule.min_duration + 's');
+  return parts.join(' \u00b7 ') || '(no conditions)';
+}
+
+function renderRulesTable() {
+  const tbody = document.getElementById('rules-tbody');
+  tbody.textContent = '';
+  if (!rulesData.length) {
+    const tr = document.createElement('tr');
+    tr.appendChild(Object.assign(document.createElement('td'), { colSpan: 4, className: 'report-empty', textContent: 'No rules defined.' }));
+    tbody.appendChild(tr);
+    return;
+  }
+  rulesData.forEach((rule, idx) => {
+    const tr = document.createElement('tr');
+
+    const scoreTd = document.createElement('td');
+    const scoreBadge = el('span', 'rules-score', String(rule.score));
+    scoreBadge.style.color = scoreColor(rule.score);
+    scoreTd.appendChild(scoreBadge);
+    tr.appendChild(scoreTd);
+
+    const reasonTd = document.createElement('td');
+    const reasonDiv = document.createElement('div');
+    reasonDiv.textContent = rule.reason || '(no reason)';
+    reasonDiv.style.fontSize = '12px';
+    reasonTd.appendChild(reasonDiv);
+    const idDiv = document.createElement('div');
+    idDiv.textContent = rule.id;
+    idDiv.style.cssText = 'font-size:10px;color:var(--text-dim)';
+    reasonTd.appendChild(idDiv);
+    tr.appendChild(reasonTd);
+
+    const condTd = document.createElement('td');
+    condTd.className = 'rules-conds';
+    condTd.textContent = condSummary(rule);
+    tr.appendChild(condTd);
+
+    const actTd = document.createElement('td');
+    const editBtn = el('button', 'report-link', 'edit');
+    editBtn.addEventListener('click', () => openModal(idx));
+    actTd.appendChild(editBtn);
+    tr.appendChild(actTd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+async function fetchRules() {
+  try {
+    const res = await fetch('/api/rules');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    rulesData = data.rules || [];
+    document.getElementById('settings-path').textContent = data.path || '';
+    renderRulesTable();
+  } catch (err) {
+    showSettingsStatus('Load failed: ' + err.message, true);
+  }
+}
+
+async function saveRules() {
+  const btn = document.getElementById('modal-save');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/rules', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rules: rulesData }),
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    showSettingsStatus('Saved', false);
+    renderRulesTable();
+  } catch (err) {
+    showSettingsStatus('Save failed: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showSettingsStatus(msg, isErr) {
+  const s = document.getElementById('settings-status');
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  clearTimeout(s._t);
+  s._t = setTimeout(() => { s.style.display = 'none'; }, 3000);
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+
+function openModal(idx) {
+  editingIdx = idx;
+  const rule = idx === -1
+    ? { id: '', score: 20, reason: '', command: null, content: null, command_base_any: [], runas: '', incomplete: false, after_hours: false, min_duration: null }
+    : JSON.parse(JSON.stringify(rulesData[idx]));
+
+  document.getElementById('modal-title').textContent = idx === -1 ? 'Add rule' : 'Edit rule';
+  document.getElementById('f-id').value     = rule.id      || '';
+  document.getElementById('f-score').value  = rule.score   || 20;
+  document.getElementById('f-reason').value = rule.reason  || '';
+  document.getElementById('f-runas').value  = rule.runas   || '';
+  document.getElementById('f-mindur').value = rule.min_duration || '';
+  document.getElementById('f-incomplete').checked = !!rule.incomplete;
+  document.getElementById('f-afterhours').checked = !!rule.after_hours;
+
+  tagInputs['f-cmd-contains'].setTags(rule.command?.contains_any);
+  tagInputs['f-cmd-also'].setTags(rule.command?.also_any);
+  tagInputs['f-cmd-base'].setTags(rule.command_base_any);
+  tagInputs['f-con-contains'].setTags(rule.content?.contains_any);
+  tagInputs['f-con-also'].setTags(rule.content?.also_any);
+
+  document.getElementById('modal-delete').hidden = idx === -1;
+  document.getElementById('rule-modal').hidden = false;
+}
+
+function closeModal() {
+  document.getElementById('rule-modal').hidden = true;
+}
+
+function collectModalRule() {
+  const cmdContains = tagInputs['f-cmd-contains'].getTags();
+  const cmdAlso     = tagInputs['f-cmd-also'].getTags();
+  const cmdBase     = tagInputs['f-cmd-base'].getTags();
+  const conContains = tagInputs['f-con-contains'].getTags();
+  const conAlso     = tagInputs['f-con-also'].getTags();
+  const mindur      = parseFloat(document.getElementById('f-mindur').value) || null;
+
+  const rule = {
+    id:     document.getElementById('f-id').value.trim(),
+    score:  parseInt(document.getElementById('f-score').value, 10) || 10,
+    reason: document.getElementById('f-reason').value.trim(),
+  };
+  if (cmdContains.length || cmdAlso.length) {
+    rule.command = {};
+    if (cmdContains.length) rule.command.contains_any = cmdContains;
+    if (cmdAlso.length)     rule.command.also_any     = cmdAlso;
+  }
+  if (conContains.length || conAlso.length) {
+    rule.content = {};
+    if (conContains.length) rule.content.contains_any = conContains;
+    if (conAlso.length)     rule.content.also_any     = conAlso;
+  }
+  if (cmdBase.length)                                         rule.command_base_any = cmdBase;
+  const runas = document.getElementById('f-runas').value.trim();
+  if (runas)                                                  rule.runas            = runas;
+  if (document.getElementById('f-incomplete').checked)        rule.incomplete       = true;
+  if (document.getElementById('f-afterhours').checked)        rule.after_hours      = true;
+  if (mindur)                                                 rule.min_duration     = mindur;
+  return rule;
+}
+
+document.getElementById('modal-save').addEventListener('click', async () => {
+  const rule = collectModalRule();
+  if (!rule.id)     { alert('ID is required'); return; }
+  if (!rule.reason) { alert('Reason is required'); return; }
+  if (editingIdx === -1) rulesData.push(rule);
+  else rulesData[editingIdx] = rule;
+  closeModal();
+  await saveRules();
+});
+
+document.getElementById('modal-delete').addEventListener('click', async () => {
+  if (!confirm('Delete this rule?')) return;
+  rulesData.splice(editingIdx, 1);
+  closeModal();
+  await saveRules();
+});
+
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('rule-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+document.getElementById('btn-add-rule').addEventListener('click', () => openModal(-1));
 
 fetchSessions();
 </script>

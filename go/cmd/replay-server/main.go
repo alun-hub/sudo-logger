@@ -92,13 +92,16 @@ type HostCount struct {
 
 // UserStat holds per-user aggregate statistics.
 type UserStat struct {
-	User        string      `json:"user"`
-	Sessions    int         `json:"sessions"`
-	Hosts       int         `json:"hosts"`
-	HostCounts  []HostCount `json:"host_counts"`
-	AvgDuration float64     `json:"avg_duration"`
-	TopCommands []string    `json:"top_commands"`
-	Incomplete  int         `json:"incomplete"`
+	User         string      `json:"user"`
+	Sessions     int         `json:"sessions"`
+	Hosts        int         `json:"hosts"`
+	HostCounts   []HostCount `json:"host_counts"`
+	AvgDuration  float64     `json:"avg_duration"`
+	TopCommands  []string    `json:"top_commands"`
+	Incomplete   int         `json:"incomplete"`
+	LongSessions int         `json:"long_sessions"`
+	HighRisk     int         `json:"high_risk"`
+	Critical     int         `json:"critical"`
 }
 
 // Anomaly describes a session that triggered an anomaly rule.
@@ -272,6 +275,16 @@ func main() {
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
 	mux.HandleFunc("/api/report", handleReport)
+	mux.HandleFunc("/api/rules", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetRules(w, r)
+		case http.MethodPut:
+			handlePutRules(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -635,11 +648,14 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 
 	// ── Per-user ─────────────────────────────────────────────────────────────
 	type userAccum struct {
-		sessions   int
-		hosts      map[string]int
-		totalDur   float64
-		commands   map[string]int
-		incomplete int
+		sessions     int
+		hosts        map[string]int
+		totalDur     float64
+		commands     map[string]int
+		incomplete   int
+		longSessions int
+		highRisk     int
+		critical     int
 	}
 	accums := make(map[string]*userAccum)
 	for _, s := range sessions {
@@ -659,6 +675,14 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 		}
 		if s.Incomplete {
 			a.incomplete++
+		}
+		if s.Duration > 7200 {
+			a.longSessions++
+		}
+		if s.RiskScore >= 75 {
+			a.critical++
+		} else if s.RiskScore >= 50 {
+			a.highRisk++
 		}
 	}
 
@@ -692,13 +716,16 @@ func buildReport(logDir string, from, to int64) (*ReportData, error) {
 		}
 
 		perUser = append(perUser, UserStat{
-			User:        user,
-			Sessions:    a.sessions,
-			Hosts:       len(a.hosts),
-			HostCounts:  hostCounts,
-			AvgDuration: avg,
-			TopCommands: top,
-			Incomplete:  a.incomplete,
+			User:         user,
+			Sessions:     a.sessions,
+			Hosts:        len(a.hosts),
+			HostCounts:   hostCounts,
+			AvgDuration:  avg,
+			TopCommands:  top,
+			Incomplete:   a.incomplete,
+			LongSessions: a.longSessions,
+			HighRisk:     a.highRisk,
+			Critical:     a.critical,
 		})
 	}
 	sort.Slice(perUser, func(i, j int) bool { return perUser[i].Sessions > perUser[j].Sessions })
@@ -795,6 +822,87 @@ func fmtDur(secs float64) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m+1)
+}
+
+// ── Rules API ─────────────────────────────────────────────────────────────────
+
+// rulesFileHeader is prepended when the Settings UI writes the rules YAML file.
+const rulesFileHeader = `# sudo-replay risk scoring rules
+# Managed by sudo-replay-server. Manual edits and Settings UI changes are both supported.
+# Changes are detected automatically on each index rebuild — no restart required.
+#
+# score: points added to session total (capped at 100)
+# reason: shown in the UI when this rule fires
+#
+# command / content: case-insensitive substring matching against command line / ttyout
+#   contains_any  – at least one string must be present (OR)
+#   also_any      – AND at least one of these must also be present (AND + OR)
+#   Rules with both fields fire if EITHER matches.
+#
+# command_base_any: basename of the executed binary (e.g. bash, visudo)
+# runas:            target user requirement (e.g. root)
+# incomplete:       true when session ended without a clean session_end
+# after_hours:      true when session started between 23:00 and 05:59 local time
+# min_duration:     minimum session length in seconds
+
+`
+
+// RulesResponse is returned by GET /api/rules.
+type RulesResponse struct {
+	Path  string `json:"path"`
+	Rules []Rule `json:"rules"`
+}
+
+func handleGetRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rulesMu.RLock()
+	rules := make([]Rule, len(globalRules))
+	copy(rules, globalRules)
+	rulesMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(RulesResponse{Path: *flagRules, Rules: rules}); err != nil {
+		log.Printf("encode rules: %v", err)
+	}
+}
+
+func handlePutRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Rules []Rule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	yamlBody, err := yaml.Marshal(RuleSet{Rules: body.Rules})
+	if err != nil {
+		http.Error(w, "marshal yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	content := []byte(rulesFileHeader)
+	content = append(content, yamlBody...)
+	if err := os.WriteFile(*flagRules, content, 0o644); err != nil {
+		log.Printf("write rules file: %v", err)
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := loadRules(*flagRules); err != nil {
+		log.Printf("reload after write: %v", err)
+	}
+	// Invalidate session index so next request re-scores with new rules.
+	index.mu.Lock()
+	index.built = false
+	index.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
+		log.Printf("encode rules response: %v", err)
+	}
 }
 
 // ── Risk scoring ──────────────────────────────────────────────────────────────
