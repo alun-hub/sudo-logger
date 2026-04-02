@@ -129,23 +129,23 @@ type ReportData struct {
 // MatchPattern holds substring conditions for a rule's command or content field.
 // ContainsAny items are ORed; AlsoAny items are ORed — both groups must match (AND).
 type MatchPattern struct {
-	ContainsAny []string `yaml:"contains_any"`
-	AlsoAny     []string `yaml:"also_any"`
+	ContainsAny []string `yaml:"contains_any" json:"contains_any,omitempty"`
+	AlsoAny     []string `yaml:"also_any"     json:"also_any,omitempty"`
 }
 
 // Rule is a single risk-scoring rule loaded from the rules YAML file.
 // All specified conditions are ANDed; command and content are ORed with each other.
 type Rule struct {
-	ID             string        `yaml:"id"`
-	Score          int           `yaml:"score"`
-	Reason         string        `yaml:"reason"`
-	Command        *MatchPattern `yaml:"command"`
-	Content        *MatchPattern `yaml:"content"`
-	CommandBaseAny []string      `yaml:"command_base_any"`
-	Runas          string        `yaml:"runas"`
-	Incomplete     *bool         `yaml:"incomplete"`
-	AfterHours     *bool         `yaml:"after_hours"`
-	MinDuration    float64       `yaml:"min_duration"`
+	ID             string        `yaml:"id"               json:"id"`
+	Score          int           `yaml:"score"            json:"score"`
+	Reason         string        `yaml:"reason"           json:"reason"`
+	Command        *MatchPattern `yaml:"command"          json:"command,omitempty"`
+	Content        *MatchPattern `yaml:"content"          json:"content,omitempty"`
+	CommandBaseAny []string      `yaml:"command_base_any" json:"command_base_any,omitempty"`
+	Runas          string        `yaml:"runas"            json:"runas,omitempty"`
+	Incomplete     *bool         `yaml:"incomplete"       json:"incomplete,omitempty"`
+	AfterHours     *bool         `yaml:"after_hours"      json:"after_hours,omitempty"`
+	MinDuration    float64       `yaml:"min_duration"     json:"min_duration,omitempty"`
 }
 
 // RuleSet is the top-level structure of the risk-rules YAML file.
