@@ -1242,16 +1242,19 @@ body::after {
             and serves a full terminal player — no database, no dependencies.
           </p>
           <ul class="replay-feat-list">
-            <li class="new">Full command + arguments in session list</li>
+            <li class="new">Risk scoring 0–100 — configurable YAML rules</li>
+            <li class="new">Summary tab — per-user stats, sortable, filterable</li>
+            <li class="new">Anomalies tab — incomplete, high-risk, root shell, after-hours</li>
+            <li class="new">Settings tab — edit risk rules in the browser</li>
+            <li>Full command + arguments in session list</li>
             <li>Live search by user, host, or command</li>
             <li>Play / pause · seek · speed 0.25×–16×</li>
             <li>Keyboard: Space · ← / → · R</li>
             <li>xterm.js — pixel-accurate terminal replay</li>
             <li>Single binary with embedded frontend</li>
-            <li>Runs as <code style="color:var(--green)">sudologger</code>, read-only access</li>
           </ul>
           <div style="margin-top:20px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);line-height:2;">
-            <span style="color:var(--green-dim)">$</span> dnf install sudo-logger-replay-1.1-2.fc43.x86_64.rpm<br>
+            <span style="color:var(--green-dim)">$</span> dnf install sudo-logger-replay-1.10.0-1.fc43.x86_64.rpm<br>
             <span style="color:var(--green-dim)">$</span> systemctl enable --now sudo-replay<br>
             <span style="color:var(--text-dim)">→ http://localhost:8080</span>
           </div>
@@ -1278,6 +1281,8 @@ body::after {
         <div class="feat"><span class="arr">→</span> Automatic recovery when network returns</div>
         <div class="feat"><span class="arr">→</span> GUI app freeze via SIGSTOP (pgid-aware)</div>
         <div class="feat"><span class="arr">→</span> RPM packages with systemd integration</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Risk scoring — YAML rules, 0–100 per session</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Summary / Anomalies / Settings tabs</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if shipper killed (&lt;150 ms)</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>

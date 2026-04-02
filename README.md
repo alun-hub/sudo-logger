@@ -484,7 +484,7 @@ terminal player for recorded sessions.  It reads the same iolog directories as
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.9.2-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.10.0-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -495,7 +495,7 @@ xdg-open http://localhost:8080
 
 Or run manually:
 ```bash
-sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
+sudo-replay-server -logdir /var/log/sudoreplay -listen :8080 -rules /etc/sudo-logger/risk-rules.yaml
 ```
 
 **Features:**
@@ -505,13 +505,23 @@ sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
 - Terminal player with play/pause, scrubbing, and speed control (0.25×–16×)
 - Keyboard shortcuts: `Space` play/pause, `←`/`→` seek ±5 s, `R` restart
 - **Summary tab** — aggregate statistics for a selectable date range: total
-  sessions, unique users and hosts, incomplete sessions, sessions > 2 h, and a
-  per-user breakdown with session count, average duration, top commands, and
-  host distribution (e.g. `web-01 (12), db-01 (5)`)
-- **Anomalies tab** — flagged sessions by rule: incomplete sessions, activity
-  outside working hours (23:00–06:00), sessions longer than 2 h, and direct
-  root shell invocations (`bash`/`sh`/`zsh`/…). Each anomaly links directly
-  to the session in the player
+  sessions, unique users and hosts, incomplete sessions, sessions > 2 h, High
+  Risk and Critical sessions. Per-user table with sortable columns (Sessions,
+  Avg Duration, Long, High Risk, Critical, Top Commands, Hosts). Click any
+  stat card to filter the table. User search box.
+- **Anomalies tab** — flagged sessions by rule: incomplete sessions, High Risk
+  sessions (score ≥ 50), direct root shell invocations, activity outside
+  working hours (23:00–06:00), and sessions longer than 2 h. Sortable columns.
+  Each anomaly links directly to the session in the player.
+- **Risk scoring** — every session is scored 0–100 based on configurable rules
+  in `/etc/sudo-logger/risk-rules.yaml`. Rules match against the sudo command
+  line and terminal output (`ttyout`) for shell sessions. Scores are cached in
+  `risk.json` per session and invalidated automatically when rules change.
+  Levels: Low (0–24) · Medium (25–49) · High (50–74) · Critical (75+). Risk
+  badges are shown on session cards and in the session info bar.
+- **Settings tab** — browser UI for viewing, adding, editing, and deleting risk
+  rules. Changes are written back to `/etc/sudo-logger/risk-rules.yaml`
+  immediately and take effect without a server restart.
 - **No external dependencies** — xterm.js and CSS are vendored into the binary;
   works in air-gapped environments with no internet access
 - No authentication built in — restrict to a management network or put behind a
@@ -582,9 +592,10 @@ sudo-logger/
 │   │   ├── server/
 │   │   │   └── main.go     # Remote log server
 │   │   └── replay-server/
-│   │       ├── main.go     # Web replay interface (HTTP + embedded SPA)
+│   │       ├── main.go          # Web replay interface (HTTP + embedded SPA)
+│   │       ├── risk-rules.yaml  # Default risk scoring rules
 │   │       └── static/
-│   │           └── index.html  # Single-page terminal player (xterm.js)
+│   │           └── index.html   # Single-page terminal player (xterm.js)
 │   └── internal/
 │       ├── protocol/
 │       │   └── protocol.go # Shared wire protocol

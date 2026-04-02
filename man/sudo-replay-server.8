@@ -1,10 +1,11 @@
-.TH SUDO\-REPLAY\-SERVER 8 "2026-03-15" "sudo-logger 1.6.0" "System Administration"
+.TH SUDO\-REPLAY\-SERVER 8 "2026-04-02" "sudo-logger 1.10.0" "System Administration"
 .SH NAME
 sudo\-replay\-server \- web interface for replaying sudo session recordings
 .SH SYNOPSIS
 .B sudo\-replay\-server
 [\fB\-listen\fR \fIaddr\fR]
 [\fB\-logdir\fR \fIdir\fR]
+[\fB\-rules\fR \fIfile\fR]
 .SH DESCRIPTION
 .B sudo\-replay\-server
 is a self-contained HTTP server that reads sudo iolog directories written by
@@ -20,7 +21,7 @@ Session list with live search by user, host, or command (AND logic).
 .IP \(bu
 Date range filter.
 .IP \(bu
-Sort by time, user, host, or duration.
+Sort by time, user, host, duration, or risk score.
 .IP \(bu
 Terminal player with play/pause, scrubbing, and speed control (0.25\(mu\(en16\(mu).
 .IP \(bu
@@ -33,10 +34,58 @@ Keyboard shortcuts:
 (restart).
 .IP \(bu
 Deep-link URLs track the selected session and playback position.
+.IP \(bu
+Risk badge on every session card (Low / Medium / High / Critical).
+.PP
+.B Summary tab
+\(em aggregate statistics for a selectable date range: total sessions, unique
+users and hosts, incomplete sessions, sessions > 2 h, High Risk and Critical
+sessions.  Per-user table with sortable columns.  Click any stat card to filter
+the table.  User search box.
+.PP
+.B Anomalies tab
+\(em flagged sessions grouped by rule: incomplete sessions, High Risk (score
+\(>= 50), root shell invocations, after-hours activity (23:00\(en06:00), and
+sessions longer than 2 h.  Sortable columns; each row links directly to the
+session in the player.
+.PP
+.B Risk scoring
+\(em every session receives a score from 0 to 100 based on configurable rules
+loaded from the file specified by
+.BR \-rules .
+Rules match against the sudo command line and, for interactive shell sessions,
+the terminal output (ttyout).  Scores are cached in a
+.B risk.json
+file alongside each session directory and are invalidated automatically when
+the rules file changes.
+.PP
+Risk levels:
+.RS
+.IP "Low" 12
+0\(en24
+.IP "Medium" 12
+25\(en49
+.IP "High" 12
+50\(en74
+.IP "Critical" 12
+75\(en100
+.RE
+.PP
+.B Settings tab
+\(em browser UI for viewing, adding, editing, and deleting risk rules.  Changes
+are written back to the rules file immediately and take effect without a server
+restart.
 .PP
 The server runs as the
 .B sudologger
-system user with read-only access to the log directory.
+system user.
+It needs read access to the log directory and read/write access to
+.I /etc/sudo-logger
+(for the Settings tab to update the rules file) and to
+.I /var/log/sudoreplay
+(for writing
+.B risk.json
+cache files).
 .PP
 No authentication is built in.
 Deploy behind a reverse proxy with HTTP basic auth, or restrict access
@@ -55,8 +104,13 @@ Base directory containing session logs, as written by
 .BR sudo\-logserver (8).
 Default:
 .BR /var/log/sudoreplay .
+.TP
+.BI \-rules " file"
+Path to the YAML risk-scoring rules file.
+The server exits at startup if this file cannot be loaded.
+Default:
+.BR /etc/sudo-logger/risk-rules.yaml .
 .SH API
-The server exposes two JSON endpoints:
 .TP
 .B GET /api/sessions
 Returns a paginated, filtered list of sessions.
@@ -75,10 +129,32 @@ by
 .IR TSID .
 The TSID format is
 .IR user / host _ YYYYMMDD\- HHMMSS .
+.TP
+.B GET /api/report
+Returns aggregate statistics and anomaly list for the date range specified by
+optional query parameters
+.B from
+and
+.B to
+(ISO 8601 date, e.g.
+.IR 2026-04-01 ).
+.TP
+.B GET /api/rules
+Returns the current risk-scoring rules as JSON, along with the path of the
+rules file on disk.
+.TP
+.B PUT /api/rules
+Replaces the rules with the JSON body, writes them back to the rules file, and
+reloads the active rule set.  Any existing
+.B risk.json
+caches are invalidated on the next session load.
 .SH FILES
 .TP
 .B /var/log/sudoreplay/
-Default log directory (read-only).
+Default log directory (read; risk.json cache files are written here).
+.TP
+.B /etc/sudo-logger/risk-rules.yaml
+Default risk-scoring rules file (read/write; the Settings tab updates this file).
 .SH SECURITY
 The TSID path parameter is validated to contain only safe characters
 .RB ( [a-zA-Z0-9/_\-.] ,
