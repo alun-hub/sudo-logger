@@ -7,7 +7,8 @@ Type=simple
 User=sudologger
 ExecStart=/usr/bin/sudo-replay-server \
     -listen :8080 \
-    -logdir /var/log/sudoreplay
+    -logdir /var/log/sudoreplay \
+    -rules /etc/sudo-logger/risk-rules.yaml
 Restart=on-failure
 RestartSec=3s
 
@@ -16,7 +17,9 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadOnlyPaths=/var/log/sudoreplay
+ReadOnlyPaths=/etc/sudo-logger
+# ReadWrite so risk.json cache files can be written alongside session logs
+ReadWritePaths=/var/log/sudoreplay
 
 # sudo-replay-server only needs to read log files
 CapabilityBoundingSet=

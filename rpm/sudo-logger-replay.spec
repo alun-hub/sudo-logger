@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.9.2
+Version:        1.10.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -34,6 +34,9 @@ install -D -m 0755 go/sudo-replay-server \
 install -D -m 0644 sudo-replay.service \
     %{buildroot}%{_unitdir}/sudo-replay.service
 
+install -D -m 0644 go/cmd/replay-server/risk-rules.yaml \
+    %{buildroot}%{_sysconfdir}/sudo-logger/risk-rules.yaml
+
 # Man page
 install -D -m 0644 man/sudo-replay-server.8 \
     %{buildroot}%{_mandir}/man8/sudo-replay-server.8
@@ -50,9 +53,20 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %files
 %{_bindir}/sudo-replay-server
 %{_unitdir}/sudo-replay.service
+%config(noreplace) %{_sysconfdir}/sudo-logger/risk-rules.yaml
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Thu Apr 02 2026 sudo-logger 1.10.0-1
+- feat: risk scoring for sessions (0-100) based on configurable YAML rules
+- Rules match against sudo command line and ttyout content for shell sessions
+- Covers audit/logging tampering, auth manipulation, firewall, persistence
+- Scores cached in risk.json per session; auto-invalidated on rule changes
+- UI: risk badges on session cards, Risk sort, info-bar risk row,
+  High Risk/Critical summary cards, risk column in anomalies table,
+  new high_risk anomaly kind
+- New config file: /etc/sudo-logger/risk-rules.yaml
+
 * Sun Mar 29 2026 sudo-logger 1.9.2-1
 - feat: add Summary and Anomalies tabs with /api/report endpoint
   (per-user stats, incomplete/after-hours/long-session/root-shell detection)
