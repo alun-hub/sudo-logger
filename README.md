@@ -552,13 +552,13 @@ it is recorded in the access log:
 
 ```bash
 # /etc/sudo-logger/replay.conf  (sourced by sudo-replay.service)
-REPLAY_EXTRA_ARGS="-trusted-user-header X-Forwarded-User"
+REPLAY_ARGS="-trusted-user-header X-Forwarded-User"
 ```
 
 Or in the systemd unit override (`systemctl edit sudo-replay`):
 ```ini
 [Service]
-Environment=REPLAY_EXTRA_ARGS=-trusted-user-header X-Forwarded-User
+Environment=REPLAY_ARGS=-trusted-user-header X-Forwarded-User
 ```
 
 #### Mode 2: Built-in HTTP Basic Auth with TLS
@@ -607,18 +607,23 @@ chmod 640 /etc/sudo-logger/replay.key
 
 **Step 3 — Configure the service:**
 
-Edit `/etc/sudo-logger/replay.conf`:
+Create `/etc/sudo-logger/replay.conf` with all flags on a single line
+(systemd `EnvironmentFile` does not support line continuations):
+
 ```bash
-REPLAY_EXTRA_ARGS="\
-  -tls-cert  /etc/sudo-logger/replay.crt \
-  -tls-key   /etc/sudo-logger/replay.key \
-  -htpasswd  /etc/sudo-logger/replay.htpasswd"
+REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/replay.key -htpasswd /etc/sudo-logger/replay.htpasswd
 ```
 
-Restart and verify:
+Reload and restart:
 ```bash
+systemctl daemon-reload
 systemctl restart sudo-replay
-curl -u alice:your-password https://localhost:8080/api/sessions
+
+# Verify TLS is active (look for "listening on ... (TLS)"):
+journalctl -u sudo-replay -n 5
+
+# Test with curl (skip cert verification for self-signed):
+curl -ku alice:your-password https://localhost:8080/api/sessions
 ```
 
 **Rotating passwords or adding users — no restart needed:**
@@ -640,7 +645,7 @@ When a proxy handles authentication and you only want the replay server to
 log who accessed it — without enforcing auth itself:
 
 ```bash
-REPLAY_EXTRA_ARGS="-trusted-user-header X-Forwarded-User"
+REPLAY_ARGS="-trusted-user-header X-Forwarded-User"
 ```
 
 Every request is logged as:
@@ -653,14 +658,11 @@ access user=alice addr=10.0.0.1:52341 GET /api/sessions 200
 
 #### Combining modes
 
-All flags work together.  Example: TLS + Basic Auth + trusted header logging:
+All flags work together.  Example: TLS + Basic Auth + trusted header logging,
+in `/etc/sudo-logger/replay.conf`:
 
 ```bash
-REPLAY_EXTRA_ARGS="\
-  -tls-cert  /etc/sudo-logger/replay.crt \
-  -tls-key   /etc/sudo-logger/replay.key \
-  -htpasswd  /etc/sudo-logger/replay.htpasswd \
-  -trusted-user-header X-Forwarded-User"
+REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/replay.key -htpasswd /etc/sudo-logger/replay.htpasswd -trusted-user-header X-Forwarded-User
 ```
 
 #### Flag reference
