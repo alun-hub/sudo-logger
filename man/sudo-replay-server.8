@@ -167,6 +167,121 @@ before verifying that the resolved path stays within the log directory.
 Session recordings may contain sensitive data such as passwords typed at
 the terminal, private key material, or other confidential output.
 Restrict access to the web interface accordingly.
+.SH RULE FILE
+The risk-scoring rules file is a YAML document with a top-level
+.B rules
+list.
+Each rule is a mapping with the following keys.
+.SS Identification
+.TP
+.B id
+Unique identifier for the rule.
+Use
+.I snake_case
+(e.g.\&
+.BR stop_auditd ).
+.TP
+.B score
+Integer 1\(en100.
+Added to the session total when the rule matches.
+Multiple rules can match; scores accumulate, capped at 100.
+.TP
+.B reason
+Short description displayed in the session info bar, risk badges, and the
+Anomalies tab.
+.SS Command matching
+Matched against the full sudo command line (everything after
+.BR sudo ).
+.TP
+.B command.contains_any
+List of substrings.
+At least one must appear in the command line.
+.TP
+.B command.also_any
+List of substrings.
+At least one must
+.I also
+appear \(em used to require two independent keywords.
+.TP
+.B command_base_any
+List of program names (basename of argv[0]).
+Matches the command name exactly, ignoring arguments.
+Preferred over
+.B contains_any
+for matching shell interpreters such as
+.BR bash ,
+.BR sh ,
+or
+.BR python3 .
+.SS Shell content matching
+Scanned against the terminal output
+.RB ( ttyout )
+of interactive sessions.
+Useful for detecting commands typed
+.I inside
+a shell, which are invisible to command-line matching.
+Content is matched case-insensitively after ANSI escape codes are stripped.
+Up to 512 KB of output is read.
+.TP
+.B content.contains_any
+At least one of the listed substrings must appear in the terminal output.
+.TP
+.B content.also_any
+At least one must
+.I also
+appear — used to require two independent indicators.
+.SS Session metadata conditions
+.TP
+.B runas
+Only match sessions where sudo ran as this user.
+Omit to match any user; the default in most rules is
+.BR root .
+.TP
+.B min_duration
+Only match sessions that lasted at least this many seconds (float).
+.TP
+.B incomplete
+Boolean.
+Only match sessions that ended without a clean
+.B SESSION_END
+message (e.g.\& the shipper was killed mid-session).
+.TP
+.B after_hours
+Boolean.
+Only match sessions started between 23:00 and 05:59.
+.SS Combining conditions
+All conditions within a rule are ANDed: every specified field must match.
+Items within a
+.B contains_any
+or
+.B also_any
+list are ORed: any one of them is sufficient.
+.B command
+and
+.B content
+blocks are ORed with each other: the rule fires if either the command
+.I or
+the terminal output matches (while all other conditions still hold).
+.SS Example rule
+.EX
+- id: stop_auditd
+  score: 80
+  reason: Audit daemon stopped or disabled
+  command:
+    contains_any: [auditd]
+    also_any:     [stop, disable, mask]
+
+- id: root_shell
+  score: 50
+  reason: Direct root shell
+  command_base_any: [bash, sh, zsh, fish, ksh]
+
+- id: passwd_tamper
+  score: 70
+  reason: Auth file manipulation
+  content:
+    contains_any: [/etc/passwd, /etc/shadow, /etc/sudoers]
+.EE
 .SH SEE ALSO
 .BR sudo\-logserver (8),
 .BR sudo\-shipper (8),

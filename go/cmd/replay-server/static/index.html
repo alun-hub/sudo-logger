@@ -356,6 +356,55 @@
       text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--border);
       padding-bottom: 5px; margin-bottom: 2px; }
 
+    /* ── Help page ──────────────────────────────────────────────────────────── */
+    .help-body { max-width: 780px; display: flex; flex-direction: column; gap: 32px; }
+    .help-section h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--border);
+      padding-bottom: 6px; margin-bottom: 14px; }
+    .help-intro { font-size: 13px; color: var(--text-sub); line-height: 1.7; }
+    .help-levels { display: flex; gap: 10px; flex-wrap: wrap; }
+    .help-level { padding: 8px 16px; border-radius: 4px; border: 1px solid;
+      font-size: 11px; line-height: 1.6; }
+    .help-level .hl-label { font-weight: 700; font-size: 13px; }
+    .help-level.hl-low      { border-color: var(--border-mid); color: var(--text-sub); }
+    .help-level.hl-medium   { border-color: #ffd666; color: #ffd666; }
+    .help-level.hl-high     { border-color: #ff9f40; color: #ff9f40; }
+    .help-level.hl-critical { border-color: #ff5f6d; color: #ff5f6d; }
+    .help-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .help-table th { text-align: left; font-size: 10px; font-weight: 600;
+      letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim);
+      padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border); }
+    .help-table td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--border);
+      vertical-align: top; color: var(--text-sub); line-height: 1.55; }
+    .help-table td:first-child { color: var(--text); white-space: nowrap;
+      font-weight: 500; padding-right: 18px; }
+    .help-table code { background: var(--card); border: 1px solid var(--border);
+      border-radius: 3px; padding: 1px 5px; font-size: 11px; color: var(--green); }
+    .help-logic { display: flex; flex-direction: column; gap: 10px; }
+    .help-logic-row { display: flex; align-items: flex-start; gap: 12px;
+      font-size: 12px; color: var(--text-sub); line-height: 1.6; }
+    .help-logic-badge { flex-shrink: 0; font-size: 10px; font-weight: 700;
+      padding: 2px 8px; border-radius: 3px; margin-top: 2px; }
+    .hlb-and { background: rgba(77,168,255,0.12); color: var(--blue);
+      border: 1px solid rgba(77,168,255,0.3); }
+    .hlb-or  { background: rgba(0,232,122,0.10); color: var(--green);
+      border: 1px solid rgba(0,232,122,0.25); }
+    .help-example { background: var(--card); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 16px; display: flex;
+      flex-direction: column; gap: 6px; }
+    .help-example .ex-title { font-size: 11px; font-weight: 600; color: var(--text); }
+    .help-example .ex-desc  { font-size: 11px; color: var(--text-sub); line-height: 1.6; }
+    .help-example .ex-yaml  { font-size: 11px; color: var(--text-dim); font-family: var(--font);
+      line-height: 1.7; margin-top: 4px; white-space: pre; }
+    .help-example .ex-yaml .yk { color: var(--blue); }
+    .help-example .ex-yaml .yv { color: var(--green); }
+    .help-example .ex-yaml .yc { color: var(--text-dim); }
+    .help-examples { display: flex; flex-direction: column; gap: 12px; }
+    .help-tip { display: flex; gap: 10px; font-size: 12px; color: var(--text-sub);
+      line-height: 1.6; }
+    .help-tip::before { content: '→'; color: var(--green); flex-shrink: 0; margin-top: 1px; }
+    .help-tips { display: flex; flex-direction: column; gap: 8px; }
+
     /* Tag input */
     .tag-input-wrap { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 7px;
       background: var(--card); border: 1px solid var(--border); border-radius: 4px;
@@ -413,6 +462,7 @@
       <button class="tab-btn" data-tab="summary">Summary</button>
       <button class="tab-btn" data-tab="anomalies">Anomalies</button>
       <button class="tab-btn" data-tab="settings">Settings</button>
+      <button class="tab-btn" data-tab="help">Help</button>
     </nav>
     <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
     <button class="theme-btn" id="theme-toggle" title="Toggle light / dark mode">☀</button>
@@ -515,6 +565,182 @@
       </tr></thead>
       <tbody id="rules-tbody"></tbody>
     </table>
+  </div>
+
+  <!-- ── Help tab ──────────────────────────────────────────────────────────── -->
+  <div class="report-panel" id="tab-help">
+    <div class="help-body">
+
+      <div class="help-section">
+        <h3>How risk scoring works</h3>
+        <p class="help-intro">
+          Every session is evaluated against all rules in
+          <code>/etc/sudo-logger/risk-rules.yaml</code>. Each matching rule adds
+          its score to the session total (capped at&nbsp;100). Scores are cached
+          alongside each session and only recalculated when the rules file
+          changes.
+        </p>
+        <div class="help-levels" style="margin-top:14px">
+          <div class="help-level hl-low">
+            <div class="hl-label">Low</div>0 – 24
+          </div>
+          <div class="help-level hl-medium">
+            <div class="hl-label">Medium</div>25 – 49
+          </div>
+          <div class="help-level hl-high">
+            <div class="hl-label">High</div>50 – 74
+          </div>
+          <div class="help-level hl-critical">
+            <div class="hl-label">Critical</div>75 – 100
+          </div>
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>Rule fields</h3>
+        <table class="help-table">
+          <thead><tr><th>Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Score</td><td>Points added to the session when this rule matches (1–100). Multiple matching rules accumulate.</td></tr>
+            <tr><td>ID</td><td>Unique identifier used internally. Use <code>snake_case</code> — e.g. <code>stop_auditd</code>.</td></tr>
+            <tr><td>Reason</td><td>Short label shown in the session info bar, risk badge tooltip, and Anomalies tab.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="help-section">
+        <h3>Command matching</h3>
+        <p class="help-intro" style="margin-bottom:12px">Matched against the full sudo command line — everything after <code>sudo</code>.</p>
+        <table class="help-table">
+          <thead><tr><th>Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Must contain one of</td>
+              <td>The command line must include <em>at least one</em> of the listed substrings.
+                  Example: <code>auditd</code>, <code>audit</code> — matches <code>systemctl stop auditd</code>.</td>
+            </tr>
+            <tr>
+              <td>AND one of</td>
+              <td>In addition to the above, the command must <em>also</em> contain at least one of these.
+                  Use this to require two independent keywords — e.g. <code>stop</code> and <code>disable</code>
+                  to match only destructive audit commands.</td>
+            </tr>
+            <tr>
+              <td>Command name is one of</td>
+              <td>Matches just the program name (basename of argv[0]).
+                  More reliable than substring matching for shell interpreters —
+                  e.g. <code>bash</code>, <code>sh</code>, <code>zsh</code>, <code>python3</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="help-section">
+        <h3>Shell content matching</h3>
+        <p class="help-intro" style="margin-bottom:12px">
+          Scans what appeared on the terminal (<code>ttyout</code>) for interactive sessions such as
+          <code>sudo bash</code>. Useful for detecting commands typed <em>inside</em> a shell —
+          these are invisible to command-line matching since sudo only sees <code>bash</code>.
+        </p>
+        <table class="help-table">
+          <thead><tr><th>Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Must contain one of</td>
+              <td>At least one of the listed substrings must appear in the terminal output.
+                  Matching is case-insensitive and ANSI escape codes are stripped first.</td>
+            </tr>
+            <tr>
+              <td>AND one of</td>
+              <td>The terminal output must <em>also</em> contain at least one of these —
+                  use to require two separate indicators before scoring.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="help-section">
+        <h3>Session metadata conditions</h3>
+        <table class="help-table">
+          <thead><tr><th>Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Runas user</td><td>Only match sessions where sudo ran as this user. Leave blank to match any. Default is <code>root</code>.</td></tr>
+            <tr><td>Min duration</td><td>Only match sessions that lasted at least this many seconds. Useful for flagging unusually long interactive shells.</td></tr>
+            <tr><td>Incomplete session</td><td>Only match sessions that ended without a clean <code>SESSION_END</code> — e.g. the shipper was killed.</td></tr>
+            <tr><td>After business hours</td><td>Only match sessions started between 23:00 and 05:59.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="help-section">
+        <h3>How conditions combine</h3>
+        <div class="help-logic">
+          <div class="help-logic-row">
+            <span class="help-logic-badge hlb-and">AND</span>
+            All conditions in a single rule must be satisfied for the rule to match.
+            A rule with both a command pattern and <em>Runas&nbsp;=&nbsp;root</em> only fires
+            when both are true.
+          </div>
+          <div class="help-logic-row">
+            <span class="help-logic-badge hlb-or">OR</span>
+            Items within a tag list are alternatives — any one of them is enough.
+            Listing <code>auditd</code> and <code>rsyslog</code> in <em>Must contain one of</em>
+            matches either word.
+          </div>
+          <div class="help-logic-row">
+            <span class="help-logic-badge hlb-or">OR</span>
+            Command matching and shell content matching are alternatives — a rule fires
+            if <em>either</em> the command <em>or</em> the content pattern matches (while all
+            other conditions still hold).
+          </div>
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>Examples</h3>
+        <div class="help-examples">
+          <div class="help-example">
+            <div class="ex-title">Detect stopping the audit daemon</div>
+            <div class="ex-desc">Matches any sudo command that contains both "auditd" and one of "stop" / "disable" / "mask".</div>
+            <div class="ex-yaml"><span class="yk">score:</span> <span class="yv">80</span>
+<span class="yk">id:</span>    <span class="yv">stop_auditd</span>
+<span class="yk">reason:</span> <span class="yv">Audit daemon stopped or disabled</span>
+<span class="yk">command:</span>
+  <span class="yk">contains_any:</span> <span class="yv">[auditd]</span>
+  <span class="yk">also_any:</span>     <span class="yv">[stop, disable, mask]</span></div>
+          </div>
+          <div class="help-example">
+            <div class="ex-title">Detect interactive root shell</div>
+            <div class="ex-desc">Fires when the command basename is a shell interpreter — regardless of arguments.</div>
+            <div class="ex-yaml"><span class="yk">score:</span> <span class="yv">50</span>
+<span class="yk">id:</span>    <span class="yv">root_shell</span>
+<span class="yk">reason:</span> <span class="yv">Direct root shell</span>
+<span class="yk">command_base_any:</span> <span class="yv">[bash, sh, zsh, fish, ksh]</span></div>
+          </div>
+          <div class="help-example">
+            <div class="ex-title">Detect passwd manipulation inside a shell</div>
+            <div class="ex-desc">Scans terminal output for commands that modify /etc/passwd or /etc/shadow — visible even though the outer command is just "bash".</div>
+            <div class="ex-yaml"><span class="yk">score:</span> <span class="yv">70</span>
+<span class="yk">id:</span>    <span class="yv">passwd_tamper</span>
+<span class="yk">reason:</span> <span class="yv">Auth file manipulation</span>
+<span class="yk">content:</span>
+  <span class="yk">contains_any:</span> <span class="yv">[/etc/passwd, /etc/shadow, /etc/sudoers]</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>Tips</h3>
+        <div class="help-tips">
+          <div class="help-tip">Use <strong>Command name is one of</strong> for shell interpreters — it is more precise than substring matching since it only checks the program name.</div>
+          <div class="help-tip">Shell content matching reads up to 512 KB of terminal output. It is only useful for sessions where a shell was invoked interactively.</div>
+          <div class="help-tip">Scores accumulate across rules. A session matching three rules with scores 30, 40, and 20 gets a total of 90 (Critical). Design scores accordingly.</div>
+          <div class="help-tip">Leave unused fields empty — only filled fields are evaluated. An empty rule (no conditions, no metadata) matches every session.</div>
+          <div class="help-tip">Changes saved in Settings take effect immediately. Cached scores are invalidated automatically on the next page load.</div>
+        </div>
+      </div>
+
+    </div>
   </div>
 
   <!-- ── Anomalies tab ─────────────────────────────────────────────────────── -->
