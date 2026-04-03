@@ -1122,8 +1122,8 @@ elSpeedSelect.addEventListener('change', () => {
 });
 
 document.addEventListener('keydown', e => {
-  if (e.target === elSearch || e.target === elDateFrom || e.target === elDateTo
-      || e.target.tagName === 'SELECT') return;
+  const _tag = e.target.tagName;
+  if (_tag === 'INPUT' || _tag === 'TEXTAREA' || _tag === 'SELECT') return;
   if (e.code === 'Space')      { e.preventDefault(); player.playing ? pause() : play(); }
   if (e.code === 'ArrowLeft')  { e.preventDefault(); seekTo(Math.max(0, elapsedSec() - 5)); }
   if (e.code === 'ArrowRight') { e.preventDefault(); seekTo(Math.min(totalDuration, elapsedSec() + 5)); }
