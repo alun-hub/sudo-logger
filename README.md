@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/sudo-logger.png" alt="Sudo-Logger Banner" width="100%">
+</p>
+
 # sudo-logger
 
 Real-time sudo session logging with mandatory remote acknowledgement.
