@@ -133,8 +133,12 @@ pass "TEST 3"
 
 # ── TEST B: mTLS enforcement ───────────────────────────────────────────────────
 echo "==> TEST B: mTLS-avvisning..."
-# A connection without a client certificate must be rejected by the logserver.
-# First confirm that a valid client cert IS accepted (guards against false pass).
+# With TLS 1.3 + RequireAndVerifyClientCert, "Verify return code: 0 (ok)" in
+# openssl output refers to the SERVER's cert, not whether the client was accepted.
+# The server sends alert 116 (certificate_required) AFTER the handshake when
+# the client presents no cert.  Check for that alert or a cert-related error.
+#
+# Guard: confirm a valid client cert IS accepted before testing rejection.
 VALID_RESULT=$(echo Q | timeout 5 podman exec -i sudo-client-test \
     openssl s_client \
     -connect localhost:9876 \
@@ -145,14 +149,14 @@ VALID_RESULT=$(echo Q | timeout 5 podman exec -i sudo-client-test \
 if ! echo "$VALID_RESULT" | grep -q "Verify return code: 0"; then
     fail "TEST B" "valid client cert was rejected (test setup broken)"
 fi
-# Now try without client cert — must NOT get a successful handshake.
+# Without a client cert the server must send a certificate_required alert.
 NOCERT_RESULT=$(echo Q | timeout 5 podman exec -i sudo-client-test \
     openssl s_client \
     -connect localhost:9876 \
     -CAfile /etc/sudo-logger/ca.crt \
     2>&1 || true)
-if echo "$NOCERT_RESULT" | grep -q "Verify return code: 0 (ok)"; then
-    fail "TEST B" "logserver accepted connection without client certificate"
+if ! echo "$NOCERT_RESULT" | grep -qiE "(alert|certificate.required|peer did not return|handshake failure)"; then
+    fail "TEST B" "logserver accepted connection without client certificate; openssl output: $NOCERT_RESULT"
 fi
 pass "TEST B"
 
