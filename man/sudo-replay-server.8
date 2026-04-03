@@ -1,4 +1,4 @@
-.TH SUDO\-REPLAY\-SERVER 8 "2026-04-02" "sudo-logger 1.10.0" "System Administration"
+.TH SUDO\-REPLAY\-SERVER 8 "2026-04-03" "sudo-logger 1.10.2" "System Administration"
 .SH NAME
 sudo\-replay\-server \- web interface for replaying sudo session recordings
 .SH SYNOPSIS
@@ -87,9 +87,22 @@ It needs read access to the log directory and read/write access to
 .B risk.json
 cache files).
 .PP
-No authentication is built in.
-Deploy behind a reverse proxy with HTTP basic auth, or restrict access
-to a management network.
+Three authentication modes are supported and can be combined freely:
+.IP \(bu 4
+.B No auth
+\(em deploy behind a reverse proxy (Pomerium, oauth2-proxy, OpenShift ingress)
+that handles authentication.
+.IP \(bu
+.B HTTP Basic Auth
+\(em pass
+.B \-auth user:bcrypt-hash
+to require login.
+The server enforces auth locally without external dependencies.
+.IP \(bu
+.B Trusted header
+\(em pass
+.B \-trusted-user-header X-Forwarded-User
+to log the username set by an upstream proxy.
 .SH OPTIONS
 .TP
 .BI \-listen " addr"
@@ -110,6 +123,55 @@ Path to the YAML risk-scoring rules file.
 The server exits at startup if this file cannot be loaded.
 Default:
 .BR /etc/sudo-logger/risk-rules.yaml .
+.TP
+.BI \-tls-cert " file"
+Path to a PEM-encoded TLS certificate.
+Must be combined with
+.BR \-tls-key .
+When both are set the server listens on HTTPS with TLS 1.2 or later.
+.TP
+.BI \-tls-key " file"
+Path to a PEM-encoded TLS private key.
+Must be combined with
+.BR \-tls-cert .
+.TP
+.BI \-auth " user" : hash
+Enable HTTP Basic Auth.
+.I user
+is the username;
+.I hash
+is the bcrypt hash of the password (generated with
+.B htpasswd -nbB
+or
+.BR "python3 -c 'import bcrypt; print(bcrypt.hashpw(b\"pass\", bcrypt.gensalt()).decode())'" ).
+The server exits at startup if the hash is not a valid bcrypt hash.
+.TP
+.BI \-trusted-user-header " header"
+Name of an HTTP request header that contains the pre-authenticated username
+set by an upstream proxy, for example
+.BR X-Forwarded-User .
+The value is recorded in the access log.
+No authentication is enforced by this flag alone \(em the proxy must
+restrict access before requests reach the server.
+.SS Authentication examples
+.PP
+Standalone with HTTPS and Basic Auth:
+.EX
+sudo\-replay\-server \e
+  \-tls\-cert /etc/sudo\-logger/replay.crt \e
+  \-tls\-key  /etc/sudo\-logger/replay.key \e
+  \-auth      admin:\(Do2b\(Do12\(Do...
+.EE
+.PP
+Behind Pomerium or oauth2-proxy (proxy handles TLS and auth):
+.EX
+sudo\-replay\-server \-trusted\-user\-header X\-Forwarded\-User
+.EE
+.PP
+OpenShift ingress (ingress terminates TLS, proxy sets header):
+.EX
+sudo\-replay\-server \-trusted\-user\-header X\-Forwarded\-User
+.EE
 .SH API
 .TP
 .B GET /api/sessions

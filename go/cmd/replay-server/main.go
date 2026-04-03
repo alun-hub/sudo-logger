@@ -1,14 +1,22 @@
 // sudo-replay-server: browser-based playback interface for sudo session logs.
 //
 // Reads iolog directories written by sudo-logserver and serves a single-page
-// application with a terminal player.  No authentication is built in — deploy
-// behind a reverse proxy or restrict to a management network.
+// application with a terminal player.
+//
+// Authentication modes (can be combined):
+//
+//	No flags         — open; deploy behind a reverse proxy that handles auth
+//	-auth user:hash  — HTTP Basic Auth with bcrypt password hash
+//	-tls-cert/-tls-key — enable HTTPS
+//	-trusted-user-header X-Forwarded-User — log proxy-authenticated username
 //
 // Run: sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
 package main
 
 import (
 	"bufio"
+	"crypto/subtle"
+	"crypto/tls"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -27,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,10 +43,70 @@ import (
 var staticFiles embed.FS
 
 var (
-	flagListen = flag.String("listen", ":8080", "Listen address")
-	flagLogDir = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
-	flagRules  = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
+	flagListen            = flag.String("listen", ":8080", "Listen address")
+	flagLogDir            = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
+	flagRules             = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
+	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
+	flagTLSKey            = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
+	flagAuth              = flag.String("auth", "", "HTTP Basic Auth credentials as user:bcrypt-hash")
+	flagTrustedUserHeader = flag.String("trusted-user-header", "", "Header containing pre-authenticated username (e.g. X-Forwarded-User)")
 )
+
+// loggingResponseWriter captures the HTTP status code for access logging.
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.status = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+// accessLogMiddleware logs every request with the authenticated username,
+// resolved from the trusted header (proxy mode) or Basic Auth credentials.
+func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := "-"
+		if trustedHeader != "" {
+			if v := r.Header.Get(trustedHeader); v != "" {
+				user = v
+			}
+		} else if u, _, ok := r.BasicAuth(); ok {
+			user = u
+		}
+		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(lrw, r)
+		log.Printf("access user=%s addr=%s %s %s %d",
+			user, r.RemoteAddr, r.Method, r.URL.Path, lrw.status)
+	})
+}
+
+// basicAuthMiddleware enforces HTTP Basic Auth against a bcrypt-hashed password.
+// creds must be in the form "username:$2b$...bcrypt-hash".
+func basicAuthMiddleware(next http.Handler, creds string) http.Handler {
+	idx := strings.IndexByte(creds, ':')
+	if idx < 1 {
+		log.Fatal("-auth: expected user:bcrypt-hash")
+	}
+	username := creds[:idx]
+	hash := []byte(creds[idx+1:])
+	if _, err := bcrypt.Cost(hash); err != nil {
+		log.Fatalf("-auth: invalid bcrypt hash: %v", err)
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok ||
+			subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 ||
+			bcrypt.CompareHashAndPassword(hash, []byte(p)) != nil {
+			w.Header().Set("WWW-Authenticate", `Basic realm="sudo-replay"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // SessionInfo is the metadata returned for each session in the list API.
 type SessionInfo struct {
@@ -299,8 +368,27 @@ func main() {
 		}
 	}()
 
-	log.Printf("sudo-replay-server listening on %s, logdir=%s", *flagListen, *flagLogDir)
-	log.Fatal(http.ListenAndServe(*flagListen, mux))
+	// Build middleware chain (innermost first):
+	//   basicAuth (optional) → accessLog → handler
+	var handler http.Handler = mux
+	if *flagAuth != "" {
+		handler = basicAuthMiddleware(handler, *flagAuth)
+	}
+	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
+
+	// Start server with TLS if certificates are provided.
+	if *flagTLSCert != "" || *flagTLSKey != "" {
+		if *flagTLSCert == "" || *flagTLSKey == "" {
+			log.Fatal("both -tls-cert and -tls-key must be specified together")
+		}
+		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+		srv := &http.Server{Addr: *flagListen, Handler: handler, TLSConfig: tlsCfg}
+		log.Printf("sudo-replay-server listening on %s (TLS), logdir=%s", *flagListen, *flagLogDir)
+		log.Fatal(srv.ListenAndServeTLS(*flagTLSCert, *flagTLSKey))
+	} else {
+		log.Printf("sudo-replay-server listening on %s, logdir=%s", *flagListen, *flagLogDir)
+		log.Fatal(http.ListenAndServe(*flagListen, handler))
+	}
 }
 
 func handleListSessions(w http.ResponseWriter, r *http.Request) {

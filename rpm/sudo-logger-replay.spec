@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.10.1
+Version:        1.10.2
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -60,6 +60,12 @@ chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || 
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Thu Apr 03 2026 sudo-logger 1.10.2-1
+- feat: HTTP Basic Auth (-auth user:bcrypt-hash) with bcrypt password hashing
+- feat: TLS support (-tls-cert/-tls-key, TLS 1.2+)
+- feat: trusted user header (-trusted-user-header) for proxy-authenticated deployments
+- feat: access logging with authenticated username on every request
+
 * Thu Apr 03 2026 sudo-logger 1.10.1-1
 - fix: risk-rules.yaml owned root:sudologger 0664 so the replay service
   can write it via the Settings UI (was root:root 0644 — permission denied)

@@ -29,6 +29,13 @@ services:
       - "-logdir=/var/log/sudoreplay"
       - "-listen=:8080"
       - "-rules=/etc/sudo-logger/risk-rules.yaml"
+      # Uncomment to enable HTTPS (mount cert/key via the pki volume):
+      #- "-tls-cert=/etc/sudo-logger/replay.crt"
+      #- "-tls-key=/etc/sudo-logger/replay.key"
+      # Uncomment to enable HTTP Basic Auth (generate hash with htpasswd -nbB):
+      #- "-auth=admin:$2b$12$..."
+      # Uncomment when deployed behind Pomerium / oauth2-proxy / OpenShift ingress:
+      #- "-trusted-user-header=X-Forwarded-User"
     volumes:
       # Session logs — must be read-write so the replay server can write
       # risk.json score-cache files alongside each session directory.
