@@ -108,11 +108,9 @@ rules:
       contains_any: [/etc/sudoers]
 
   - id: visudo
-    score: 40
+    score: 60
     reason: "sudoers edited via visudo"
     command_base_any: [visudo]
-    content:
-      contains_any: [visudo]
 
   - id: shadow_accessed
     score: 35

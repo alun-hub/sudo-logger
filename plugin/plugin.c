@@ -320,12 +320,22 @@ static void *monitor_thread_fn(void *arg)
         int fresh = ack_is_fresh_locked();
 
         /* Shipper socket dropped — terminate the session immediately.
-         * kill(getpid(), SIGTERM) sends SIGTERM to sudo, which cleans up
-         * and sends SIGHUP to the child (bash), ending the session. */
+         *
+         * In non-interactive mode (exec_nopty) sudo does not automatically
+         * forward SIGTERM to its children, so sending SIGTERM only to sudo
+         * leaves the child alive and blocks sudo in poll() waiting for the
+         * child's pipes to close.  Killing the entire process group ensures
+         * both sudo and its children terminate regardless of the exec mode:
+         *   - exec_nopty: sudo and children share the same PGID, so all
+         *     processes in the session are killed via the process group.
+         *   - exec_pty:   children run in their own PGID (new session), so
+         *     kill(-pgrp) only reaches sudo; the PTY hangup then delivers
+         *     SIGHUP to the child session as usual.
+         */
         if (atomic_load(&g_shipper_dead)) {
             if (g_tty_fd >= 0)
                 write(g_tty_fd, TERMINATE_MSG, sizeof(TERMINATE_MSG) - 1);
-            kill(getpid(), SIGTERM);
+            kill(-getpgrp(), SIGTERM);
             return NULL;
         }
 

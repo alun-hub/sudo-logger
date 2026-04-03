@@ -181,23 +181,26 @@ echo "==> TEST A: Session avslutas när shipper dödas..."
 # plugin's monitor thread guarantees: kill(getpid(), SIGTERM) within 150 ms.
 #
 # Capture sudo's PID via $PPID (= parent of the sh running inside sudo).
-podman exec -d sudo-client-test sudo sh -c 'echo $PPID > /tmp/sudo_test_pid; sleep 60'
+# Use "exec sleep 60" so sh replaces itself with sleep — sudo then has exactly
+# one child whose exit closes the stdout/stderr pipes and unblocks sudo's poll().
+podman exec -d sudo-client-test sudo sh -c 'echo $PPID > /tmp/sudo_test_pid; exec sleep 60'
 sleep 3
 SUDO_TEST_PID=$(podman exec sudo-client-test cat /tmp/sudo_test_pid 2>/dev/null || echo "0")
 [ "$SUDO_TEST_PID" != "0" ] \
     || fail "TEST A" "could not read sudo PID (session did not start)"
 podman exec sudo-client-test kill -0 "$SUDO_TEST_PID" 2>/dev/null \
     || fail "TEST A" "sudo PID $SUDO_TEST_PID not running (test setup broken)"
-# Kill the shipper — monitor thread must detect and call kill(getpid(), SIGTERM).
+# Kill the shipper — monitor thread detects EOF, calls kill(-pgrp, SIGTERM) to
+# terminate the whole process group (sudo + its children), then exits.
 podman exec sudo-client-test pkill -x sudo-shipper \
     || fail "TEST A" "sudo-shipper not found — cannot run test"
-sleep 8
+sleep 10
 # The sudo process must have exited.  Zombie processes (State: Z) still appear
 # in kill -0 checks, so inspect /proc directly and treat zombies as terminated.
 PROC_STATE=$(podman exec sudo-client-test \
     sh -c "grep '^State:' /proc/$SUDO_TEST_PID/status 2>/dev/null || echo 'State: gone'")
 if echo "$PROC_STATE" | grep -qE "^State:[[:space:]]+(R|S|D)"; then
-    fail "TEST A" "sudo (PID $SUDO_TEST_PID) still genuinely running ($PROC_STATE) 8s after shipper was killed"
+    fail "TEST A" "sudo (PID $SUDO_TEST_PID) still genuinely running ($PROC_STATE) after shipper was killed"
 fi
 pass "TEST A"
 
@@ -207,6 +210,13 @@ restart_shipper
 
 # ── TEST 5: Risk scoring ───────────────────────────────────────────────────────
 echo "==> TEST 5: Risk Scoring..."
+# Run the high-risk command BEFORE starting the replay server so it lands on
+# disk and is included in the server's initial session-index rebuild.  The
+# replay server caches the index for 30 s; any command logged after the
+# initial rebuild would be invisible to TEST F's API call.
+podman exec sudo-client-test sudo visudo -c >/dev/null 2>&1 || true
+sleep 3  # wait for the logserver to write the session to disk
+
 # Generate htpasswd file and start replay server with auth.
 podman exec sudo-logserver-test sh -c \
     "htpasswd -nBb $REPLAY_AUTH_USER $REPLAY_AUTH_PWD > /tmp/replay.htpasswd"  # pragma: allowlist secret
@@ -214,9 +224,6 @@ podman exec sudo-logserver-test sh -c \
     'sudo-replay-server -logdir /var/log/sudoreplay -rules /etc/sudo-logger/risk-rules.yaml -htpasswd /tmp/replay.htpasswd -listen :8080 &>/tmp/replay.log & echo $! > /tmp/replay.pid'
 sleep 4
 
-# Run a high-risk command (visudo triggers the visudo rule in risk-rules.yaml).
-podman exec sudo-client-test sudo visudo -c >/dev/null 2>&1 || true
-sleep 2
 podman exec sudo-logserver-test find /var/log/sudoreplay -name risk.json \
     | grep -q risk.json \
     || fail "TEST 5" "no risk.json found after risk-scoring run"

@@ -7,7 +7,7 @@ RUN CGO_ENABLED=0 go build -o /usr/local/bin/sudo-shipper ./cmd/shipper
 
 FROM fedora:40
 # Install tools for testing: iproute (tc), coreutils (md5sum), procps (ps/pkill), nmap-ncat (nc)
-RUN dnf install -y sudo gcc make openssl procps-ng iproute iproute-tc coreutils nmap-ncat && \
+RUN dnf install -y sudo sudo-devel gcc make openssl procps-ng iproute iproute-tc coreutils nmap-ncat && \
     dnf clean all
 
 # Create a non-root user for security testing
