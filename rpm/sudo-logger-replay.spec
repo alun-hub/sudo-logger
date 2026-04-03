@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.10.2
+Version:        1.10.3
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -60,6 +60,12 @@ chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || 
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Thu Apr 03 2026 sudo-logger 1.10.3-1
+- feat: replace -auth flag with -htpasswd file (htpasswd format, bcrypt only)
+- feat: support multiple users in htpasswd file
+- feat: reload credentials on SIGHUP without service restart
+- security: constant-time dummy bcrypt run for unknown usernames
+
 * Thu Apr 03 2026 sudo-logger 1.10.2-1
 - feat: HTTP Basic Auth (-auth user:bcrypt-hash) with bcrypt password hashing
 - feat: TLS support (-tls-cert/-tls-key, TLS 1.2+)

@@ -32,8 +32,8 @@ services:
       # Uncomment to enable HTTPS (mount cert/key via the pki volume):
       #- "-tls-cert=/etc/sudo-logger/replay.crt"
       #- "-tls-key=/etc/sudo-logger/replay.key"
-      # Uncomment to enable HTTP Basic Auth (generate hash with htpasswd -nbB):
-      #- "-auth=admin:$2b$12$..."
+      # Uncomment to enable HTTP Basic Auth (htpasswd file with bcrypt hashes):
+      #- "-htpasswd=/etc/sudo-logger/replay.htpasswd"
       # Uncomment when deployed behind Pomerium / oauth2-proxy / OpenShift ingress:
       #- "-trusted-user-header=X-Forwarded-User"
     volumes:

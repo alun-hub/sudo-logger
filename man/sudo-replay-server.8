@@ -135,16 +135,24 @@ Path to a PEM-encoded TLS private key.
 Must be combined with
 .BR \-tls-cert .
 .TP
-.BI \-auth " user" : hash
-Enable HTTP Basic Auth.
-.I user
-is the username;
-.I hash
-is the bcrypt hash of the password (generated with
-.B htpasswd -nbB
-or
-.BR "python3 -c 'import bcrypt; print(bcrypt.hashpw(b\"pass\", bcrypt.gensalt()).decode())'" ).
-The server exits at startup if the hash is not a valid bcrypt hash.
+.BI \-htpasswd " file"
+Enable HTTP Basic Auth using credentials loaded from an htpasswd file.
+The file must contain one entry per line in the format
+.IR username : bcrypt-hash .
+Lines beginning with
+.B #
+and blank lines are ignored.
+Only bcrypt hashes (
+.BR $2b$ ,
+.BR $2y$ )
+are accepted; MD5 and SHA1 entries are rejected with a log warning and skipped.
+The server exits at startup if the file cannot be read.
+Send
+.B SIGHUP
+to reload the file without restarting the service:
+.EX
+systemctl kill \-\-signal=HUP sudo\-replay
+.EE
 .TP
 .BI \-trusted-user-header " header"
 Name of an HTTP request header that contains the pre-authenticated username
@@ -157,10 +165,13 @@ restrict access before requests reach the server.
 .PP
 Standalone with HTTPS and Basic Auth:
 .EX
+# Create htpasswd file
+htpasswd \-cBb /etc/sudo\-logger/replay.htpasswd admin yourpassword
+
 sudo\-replay\-server \e
-  \-tls\-cert /etc/sudo\-logger/replay.crt \e
-  \-tls\-key  /etc/sudo\-logger/replay.key \e
-  \-auth      admin:\(Do2b\(Do12\(Do...
+  \-tls\-cert   /etc/sudo\-logger/replay.crt \e
+  \-tls\-key    /etc/sudo\-logger/replay.key \e
+  \-htpasswd   /etc/sudo\-logger/replay.htpasswd
 .EE
 .PP
 Behind Pomerium or oauth2-proxy (proxy handles TLS and auth):

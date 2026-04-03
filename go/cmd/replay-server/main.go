@@ -5,17 +5,16 @@
 //
 // Authentication modes (can be combined):
 //
-//	No flags         — open; deploy behind a reverse proxy that handles auth
-//	-auth user:hash  — HTTP Basic Auth with bcrypt password hash
-//	-tls-cert/-tls-key — enable HTTPS
-//	-trusted-user-header X-Forwarded-User — log proxy-authenticated username
+//	No flags              — open; deploy behind a reverse proxy that handles auth
+//	-htpasswd file        — HTTP Basic Auth from an htpasswd file (bcrypt only)
+//	-tls-cert/-tls-key    — enable HTTPS
+//	-trusted-user-header  — log proxy-authenticated username from a request header
 //
 // Run: sudo-replay-server -logdir /var/log/sudoreplay -listen :8080
 package main
 
 import (
 	"bufio"
-	"crypto/subtle"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
@@ -31,8 +30,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -48,7 +49,7 @@ var (
 	flagRules             = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	flagTLSKey            = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
-	flagAuth              = flag.String("auth", "", "HTTP Basic Auth credentials as user:bcrypt-hash")
+	flagHTPasswd          = flag.String("htpasswd", "", "Path to htpasswd file for HTTP Basic Auth (bcrypt hashes only; reload with SIGHUP)")
 	flagTrustedUserHeader = flag.String("trusted-user-header", "", "Header containing pre-authenticated username (e.g. X-Forwarded-User)")
 )
 
@@ -82,24 +83,88 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 	})
 }
 
-// basicAuthMiddleware enforces HTTP Basic Auth against a bcrypt-hashed password.
-// creds must be in the form "username:$2b$...bcrypt-hash".
-func basicAuthMiddleware(next http.Handler, creds string) http.Handler {
-	idx := strings.IndexByte(creds, ':')
-	if idx < 1 {
-		log.Fatal("-auth: expected user:bcrypt-hash")
+// htpasswdStore holds bcrypt-hashed credentials loaded from an htpasswd file.
+// The file format is one "username:bcrypt-hash" entry per line; lines starting
+// with '#' and blank lines are ignored.  Only bcrypt hashes are accepted.
+// Reload at runtime by sending SIGHUP to the process.
+type htpasswdStore struct {
+	mu    sync.RWMutex
+	users map[string][]byte // username → bcrypt hash
+	path  string
+}
+
+func newHTPasswd(path string) (*htpasswdStore, error) {
+	h := &htpasswdStore{path: path}
+	if err := h.reload(); err != nil {
+		return nil, err
 	}
-	username := creds[:idx]
-	hash := []byte(creds[idx+1:])
-	if _, err := bcrypt.Cost(hash); err != nil {
-		log.Fatalf("-auth: invalid bcrypt hash: %v", err)
+	return h, nil
+}
+
+// reload reads the htpasswd file and replaces the in-memory user map atomically.
+func (h *htpasswdStore) reload() error {
+	f, err := os.Open(h.path)
+	if err != nil {
+		return fmt.Errorf("open htpasswd %s: %w", h.path, err)
+	}
+	defer f.Close()
+
+	users := make(map[string][]byte)
+	lineNum := 0
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexByte(line, ':')
+		if idx < 1 {
+			log.Printf("htpasswd %s:%d: missing colon, skipping", h.path, lineNum)
+			continue
+		}
+		username, hash := line[:idx], []byte(line[idx+1:])
+		if _, err := bcrypt.Cost(hash); err != nil {
+			log.Printf("htpasswd %s:%d: user %q: not a bcrypt hash, skipping", h.path, lineNum, username)
+			continue
+		}
+		users[username] = hash
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read htpasswd: %w", err)
 	}
 
+	h.mu.Lock()
+	h.users = users
+	h.mu.Unlock()
+	log.Printf("htpasswd: loaded %d user(s) from %s", len(users), h.path)
+	return nil
+}
+
+// authenticate returns true if username and password match a stored entry.
+// Always runs bcrypt even for unknown users to prevent timing-based
+// username enumeration.
+var dummyHash = func() []byte {
+	h, _ := bcrypt.GenerateFromPassword([]byte("dummy"), bcrypt.MinCost)
+	return h
+}()
+
+func (h *htpasswdStore) authenticate(username, password string) bool {
+	h.mu.RLock()
+	hash, ok := h.users[username]
+	h.mu.RUnlock()
+	if !ok {
+		bcrypt.CompareHashAndPassword(dummyHash, []byte(password)) //nolint:errcheck
+		return false
+	}
+	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
+}
+
+// basicAuthMiddleware enforces HTTP Basic Auth using the htpasswdStore.
+func basicAuthMiddleware(next http.Handler, store *htpasswdStore) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
-		if !ok ||
-			subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 ||
-			bcrypt.CompareHashAndPassword(hash, []byte(p)) != nil {
+		if !ok || !store.authenticate(u, p) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="sudo-replay"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -371,8 +436,22 @@ func main() {
 	// Build middleware chain (innermost first):
 	//   basicAuth (optional) → accessLog → handler
 	var handler http.Handler = mux
-	if *flagAuth != "" {
-		handler = basicAuthMiddleware(handler, *flagAuth)
+	if *flagHTPasswd != "" {
+		store, err := newHTPasswd(*flagHTPasswd)
+		if err != nil {
+			log.Fatalf("htpasswd: %v", err)
+		}
+		// Reload credentials on SIGHUP — no restart required for password rotation.
+		sighup := make(chan os.Signal, 1)
+		signal.Notify(sighup, syscall.SIGHUP)
+		go func() {
+			for range sighup {
+				if err := store.reload(); err != nil {
+					log.Printf("htpasswd reload: %v", err)
+				}
+			}
+		}()
+		handler = basicAuthMiddleware(handler, store)
 	}
 	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
 

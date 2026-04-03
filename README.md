@@ -563,16 +563,32 @@ Environment=REPLAY_EXTRA_ARGS=-trusted-user-header X-Forwarded-User
 
 #### Mode 2: Built-in HTTP Basic Auth with TLS
 
-Standalone deployment with no external proxy required.  Credentials are
-validated locally with bcrypt; no database or external service needed.
+Standalone deployment with no external proxy required.  Credentials are stored
+in a standard htpasswd file with bcrypt hashing.  Multiple users are supported
+and credentials can be rotated without restarting the service.
 
-**Step 1 — Generate a bcrypt password hash:**
+**Step 1 — Create the htpasswd file:**
+
 ```bash
-# Using htpasswd (httpd-tools package):
-htpasswd -nbB admin 'your-password' | cut -d: -f2
+# Install htpasswd (part of httpd-tools):
+dnf install httpd-tools
 
-# Or using Python:
-python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())"
+# Create the file with the first user (-c creates, -B forces bcrypt):
+htpasswd -cB /etc/sudo-logger/replay.htpasswd alice
+
+# Add more users:
+htpasswd -B /etc/sudo-logger/replay.htpasswd bob
+
+# Restrict permissions — the file contains password hashes:
+chmod 640 /etc/sudo-logger/replay.htpasswd
+chown root:sudologger /etc/sudo-logger/replay.htpasswd
+```
+
+The file format is one entry per line:
+```
+alice:$2b$12$...bcrypt-hash...
+bob:$2b$12$...bcrypt-hash...
+# Comments and blank lines are ignored
 ```
 
 **Step 2 — Obtain a TLS certificate:**
@@ -583,6 +599,7 @@ Use your existing PKI, a self-signed cert, or Let's Encrypt:
 openssl req -x509 -newkey rsa:4096 -keyout replay.key -out replay.crt \
     -days 365 -nodes -subj '/CN=replay.example.com'
 cp replay.crt replay.key /etc/sudo-logger/
+chmod 640 /etc/sudo-logger/replay.key
 ```
 
 **Step 3 — Configure the service:**
@@ -590,15 +607,28 @@ cp replay.crt replay.key /etc/sudo-logger/
 Edit `/etc/sudo-logger/replay.conf`:
 ```bash
 REPLAY_EXTRA_ARGS="\
-  -tls-cert /etc/sudo-logger/replay.crt \
-  -tls-key  /etc/sudo-logger/replay.key \
-  -auth     admin:\$2b\$12\$..."
+  -tls-cert  /etc/sudo-logger/replay.crt \
+  -tls-key   /etc/sudo-logger/replay.key \
+  -htpasswd  /etc/sudo-logger/replay.htpasswd"
 ```
 
 Restart and verify:
 ```bash
 systemctl restart sudo-replay
-curl -u admin:your-password https://localhost:8080/api/sessions
+curl -u alice:your-password https://localhost:8080/api/sessions
+```
+
+**Rotating passwords or adding users — no restart needed:**
+
+```bash
+# Change a password:
+htpasswd -B /etc/sudo-logger/replay.htpasswd alice
+
+# Remove a user (edit the file manually or use sed):
+sed -i '/^alice:/d' /etc/sudo-logger/replay.htpasswd
+
+# Reload credentials (no service restart):
+systemctl kill --signal=HUP sudo-replay
 ```
 
 #### Mode 3: Trusted header only (logging, no enforcement)
@@ -620,14 +650,13 @@ access user=alice addr=10.0.0.1:52341 GET /api/sessions 200
 
 #### Combining modes
 
-Basic Auth + TLS + trusted header all work together.  Example: internal
-deployment with TLS and Basic Auth, logging the username from both sources:
+All flags work together.  Example: TLS + Basic Auth + trusted header logging:
 
 ```bash
 REPLAY_EXTRA_ARGS="\
-  -tls-cert /etc/sudo-logger/replay.crt \
-  -tls-key  /etc/sudo-logger/replay.key \
-  -auth     admin:\$2b\$12\$... \
+  -tls-cert  /etc/sudo-logger/replay.crt \
+  -tls-key   /etc/sudo-logger/replay.key \
+  -htpasswd  /etc/sudo-logger/replay.htpasswd \
   -trusted-user-header X-Forwarded-User"
 ```
 
@@ -637,7 +666,7 @@ REPLAY_EXTRA_ARGS="\
 |------|---------|-------------|
 | `-tls-cert file` | — | PEM TLS certificate (enables HTTPS, requires `-tls-key`) |
 | `-tls-key file` | — | PEM TLS private key |
-| `-auth user:hash` | — | Enable Basic Auth; `hash` is a bcrypt hash of the password |
+| `-htpasswd file` | — | htpasswd file for Basic Auth (bcrypt only; reload with `SIGHUP`) |
 | `-trusted-user-header hdr` | — | Log username from this request header (e.g. `X-Forwarded-User`) |
 | `-listen addr` | `:8080` | Listen address |
 | `-logdir dir` | `/var/log/sudoreplay` | Session log directory |
