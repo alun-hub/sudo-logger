@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.9.1
+Version:        1.10.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri Apr 03 2026 sudo-logger 1.10.0-1
+- security: cgroup namespace isolation via unshare(CLONE_NEWCGROUP) in plugin
+  Child processes see the session cgroup as /sys/fs/cgroup root; cannot
+  self-migrate to escape cgroup.freeze even with CAP_SYS_ADMIN
+
 * Sat Mar 21 2026 sudo-logger 1.9.1-1
 - fix: replace atoi with strtol for runas_uid/runas_gid in plugin (CWE-190)
 - fix: propagate write errors in iolog log header (fmt.Fprintf, logF.Close)

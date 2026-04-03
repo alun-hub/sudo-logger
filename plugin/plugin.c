@@ -38,6 +38,15 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/syscall.h>
+#include <syslog.h>
+
+/* CLONE_NEWCGROUP: enter a new cgroup namespace (Linux 4.6+, <sched.h>/_GNU_SOURCE).
+ * Defined here directly to avoid pulling in _GNU_SOURCE globally, which can
+ * conflict with sudo_plugin.h and other system headers. */
+#ifndef CLONE_NEWCGROUP
+#define CLONE_NEWCGROUP 0x02000000
+#endif
 
 /* ---------- tunables ---------- */
 #define SHIPPER_SOCK_PATH    "/run/sudo-logger/plugin.sock"
@@ -639,6 +648,31 @@ static int plugin_open(unsigned int        version,
     g_last_ack_query = now_sec();
     /* Seed ack time so the freeze window starts from now */
     g_last_ack_time = now_sec();
+
+    /* Isolate the session in a cgroup namespace so child processes cannot
+     * escape the session freeze by migrating to a cgroup outside our
+     * delegated subtree — even if they hold CAP_SYS_ADMIN.
+     *
+     * After unshare(CLONE_NEWCGROUP), /sys/fs/cgroup appears to all children
+     * of this process as a private tree rooted at the session cgroup that the
+     * shipper just placed us in (SESSION_READY is the synchronisation point).
+     * An attempt to write a PID to /sys/fs/cgroup/../../escape/cgroup.procs
+     * resolves only within that subtree and fails with ENOENT.
+     *
+     * The shipper itself remains in the host cgroup namespace and continues
+     * to read and write cgroup.freeze / cgroup.procs via the full host path.
+     * The existing socket connection (g_shipper_fd) is unaffected: sockets
+     * are not part of the cgroup namespace.
+     *
+     * CAP_SYS_ADMIN is required; sudo always runs with full capabilities.
+     * Non-fatal: if the call fails the session continues without namespace
+     * isolation and a warning is written to syslog. */
+    if (syscall(SYS_unshare, CLONE_NEWCGROUP) != 0) {
+        syslog(LOG_WARNING,
+               "sudo-logger: cgroup namespace isolation failed (%s) -- "
+               "session proceeds without cgroup namespace protection",
+               strerror(errno));
+    }
 
     /* Start background monitor thread. */
     g_monitor_stop  = 0;

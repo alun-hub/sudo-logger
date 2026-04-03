@@ -49,6 +49,19 @@ Blocks until the shipper replies with
 (server unreachable).
 If the server is unreachable, the command is blocked and never executes.
 .IP 5.
+Calls
+.BR unshare (2)
+with
+.B CLONE_NEWCGROUP
+to enter a new cgroup namespace rooted at the session cgroup.
+Child processes see this cgroup as
+.B /sys/fs/cgroup
+and cannot reference or write to cgroups outside it, preventing cgroup
+escape even by processes holding
+.BR CAP_SYS_ADMIN .
+Non-fatal: if the call fails a syslog warning is written and the session
+continues without cgroup namespace isolation.
+.IP 6.
 Starts a background monitor thread that polls ACK state every 150 ms.
 .PP
 During a session the monitor thread writes a freeze banner to the terminal

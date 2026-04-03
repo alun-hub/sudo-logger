@@ -136,6 +136,7 @@ A TLS server running on a dedicated machine. For each client connection:
 | **Sudo blocked at start** | If the log server is unreachable when sudo runs, the session is rejected before the command executes |
 | **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen within ~1 second |
 | **Freeze cannot be escaped with `fg`** | Terminal sessions are frozen via `cgroup.freeze=1` — no job-control signals involved, so `fg` cannot escape the freeze |
+| **cgroup namespace isolation** | At session start the plugin calls `unshare(CLONE_NEWCGROUP)`: child processes see the session cgroup as their filesystem root for `/sys/fs/cgroup`. They cannot migrate to a parent cgroup to escape the freeze, even with `CAP_SYS_ADMIN`. The shipper remains in the host cgroup namespace and manages freeze/unfreeze normally. |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
 | **Asymmetric ACK signing (ed25519)** | Server signs each ACK with its ed25519 private key over `sessionID \|\| seq \|\| ts_ns`; a compromised client cannot forge ACKs for other sessions or other clients |
@@ -164,6 +165,7 @@ A TLS server running on a dedicated machine. For each client connection:
 - Freeze within ~1 s of network loss; automatic recovery when network returns
 - Terminal sessions (bash, zsh, …) frozen via `cgroup.freeze` — no job control triggered
 - GUI programs with own process group (gvim, okular, …) frozen via direct SIGSTOP/SIGCONT
+- cgroup namespace isolation (`CLONE_NEWCGROUP`) prevents child processes from escaping the freeze cgroup, even with `CAP_SYS_ADMIN`
 - Scalable: designed for 50+ simultaneous sessions
 - RPM packages for Fedora/RHEL with proper systemd integration
 - Automatic sudo.conf configuration on client RPM install/uninstall

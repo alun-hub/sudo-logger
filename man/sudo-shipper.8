@@ -126,6 +126,33 @@ verified via
 ACK messages from the server are verified using ed25519 signatures.
 The signed message includes the session ID, sequence number, and timestamp,
 so an ACK captured from one session cannot be replayed against another.
+.PP
+.B cgroup namespace isolation
+.PP
+The shipper moves the sudo process into a per-session cgroup before sending
+.B SESSION_READY
+to the plugin.
+The plugin then calls
+.BR unshare (2)
+with
+.B CLONE_NEWCGROUP
+so that child processes (bash, helper programs) see the session cgroup as
+their filesystem root for
+.IR /sys/fs/cgroup .
+A child process cannot reference or write to cgroups outside this subtree,
+so it cannot self-migrate to escape
+.B cgroup.freeze
+even if it holds
+.BR CAP_SYS_ADMIN .
+.PP
+The shipper itself remains in the host cgroup namespace and continues to
+manage
+.B cgroup.freeze
+and
+.B cgroup.procs
+via the full host path.
+The existing Unix socket connection between plugin and shipper is unaffected
+because sockets are not part of the cgroup namespace.
 .SH SEE ALSO
 .BR sudo\-logserver (8),
 .BR sudo\-replay\-server (8),
