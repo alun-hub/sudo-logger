@@ -31,6 +31,14 @@ rules:
       contains_any: [sudo-log, sudolog]
       also_any:     [stop, disable, kill, purge, uninstall]
 
+  - id: cgroup_escape
+    score: 75
+    reason: "cgroup escape attempt — possible freeze evasion"
+    command:
+      contains_any: [cgclassify, cgexec, /sys/fs/cgroup, cgroup.procs]
+    content:
+      contains_any: [cgclassify, cgexec, /sys/fs/cgroup, cgroup.procs]
+
   - id: stop_auditd
     score: 45
     reason: "audit daemon stopped"
