@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/sudo-logserver ./c
 
 # ---- Runtime stage ----
 FROM alpine:latest
-RUN apk add --no-cache ca-certificates coreutils grep curl netcat-openbsd
+RUN apk add --no-cache ca-certificates coreutils grep curl netcat-openbsd apache2-utils procps
 
 COPY --from=builder /usr/local/bin/sudo-logserver /usr/local/bin/sudo-logserver
 COPY --from=builder /usr/local/bin/sudo-replay-server /usr/local/bin/sudo-replay-server
