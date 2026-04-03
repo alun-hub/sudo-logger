@@ -9,3 +9,7 @@ plugin/sudo_logger_plugin.so
 *.tar.gz
 go/sudo-replay-server
 go/replay-server
+go/loadgen
+
+# Temporary build directories
+selinux/tmp/
