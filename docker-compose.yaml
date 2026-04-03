@@ -25,9 +25,22 @@ services:
     ports:
       - "8080:8080"
     entrypoint: ["/usr/local/bin/sudo-replay-server"]
-    command: ["-logdir=/var/log/sudoreplay", "-listen=:8080"]
+    command:
+      - "-logdir=/var/log/sudoreplay"
+      - "-listen=:8080"
+      - "-rules=/etc/sudo-logger/risk-rules.yaml"
     volumes:
-      - sudologs:/var/log/sudoreplay:ro
+      # Session logs — must be read-write so the replay server can write
+      # risk.json score-cache files alongside each session directory.
+      - sudologs:/var/log/sudoreplay
+      # Risk-scoring rules — the default file is bundled in the image.
+      # To persist Settings UI changes across container restarts, mount a
+      # host directory here instead:
+      #   - ./config:/etc/sudo-logger:Z
+      # Pre-populate it with the default rules before first start:
+      #   mkdir -p config
+      #   podman run --rm --entrypoint cat sudo-logger:latest \
+      #       /etc/sudo-logger/risk-rules.yaml > config/risk-rules.yaml
     restart: always
 
 volumes:

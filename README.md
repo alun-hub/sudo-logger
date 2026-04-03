@@ -832,12 +832,36 @@ podman unshare chmod 600 ./pki/server.key ./pki/ack-sign.key
 podman-compose build
 
 # 4. Pre-create the log volume and fix its ownership before first start
+#    The replay server writes risk.json cache files here — must be read-write.
 podman volume create sudo-logger_sudologs
 podman unshare chown -R 65532:65532 \
     $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}')
 
 # 5. Start
 podman-compose up -d
+```
+
+### Persisting risk-scoring rule changes (Settings UI)
+
+The default `risk-rules.yaml` is bundled inside the image.  Changes saved via
+the Settings tab are written back to `/etc/sudo-logger/risk-rules.yaml` inside
+the container and are lost when the container is recreated.
+
+To persist rule changes across restarts, mount a host directory:
+
+```bash
+# 1. Create a config directory and copy the default rules into it
+mkdir -p config
+podman run --rm --entrypoint cat sudo-logger:latest \
+    /etc/sudo-logger/risk-rules.yaml > config/risk-rules.yaml
+
+# 2. Fix ownership for the nonroot container user
+podman unshare chown -R 65532:65532 ./config/
+
+# 3. Uncomment the config volume in docker-compose.yaml:
+#      - ./config:/etc/sudo-logger:Z
+#    Then restart:
+podman-compose down && podman-compose up -d
 ```
 
 ### Start

@@ -20,6 +20,14 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /usr/local/bin/sudo-logserver /usr/local/bin/sudo-logserver
 COPY --from=builder /usr/local/bin/sudo-replay-server /usr/local/bin/sudo-replay-server
 
+# Bundle the default risk-scoring rules so the replay-server starts
+# without requiring an external mount.  Override by mounting a volume
+# at /etc/sudo-logger or by passing a different -rules path.
+# Note: the file is owned by root inside the image.  To allow the
+# Settings UI to save rule changes, mount a writable volume at
+# /etc/sudo-logger (see docker-compose.yaml).
+COPY go/cmd/replay-server/risk-rules.yaml /etc/sudo-logger/risk-rules.yaml
+
 # Expose both the logserver (9876) and replay-server (8080) ports.
 EXPOSE 9876 8080
 
