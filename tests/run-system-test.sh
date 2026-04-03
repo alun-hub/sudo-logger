@@ -106,12 +106,15 @@ if podman exec -u testuser sudo-client-test \
         nc -U /run/sudo-logger/plugin.sock -z 2>/dev/null; then
     fail "TEST 2" "non-root connected to plugin socket"
 fi
-# Temporarily widen permissions and send garbage — shipper must log UID rejection.
+# Temporarily widen dir + socket so testuser can reach the socket,
+# then send garbage — shipper must reject via SO_PEERCRED UID check.
+podman exec sudo-client-test chmod 755 /run/sudo-logger
 podman exec sudo-client-test chmod 666 /run/sudo-logger/plugin.sock
 podman exec -u testuser sudo-client-test \
     sh -c "echo HELLO | nc -U /run/sudo-logger/plugin.sock" >/dev/null 2>&1 || true
 sleep 1
 podman exec sudo-client-test chmod 600 /run/sudo-logger/plugin.sock
+podman exec sudo-client-test chmod 750 /run/sudo-logger
 if podman logs sudo-client-test 2>&1 | grep -q "rejected non-root connection"; then
     pass "TEST 2"
 else
