@@ -147,6 +147,21 @@ Only bcrypt hashes (
 .BR $2y$ )
 are accepted; MD5 and SHA1 entries are rejected with a log warning and skipped.
 The server exits at startup if the file cannot be read.
+.PP
+.B Recommended file permissions:
+.EX
+chown root:sudologger /etc/sudo\-logger/replay.htpasswd
+chmod 0640            /etc/sudo\-logger/replay.htpasswd
+.EE
+.RS
+Root owns and writes the file.
+The
+.B sudologger
+service user has read access.
+World access is denied — the file contains bcrypt hashes that could be
+brute-forced offline if exposed.
+.RE
+.PP
 Send
 .B SIGHUP
 to reload the file without restarting the service:

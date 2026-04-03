@@ -579,9 +579,12 @@ htpasswd -cB /etc/sudo-logger/replay.htpasswd alice
 # Add more users:
 htpasswd -B /etc/sudo-logger/replay.htpasswd bob
 
-# Restrict permissions — the file contains password hashes:
-chmod 640 /etc/sudo-logger/replay.htpasswd
+# Set ownership and permissions:
+#   root owns and writes the file; sudologger (the service user) reads it;
+#   no world access — the file contains bcrypt hashes that could be
+#   brute-forced offline if exposed.
 chown root:sudologger /etc/sudo-logger/replay.htpasswd
+chmod 0640 /etc/sudo-logger/replay.htpasswd
 ```
 
 The file format is one entry per line:
