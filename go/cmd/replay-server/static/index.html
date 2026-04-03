@@ -1963,7 +1963,10 @@ async function pollSessions() {
   } catch { /* ignore transient errors */ }
 }
 
-setInterval(pollSessions, 30_000);
+setInterval(pollSessions, 15_000);
+
+// Also poll immediately when the user switches back to this tab.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollSessions(); });
 
 fetchSessions();
 </script>
