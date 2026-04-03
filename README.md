@@ -18,6 +18,8 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Server installation](#2-server-installation)
   - [Client installation](#3-client-installation)
 - [Configuration](#configuration)
+- [Web replay interface](#web-replay-interface)
+  - [Authentication](#authentication)
 - [Viewing and replaying sessions](#viewing-and-replaying-sessions)
 - [Developer guide](#developer-guide)
   - [Repository layout](#repository-layout)
@@ -166,6 +168,7 @@ A TLS server running on a dedicated machine. For each client connection:
 - Terminal sessions (bash, zsh, …) frozen via `cgroup.freeze` — no job control triggered
 - GUI programs with own process group (gvim, okular, …) frozen via direct SIGSTOP/SIGCONT
 - cgroup namespace isolation (`CLONE_NEWCGROUP`) prevents child processes from escaping the freeze cgroup, even with `CAP_SYS_ADMIN`
+- Web replay interface with Basic Auth + TLS + trusted-user-header support (works standalone or behind Pomerium/oauth2-proxy/OpenShift ingress)
 - Scalable: designed for 50+ simultaneous sessions
 - RPM packages for Fedora/RHEL with proper systemd integration
 - Automatic sudo.conf configuration on client RPM install/uninstall
@@ -486,18 +489,13 @@ terminal player for recorded sessions.  It reads the same iolog directories as
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.10.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.10.2-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
 
 # Open in browser
 xdg-open http://localhost:8080
-```
-
-Or run manually:
-```bash
-sudo-replay-server -logdir /var/log/sudoreplay -listen :8080 -rules /etc/sudo-logger/risk-rules.yaml
 ```
 
 **Features:**
@@ -524,21 +522,133 @@ sudo-replay-server -logdir /var/log/sudoreplay -listen :8080 -rules /etc/sudo-lo
 - **Settings tab** — browser UI for viewing, adding, editing, and deleting risk
   rules. Changes are written back to `/etc/sudo-logger/risk-rules.yaml`
   immediately and take effect without a server restart.
+- **Auto-refresh** — session list polls for new sessions every 15 seconds and
+  immediately on tab focus; no manual browser refresh needed.
 - **No external dependencies** — xterm.js and CSS are vendored into the binary;
   works in air-gapped environments with no internet access
-- No authentication built in — restrict to a management network or put behind a
-  reverse proxy with HTTP basic auth
+
+> **Security note:** sudo session recordings may contain sensitive data
+> (passwords typed, private keys, etc.).  Always protect the replay interface
+> with authentication; see [Authentication](#authentication) below.
+
+### Authentication
+
+`sudo-replay-server` supports three authentication modes that can be combined
+freely.  Choose the mode that fits your deployment:
+
+#### Mode 1: No built-in auth — deploy behind a reverse proxy
+
+The simplest option when you already have infrastructure for authentication.
+The replay server runs on localhost and the proxy handles auth and TLS.
+
+Compatible proxies:
+- **Pomerium** (identity-aware proxy, recommended)
+- **oauth2-proxy** (lightweight OIDC proxy, works with any IdP: Keycloak, Azure AD, Dex, …)
+- **OpenShift ingress** with built-in OAuth support
+
+Configure the proxy to set a header with the authenticated username (e.g.
+`X-Forwarded-User`) and pass `-trusted-user-header` to the replay server so
+it is recorded in the access log:
+
+```bash
+# /etc/sudo-logger/replay.conf  (sourced by sudo-replay.service)
+REPLAY_EXTRA_ARGS="-trusted-user-header X-Forwarded-User"
+```
+
+Or in the systemd unit override (`systemctl edit sudo-replay`):
+```ini
+[Service]
+Environment=REPLAY_EXTRA_ARGS=-trusted-user-header X-Forwarded-User
+```
+
+#### Mode 2: Built-in HTTP Basic Auth with TLS
+
+Standalone deployment with no external proxy required.  Credentials are
+validated locally with bcrypt; no database or external service needed.
+
+**Step 1 — Generate a bcrypt password hash:**
+```bash
+# Using htpasswd (httpd-tools package):
+htpasswd -nbB admin 'your-password' | cut -d: -f2
+
+# Or using Python:
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())"
+```
+
+**Step 2 — Obtain a TLS certificate:**
+
+Use your existing PKI, a self-signed cert, or Let's Encrypt:
+```bash
+# Self-signed (for internal use):
+openssl req -x509 -newkey rsa:4096 -keyout replay.key -out replay.crt \
+    -days 365 -nodes -subj '/CN=replay.example.com'
+cp replay.crt replay.key /etc/sudo-logger/
+```
+
+**Step 3 — Configure the service:**
+
+Edit `/etc/sudo-logger/replay.conf`:
+```bash
+REPLAY_EXTRA_ARGS="\
+  -tls-cert /etc/sudo-logger/replay.crt \
+  -tls-key  /etc/sudo-logger/replay.key \
+  -auth     admin:\$2b\$12\$..."
+```
+
+Restart and verify:
+```bash
+systemctl restart sudo-replay
+curl -u admin:your-password https://localhost:8080/api/sessions
+```
+
+#### Mode 3: Trusted header only (logging, no enforcement)
+
+When a proxy handles authentication and you only want the replay server to
+log who accessed it — without enforcing auth itself:
+
+```bash
+REPLAY_EXTRA_ARGS="-trusted-user-header X-Forwarded-User"
+```
+
+Every request is logged as:
+```
+access user=alice addr=10.0.0.1:52341 GET /api/sessions 200
+```
+
+> **Important:** This mode does not reject unauthenticated requests.
+> The proxy must restrict access before requests reach the replay server.
+
+#### Combining modes
+
+Basic Auth + TLS + trusted header all work together.  Example: internal
+deployment with TLS and Basic Auth, logging the username from both sources:
+
+```bash
+REPLAY_EXTRA_ARGS="\
+  -tls-cert /etc/sudo-logger/replay.crt \
+  -tls-key  /etc/sudo-logger/replay.key \
+  -auth     admin:\$2b\$12\$... \
+  -trusted-user-header X-Forwarded-User"
+```
+
+#### Flag reference
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-tls-cert file` | — | PEM TLS certificate (enables HTTPS, requires `-tls-key`) |
+| `-tls-key file` | — | PEM TLS private key |
+| `-auth user:hash` | — | Enable Basic Auth; `hash` is a bcrypt hash of the password |
+| `-trusted-user-header hdr` | — | Log username from this request header (e.g. `X-Forwarded-User`) |
+| `-listen addr` | `:8080` | Listen address |
+| `-logdir dir` | `/var/log/sudoreplay` | Session log directory |
+| `-rules file` | `/etc/sudo-logger/risk-rules.yaml` | Risk scoring rules |
 
 **How it works:**
 
-The plugin now captures the full `argv` array (not just `argv[0]`) in every
+The plugin captures the full `argv` array (not just `argv[0]`) in every
 `SESSION_START` message.  The shipper forwards this verbatim to the server,
 which writes it as line 3 of the iolog `log` file — the same field that
 `sudoreplay -l` and the web interface read as the session command.
-
-> **Security note:** sudo session recordings may contain sensitive data
-> (passwords typed, private keys, etc.).  Restrict access to the replay
-> interface accordingly.
 
 ---
 
@@ -933,7 +1043,7 @@ podman-compose up -d
 | ✅ | Runs as nonroot UID 65532 | Good |
 | ✅ | Named volume (no bind mount permission issues) | Good |
 | ✅ | Replay server mounts log volume read-only | Good |
-| ⚠️ | Replay server has no authentication | Put behind a reverse proxy with HTTP basic auth before exposing beyond localhost |
+| ✅ | Replay server supports Basic Auth + TLS + trusted-user-header | See [Authentication](#authentication) |
 | ⚠️ | No `no-new-privileges` / `cap_drop: ALL` | Add to both services for defence in depth |
 | ⚠️ | No resource limits | Add `deploy.resources.limits` for memory/CPU |
 | ⚠️ | No healthcheck | `depends_on` does not wait for logserver to be ready |
