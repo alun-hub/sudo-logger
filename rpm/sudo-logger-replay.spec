@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.10.0
+Version:        1.10.1
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -34,7 +34,7 @@ install -D -m 0755 go/sudo-replay-server \
 install -D -m 0644 sudo-replay.service \
     %{buildroot}%{_unitdir}/sudo-replay.service
 
-install -D -m 0644 go/cmd/replay-server/risk-rules.yaml \
+install -D -m 0664 go/cmd/replay-server/risk-rules.yaml \
     %{buildroot}%{_sysconfdir}/sudo-logger/risk-rules.yaml
 
 # Man page
@@ -43,6 +43,9 @@ install -D -m 0644 man/sudo-replay-server.8 \
 
 %post
 %systemd_post sudo-replay.service
+# Ensure the replay service can write the rules file (fix pre-1.10.0 installs)
+chown root:sudologger %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
+chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
 
 %preun
 %systemd_preun sudo-replay.service
@@ -53,10 +56,19 @@ install -D -m 0644 man/sudo-replay-server.8 \
 %files
 %{_bindir}/sudo-replay-server
 %{_unitdir}/sudo-replay.service
-%config(noreplace) %{_sysconfdir}/sudo-logger/risk-rules.yaml
+%config(noreplace) %attr(0664, root, sudologger) %{_sysconfdir}/sudo-logger/risk-rules.yaml
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Thu Apr 03 2026 sudo-logger 1.10.1-1
+- fix: risk-rules.yaml owned root:sudologger 0664 so the replay service
+  can write it via the Settings UI (was root:root 0644 — permission denied)
+- fix: keyboard shortcuts no longer intercept input in modal fields
+  (Swedish keyboard: physical minus key has e.code Slash, was caught by
+  the / shortcut handler with preventDefault)
+- feat: Help tab explaining risk rule fields, AND/OR logic and examples
+- docs: RULE FILE section added to sudo-replay-server(8) man page
+
 * Thu Apr 02 2026 sudo-logger 1.10.0-1
 - feat: risk scoring for sessions (0-100) based on configurable YAML rules
 - Rules match against sudo command line and ttyout content for shell sessions
