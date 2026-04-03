@@ -192,9 +192,12 @@ podman exec sudo-client-test kill -0 "$SUDO_TEST_PID" 2>/dev/null \
 podman exec sudo-client-test pkill -x sudo-shipper \
     || fail "TEST A" "sudo-shipper not found — cannot run test"
 sleep 8
-# The sudo process must have exited.
-if podman exec sudo-client-test kill -0 "$SUDO_TEST_PID" 2>/dev/null; then
-    fail "TEST A" "sudo (PID $SUDO_TEST_PID) still running 8s after shipper was killed"
+# The sudo process must have exited.  Zombie processes (State: Z) still appear
+# in kill -0 checks, so inspect /proc directly and treat zombies as terminated.
+PROC_STATE=$(podman exec sudo-client-test \
+    sh -c "grep '^State:' /proc/$SUDO_TEST_PID/status 2>/dev/null || echo 'State: gone'")
+if echo "$PROC_STATE" | grep -qE "^State:[[:space:]]+(R|S|D)"; then
+    fail "TEST A" "sudo (PID $SUDO_TEST_PID) still genuinely running ($PROC_STATE) 8s after shipper was killed"
 fi
 pass "TEST A"
 
