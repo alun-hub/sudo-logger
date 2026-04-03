@@ -38,7 +38,7 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
 
 # Build the shipper daemon
 cd ../go
-go build -o sudo-shipper ./cmd/shipper
+/usr/lib/golang/bin/go build -o sudo-shipper ./cmd/shipper
 
 %install
 # Plugin
