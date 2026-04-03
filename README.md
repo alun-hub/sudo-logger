@@ -551,14 +551,14 @@ Configure the proxy to set a header with the authenticated username (e.g.
 it is recorded in the access log:
 
 ```bash
-# /etc/sudo-logger/replay.conf  (sourced by sudo-replay.service)
-REPLAY_ARGS="-trusted-user-header X-Forwarded-User"
+# /etc/sudo-logger/replay.conf  (read by sudo-replay.service via EnvironmentFile)
+# All flags must be on ONE line — no line continuations.
+REPLAY_ARGS=-trusted-user-header X-Forwarded-User
 ```
 
-Or in the systemd unit override (`systemctl edit sudo-replay`):
-```ini
-[Service]
-Environment=REPLAY_ARGS=-trusted-user-header X-Forwarded-User
+Then reload:
+```bash
+systemctl daemon-reload && systemctl restart sudo-replay
 ```
 
 #### Mode 2: Built-in HTTP Basic Auth with TLS

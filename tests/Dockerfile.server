@@ -1,0 +1,20 @@
+# tests/Dockerfile.server — includes replay-server for risk testing
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+COPY go/ .
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/sudo-logserver ./cmd/server && \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/sudo-replay-server ./cmd/replay-server
+
+# ---- Runtime stage ----
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates coreutils grep curl netcat-openbsd
+
+COPY --from=builder /usr/local/bin/sudo-logserver /usr/local/bin/sudo-logserver
+COPY --from=builder /usr/local/bin/sudo-replay-server /usr/local/bin/sudo-replay-server
+COPY go/cmd/replay-server/risk-rules.yaml /etc/sudo-logger/risk-rules.yaml
+
+RUN mkdir -p /var/log/sudoreplay && chmod 777 /var/log/sudoreplay
+
+EXPOSE 9876 8080
+ENTRYPOINT ["/usr/local/bin/sudo-logserver"]

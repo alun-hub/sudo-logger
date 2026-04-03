@@ -1,0 +1,27 @@
+# tests/Dockerfile.client — multi-stage build for advanced system tests.
+FROM golang:1.25-alpine AS go-builder
+WORKDIR /src
+COPY go/ .
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -o /usr/local/bin/sudo-shipper ./cmd/shipper
+
+FROM fedora:40
+# Install tools for testing: iproute (tc), coreutils (md5sum), procps (ps/pkill), nmap-ncat (nc)
+RUN dnf install -y sudo gcc make openssl procps-ng iproute iproute-tc coreutils nmap-ncat && \
+    dnf clean all
+
+# Create a non-root user for security testing
+RUN useradd -m testuser
+
+WORKDIR /src
+COPY . .
+
+RUN cd plugin && make && make install
+RUN echo "Plugin sudo_logger_plugin /usr/libexec/sudo/sudo_logger_plugin.so" >> /etc/sudo.conf
+COPY --from=go-builder /usr/local/bin/sudo-shipper /usr/local/bin/sudo-shipper
+RUN mkdir -p /etc/sudo-logger /run/sudo-logger && chmod 750 /run/sudo-logger
+
+COPY tests/start-client.sh /usr/local/bin/start-client.sh
+RUN chmod +x /usr/local/bin/start-client.sh
+
+CMD ["/usr/local/bin/start-client.sh"]
