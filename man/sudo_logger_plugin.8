@@ -40,7 +40,10 @@ Connects to
 .BR sudo\-shipper (8)
 via the Unix socket and sends a
 .B SESSION_START
-message containing session metadata.
+message containing session metadata including terminal dimensions
+.RB ( cols ", " lines )
+read from
+.BR command_info[] .
 .IP 4.
 Blocks until the shipper replies with
 .B SESSION_READY

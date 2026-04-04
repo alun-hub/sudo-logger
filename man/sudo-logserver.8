@@ -1,4 +1,4 @@
-.TH SUDO\-LOGSERVER 8 "2026-03-15" "sudo-logger 1.6.0" "System Administration"
+.TH SUDO\-LOGSERVER 8 "2026-03-15" "sudo-logger 1.10.0" "System Administration"
 .SH NAME
 sudo\-logserver \- remote TLS server for sudo session recordings
 .SH SYNOPSIS
@@ -14,7 +14,7 @@ sudo\-logserver \- remote TLS server for sudo session recordings
 .B sudo\-logserver
 is a TLS server that receives sudo session recordings from one or more
 .BR sudo\-shipper (8)
-instances and writes them to disk in sudo's native iolog format.
+instances and writes them to disk as asciinema v2 session recordings.
 .PP
 Each client connection must present a certificate signed by the configured CA
 (mutual TLS).
@@ -26,21 +26,15 @@ Creates a session directory under
 .IB logdir / user / host _ timestamp /\c
 \&.
 .IP \(bu
-Streams terminal I/O into
-.BR ttyout ,
-.BR ttyin ,
-and
-.B timing
-files compatible with
-.BR sudoreplay (8).
+Streams terminal I/O as events into a
+.B session.cast
+file in asciinema v2 format.
 .IP \(bu
 Sends an ed25519-signed ACK for every received chunk.
 The signature covers the session ID, sequence number, and timestamp,
 binding each ACK to the specific session.
 .PP
-Sessions can be replayed with
-.BR sudoreplay (8)
-or the web interface provided by
+Sessions can be replayed with the web interface provided by
 .BR sudo\-replay\-server (8).
 .SH OPTIONS
 .TP
@@ -133,12 +127,9 @@ Default log directory.
 Each session is stored as a subdirectory:
 .IR user / host _ YYYYMMDD\- HHMMSS /
 containing
-.BR log ,
-.BR timing ,
-.BR ttyout ,
-and
-.B ttyin
-files.
+.B session.cast
+(asciinema v2 recording) and optional marker files
+.RB ( ACTIVE ", " INCOMPLETE ).
 .SH SECURITY
 .B sudo\-logserver
 requires mutual TLS for all connections.
@@ -163,6 +154,5 @@ before use in filesystem paths.
 .SH SEE ALSO
 .BR sudo\-shipper (8),
 .BR sudo\-replay\-server (8),
-.BR sudoreplay (8),
 .BR sudo_logger_plugin (8),
 .BR systemd.unit (5)

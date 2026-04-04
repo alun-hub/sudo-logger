@@ -63,14 +63,13 @@ User runs sudo
 ┌─────────────────────┐
 │  sudo-logserver     │  Central server (separate machine).
 │  (Go)               │  Receives session data.
-│                     │  Writes sudo iolog directories.
+│                     │  Writes asciinema v2 recordings.
 │                     │  Sends ed25519-signed ACKs per chunk.
 │                     │  Replies to heartbeats immediately.
 └─────────────────────┘
          │
          ▼
-  /var/log/sudoreplay/<user>/<host>_<timestamp>/
-  Replayed with: sudoreplay -d /var/log/sudoreplay <TSID>
+  /var/log/sudoreplay/<user>/<host>_<timestamp>/session.cast
 ```
 
 When a user runs `sudo`, the plugin connects to the local shipper daemon.
@@ -126,11 +125,11 @@ sudo session:
 
 A TLS server running on a dedicated machine. For each client connection:
 
-- Receives session metadata and writes a sudo iolog log file
-- Streams terminal I/O into `ttyout`/`ttyin` files with timing data
+- Receives session metadata and opens session.cast for writing
+- Streams terminal I/O as events into session.cast
 - Acknowledges every chunk with an ed25519-signed ACK
 - Replies to HEARTBEAT probes immediately with HEARTBEAT_ACK
-- Sessions stored as sudoreplay-compatible directories under
+- Sessions stored as asciinema v2 recordings under
   `/var/log/sudoreplay/<user>/<host>_<timestamp>/`
 
 ---
@@ -162,7 +161,7 @@ A TLS server running on a dedicated machine. For each client connection:
 
 ## Features
 
-- Full session replay with `sudoreplay` (native sudo iolog format)
+- Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
 - Active session terminated if shipper is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the shipper was killed mid-recording
 - SELinux policy for `sudo-shipper` (enforcing mode, ships in the `selinux/` directory)
@@ -218,9 +217,6 @@ A TLS server running on a dedicated machine. For each client connection:
   freeze tracking — sending SIGSTOP to their group would also stop bash and
   trigger job control. Only GUI apps that have their own process group
   (e.g. gvim after setsid) are frozen via direct SIGSTOP.
-
-- **TTY dimensions not recorded**: terminal size (rows/cols) is not sent to
-  the server. Replay will use default dimensions.
 
 - **Requires sudo 1.9+**: uses the sudo 1.9 I/O plugin API.
 
@@ -296,7 +292,7 @@ The ACK signing key pair is generated automatically on the server when the
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.9.2-1.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.10.0-1.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -330,7 +326,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.9.2-1.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.11.0-1.fc43.x86_64.rpm
 
 # Install certificates and ACK verify key
 cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
@@ -486,14 +482,14 @@ Defaults@webservers  env_delete += DISPLAY
 ## Web replay interface
 
 `sudo-replay-server` is a lightweight HTTP server that provides a browser-based
-terminal player for recorded sessions.  It reads the same iolog directories as
-`sudoreplay` and requires no database.
+terminal player for recorded sessions.  It reads asciinema v2 session recordings written by
+`sudo-logserver` and requires no database.
 
 ![sudo-replay web interface showing session list and terminal player](docs/replay-ui.svg)
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.10.2-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.11.0-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -519,7 +515,7 @@ xdg-open http://localhost:8080
   Each anomaly links directly to the session in the player.
 - **Risk scoring** — every session is scored 0–100 based on configurable rules
   in `/etc/sudo-logger/risk-rules.yaml`. Rules match against the sudo command
-  line and terminal output (`ttyout`) for shell sessions. Scores are cached in
+  line and terminal output events in `session.cast` for shell sessions. Scores are cached in
   `risk.json` per session and invalidated automatically when rules change.
   Levels: Low (0–24) · Medium (25–49) · High (50–74) · Critical (75+). Risk
   badges are shown on session cards and in the session info bar.
@@ -683,44 +679,37 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 
 **How it works:**
 
-The plugin captures the full `argv` array (not just `argv[0]`) in every
+The plugin captures the full `argv` array and terminal dimensions (rows/cols) in every
 `SESSION_START` message.  The shipper forwards this verbatim to the server,
-which writes it as line 3 of the iolog `log` file — the same field that
-`sudoreplay -l` and the web interface read as the session command.
+which stores it in the `session.cast` header — the same field that
+the web interface reads as the session command.
 
 ---
 
 ## Viewing and replaying sessions
 
-Sessions are stored on the server in sudo's native iolog format under
+Sessions are stored on the server as asciinema v2 recordings under
 `/var/log/sudoreplay/<user>/<host>_<timestamp>/`.
 
+Use the web replay interface to browse and play back sessions:
+
 ```bash
-# List all recorded sessions
-sudoreplay -d /var/log/sudoreplay -l
-
-# Replay a session (use the TSID from -l)
-sudoreplay -d /var/log/sudoreplay alun/fedora_20260307-112244
-
-# Replay at 2x speed
-sudoreplay -d /var/log/sudoreplay -s 2 alun/fedora_20260307-112244
-
-# Replay a specific time range (seconds 10–30)
-sudoreplay -d /var/log/sudoreplay -f 10 -t 30 alun/fedora_20260307-112244
-
-# Search sessions by user
-sudoreplay -d /var/log/sudoreplay -l -u alun
-
-# Search sessions by command
-sudoreplay -d /var/log/sudoreplay -l -c bash
+# Open in browser (requires sudo-logger-replay package)
+xdg-open http://localhost:8080
 ```
 
 Each session directory contains:
 ```
-log     — session metadata (user, host, runas, tty, command, timestamp)
-timing  — event timing file (event type, delta seconds, byte count)
-ttyout  — terminal output data
-ttyin   — terminal input data
+session.cast  — asciinema v2 recording (header + event lines)
+ACTIVE        — present while session is being recorded
+INCOMPLETE    — present if connection dropped mid-session
+risk.json     — risk score cache (written by replay server)
+```
+
+The `session.cast` file is compatible with the asciinema ecosystem:
+```bash
+# Install asciinema CLI for terminal playback
+asciinema play /var/log/sudoreplay/alice/gnarg_20260404-120000/session.cast
 ```
 
 ---
@@ -750,7 +739,7 @@ sudo-logger/
 │       ├── protocol/
 │       │   └── protocol.go # Shared wire protocol
 │       └── iolog/
-│           └── iolog.go    # sudo iolog directory writer
+│           └── iolog.go    # asciinema v2 session writer
 ├── rpm/
 │   ├── sudo-logger-client.spec  # RPM spec for client package
 │   ├── sudo-logger-server.spec  # RPM spec for server package
@@ -795,7 +784,7 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 
 | Type | Hex | Direction | Description |
 |------|-----|-----------|-------------|
-| `SESSION_START` | `0x01` | plugin → shipper → server | JSON: session_id, user, host, command, ts, pid |
+| `SESSION_START` | `0x01` | plugin → shipper → server | JSON: session_id, user, host, command, ts, pid, rows, cols |
 | `CHUNK` | `0x02` | plugin → shipper → server | Binary: seq(8) + ts_ns(8) + stream(1) + len(4) + data |
 | `SESSION_END` | `0x03` | plugin → shipper → server | Binary: final_seq(8) + exit_code(4) |
 | `ACK` | `0x04` | server → shipper | Binary: seq(8) + ts_ns(8) + sig(64) |

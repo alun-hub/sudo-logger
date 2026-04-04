@@ -1,4 +1,4 @@
-.TH SUDO\-REPLAY\-SERVER 8 "2026-04-03" "sudo-logger 1.10.2" "System Administration"
+.TH SUDO\-REPLAY\-SERVER 8 "2026-04-03" "sudo-logger 1.11.0" "System Administration"
 .SH NAME
 sudo\-replay\-server \- web interface for replaying sudo session recordings
 .SH SYNOPSIS
@@ -8,7 +8,7 @@ sudo\-replay\-server \- web interface for replaying sudo session recordings
 [\fB\-rules\fR \fIfile\fR]
 .SH DESCRIPTION
 .B sudo\-replay\-server
-is a self-contained HTTP server that reads sudo iolog directories written by
+is a self-contained HTTP server that reads asciinema v2 session recordings written by
 .BR sudo\-logserver (8)
 and serves a browser-based terminal player.
 .PP
@@ -54,7 +54,9 @@ session in the player.
 loaded from the file specified by
 .BR \-rules .
 Rules match against the sudo command line and, for interactive shell sessions,
-the terminal output (ttyout).  Scores are cached in a
+the terminal output events in
+.BR session.cast .
+Scores are cached in a
 .B risk.json
 file alongside each session directory and are invalidated automatically when
 the rules file changes.
@@ -302,9 +304,9 @@ for matching shell interpreters such as
 or
 .BR python3 .
 .SS Shell content matching
-Scanned against the terminal output
-.RB ( ttyout )
-of interactive sessions.
+Scanned against the terminal output events in
+.B session.cast
+for interactive sessions.
 Useful for detecting commands typed
 .I inside
 a shell, which are invisible to command-line matching.
@@ -372,5 +374,4 @@ the terminal output matches (while all other conditions still hold).
 .EE
 .SH SEE ALSO
 .BR sudo\-logserver (8),
-.BR sudo\-shipper (8),
-.BR sudoreplay (8)
+.BR sudo\-shipper (8)
