@@ -1,16 +1,18 @@
-// Package iolog writes sudo I/O log directories compatible with sudoreplay.
+// Package iolog writes asciinema v2 session recordings (.cast files).
 //
 // Directory structure:
-//   <base>/<user>/<host>_<timestamp>/
-//       log     - session metadata (text)
-//       timing  - event timing (text)
-//       ttyout  - terminal output (binary)
-//       ttyin   - terminal input (binary)
 //
-// Format references: sudoreplay(8), sudo source plugins/sudoers/iolog*.c
+//	<base>/<user>/<host>_<timestamp>/
+//	    session.cast  - asciinema v2 recording (header + event lines)
+//	    ACTIVE        - marker written at open, removed at close
+//	    INCOMPLETE    - marker written if connection drops without session_end
+//	    risk.json     - optional risk score cache (written by replay-server)
+//
+// Format: https://docs.asciinema.org/manual/asciicast/v2/
 package iolog
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,43 +21,57 @@ import (
 	"time"
 )
 
-// Event types as defined by sudo's I/O log plugin.
-const (
-	EventStdin  = 0
-	EventStdout = 1
-	EventStderr = 2
-	EventTtyIn  = 3
-	EventTtyOut = 4
-)
+// SessionMeta holds the per-session metadata written into the cast header.
+type SessionMeta struct {
+	SessionID       string
+	User            string
+	Host            string
+	RunasUser       string
+	RunasUID        int
+	RunasGID        int
+	Cwd             string
+	Command         string
+	ResolvedCommand string
+	Flags           string
+	Rows            int // terminal height; 0 → default 50
+	Cols            int // terminal width;  0 → default 220
+}
 
-// Writer writes a sudo-compatible I/O log session.
+// Writer appends events to an asciinema v2 cast file.
 // Safe for concurrent use.
 type Writer struct {
 	mu        sync.Mutex
 	dir       string
-	ttyoutF   *os.File
-	ttyinF    *os.File
-	timingF   *os.File
+	castF     *os.File
 	startTime time.Time
-	lastEvent time.Time
 }
 
-// NewWriter creates a new session log directory and opens the log files.
-//
-// Parameters map to sudo's log(5) fields:
-//   host      - client hostname
-//   user      - the user who invoked sudo
-//   runas     - the user sudo ran as (typically "root")
-//   tty       - terminal name (e.g. "/dev/pts/0") or "unknown"
-//   command   - full command path and arguments
-//   cwd       - working directory at the time sudo was invoked
-//   startTime - session start time
-func NewWriter(baseDir, user, host, runas, tty, command, cwd string, startTime time.Time) (*Writer, error) {
-	ts := startTime.UTC().Format("20060102-150405")
-	dir := filepath.Join(baseDir, user, fmt.Sprintf("%s_%s", host, ts))
+// castHeader is the first line of an asciinema v2 file.
+// Custom fields (user, host, …) are allowed by the spec and ignored by
+// standard players.
+type castHeader struct {
+	Version         int    `json:"version"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
+	Timestamp       int64  `json:"timestamp"`
+	Title           string `json:"title"`
+	SessionID       string `json:"session_id"`
+	User            string `json:"user"`
+	Host            string `json:"host"`
+	RunasUser       string `json:"runas_user"`
+	RunasUID        int    `json:"runas_uid"`
+	RunasGID        int    `json:"runas_gid"`
+	Cwd             string `json:"cwd,omitempty"`
+	Command         string `json:"command"`
+	ResolvedCommand string `json:"resolved_command,omitempty"`
+	Flags           string `json:"flags,omitempty"`
+}
 
-	// Defence-in-depth: ensure the resolved path stays within baseDir.
-	// filepath.Join already cleans ".." but we verify explicitly.
+// NewWriter creates the session directory and opens session.cast for writing.
+func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, error) {
+	ts := startTime.UTC().Format("20060102-150405")
+	dir := filepath.Join(baseDir, meta.User, fmt.Sprintf("%s_%s", meta.Host, ts))
+
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve base dir: %w", err)
@@ -72,66 +88,66 @@ func NewWriter(baseDir, user, host, runas, tty, command, cwd string, startTime t
 		return nil, fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	// log file: metadata read by sudoreplay
-	// Legacy format (iolog_parse_loginfo_legacy):
-	//   line 1: timestamp:submituser:runasuser:runasgroup:ttyname
-	//   line 2: cwd
-	//   line 3: command with args
-	logF, err := os.Create(filepath.Join(dir, "log"))
+	castF, err := os.Create(filepath.Join(dir, "session.cast"))
 	if err != nil {
 		return nil, err
-	}
-	safeCmd := strings.NewReplacer("\n", " ", "\r", " ").Replace(command)
-	safeCwd := strings.NewReplacer("\n", " ", "\r", " ").Replace(cwd)
-	if safeCwd == "" {
-		safeCwd = "/"
-	}
-	if _, err = fmt.Fprintf(logF, "%d:%s:%s::%s\n%s\n%s\n",
-		startTime.Unix(), user, runas, tty, safeCwd, safeCmd); err != nil {
-		_ = logF.Close()
-		return nil, fmt.Errorf("write log header: %w", err)
-	}
-	if err = logF.Close(); err != nil {
-		return nil, fmt.Errorf("close log file: %w", err)
 	}
 
-	ttyoutF, err := os.Create(filepath.Join(dir, "ttyout"))
-	if err != nil {
-		return nil, err
+	cols := meta.Cols
+	if cols <= 0 {
+		cols = 220
 	}
-	ttyinF, err := os.Create(filepath.Join(dir, "ttyin"))
-	if err != nil {
-		ttyoutF.Close()
-		return nil, err
+	rows := meta.Rows
+	if rows <= 0 {
+		rows = 50
 	}
-	timingF, err := os.Create(filepath.Join(dir, "timing"))
+
+	hdr := castHeader{
+		Version:         2,
+		Width:           cols,
+		Height:          rows,
+		Timestamp:       startTime.Unix(),
+		Title:           meta.User + "@" + meta.Host + ": " + meta.Command,
+		SessionID:       meta.SessionID,
+		User:            meta.User,
+		Host:            meta.Host,
+		RunasUser:       meta.RunasUser,
+		RunasUID:        meta.RunasUID,
+		RunasGID:        meta.RunasGID,
+		Cwd:             meta.Cwd,
+		Command:         meta.Command,
+		ResolvedCommand: meta.ResolvedCommand,
+		Flags:           meta.Flags,
+	}
+
+	b, err := json.Marshal(hdr)
 	if err != nil {
-		ttyoutF.Close()
-		ttyinF.Close()
-		return nil, err
+		castF.Close()
+		return nil, fmt.Errorf("marshal cast header: %w", err)
+	}
+	if _, err := castF.Write(append(b, '\n')); err != nil {
+		castF.Close()
+		return nil, fmt.Errorf("write cast header: %w", err)
 	}
 
 	return &Writer{
 		dir:       dir,
-		ttyoutF:   ttyoutF,
-		ttyinF:    ttyinF,
-		timingF:   timingF,
+		castF:     castF,
 		startTime: startTime,
-		lastEvent: startTime,
 	}, nil
 }
 
-// WriteOutput writes terminal output (what the user sees).
+// WriteOutput appends a terminal output event ("o") to the cast file.
 func (w *Writer) WriteOutput(data []byte, ts int64) error {
-	return w.write(EventTtyOut, w.ttyoutF, data, ts)
+	return w.writeEvent("o", data, ts)
 }
 
-// WriteInput writes terminal input (what the user typed).
+// WriteInput appends a terminal input event ("i") to the cast file.
 func (w *Writer) WriteInput(data []byte, ts int64) error {
-	return w.write(EventTtyIn, w.ttyinF, data, ts)
+	return w.writeEvent("i", data, ts)
 }
 
-func (w *Writer) write(eventType int, f *os.File, data []byte, tsNs int64) error {
+func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -139,40 +155,35 @@ func (w *Writer) write(eventType int, f *os.File, data []byte, tsNs int64) error
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	t := time.Unix(0, tsNs)
-	delta := t.Sub(w.lastEvent).Seconds()
-	if delta < 0 {
-		delta = 0
+	elapsed := time.Unix(0, tsNs).Sub(w.startTime).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
 	}
 
-	// timing entry: "<type> <delta_seconds> <num_bytes>"
-	if _, err := fmt.Fprintf(w.timingF, "%d %f %d\n", eventType, delta, len(data)); err != nil {
+	// Event: [elapsed_seconds, "o"/"i", "data"]
+	// Data must be valid UTF-8; replace invalid bytes with the replacement char.
+	event := []any{elapsed, kind, strings.ToValidUTF8(string(data), "\ufffd")}
+	b, err := json.Marshal(event)
+	if err != nil {
 		return err
 	}
-
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-
-	w.lastEvent = t
-	return nil
+	_, err = w.castF.Write(append(b, '\n'))
+	return err
 }
 
-// Dir returns the session log directory path.
+// Dir returns the session directory path (contains session.cast and marker files).
 func (w *Writer) Dir() string {
 	return w.dir
 }
 
-// Close flushes and closes all log files.
-// Returns the first error encountered, if any.
+// CastPath returns the absolute path to session.cast.
+func (w *Writer) CastPath() string {
+	return filepath.Join(w.dir, "session.cast")
+}
+
+// Close flushes and closes the cast file.
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	var firstErr error
-	for _, f := range []*os.File{w.ttyoutF, w.ttyinF, w.timingF} {
-		if err := f.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
+	return w.castF.Close()
 }

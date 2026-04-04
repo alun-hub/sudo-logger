@@ -15,6 +15,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
@@ -22,15 +23,14 @@ import (
 	"flag"
 	"fmt"
 	"hash/fnv"
-	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
-	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
@@ -386,8 +386,11 @@ func scanAllSessions(logDir string) ([]SessionInfo, error) {
 			if !sessEntry.IsDir() {
 				continue
 			}
-			tsid := userEntry.Name() + "/" + sessEntry.Name()
 			sessDir := filepath.Join(userDir, sessEntry.Name())
+			if _, err := os.Stat(filepath.Join(sessDir, "session.cast")); err != nil {
+				continue // not a cast session directory
+			}
+			tsid := userEntry.Name() + "/" + sessEntry.Name()
 			info, err := parseSession(sessDir, tsid)
 			if err != nil {
 				log.Printf("parse session %s: %v", sessDir, err)
@@ -652,77 +655,50 @@ func matchesAll(s SessionInfo, q string) bool {
 	return true
 }
 
-// parseSession reads the iolog "log" file and timing file for a session directory.
-//
-// The sudo iolog legacy log format (written by iolog.go):
-//
-//	line 1: unix_ts:submituser:runasuser::ttyname
-//	line 2: cwd (always "/" in this implementation)
-//	line 3: command with arguments
+// parseSession reads the asciinema v2 header from session.cast.
 func parseSession(sessDir, tsid string) (*SessionInfo, error) {
-	logData, err := os.ReadFile(filepath.Join(sessDir, "log"))
+	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
-	lines := strings.SplitN(strings.TrimRight(string(logData), "\n"), "\n", 3)
-	if len(lines) < 3 {
-		return nil, fmt.Errorf("malformed log file (%d lines)", len(lines))
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("empty cast file")
 	}
 
-	// "unix_ts:user:runas::tty" — split into at most 5 fields.
-	// The double colon is because runasgroup is always empty here.
-	parts := strings.SplitN(lines[0], ":", 5)
-	if len(parts) < 5 {
-		return nil, fmt.Errorf("malformed log metadata: %q", lines[0])
+	var hdr struct {
+		Timestamp       int64   `json:"timestamp"`
+		User            string  `json:"user"`
+		Host            string  `json:"host"`
+		RunasUser       string  `json:"runas_user"`
+		Cwd             string  `json:"cwd"`
+		Command         string  `json:"command"`
+		ResolvedCommand string  `json:"resolved_command"`
+		Flags           string  `json:"flags"`
 	}
-
-	ts, _ := strconv.ParseInt(parts[0], 10, 64)
-	user := parts[1]
-	runas := parts[2]
-	tty := parts[4]
-	cwd := lines[1]
-	command := lines[2]
-
-	// Extract host from session directory name "host_YYYYMMDD-HHMMSS".
-	// The timestamp suffix is always "_YYYYMMDD-HHMMSS" = 16 chars.
-	host := ""
-	dirName := filepath.Base(sessDir)
-	if len(dirName) > 16 {
-		host = dirName[:len(dirName)-16]
+	if err := json.Unmarshal(scanner.Bytes(), &hdr); err != nil {
+		return nil, fmt.Errorf("parse cast header: %w", err)
 	}
 
 	info := &SessionInfo{
-		TSID:      tsid,
-		User:      user,
-		Host:      host,
-		Runas:     runas,
-		TTY:       tty,
-		Command:   command,
-		Cwd:       cwd,
-		StartTime: ts,
-		Duration:  calcDuration(filepath.Join(sessDir, "timing")),
+		TSID:            tsid,
+		User:            hdr.User,
+		Host:            hdr.Host,
+		Runas:           hdr.RunasUser,
+		Command:         hdr.Command,
+		ResolvedCommand: hdr.ResolvedCommand,
+		Cwd:             hdr.Cwd,
+		Flags:           hdr.Flags,
+		StartTime:       hdr.Timestamp,
+		Duration:        castLastTime(sessDir),
 	}
 
-	// Merge extra metadata written by sudo-logserver (not in sudoreplay format).
-	var meta struct {
-		ResolvedCommand string `json:"resolved_command"`
-		Flags           string `json:"flags"`
-	}
-	if b, err := os.ReadFile(filepath.Join(sessDir, "meta.json")); err == nil {
-		if json.Unmarshal(b, &meta) == nil {
-			info.ResolvedCommand = meta.ResolvedCommand
-			info.Flags = meta.Flags
-		}
-	}
-
-	// Mark sessions where the shipper was killed without sending session_end.
 	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {
 		info.Incomplete = true
 	}
-
-	// Mark sessions that are still being recorded (ACTIVE written at start,
-	// removed by the logserver when SESSION_END or INCOMPLETE is written).
 	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
 		info.InProgress = true
 	}
@@ -733,23 +709,46 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 	return info, nil
 }
 
-// calcDuration sums all delta values in a timing file to get total duration.
-func calcDuration(timingPath string) float64 {
-	f, err := os.Open(timingPath)
+// castLastTime reads the timestamp of the last event line in session.cast
+// by seeking to the file tail — O(1) regardless of recording length.
+func castLastTime(sessDir string) float64 {
+	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
 	if err != nil {
 		return 0
 	}
 	defer f.Close()
-	var total float64
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 {
-			delta, _ := strconv.ParseFloat(fields[1], 64)
-			total += delta
+
+	fi, err := f.Stat()
+	if err != nil || fi.Size() == 0 {
+		return 0
+	}
+
+	const tailSize = 8 * 1024
+	readFrom := fi.Size() - tailSize
+	if readFrom < 0 {
+		readFrom = 0
+	}
+	buf := make([]byte, fi.Size()-readFrom)
+	if _, err := f.ReadAt(buf, readFrom); err != nil {
+		return 0
+	}
+
+	lines := bytes.Split(bytes.TrimRight(buf, "\n"), []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 || line[0] != '[' {
+			continue
+		}
+		var event []json.RawMessage
+		if json.Unmarshal(line, &event) != nil || len(event) < 1 {
+			continue
+		}
+		var t float64
+		if json.Unmarshal(event[0], &t) == nil {
+			return t
 		}
 	}
-	return total
+	return 0
 }
 
 func handleReport(w http.ResponseWriter, r *http.Request) {
@@ -1224,16 +1223,45 @@ func stripANSI(s string) string {
 	return string(out)
 }
 
-// loadTtyOut reads up to maxTtyOutBytes from the session's ttyout file,
+// loadTtyOut reads "o" (output) events from session.cast up to maxTtyOutBytes,
 // strips ANSI codes, and returns lowercase text for pattern matching.
 func loadTtyOut(sessDir string) string {
-	f, err := os.Open(filepath.Join(sessDir, "ttyout"))
+	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
 	if err != nil {
 		return ""
 	}
 	defer f.Close()
-	data, _ := io.ReadAll(io.LimitReader(f, maxTtyOutBytes))
-	return strings.ToLower(stripANSI(string(data)))
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 2*1024*1024), 2*1024*1024)
+	// Skip header line.
+	if !scanner.Scan() {
+		return ""
+	}
+
+	var sb strings.Builder
+	for scanner.Scan() {
+		if sb.Len() >= maxTtyOutBytes {
+			break
+		}
+		line := scanner.Bytes()
+		if len(line) == 0 || line[0] != '[' {
+			continue
+		}
+		var raw [3]json.RawMessage
+		if json.Unmarshal(line, &raw) != nil {
+			continue
+		}
+		var kind, data string
+		if json.Unmarshal(raw[1], &kind) != nil || kind != "o" {
+			continue
+		}
+		if json.Unmarshal(raw[2], &data) != nil {
+			continue
+		}
+		sb.WriteString(data)
+	}
+	return strings.ToLower(stripANSI(sb.String()))
 }
 
 // loadRiskCache reads risk.json from sessDir and returns it if the
@@ -1317,68 +1345,56 @@ func scoreSession(s *SessionInfo, sessDir string) (int, []string) {
 	return score, reasons
 }
 
-// readEvents parses the timing file and streams the corresponding bytes from
-// ttyout (EventTtyOut=4) and ttyin (EventTtyIn=3) — only the bytes referenced
-// by each timing entry are read, avoiding loading entire data files into memory.
-//
-// The timing file format (one entry per line):
-//
-//	<event_type> <delta_seconds> <byte_count>
+// readEvents parses session.cast and returns playback events.
+// "o" (output) events map to Type 4, "i" (input) events map to Type 3,
+// preserving the API contract expected by the frontend player.
 func readEvents(sessDir string) ([]PlaybackEvent, error) {
-	timingData, err := os.ReadFile(filepath.Join(sessDir, "timing"))
+	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
 	if err != nil {
-		return nil, fmt.Errorf("read timing: %w", err)
+		return nil, fmt.Errorf("open cast: %w", err)
 	}
+	defer f.Close()
 
-	outF, _ := os.Open(filepath.Join(sessDir, "ttyout"))
-	if outF != nil {
-		defer outF.Close()
-	}
-	inF, _ := os.Open(filepath.Join(sessDir, "ttyin"))
-	if inF != nil {
-		defer inF.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 2*1024*1024), 2*1024*1024)
+
+	// Skip header line.
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("empty cast file")
 	}
 
 	events := make([]PlaybackEvent, 0)
-	var cumTime float64
-
-	for _, line := range strings.Split(string(timingData), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 || line[0] != '[' {
 			continue
 		}
-		eventType, _ := strconv.Atoi(fields[0])
-		delta, _ := strconv.ParseFloat(fields[1], 64)
-		nbytes, _ := strconv.Atoi(fields[2])
-		cumTime += delta
-
-		if nbytes <= 0 {
+		// Event: [float64, string, string]
+		var raw [3]json.RawMessage
+		if json.Unmarshal(line, &raw) != nil {
 			continue
 		}
-
-		var f *os.File
-		switch eventType {
-		case 4: // TtyOut — what the user sees
-			f = outF
-		case 3: // TtyIn — what the user typed
-			f = inF
-		default:
+		var t float64
+		var kind, data string
+		if json.Unmarshal(raw[0], &t) != nil {
 			continue
 		}
-		if f == nil {
+		if json.Unmarshal(raw[1], &kind) != nil {
+			continue
+		}
+		if json.Unmarshal(raw[2], &data) != nil {
 			continue
 		}
 
-		chunk := make([]byte, nbytes)
-		if _, err := io.ReadFull(f, chunk); err != nil {
-			continue
+		eventType := 4 // TtyOut
+		if kind == "i" {
+			eventType = 3 // TtyIn
 		}
 		events = append(events, PlaybackEvent{
-			T:    cumTime,
+			T:    t,
 			Type: eventType,
-			Data: base64.StdEncoding.EncodeToString(chunk),
+			Data: base64.StdEncoding.EncodeToString([]byte(data)),
 		})
 	}
-
-	return events, nil
+	return events, scanner.Err()
 }

@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.9.3
+Version:        1.10.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -99,6 +99,10 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sat Apr 04 2026 sudo-logger 1.10.0-1
+- feat: sessions stored as asciinema v2 (session.cast) instead of sudoreplay
+  multi-file format; all metadata embedded in cast header, no separate meta.json
+
 * Sun Mar 29 2026 sudo-logger 1.9.2-1
 - feat: add daily 03:00 restart timer (sudo-logserver-restart.timer) to
   reclaim leaked goroutines and file descriptors from sessions where the

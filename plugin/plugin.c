@@ -527,6 +527,8 @@ static int plugin_open(unsigned int        version,
     const char *raw_resolved = "";
     int         runas_uid    = 0;
     int         runas_gid    = 0;
+    int         term_cols    = 0;
+    int         term_rows    = 0;
     for (int i = 0; command_info[i] != NULL; i++) {
         if      (strncmp(command_info[i], "command=",   8) == 0)
             raw_resolved = command_info[i] + 8;
@@ -534,6 +536,10 @@ static int plugin_open(unsigned int        version,
             runas_uid = (int)strtol(command_info[i] + 10, NULL, 10);
         else if (strncmp(command_info[i], "runas_gid=", 10) == 0)
             runas_gid = (int)strtol(command_info[i] + 10, NULL, 10);
+        else if (strncmp(command_info[i], "cols=",      5) == 0)
+            term_cols = (int)strtol(command_info[i] + 5,  NULL, 10);
+        else if (strncmp(command_info[i], "lines=",     6) == 0)
+            term_rows = (int)strtol(command_info[i] + 6,  NULL, 10);
     }
 
     /* ── Extract metadata from settings[] ───────────────────────────────
@@ -604,11 +610,13 @@ static int plugin_open(unsigned int        version,
         "\"resolved_command\":\"%s\",\"runas_user\":\"%s\","
         "\"runas_uid\":%d,\"runas_gid\":%d,"
         "\"cwd\":\"%s\",\"flags\":\"%s\","
+        "\"rows\":%d,\"cols\":%d,"
         "\"ts\":%lld,\"pid\":%d}",
         g_session_id, user, host, cmd,
         resolved_j, runas_user_j,
         runas_uid, runas_gid,
         cwd_j, flags,
+        term_rows, term_cols,
         (long long)now_sec(), (int)getpid());
 
     /* snprintf returns the number of bytes that *would* have been written,

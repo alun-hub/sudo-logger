@@ -70,6 +70,8 @@ type SessionStart struct {
 	RunasGID        int    `json:"runas_gid"`                  // numeric GID from command_info[]
 	Cwd             string `json:"cwd,omitempty"`              // working directory from command_info[]
 	Flags           string `json:"flags,omitempty"`            // set sudo flags: login_shell, preserve_env, implied_shell
+	Rows            int    `json:"rows,omitempty"`             // terminal height from command_info[lines=]
+	Cols            int    `json:"cols,omitempty"`             // terminal width from command_info[cols=]
 }
 
 // Chunk is a decoded CHUNK message.

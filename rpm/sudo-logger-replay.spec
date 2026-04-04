@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.10.4
+Version:        1.11.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -60,6 +60,11 @@ chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || 
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sat Apr 04 2026 sudo-logger 1.11.0-1
+- feat: reads asciinema v2 session.cast format; all session metadata in cast header
+- perf: duration calculated via file tail-seek — O(1) regardless of session length
+- feat: content scanning (loadTtyOut) reads output events from cast file
+
 * Thu Apr 03 2026 sudo-logger 1.10.3-1
 - feat: replace -auth flag with -htpasswd file (htpasswd format, bcrypt only)
 - feat: support multiple users in htpasswd file

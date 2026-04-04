@@ -13,3 +13,11 @@ go/loadgen
 
 # Temporary build directories
 selinux/tmp/
+
+# ebpf-recorder: generated at build time, not committed
+go/cmd/ebpf-recorder/bpf/vmlinux.h
+go/cmd/ebpf-recorder/recorder_bpfeb.go
+go/cmd/ebpf-recorder/recorder_bpfeb.o
+go/cmd/ebpf-recorder/recorder_bpfel.go
+go/cmd/ebpf-recorder/recorder_bpfel.o
+bin/

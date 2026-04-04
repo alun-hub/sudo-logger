@@ -1,6 +1,7 @@
 package iolog_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,45 +11,62 @@ import (
 	"sudo-logger/internal/iolog"
 )
 
+var testMeta = iolog.SessionMeta{
+	SessionID: "host1-alice-123-456-aabbccdd",
+	User:      "alice",
+	Host:      "host1",
+	RunasUser: "root",
+	Cwd:       "/home/alice",
+	Command:   "/bin/bash",
+	Rows:      50,
+	Cols:      220,
+}
+
 func newTestWriter(t *testing.T) (*iolog.Writer, string) {
 	t.Helper()
 	dir := t.TempDir()
 	start := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	w, err := iolog.NewWriter(dir, "alice", "host1", "root", "/dev/pts/0", "/bin/bash", "/home/alice", start)
+	w, err := iolog.NewWriter(dir, testMeta, start)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
 	return w, w.Dir()
 }
 
-// TestNewWriterCreatesFiles checks that all expected files are created.
-func TestNewWriterCreatesFiles(t *testing.T) {
+// TestNewWriterCreatesCastFile checks that session.cast is created.
+func TestNewWriterCreatesCastFile(t *testing.T) {
 	_, dir := newTestWriter(t)
-	for _, name := range []string{"log", "timing", "ttyout", "ttyin"} {
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("expected file %s to exist: %v", name, err)
-		}
+	if _, err := os.Stat(filepath.Join(dir, "session.cast")); err != nil {
+		t.Errorf("expected session.cast to exist: %v", err)
 	}
 }
 
-// TestNewWriterLogContent checks that the log file contains expected fields.
-func TestNewWriterLogContent(t *testing.T) {
+// TestNewWriterHeaderContent checks that the cast header contains key fields.
+func TestNewWriterHeaderContent(t *testing.T) {
 	_, dir := newTestWriter(t)
-	data, err := os.ReadFile(filepath.Join(dir, "log"))
+	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
 	if err != nil {
-		t.Fatalf("read log: %v", err)
+		t.Fatalf("read cast: %v", err)
 	}
-	content := string(data)
-	if !strings.Contains(content, "alice") {
-		t.Error("log file missing user 'alice'")
+	// Header is the first line.
+	firstLine := strings.SplitN(string(data), "\n", 2)[0]
+
+	var hdr map[string]any
+	if err := json.Unmarshal([]byte(firstLine), &hdr); err != nil {
+		t.Fatalf("header is not valid JSON: %v", err)
 	}
-	if !strings.Contains(content, "/bin/bash") {
-		t.Error("log file missing command '/bin/bash'")
+	if hdr["user"] != "alice" {
+		t.Errorf("header user: got %v, want alice", hdr["user"])
+	}
+	if hdr["command"] != "/bin/bash" {
+		t.Errorf("header command: got %v, want /bin/bash", hdr["command"])
+	}
+	if hdr["version"].(float64) != 2 {
+		t.Errorf("header version: got %v, want 2", hdr["version"])
 	}
 }
 
-// TestWriteOutput verifies that output data is written to ttyout and timing.
+// TestWriteOutput verifies that an "o" event is appended to the cast file.
 func TestWriteOutput(t *testing.T) {
 	w, dir := newTestWriter(t)
 	defer w.Close()
@@ -58,25 +76,34 @@ func TestWriteOutput(t *testing.T) {
 		t.Fatalf("WriteOutput: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "ttyout"))
+	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
 	if err != nil {
-		t.Fatalf("read ttyout: %v", err)
+		t.Fatalf("read cast: %v", err)
 	}
-	if string(data) != "hello world" {
-		t.Errorf("ttyout: got %q, want %q", data, "hello world")
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines (header + event), got %d", len(lines))
 	}
 
-	timing, err := os.ReadFile(filepath.Join(dir, "timing"))
-	if err != nil {
-		t.Fatalf("read timing: %v", err)
+	var event []json.RawMessage
+	if err := json.Unmarshal([]byte(lines[1]), &event); err != nil {
+		t.Fatalf("event line is not valid JSON: %v", err)
 	}
-	// Timing entry should start with event type 4 (EventTtyOut)
-	if !strings.HasPrefix(string(timing), "4 ") {
-		t.Errorf("timing entry: got %q, expected to start with '4 '", timing)
+	if len(event) != 3 {
+		t.Fatalf("event has %d elements, want 3", len(event))
+	}
+	var kind, payload string
+	json.Unmarshal(event[1], &kind)  //nolint:errcheck
+	json.Unmarshal(event[2], &payload) //nolint:errcheck
+	if kind != "o" {
+		t.Errorf("event kind: got %q, want %q", kind, "o")
+	}
+	if payload != "hello world" {
+		t.Errorf("event data: got %q, want %q", payload, "hello world")
 	}
 }
 
-// TestWriteInput verifies that input data is written to ttyin with correct event type.
+// TestWriteInput verifies that an "i" event is appended with correct kind.
 func TestWriteInput(t *testing.T) {
 	w, dir := newTestWriter(t)
 	defer w.Close()
@@ -86,25 +113,27 @@ func TestWriteInput(t *testing.T) {
 		t.Fatalf("WriteInput: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "ttyin"))
+	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
 	if err != nil {
-		t.Fatalf("read ttyin: %v", err)
+		t.Fatalf("read cast: %v", err)
 	}
-	if string(data) != "ls\n" {
-		t.Errorf("ttyin: got %q, want %q", data, "ls\n")
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d", len(lines))
 	}
 
-	timing, err := os.ReadFile(filepath.Join(dir, "timing"))
-	if err != nil {
-		t.Fatalf("read timing: %v", err)
+	var event []json.RawMessage
+	if err := json.Unmarshal([]byte(lines[1]), &event); err != nil {
+		t.Fatalf("event is not valid JSON: %v", err)
 	}
-	// Timing entry should start with event type 3 (EventTtyIn)
-	if !strings.HasPrefix(string(timing), "3 ") {
-		t.Errorf("timing entry: got %q, expected to start with '3 '", timing)
+	var kind string
+	json.Unmarshal(event[1], &kind) //nolint:errcheck
+	if kind != "i" {
+		t.Errorf("event kind: got %q, want %q", kind, "i")
 	}
 }
 
-// TestClose verifies that Close returns no error and that files can no longer be written.
+// TestClose verifies that Close returns no error.
 func TestClose(t *testing.T) {
 	w, _ := newTestWriter(t)
 	if err := w.Close(); err != nil {
@@ -112,24 +141,33 @@ func TestClose(t *testing.T) {
 	}
 }
 
-// TestCommandNewlineStripping checks that newlines in the command are replaced.
-func TestCommandNewlineStripping(t *testing.T) {
+// TestCommandWithNewline checks that a command containing a newline is stored
+// as valid JSON (the newline is escaped automatically by json.Marshal).
+func TestCommandWithNewline(t *testing.T) {
 	dir := t.TempDir()
 	start := time.Now()
-	w, err := iolog.NewWriter(dir, "bob", "host2", "root", "unknown", "evil\ninjected", "/tmp", start)
+	meta := iolog.SessionMeta{
+		SessionID: "host2-bob-1-2-aabb",
+		User:      "bob",
+		Host:      "host2",
+		RunasUser: "root",
+		Command:   "evil\ninjected",
+		Cwd:       "/tmp",
+	}
+	w, err := iolog.NewWriter(dir, meta, start)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
 	w.Close()
 
-	data, err := os.ReadFile(filepath.Join(w.Dir(), "log"))
+	data, err := os.ReadFile(filepath.Join(w.Dir(), "session.cast"))
 	if err != nil {
-		t.Fatalf("read log: %v", err)
+		t.Fatalf("read cast: %v", err)
 	}
-	// The log file line 3 must not contain a raw newline within the command
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) != 3 {
-		t.Errorf("expected 3 lines in log file, got %d:\n%s", len(lines), string(data))
+	firstLine := strings.SplitN(string(data), "\n", 2)[0]
+	var hdr map[string]any
+	if err := json.Unmarshal([]byte(firstLine), &hdr); err != nil {
+		t.Errorf("header with newline-containing command is invalid JSON: %v", err)
 	}
 }
 
@@ -137,10 +175,15 @@ func TestCommandNewlineStripping(t *testing.T) {
 func TestPathConfinement(t *testing.T) {
 	dir := t.TempDir()
 	start := time.Now()
-	// Attempting to escape via a crafted user name is prevented by the server's
-	// sanitizeName check, but iolog itself should also be safe with filepath.Join.
-	// Test with a normal nested path to confirm confinement logic works.
-	_, err := iolog.NewWriter(dir, "validuser", "host3", "root", "unknown", "cmd", "/", start)
+	meta := iolog.SessionMeta{
+		SessionID: "host3-validuser-1-2-aabb",
+		User:      "validuser",
+		Host:      "host3",
+		RunasUser: "root",
+		Command:   "cmd",
+		Cwd:       "/",
+	}
+	_, err := iolog.NewWriter(dir, meta, start)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

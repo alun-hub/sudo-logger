@@ -312,20 +312,21 @@ func TestStripANSI(t *testing.T) {
 
 // ── scoreSession ──────────────────────────────────────────────────────────────
 
-// makeTestSession creates a minimal session directory structure and a
-// corresponding SessionInfo for use in scoring tests.
+// makeTestSession creates a minimal session.cast and a corresponding
+// SessionInfo for use in scoring tests.
 func makeTestSession(t *testing.T, baseDir, command string) (string, *SessionInfo) {
 	t.Helper()
 	sessDir := filepath.Join(baseDir, "alice", "host_20260101-120000")
 	if err := os.MkdirAll(sessDir, 0o755); err != nil {
 		t.Fatalf("mkdirall: %v", err)
 	}
-	logContent := "1735726800:alice:root::pts/0\n/home/alice\n" + command + "\n"
-	if err := os.WriteFile(filepath.Join(sessDir, "log"), []byte(logContent), 0o644); err != nil {
-		t.Fatalf("write log: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sessDir, "timing"), []byte("4 0.5 10\n"), 0o644); err != nil {
-		t.Fatalf("write timing: %v", err)
+	hdr := `{"version":2,"width":220,"height":50,"timestamp":1735726800,` +
+		`"title":"alice@host: ` + command + `","session_id":"test-sid",` +
+		`"user":"alice","host":"host","runas_user":"root","runas_uid":0,"runas_gid":0,` +
+		`"cwd":"/home/alice","command":"` + command + `"}` + "\n"
+	cast := hdr + "[0.5,\"o\",\"some output\\r\\n\"]\n"
+	if err := os.WriteFile(filepath.Join(sessDir, "session.cast"), []byte(cast), 0o644); err != nil {
+		t.Fatalf("write cast: %v", err)
 	}
 	s := &SessionInfo{
 		TSID:    "alice/host_20260101-120000",
@@ -453,11 +454,19 @@ func TestScoreSessionIncompleteRule(t *testing.T) {
 func TestScoreSessionContentRule(t *testing.T) {
 	dir := t.TempDir()
 	sessDir, s := makeTestSession(t, dir, "bash")
-	// Write suspicious content to ttyout.
-	ttyout := "checking /etc/shadow contents\nalice:$6$hash:19000:0:99999:7:::\n"
-	if err := os.WriteFile(filepath.Join(sessDir, "ttyout"), []byte(ttyout), 0o644); err != nil {
-		t.Fatalf("write ttyout: %v", err)
+	// Append suspicious output event to the cast file.
+	shadowContent := "checking /etc/shadow contents\\nalice:$6$hash:19000:0:99999:7:::\\n"
+	event := "[1.0,\"o\",\"" + shadowContent + "\"]\n"
+	castPath := filepath.Join(sessDir, "session.cast")
+	f, err := os.OpenFile(castPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open cast for append: %v", err)
 	}
+	if _, err := f.WriteString(event); err != nil {
+		f.Close()
+		t.Fatalf("append event: %v", err)
+	}
+	f.Close()
 
 	rulesMu.Lock()
 	globalRules = []Rule{
