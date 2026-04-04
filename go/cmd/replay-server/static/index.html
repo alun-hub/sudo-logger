@@ -148,6 +148,15 @@
     .sc-incomplete { font-size: 10px; color: var(--red); background: rgba(255,80,80,0.08);
       border: 1px solid rgba(255,80,80,0.3); padding: 1px 5px; border-radius: 2px; flex-shrink: 0; }
     .session-card.incomplete { border-left-color: var(--red) !important; }
+    .sc-live { font-size: 10px; color: #4caf50; background: rgba(76,175,80,0.08);
+      border: 1px solid rgba(76,175,80,0.35); padding: 1px 5px; border-radius: 2px; flex-shrink: 0; }
+    .sc-live::before { content: '●'; margin-right: 3px;
+      animation: live-pulse 1.4s ease-in-out infinite; }
+    @keyframes live-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+    .session-card.in-progress { border-left-color: #4caf50 !important; }
+    .info-bar { display: flex; align-items: center; gap: 6px; padding: 5px 14px;
+      background: rgba(76,175,80,0.07); border-bottom: 1px solid rgba(76,175,80,0.2);
+      font-size: 11px; color: #4caf50; }
     .warn-bar { display: flex; align-items: center; gap: 6px; padding: 5px 14px;
       background: rgba(255,80,80,0.07); border-bottom: 1px solid rgba(255,80,80,0.2);
       font-size: 11px; color: var(--red); }
@@ -1017,7 +1026,7 @@ function renderSessionList(sessions) {
   const q = fetchState.q;
   const frag = document.createDocumentFragment();
   for (const s of sessions) {
-    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : '') + (s.incomplete ? ' incomplete' : ''));
+    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : '') + (s.incomplete ? ' incomplete' : '') + (s.in_progress ? ' in-progress' : ''));
     card.dataset.tsid = s.tsid;
 
     // user@host row with runas badge
@@ -1040,6 +1049,7 @@ function renderSessionList(sessions) {
     if (s.risk_level && s.risk_level !== 'low') {
       meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
     }
+    if (s.in_progress) meta.appendChild(el('span', 'sc-live', 'live'));
     if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
 
     card.appendChild(userRow);
@@ -1174,6 +1184,12 @@ function renderInfoBar(sess) {
   if (sess.runas) addItem(row1, 'runas', sess.runas, sess.runas !== 'root' ? 'blue' : 'dim', '');
   addItem(row1, 'cmd', sess.command, 'green', 'grow');
   elInfoBar.appendChild(row1);
+
+  // Info bar for sessions still being recorded
+  if (sess.in_progress) {
+    const info = el('div', 'info-bar', '● Session is live — recording is still in progress. Playback shows what has been logged so far.');
+    elInfoBar.appendChild(info);
+  }
 
   // Warning bar for incomplete sessions (shipper killed mid-session)
   if (sess.incomplete) {

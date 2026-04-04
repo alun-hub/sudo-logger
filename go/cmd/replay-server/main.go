@@ -186,7 +186,8 @@ type SessionInfo struct {
 	Flags           string  `json:"flags,omitempty"`
 	StartTime       int64    `json:"start_time"` // unix seconds
 	Duration        float64  `json:"duration"`   // seconds
-	Incomplete      bool     `json:"incomplete,omitempty"` // true if shipper was killed mid-session
+	Incomplete      bool     `json:"incomplete,omitempty"`  // true if shipper was killed mid-session
+	InProgress      bool     `json:"in_progress,omitempty"` // true if session is still being recorded
 	RiskScore       int      `json:"risk_score"`
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
 	RiskReasons     []string `json:"risk_reasons,omitempty"`
@@ -718,6 +719,12 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 	// Mark sessions where the shipper was killed without sending session_end.
 	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {
 		info.Incomplete = true
+	}
+
+	// Mark sessions that are still being recorded (ACTIVE written at start,
+	// removed by the logserver when SESSION_END or INCOMPLETE is written).
+	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
+		info.InProgress = true
 	}
 
 	info.RiskScore, info.RiskReasons = scoreSession(info, sessDir)

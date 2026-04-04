@@ -284,6 +284,11 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 		_ = os.WriteFile(w.Dir()+"/meta.json", b, 0640)
 	}
 
+	// Mark the session as active so the replay server can distinguish
+	// "currently recording" from "ended cleanly" or "ended abruptly (INCOMPLETE)".
+	// Removed by closeSession() regardless of how the session ends.
+	_ = os.WriteFile(w.Dir()+"/ACTIVE", []byte("session in progress\n"), 0640)
+
 	sess := &session{
 		id:        start.SessionID,
 		user:      start.User,
@@ -311,6 +316,7 @@ func (srv *server) closeSession(sess *session) {
 	if sess == nil {
 		return
 	}
+	_ = os.Remove(sess.writer.Dir() + "/ACTIVE")
 	if err := sess.writer.Close(); err != nil {
 		log.Printf("[%s] close writer: %v", sess.id, err)
 	}
