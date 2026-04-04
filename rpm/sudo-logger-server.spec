@@ -25,7 +25,7 @@ sudo-logger-client instances and stores them for later replay.
 
 %build
 cd go
-go build -o sudo-logserver ./cmd/server
+/usr/lib/golang/bin/go build -o sudo-logserver ./cmd/server
 
 %install
 # Server binary
