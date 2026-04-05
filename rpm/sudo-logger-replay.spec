@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.12.5
+Version:        1.13.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -66,6 +66,14 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sat Apr 06 2026 sudo-logger 1.13.0-1
+- feat: SIEM forwarding moved to replay server using fsnotify (Alt 2)
+  - watches for ACTIVE marker removal; sends event after session fully closed
+  - risk_score and risk_reasons included in JSON/CEF/OCSF SIEM events
+  - session_id, runas_uid, runas_gid, exit_code now read from cast header / file
+  - parseSession() extended with SessionID, RunasUID, RunasGID, ExitCode fields
+  - watchSessions() goroutine started at server startup
+
 * Sun Apr 05 2026 sudo-logger 1.12.4-1
 - fix: GET /api/siem-config reads siem.yaml from disk, not siem.Get()
   (siem.Get() always returned empty defaults in replay-server since

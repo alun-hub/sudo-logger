@@ -8,8 +8,8 @@ import (
 )
 
 // Event carries the per-session metadata forwarded to the SIEM.
-// It is populated from the in-memory session struct at close time —
-// no file parsing required.
+// It is populated by replay-server after the session completes —
+// risk score is included because it is computed by the replay-server.
 type Event struct {
 	SessionID       string
 	TSID            string // user/host_YYYYmmdd-HHMMSS — matches ?tsid= in the replay GUI
@@ -25,8 +25,10 @@ type Event struct {
 	StartTime       time.Time
 	EndTime         time.Time
 	ExitCode        int32
-	Incomplete      bool   // true when connection was lost without SESSION_END
-	ReplayURL       string // populated by Send() from Config.ReplayURLBase + TSID
+	Incomplete      bool     // true when connection was lost without SESSION_END
+	RiskScore       int      // 0–100 from risk scoring rules
+	RiskReasons     []string // rule names that triggered
+	ReplayURL       string   // populated by Send() from Config.ReplayURLBase + TSID
 }
 
 // durationSec returns the session length in seconds (≥ 0).
@@ -56,12 +58,16 @@ func (e Event) FormatJSON() ([]byte, error) {
 		"duration_s": e.durationSec(),
 		"exit_code":  e.ExitCode,
 		"incomplete": e.Incomplete,
+		"risk_score": e.RiskScore,
 	}
 	if e.ResolvedCommand != "" {
 		obj["resolved_command"] = e.ResolvedCommand
 	}
 	if e.Flags != "" {
 		obj["flags"] = e.Flags
+	}
+	if len(e.RiskReasons) > 0 {
+		obj["risk_reasons"] = e.RiskReasons
 	}
 	if e.ReplayURL != "" {
 		obj["replay_url"] = e.ReplayURL
@@ -125,6 +131,10 @@ func (e Event) FormatCEF() string {
 	if e.ReplayURL != "" {
 		ext += " cs6=" + cefEscape(e.ReplayURL) + " cs6Label=replayUrl"
 	}
+	ext += fmt.Sprintf(" cn3=%d cn3Label=riskScore", e.RiskScore)
+	if len(e.RiskReasons) > 0 {
+		ext += " cs7=" + cefEscape(strings.Join(e.RiskReasons, ",")) + " cs7Label=riskReasons"
+	}
 	return fmt.Sprintf(
 		"CEF:0|sudo-logger|sudo-logger|1.0|sudo-session|Privileged Command Session|%d|%s",
 		sev, ext,
@@ -143,9 +153,13 @@ func (e Event) FormatOCSF() ([]byte, error) {
 		"session_id": e.SessionID,
 		"cwd":        e.Cwd,
 		"incomplete": e.Incomplete,
+		"risk_score": e.RiskScore,
 	}
 	if e.Flags != "" {
 		unmapped["flags"] = e.Flags
+	}
+	if len(e.RiskReasons) > 0 {
+		unmapped["risk_reasons"] = e.RiskReasons
 	}
 	if e.ReplayURL != "" {
 		unmapped["replay_url"] = e.ReplayURL

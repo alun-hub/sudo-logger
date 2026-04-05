@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.11.5
+Version:        1.12.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,14 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sat Apr 06 2026 sudo-logger 1.12.0-1
+- refactor: move SIEM forwarding from log server to replay server (Alt 2)
+  - log server now only writes exit_code file on SESSION_END; no more siem.Send()
+  - replay server watches for ACTIVE removal via fsnotify and sends SIEM event
+  - risk_score and risk_reasons now included in every SIEM event
+  - all session metadata (session_id, runas_uid, runas_gid, exit_code) read from
+    cast header and exit_code file rather than in-memory session struct
+
 * Sun Apr 05 2026 sudo-logger 1.11.4-1
 - feat: add replay_url_base to config reload log, replay_url to send log
 

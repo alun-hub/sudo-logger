@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/cilium/ebpf v0.21.0
+	github.com/fsnotify/fsnotify v1.9.0
 	golang.org/x/crypto v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
 )

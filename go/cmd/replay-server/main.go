@@ -26,6 +26,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -37,6 +38,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 
@@ -179,17 +181,21 @@ func basicAuthMiddleware(next http.Handler, store *htpasswdStore) http.Handler {
 
 // SessionInfo is the metadata returned for each session in the list API.
 type SessionInfo struct {
-	TSID            string  `json:"tsid"`
-	User            string  `json:"user"`
-	Host            string  `json:"host"`
-	Runas           string  `json:"runas"`
-	TTY             string  `json:"tty"`
-	Command         string  `json:"command"`
-	ResolvedCommand string  `json:"resolved_command,omitempty"`
-	Cwd             string  `json:"cwd,omitempty"`
-	Flags           string  `json:"flags,omitempty"`
+	TSID            string   `json:"tsid"`
+	SessionID       string   `json:"session_id,omitempty"`
+	User            string   `json:"user"`
+	Host            string   `json:"host"`
+	Runas           string   `json:"runas"`
+	RunasUID        int      `json:"runas_uid,omitempty"`
+	RunasGID        int      `json:"runas_gid,omitempty"`
+	TTY             string   `json:"tty"`
+	Command         string   `json:"command"`
+	ResolvedCommand string   `json:"resolved_command,omitempty"`
+	Cwd             string   `json:"cwd,omitempty"`
+	Flags           string   `json:"flags,omitempty"`
 	StartTime       int64    `json:"start_time"` // unix seconds
 	Duration        float64  `json:"duration"`   // seconds
+	ExitCode        int32    `json:"exit_code"`
 	Incomplete      bool     `json:"incomplete,omitempty"`  // true if shipper was killed mid-session
 	InProgress      bool     `json:"in_progress,omitempty"` // true if session is still being recorded
 	RiskScore       int      `json:"risk_score"`
@@ -412,6 +418,9 @@ func main() {
 	if err := loadRules(*flagRules); err != nil {
 		log.Fatalf("load risk rules: %v", err)
 	}
+
+	siem.Load(*flagSiemConfig)
+	go watchSessions(*flagLogDir)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sessions", handleListSessions)
@@ -692,9 +701,12 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 
 	var hdr struct {
 		Timestamp       int64   `json:"timestamp"`
+		SessionID       string  `json:"session_id"`
 		User            string  `json:"user"`
 		Host            string  `json:"host"`
 		RunasUser       string  `json:"runas_user"`
+		RunasUID        int     `json:"runas_uid"`
+		RunasGID        int     `json:"runas_gid"`
 		Cwd             string  `json:"cwd"`
 		Command         string  `json:"command"`
 		ResolvedCommand string  `json:"resolved_command"`
@@ -706,9 +718,12 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 
 	info := &SessionInfo{
 		TSID:            tsid,
+		SessionID:       hdr.SessionID,
 		User:            hdr.User,
 		Host:            hdr.Host,
 		Runas:           hdr.RunasUser,
+		RunasUID:        hdr.RunasUID,
+		RunasGID:        hdr.RunasGID,
 		Command:         hdr.Command,
 		ResolvedCommand: hdr.ResolvedCommand,
 		Cwd:             hdr.Cwd,
@@ -722,6 +737,13 @@ func parseSession(sessDir, tsid string) (*SessionInfo, error) {
 	}
 	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
 		info.InProgress = true
+	}
+
+	// Read exit code written by logserver on SESSION_END.
+	if data, err := os.ReadFile(filepath.Join(sessDir, "exit_code")); err == nil {
+		if v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 32); err == nil {
+			info.ExitCode = int32(v)
+		}
 	}
 
 	info.RiskScore, info.RiskReasons = scoreSession(info, sessDir)
@@ -1245,6 +1267,120 @@ var validCertName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}\.(crt|pem|key)$`)
 // containsPEMBlock returns true if data contains at least one valid PEM block.
 func containsPEMBlock(data []byte) bool {
 	return bytes.Contains(data, []byte("-----BEGIN "))
+}
+
+// ── SIEM forwarding ───────────────────────────────────────────────────────────
+
+// watchSessions uses fsnotify to watch for sessions completing under logDir.
+// When the ACTIVE marker file is removed (or a session directory is created
+// without one) we know the session just finished — send the SIEM event then.
+func watchSessions(logDir string) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("siem watcher: create: %v", err)
+		return
+	}
+	defer watcher.Close()
+
+	// Watch the top-level log dir for new per-user dirs, and each user dir
+	// for new session dirs.
+	watchSubdirs(watcher, logDir)
+	if err := watcher.Add(logDir); err != nil {
+		log.Printf("siem watcher: watch %s: %v", logDir, err)
+		return
+	}
+
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			// New subdirectory created — add a watch on it so we see session dirs.
+			if event.Has(fsnotify.Create) {
+				fi, err := os.Stat(event.Name)
+				if err == nil && fi.IsDir() {
+					watchSubdirs(watcher, event.Name)
+					_ = watcher.Add(event.Name)
+				}
+			}
+			// ACTIVE file removed → session just ended cleanly.
+			// INCOMPLETE file created → session ended abnormally.
+			if event.Has(fsnotify.Remove) && filepath.Base(event.Name) == "ACTIVE" {
+				go sendSiemEvent(filepath.Dir(event.Name))
+			}
+			if event.Has(fsnotify.Create) && filepath.Base(event.Name) == "INCOMPLETE" {
+				go sendSiemEvent(filepath.Dir(event.Name))
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("siem watcher: %v", err)
+		}
+	}
+}
+
+// watchSubdirs adds a fsnotify watch on every immediate subdirectory of dir.
+func watchSubdirs(watcher *fsnotify.Watcher, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			sub := filepath.Join(dir, e.Name())
+			_ = watcher.Add(sub)
+		}
+	}
+}
+
+// sendSiemEvent parses the completed session in sessDir and forwards it to the
+// configured SIEM.  The sessDir is expected to be user/host_timestamp inside
+// the log root.
+func sendSiemEvent(sessDir string) {
+	// Derive the TSID from the directory structure: …/<user>/<session-dir>
+	// tsid = user/session-dir  (matches ?tsid= format in the replay GUI)
+	rel, err := filepath.Rel(*flagLogDir, sessDir)
+	if err != nil {
+		log.Printf("siem: sendSiemEvent rel path: %v", err)
+		return
+	}
+	parts := strings.SplitN(rel, string(filepath.Separator), 2)
+	if len(parts) != 2 {
+		log.Printf("siem: unexpected session path %s", sessDir)
+		return
+	}
+	tsid := url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
+
+	info, err := parseSession(sessDir, tsid)
+	if err != nil {
+		log.Printf("siem: parse session %s: %v", sessDir, err)
+		return
+	}
+
+	startTime := time.Unix(info.StartTime, 0)
+	endTime := startTime.Add(time.Duration(info.Duration * float64(time.Second)))
+
+	siem.Send(siem.Event{
+		SessionID:       info.SessionID,
+		TSID:            tsid,
+		User:            info.User,
+		Host:            info.Host,
+		RunasUser:       info.Runas,
+		RunasUID:        info.RunasUID,
+		RunasGID:        info.RunasGID,
+		Cwd:             info.Cwd,
+		Command:         info.Command,
+		ResolvedCommand: info.ResolvedCommand,
+		Flags:           info.Flags,
+		StartTime:       startTime,
+		EndTime:         endTime,
+		ExitCode:        info.ExitCode,
+		Incomplete:      info.Incomplete,
+		RiskScore:       info.RiskScore,
+		RiskReasons:     info.RiskReasons,
+	})
 }
 
 // ── Risk scoring ──────────────────────────────────────────────────────────────
