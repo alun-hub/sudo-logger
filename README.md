@@ -528,6 +528,8 @@ xdg-open http://localhost:8080
   See [SIEM forwarding](#siem-forwarding) below.
 - **Auto-refresh** — session list polls for new sessions every 15 seconds and
   immediately on tab focus; no manual browser refresh needed.
+- **Prometheus metrics** — `/metrics` endpoint with session counts, risk level
+  distribution, and view counter; see [Prometheus metrics](#prometheus-metrics).
 - **No external dependencies** — xterm.js and CSS are vendored into the binary;
   works in air-gapped environments with no internet access
 
@@ -795,6 +797,89 @@ command, and verify the event appears within a few seconds.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-siem-config file` | `/etc/sudo-logger/siem.yaml` | SIEM forwarding configuration |
+
+---
+
+## Prometheus metrics
+
+`sudo-replay-server` exposes a Prometheus-compatible metrics endpoint at `/metrics`.
+No external library is required — the endpoint writes the standard
+[Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/)
+directly.
+
+### Available metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `sudoreplay_sessions_total` | Gauge | Total number of recorded sessions |
+| `sudoreplay_sessions_active` | Gauge | Sessions currently being recorded |
+| `sudoreplay_sessions_incomplete` | Gauge | Sessions that ended without clean termination |
+| `sudoreplay_sessions_by_risk{level="low\|medium\|high\|critical"}` | Gauge | Sessions per risk level |
+| `sudoreplay_session_views_total` | Counter | Session views via the replay UI since last restart |
+
+### Scrape configuration
+
+Add the replay server as a Prometheus scrape target:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: sudo-replay
+    static_configs:
+      - targets: ["replay.example.com:8080"]
+    # If Basic Auth is enabled on the replay server:
+    basic_auth:
+      username: prometheus
+      password: <token>
+    # If TLS is enabled:
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/ca.crt
+```
+
+### Example Grafana queries
+
+```promql
+# Sessions recorded per risk level
+sudoreplay_sessions_by_risk
+
+# Incomplete session ratio (alert if > 5%)
+sudoreplay_sessions_incomplete / sudoreplay_sessions_total > 0.05
+
+# Session views over time (rate per minute)
+rate(sudoreplay_session_views_total[5m]) * 60
+```
+
+### Example output
+
+```
+# HELP sudoreplay_sessions_total Total number of recorded sessions.
+# TYPE sudoreplay_sessions_total gauge
+sudoreplay_sessions_total 1234
+
+# HELP sudoreplay_sessions_active Sessions currently being recorded.
+# TYPE sudoreplay_sessions_active gauge
+sudoreplay_sessions_active 3
+
+# HELP sudoreplay_sessions_incomplete Sessions that ended without clean termination.
+# TYPE sudoreplay_sessions_incomplete gauge
+sudoreplay_sessions_incomplete 12
+
+# HELP sudoreplay_sessions_by_risk Number of sessions per risk level.
+# TYPE sudoreplay_sessions_by_risk gauge
+sudoreplay_sessions_by_risk{level="low"} 800
+sudoreplay_sessions_by_risk{level="medium"} 300
+sudoreplay_sessions_by_risk{level="high"} 100
+sudoreplay_sessions_by_risk{level="critical"} 34
+
+# HELP sudoreplay_session_views_total Total session views via the replay UI since last restart.
+# TYPE sudoreplay_session_views_total counter
+sudoreplay_session_views_total 567
+```
+
+> **Note:** `/metrics` is protected by the same authentication layer as the rest of the
+> replay server.  When using Basic Auth, create a dedicated read-only account for the
+> Prometheus scraper rather than reusing an operator account.
 
 ---
 
