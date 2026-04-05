@@ -1,4 +1,4 @@
-.TH SUDO\-LOGSERVER 8 "2026-03-15" "sudo-logger 1.10.0" "System Administration"
+.TH SUDO\-LOGSERVER 8 "2026-04-06" "sudo-logger 1.12.0" "System Administration"
 .SH NAME
 sudo\-logserver \- remote TLS server for sudo session recordings
 .SH SYNOPSIS
@@ -126,10 +126,34 @@ Copy this file to all client machines after installation.
 Default log directory.
 Each session is stored as a subdirectory:
 .IR user / host _ YYYYMMDD\- HHMMSS /
-containing
+containing the following files:
+.RS
+.TP
 .B session.cast
-(asciinema v2 recording) and optional marker files
-.RB ( ACTIVE ", " INCOMPLETE ).
+asciinema v2 recording (header line + event lines).
+.TP
+.B exit_code
+Exit status of the sudo command, written as a decimal integer when the server
+receives a clean
+.B SESSION_END
+message.
+Absent for sessions that ended without
+.B SESSION_END
+(the session will also have an
+.B INCOMPLETE
+marker in that case).
+Read by
+.BR sudo\-replay\-server (8)
+when building SIEM events.
+.TP
+.BR ACTIVE " (marker)"
+Present while the session is being recorded.
+Removed by the server on any session close.
+.TP
+.BR INCOMPLETE " (marker)"
+Written when the client connection dropped without sending
+.BR SESSION_END .
+.RE
 .SH SECURITY
 .B sudo\-logserver
 requires mutual TLS for all connections.

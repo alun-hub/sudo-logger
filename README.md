@@ -519,9 +519,13 @@ xdg-open http://localhost:8080
   `risk.json` per session and invalidated automatically when rules change.
   Levels: Low (0–24) · Medium (25–49) · High (50–74) · Critical (75+). Risk
   badges are shown on session cards and in the session info bar.
-- **Settings tab** — browser UI for viewing, adding, editing, and deleting risk
-  rules. Changes are written back to `/etc/sudo-logger/risk-rules.yaml`
-  immediately and take effect without a server restart.
+- **Settings tab** — browser UI for risk rules and SIEM forwarding. Rule
+  changes and SIEM configuration are written back to disk immediately and take
+  effect without a server restart. PEM certificates can be uploaded directly
+  from the browser.
+- **SIEM forwarding** — completed sessions are forwarded to an external SIEM
+  after the session closes. Risk score and reasons are included in every event.
+  See [SIEM forwarding](#siem-forwarding) below.
 - **Auto-refresh** — session list polls for new sessions every 15 seconds and
   immediately on tab focus; no manual browser refresh needed.
 - **No external dependencies** — xterm.js and CSS are vendored into the binary;
@@ -676,6 +680,7 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 | `-listen addr` | `:8080` | Listen address |
 | `-logdir dir` | `/var/log/sudoreplay` | Session log directory |
 | `-rules file` | `/etc/sudo-logger/risk-rules.yaml` | Risk scoring rules |
+| `-siem-config file` | `/etc/sudo-logger/siem.yaml` | SIEM forwarding config |
 
 **How it works:**
 
@@ -683,6 +688,113 @@ The plugin captures the full `argv` array and terminal dimensions (rows/cols) in
 `SESSION_START` message.  The shipper forwards this verbatim to the server,
 which stores it in the `session.cast` header — the same field that
 the web interface reads as the session command.
+
+---
+
+## SIEM forwarding
+
+`sudo-replay-server` can forward a structured event to an external SIEM after
+each session closes.  Events are sent by the replay server (not the log server)
+so that the computed **risk score** and **risk reasons** can be included.
+
+### How it works
+
+The replay server watches the log directory for `ACTIVE` marker file removal
+using inotify.  When a session ends (cleanly or abnormally), the server:
+
+1. Reads session metadata from the `session.cast` header.
+2. Reads the exit code from the `exit_code` file (written by `sudo-logserver`
+   on clean `SESSION_END`).
+3. Computes the risk score using the configured rules.
+4. Sends a structured event to the configured SIEM endpoint.
+
+### Configuration
+
+Configure SIEM forwarding via the **Settings tab** in the browser, or by
+editing `/etc/sudo-logger/siem.yaml` directly.
+
+```yaml
+enabled: true
+transport: syslog        # https | syslog
+format: json             # json | cef | ocsf
+replay_url_base: https://replay.example.com:8080
+
+syslog:
+  addr: siem.example.com:514
+  protocol: udp          # udp | tcp | tcp-tls
+  # For tcp-tls only:
+  # ca:   /etc/sudo-logger/siem-ca.crt
+  # cert: /etc/sudo-logger/siem-client.crt
+  # key:  /etc/sudo-logger/siem-client.key
+
+https:
+  url: https://siem.example.com/ingest
+  token: ""              # Bearer or Splunk HEC token (optional)
+  ca:   /etc/sudo-logger/siem-ca.crt
+  cert: /etc/sudo-logger/siem-client.crt
+  key:  /etc/sudo-logger/siem-client.key
+```
+
+The `https` transport requires mutual TLS (client certificate mandatory).
+
+### Event formats
+
+#### JSON
+
+Flat JSON object — suitable for most modern SIEMs:
+
+```json
+{
+  "session_id": "fedora-alice-12345-1712345678-ab12cd34",
+  "user": "alice",
+  "host": "fedora",
+  "runas": "root",
+  "runas_uid": 0,
+  "runas_gid": 0,
+  "command": "vim /etc/nginx/nginx.conf",
+  "resolved_command": "/usr/bin/vim",
+  "cwd": "/home/alice",
+  "flags": "",
+  "start_time": "2026-04-06T10:30:00Z",
+  "end_time": "2026-04-06T10:31:23Z",
+  "duration_s": 83.2,
+  "exit_code": 0,
+  "incomplete": false,
+  "risk_score": 25,
+  "risk_reasons": ["edit_sensitive_config"],
+  "replay_url": "https://replay.example.com:8080/?tsid=alice%2Ffedora_20260406-103000"
+}
+```
+
+#### CEF
+
+`CEF:0|sudo-logger|sudo-logger|1.0|sudo-session|Privileged Command Session|Severity|...`
+
+Key extension fields: `rt` (start ms), `shost`, `suser`, `duser`, `duid`,
+`dgid`, `dproc` (command), `cs1`=sessionId, `cs2`=cwd, `cs3`=resolvedCommand,
+`cs4`=flags, `cs5`=status, `cs6`=replayUrl, `cn1`=exitCode, `cn2`=durationSec,
+`cn3`=riskScore, `cs7`=riskReasons.
+
+#### OCSF
+
+OCSF v1.3.0 Class 3003 (Process Activity).  Risk score and reasons appear in
+the `unmapped` object.
+
+### Testing with netcat
+
+```bash
+# Listen on port 514 and print raw syslog events
+nc -lk 514
+```
+
+Set `addr: localhost:514` and `protocol: tcp` in the Settings UI, run a sudo
+command, and verify the event appears within a few seconds.
+
+### Flag reference (replay server, SIEM-related)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-siem-config file` | `/etc/sudo-logger/siem.yaml` | SIEM forwarding configuration |
 
 ---
 
@@ -701,6 +813,7 @@ xdg-open http://localhost:8080
 Each session directory contains:
 ```
 session.cast  — asciinema v2 recording (header + event lines)
+exit_code     — decimal exit status, written by log server on clean SESSION_END
 ACTIVE        — present while session is being recorded
 INCOMPLETE    — present if connection dropped mid-session
 risk.json     — risk score cache (written by replay server)
@@ -738,8 +851,12 @@ sudo-logger/
 │   └── internal/
 │       ├── protocol/
 │       │   └── protocol.go # Shared wire protocol
-│       └── iolog/
-│           └── iolog.go    # asciinema v2 session writer
+│       ├── iolog/
+│       │   └── iolog.go    # asciinema v2 session writer
+│       └── siem/
+│           ├── config.go   # YAML config loader (30 s polling)
+│           ├── event.go    # Event struct + JSON/CEF/OCSF formatters
+│           └── sender.go   # HTTPS and syslog transports
 ├── rpm/
 │   ├── sudo-logger-client.spec  # RPM spec for client package
 │   ├── sudo-logger-server.spec  # RPM spec for server package

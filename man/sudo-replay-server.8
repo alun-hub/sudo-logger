@@ -1,4 +1,4 @@
-.TH SUDO\-REPLAY\-SERVER 8 "2026-04-03" "sudo-logger 1.11.0" "System Administration"
+.TH SUDO\-REPLAY\-SERVER 8 "2026-04-06" "sudo-logger 1.13.0" "System Administration"
 .SH NAME
 sudo\-replay\-server \- web interface for replaying sudo session recordings
 .SH SYNOPSIS
@@ -6,6 +6,7 @@ sudo\-replay\-server \- web interface for replaying sudo session recordings
 [\fB\-listen\fR \fIaddr\fR]
 [\fB\-logdir\fR \fIdir\fR]
 [\fB\-rules\fR \fIfile\fR]
+[\fB\-siem-config\fR \fIfile\fR]
 .SH DESCRIPTION
 .B sudo\-replay\-server
 is a self-contained HTTP server that reads asciinema v2 session recordings written by
@@ -74,9 +75,93 @@ Risk levels:
 .RE
 .PP
 .B Settings tab
-\(em browser UI for viewing, adding, editing, and deleting risk rules.  Changes
-are written back to the rules file immediately and take effect without a server
-restart.
+\(em browser UI for viewing, adding, editing, and deleting risk rules, and for
+configuring SIEM forwarding.  Rule changes take effect without a server restart.
+.PP
+.B SIEM forwarding
+\(em completed sessions are forwarded to an external SIEM after the session
+closes.
+The server watches the log directory for ACTIVE marker removal using
+.BR inotify (7)
+and sends an event as soon as the marker disappears.
+Events include all session metadata and the computed risk score.
+.PP
+Three event formats are supported:
+.TP
+.B json
+Flat JSON object.
+Fields:
+.BR session_id ,
+.BR user ,
+.BR host ,
+.BR runas ,
+.BR runas_uid ,
+.BR runas_gid ,
+.BR command ,
+.BR resolved_command ,
+.BR cwd ,
+.BR flags ,
+.BR start_time ,
+.BR end_time ,
+.BR duration_s ,
+.BR exit_code ,
+.BR incomplete ,
+.BR risk_score ,
+.BR risk_reasons ,
+.BR replay_url .
+.TP
+.B cef
+CEF:0 syslog format (ArcSight).
+Extension fields include
+.BR rt ,
+.BR shost ,
+.BR suser ,
+.BR duser ,
+.BR duid ,
+.BR dgid ,
+.BR dproc ,
+.BR cs1 = session_id,
+.BR cs2 = cwd,
+.BR cs3 = resolved_command,
+.BR cs4 = flags,
+.BR cs5 = status,
+.BR cs6 = replay_url,
+.BR cn1 = exit_code,
+.BR cn2 = duration_s,
+.BR cn3 = risk_score,
+.BR cs7 = risk_reasons.
+.TP
+.B ocsf
+OCSF v1.3.0 Class 3003 (Process Activity).
+Risk score and reasons are included in the
+.B unmapped
+object.
+.PP
+Two transport protocols are supported:
+.TP
+.B https
+HTTP POST with TLS.
+Client certificates are required (mTLS); plain TLS without a client
+certificate is not accepted.
+The CA certificate must be configured so the server certificate can be
+verified.
+A bearer or Splunk HEC token can optionally be set.
+.TP
+.B syslog
+RFC 5424 syslog message.
+Three sub-protocols are available:
+.B udp
+(connectionless; messages may be lost),
+.B tcp
+(reliable, no encryption),
+.B tcp-tls
+(reliable, TLS 1.2+, mTLS optional).
+Facility: LOG_AUTHPRIV (10).
+Severity: NOTICE on success, WARNING on non-zero exit or incomplete session.
+.PP
+SIEM configuration is stored in
+.B /etc/sudo-logger/siem.yaml
+and is also writable via the Settings tab in the browser.
 .PP
 The server runs as the
 .B sudologger
@@ -125,6 +210,16 @@ Path to the YAML risk-scoring rules file.
 The server exits at startup if this file cannot be loaded.
 Default:
 .BR /etc/sudo-logger/risk-rules.yaml .
+.TP
+.BI \-siem-config " file"
+Path to the SIEM forwarding configuration file.
+The file is shared with
+.BR sudo\-logserver (8)
+and uses YAML format.
+If the file does not exist, SIEM forwarding is disabled.
+The Settings tab in the browser provides a GUI for editing this file.
+Default:
+.BR /etc/sudo-logger/siem.yaml .
 .TP
 .BI \-tls-cert " file"
 Path to a PEM-encoded TLS certificate.
@@ -238,13 +333,127 @@ Replaces the rules with the JSON body, writes them back to the rules file, and
 reloads the active rule set.  Any existing
 .B risk.json
 caches are invalidated on the next session load.
+.TP
+.B GET /api/siem-config
+Returns the current SIEM configuration as JSON, read directly from
+.BR siem.yaml .
+.TP
+.B PUT /api/siem-config
+Validates and writes an updated SIEM configuration to
+.BR siem.yaml .
+Accepted fields match the SIEM CONFIG FILE section below.
+.TP
+.B POST /api/siem-cert
+Accepts a PEM file upload (multipart field
+.BR file )
+and saves it under the same directory as
+.BR siem.yaml .
+Filename must match
+.BR [a-zA-Z0-9._-]{1,64}\\.(crt|pem|key) .
+Maximum 64 KB.
+Returns the saved path.
 .SH FILES
 .TP
 .B /var/log/sudoreplay/
-Default log directory (read; risk.json cache files are written here).
+Default log directory.
+Session recordings are read from here; risk.json cache files are written
+alongside each session directory.
 .TP
 .B /etc/sudo-logger/risk-rules.yaml
 Default risk-scoring rules file (read/write; the Settings tab updates this file).
+.TP
+.B /etc/sudo-logger/siem.yaml
+SIEM forwarding configuration (read/write; the Settings tab updates this file).
+Not installed by default; created on first save via the Settings UI.
+Must be readable by the
+.B sudologger
+service user.
+See
+.B SIEM CONFIG FILE
+below.
+.SH SIEM CONFIG FILE
+The SIEM configuration file is a YAML document at
+.B /etc/sudo-logger/siem.yaml
+(path overridable with
+.BR \-siem-config ).
+.PP
+Top-level fields:
+.TP
+.B enabled
+Boolean.
+Set to
+.B true
+to enable forwarding.
+.TP
+.B transport
+String.
+.B https
+or
+.BR syslog .
+.TP
+.B format
+String.
+.BR json ,
+.BR cef ,
+or
+.BR ocsf .
+.TP
+.B replay_url_base
+Optional URL prefix for session deep-links included in SIEM events.
+Example:
+.BR https://replay.example.com:8080 .
+The full replay URL is constructed as
+.IR base /?tsid= TSID
+where TSID is
+.IR user / host _ YYYYMMDD\- HHMMSS .
+.PP
+HTTPS transport fields (under
+.BR https: ):
+.TP
+.B url
+Destination URL, e.g.\&
+.BR https://siem.example.com/ingest .
+.TP
+.B token
+Optional bearer token (
+.BI "Authorization: Bearer " token )
+or Splunk HEC token (
+.BI "Authorization: Splunk " token
+when the URL contains
+.BR /services/collector ).
+.TP
+.B ca ,\  cert ,\  key
+Paths to PEM files for TLS CA verification and optional mTLS client certificate.
+.PP
+Syslog transport fields (under
+.BR syslog: ):
+.TP
+.B addr
+Destination address in
+.I host:port
+format, e.g.\&
+.BR siem.example.com:514 .
+.TP
+.B protocol
+.BR udp ,
+.BR tcp ,
+or
+.BR tcp-tls .
+.TP
+.B ca ,\  cert ,\  key
+Paths to PEM files for TLS (used only with
+.BR tcp-tls ).
+.PP
+Example configuration (JSON format, syslog/UDP):
+.EX
+enabled: true
+transport: syslog
+format: json
+replay_url_base: https://replay.example.com:8080
+syslog:
+  addr: siem.example.com:514
+  protocol: udp
+.EE
 .SH SECURITY
 The TSID path parameter is validated to contain only safe characters
 .RB ( [a-zA-Z0-9/_\-.] ,
