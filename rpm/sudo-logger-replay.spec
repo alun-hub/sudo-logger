@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.14.0
+Version:        1.14.1
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -66,6 +66,12 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sat Apr 05 2026 sudo-logger 1.14.1-1
+- feat: modernised web UI — Inter/system-ui font for UI chrome, monospace
+  kept for terminal and commands; base font 13px → 14px, eliminate 10px text
+- topbar 42px → 48px, sidebar 300px → 320px, tighter session card spacing
+- refreshed light theme with higher contrast colours
+
 * Sat Apr 05 2026 sudo-logger 1.14.0-1
 - feat: Prometheus /metrics endpoint (sessions_total, sessions_active,
   sessions_incomplete, sessions_by_risk, session_views_total)
