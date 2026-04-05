@@ -1,0 +1,24 @@
+# SIEM forwarding configuration — managed by sudo-replay GUI
+# Log server reloads this file automatically every 30 seconds.
+# See sudo-logserver(8) and sudo-replay-server(8) for details.
+
+enabled: false
+transport: https
+format: json
+replay_url_base: ""
+
+https:
+  url: ""
+  token: ""
+  tls:
+    ca: ""
+    cert: ""
+    key: ""
+
+syslog:
+  addr: ""
+  protocol: udp
+  tls:
+    ca: ""
+    cert: ""
+    key: ""

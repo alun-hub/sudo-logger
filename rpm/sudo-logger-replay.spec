@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.12.1
+Version:        1.12.2
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -37,15 +37,20 @@ install -D -m 0644 sudo-replay.service \
 install -D -m 0664 go/cmd/replay-server/risk-rules.yaml \
     %{buildroot}%{_sysconfdir}/sudo-logger/risk-rules.yaml
 
+install -D -m 0664 siem.yaml \
+    %{buildroot}%{_sysconfdir}/sudo-logger/siem.yaml
+
 # Man page
 install -D -m 0644 man/sudo-replay-server.8 \
     %{buildroot}%{_mandir}/man8/sudo-replay-server.8
 
 %post
 %systemd_post sudo-replay.service
-# Ensure the replay service can write the rules file (fix pre-1.10.0 installs)
+# Ensure the replay service can write config files
 chown root:sudologger %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
 chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
+chown root:sudologger %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
+chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 
 %preun
 %systemd_preun sudo-replay.service
@@ -57,9 +62,14 @@ chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || 
 %{_bindir}/sudo-replay-server
 %{_unitdir}/sudo-replay.service
 %config(noreplace) %attr(0664, root, sudologger) %{_sysconfdir}/sudo-logger/risk-rules.yaml
+%config(noreplace) %attr(0664, root, sudologger) %{_sysconfdir}/sudo-logger/siem.yaml
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.12.2-1
+- fix: install siem.yaml (disabled default) as %config(noreplace) 0664 root:sudologger
+  so the replay service can write it without root; fixes "permission denied" on first save
+
 * Sun Apr 05 2026 sudo-logger 1.12.1-1
 - feat: cert/key upload buttons in SIEM settings — uploads PEM files to
   /etc/sudo-logger/ via POST /api/siem-cert; path field auto-populated on success

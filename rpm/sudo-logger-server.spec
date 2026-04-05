@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.11.0
+Version:        1.11.1
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -90,16 +90,20 @@ fi
 %{_unitdir}/sudo-logserver.service
 %{_unitdir}/sudo-logserver-restart.timer
 %{_unitdir}/sudo-logserver-restart.service
-%dir %attr(0750, root, sudologger) %{_sysconfdir}/sudo-logger
+%dir %attr(0770, root, sudologger) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/server.conf
 %ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/ack-sign.key
 %ghost %attr(0644, root, root)       %{_sysconfdir}/sudo-logger/ack-verify.key
-%ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/siem.yaml
+
 %dir %attr(0750, sudologger, sudologger) %{_localstatedir}/log/sudoreplay
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.11.1-1
+- fix: /etc/sudo-logger/ mode 0750 → 0770 so sudologger service can create
+  new files (siem.yaml, uploaded certs) without requiring root intervention
+
 * Sun Apr 05 2026 sudo-logger 1.11.0-1
 - feat: SIEM forwarding — sends session events to external SIEM on session close
 - Supports HTTPS (mTLS) and syslog (UDP/TCP/TCP-TLS) transports
