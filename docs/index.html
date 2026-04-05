@@ -1438,7 +1438,7 @@ body::after {
         <div class="cgroup-steps">
           <div class="cg-step s-ok">
             <div class="cg-step-label">① session starts</div>
-            <div class="cg-step-text">Shipper creates cgroup and adds the sudo PID. All child processes inherit the cgroup. Shipper polls every 10 ms to catch GUI apps that systemd moves out.</div>
+            <div class="cg-step-text">Shipper creates cgroup and adds the sudo PID. All child processes inherit the cgroup. Plugin calls <code>unshare(CLONE_NEWCGROUP)</code> — child processes see the session cgroup as their <code>/sys/fs/cgroup</code> root and cannot migrate to a parent cgroup to escape the freeze, even with <code>CAP_SYS_ADMIN</code>. Shipper polls every 10 ms to catch GUI apps that systemd moves out.</div>
           </div>
           <div class="cg-step">
             <div class="cg-step-label">② normal operation</div>
