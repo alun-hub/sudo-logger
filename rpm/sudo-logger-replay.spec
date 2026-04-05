@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.12.3
+Version:        1.12.4
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -66,6 +66,12 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.12.4-1
+- fix: GET /api/siem-config reads siem.yaml from disk, not siem.Get()
+  (siem.Get() always returned empty defaults in replay-server since
+  siem.Load() is only called in log server; caused settings to reset
+  on every page load and format to always default to json)
+
 * Sun Apr 05 2026 sudo-logger 1.12.3-1
 - fix: replay_url_base placeholder updated to clarify field is required for links
 

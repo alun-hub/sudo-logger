@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.11.3
+Version:        1.11.4
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,9 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.11.4-1
+- feat: add replay_url_base to config reload log, replay_url to send log
+
 * Sun Apr 05 2026 sudo-logger 1.11.3-1
 - feat: log successful SIEM sends (session ID, user, host, cmd, format, transport)
 - fix: truncate helper moved into siem package
