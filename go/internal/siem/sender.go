@@ -38,11 +38,17 @@ func Send(e Event) {
 	switch cfg.Transport {
 	case "https":
 		if err := sendHTTPS(cfg, e, body, contentType); err != nil {
-			log.Printf("siem: HTTPS: %v", err)
+			log.Printf("siem: [%s] HTTPS error: %v", e.SessionID, err)
+		} else {
+			log.Printf("siem: [%s] sent user=%s host=%s cmd=%q format=%s transport=https",
+				e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format)
 		}
 	case "syslog":
 		if err := sendSyslog(cfg, e, body); err != nil {
-			log.Printf("siem: syslog: %v", err)
+			log.Printf("siem: [%s] syslog error: %v", e.SessionID, err)
+		} else {
+			log.Printf("siem: [%s] sent user=%s host=%s cmd=%q format=%s transport=%s",
+				e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format, cfg.Syslog.Protocol)
 		}
 	default:
 		log.Printf("siem: unknown transport %q — use https or syslog", cfg.Transport)
@@ -187,6 +193,13 @@ func sendSyslog(cfg Config, e Event, body []byte) error {
 }
 
 // ── TLS helper ────────────────────────────────────────────────────────────────
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
 
 // buildTLSConfig constructs a *tls.Config from the given TLSCfg paths.
 //   - All empty → default config (system root CAs, no client cert).
