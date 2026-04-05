@@ -324,6 +324,7 @@ func (srv *server) closeSession(sess *session) {
 
 	go siem.Send(siem.Event{
 		SessionID:  sess.id,
+		TSID:       sess.user + "/" + sess.host + "_" + sess.startTime.UTC().Format("20060102-150405"),
 		User:       sess.user,
 		Host:       sess.host,
 		RunasUser:  sess.runas,

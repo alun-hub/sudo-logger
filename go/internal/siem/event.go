@@ -12,6 +12,7 @@ import (
 // no file parsing required.
 type Event struct {
 	SessionID  string
+	TSID       string // user/host_YYYYmmdd-HHMMSS — matches ?tsid= in the replay GUI
 	User       string
 	Host       string
 	RunasUser  string
@@ -21,7 +22,7 @@ type Event struct {
 	EndTime    time.Time
 	ExitCode   int32
 	Incomplete bool   // true when connection was lost without SESSION_END
-	ReplayURL  string // populated by Send() from Config.ReplayURLBase
+	ReplayURL  string // populated by Send() from Config.ReplayURLBase + TSID
 }
 
 // durationSec returns the session length in seconds (≥ 0).

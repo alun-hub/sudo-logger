@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -22,8 +23,10 @@ func Send(e Event) {
 		return
 	}
 
-	if cfg.ReplayURLBase != "" {
-		e.ReplayURL = strings.TrimRight(cfg.ReplayURLBase, "/") + "/?session=" + e.SessionID
+	if cfg.ReplayURLBase != "" && e.TSID != "" {
+		// TSID format: user/host_YYYYmmdd-HHMMSS — same as ?tsid= in the replay GUI
+		base := strings.TrimRight(cfg.ReplayURLBase, "/")
+		e.ReplayURL = base + "/?tsid=" + url.QueryEscape(e.TSID)
 	}
 
 	body, contentType, err := encodeEvent(e, cfg.Format)
