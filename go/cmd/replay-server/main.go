@@ -16,6 +16,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
@@ -59,6 +60,51 @@ var (
 	flagTrustedUserHeader = flag.String("trusted-user-header", "", "Header containing pre-authenticated username (e.g. X-Forwarded-User)")
 )
 
+// ctxKey is the unexported type for context keys in this package.
+type ctxKey int
+
+const ctxViewer ctxKey = 0
+
+// viewerFromContext returns the authenticated username stored in ctx,
+// or "-" if none was set.
+func viewerFromContext(r *http.Request) string {
+	if v, ok := r.Context().Value(ctxViewer).(string); ok && v != "" {
+		return v
+	}
+	return "-"
+}
+
+// viewLogEntry records a single session-view event.
+type viewLogEntry struct {
+	Time    time.Time `json:"time"`
+	Viewer  string    `json:"viewer"`
+	TSID    string    `json:"tsid"`
+	ReplayURL string  `json:"replay_url,omitempty"`
+}
+
+// viewLog is a bounded ring buffer of the most recent session-view events.
+const viewLogMax = 10_000
+
+var (
+	viewLogMu      sync.Mutex
+	viewLogEntries []viewLogEntry
+)
+
+func recordView(viewer, tsid, replayURL string) {
+	viewLogMu.Lock()
+	defer viewLogMu.Unlock()
+	if len(viewLogEntries) >= viewLogMax {
+		// Drop oldest entry.
+		viewLogEntries = viewLogEntries[1:]
+	}
+	viewLogEntries = append(viewLogEntries, viewLogEntry{
+		Time:      time.Now().UTC(),
+		Viewer:    viewer,
+		TSID:      tsid,
+		ReplayURL: replayURL,
+	})
+}
+
 // loggingResponseWriter captures the HTTP status code for access logging.
 type loggingResponseWriter struct {
 	http.ResponseWriter
@@ -83,7 +129,8 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 			user = u
 		}
 		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(lrw, r)
+		ctx := context.WithValue(r.Context(), ctxViewer, user)
+		next.ServeHTTP(lrw, r.WithContext(ctx))
 		log.Printf("access user=%s addr=%s %s %s %d",
 			user, r.RemoteAddr, r.Method, r.URL.Path, lrw.status)
 	})
@@ -425,6 +472,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
+	mux.HandleFunc("/api/access-log", handleAccessLog)
 	mux.HandleFunc("/api/report", handleReport)
 	mux.HandleFunc("/api/rules", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -577,6 +625,23 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record who viewed this session before streaming the response.
+	// Prefer the configured base URL (from SIEM config) so the logged link
+	// matches what operators expect, regardless of the request's Host header.
+	var replayURL string
+	if base := strings.TrimRight(siem.Get().ReplayURLBase, "/"); base != "" {
+		replayURL = base + "/?tsid=" + url.QueryEscape(tsid)
+	} else {
+		scheme := "https"
+		if r.TLS == nil {
+			scheme = "http"
+		}
+		replayURL = scheme + "://" + r.Host + "/?tsid=" + url.QueryEscape(tsid)
+	}
+	viewer := viewerFromContext(r)
+	recordView(viewer, tsid, replayURL)
+	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", viewer, r.RemoteAddr, tsid, replayURL)
+
 	events, err := readEvents(absSessDir)
 	if err != nil {
 		log.Printf("read events %s: %v", tsid, err)
@@ -586,6 +651,50 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(events); err != nil {
 		log.Printf("encode session events: %v", err)
+	}
+}
+
+// handleAccessLog returns the view audit log as JSON, newest entries first.
+// Optional query params:
+//
+//	viewer=alice  — filter to a specific viewer
+//	limit=N       — max entries to return (default 200, max 1000)
+func handleAccessLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	filterViewer := r.URL.Query().Get("viewer")
+	limit := 200
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 1000 {
+		limit = v
+	}
+
+	viewLogMu.Lock()
+	snap := make([]viewLogEntry, len(viewLogEntries))
+	copy(snap, viewLogEntries)
+	viewLogMu.Unlock()
+
+	// Reverse so newest is first.
+	for i, j := 0, len(snap)-1; i < j; i, j = i+1, j-1 {
+		snap[i], snap[j] = snap[j], snap[i]
+	}
+
+	result := snap[:0]
+	for _, e := range snap {
+		if filterViewer != "" && e.Viewer != filterViewer {
+			continue
+		}
+		result = append(result, e)
+		if len(result) >= limit {
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("encode access log: %v", err)
 	}
 }
 
