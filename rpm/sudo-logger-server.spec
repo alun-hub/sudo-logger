@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.10.0
+Version:        1.11.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -94,11 +94,20 @@ fi
 %config(noreplace) %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/server.conf
 %ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/ack-sign.key
 %ghost %attr(0644, root, root)       %{_sysconfdir}/sudo-logger/ack-verify.key
+%ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/siem.yaml
 %dir %attr(0750, sudologger, sudologger) %{_localstatedir}/log/sudoreplay
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.11.0-1
+- feat: SIEM forwarding — sends session events to external SIEM on session close
+- Supports HTTPS (mTLS) and syslog (UDP/TCP/TCP-TLS) transports
+- Supports JSON, CEF, and OCSF v1.3.0 (Class 3003) formats
+- Config loaded from /etc/sudo-logger/siem.yaml; reloaded automatically every 30s
+- New flag: -siem-config (default /etc/sudo-logger/siem.yaml)
+- siem.yaml managed via sudo-replay GUI Settings tab
+
 * Sat Apr 04 2026 sudo-logger 1.10.0-1
 - feat: sessions stored as asciinema v2 (session.cast) instead of sudoreplay
   multi-file format; all metadata embedded in cast header, no separate meta.json

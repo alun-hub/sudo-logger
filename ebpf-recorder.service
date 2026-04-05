@@ -1,0 +1,42 @@
+[Unit]
+Description=eBPF PTY session recorder
+# Must start after systemd-logind (session cgroups) and network (logserver).
+After=systemd-logind.service network-online.target
+Wants=network-online.target
+# Same rationale as sudo-shipper: prevent manual stop to close the
+# attack vector where a user stops the recorder to avoid logging.
+RefuseManualStop=yes
+
+[Service]
+EnvironmentFile=/etc/sudo-logger/shipper.conf
+ExecStart=/usr/bin/ebpf-recorder \
+    -server    ${LOGSERVER} \
+    -cert      /etc/sudo-logger/client.crt \
+    -key       /etc/sudo-logger/client.key \
+    -ca        /etc/sudo-logger/ca.crt \
+    -verify-key /etc/sudo-logger/ack-verify.key
+
+KillMode=process
+Restart=always
+RestartSec=2
+
+User=root
+# eBPF requires CAP_BPF + CAP_PERFMON (kernel >= 5.8).
+# CAP_BPF is implied by running as root; explicit AmbientCapabilities
+# would be needed if we ever drop to a non-root user.
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+# eBPF loading requires access to /sys/kernel/btf/vmlinux at startup
+# for CO-RE relocation resolution.  ProtectKernelLogs is omitted for
+# the same reason (bpf() syscall needs kernel log access for verifier errors).
+ReadOnlyPaths=/sys/kernel/btf
+
+[Install]
+WantedBy=multi-user.target

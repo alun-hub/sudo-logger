@@ -458,6 +458,30 @@
       width: 32px; text-align: center; padding: 1px 0; border-radius: 3px; }
     .rules-conds { font-size: 11px; color: var(--text-dim);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
+
+    /* ── SIEM config section ──────────────────────────────────────────────── */
+    .siem-section { margin-top: 28px; }
+    .siem-heading { font-size: 12px; font-weight: 700; color: var(--text-sub);
+      text-transform: uppercase; letter-spacing: 0.08em;
+      padding: 10px 0 10px; border-top: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px; }
+    .siem-form { display: grid; grid-template-columns: 160px 1fr; gap: 8px 14px;
+      align-items: center; max-width: 640px; }
+    .siem-form label { font-size: 11px; color: var(--text-sub); text-align: right; }
+    .siem-form input[type=text], .siem-form select {
+      background: var(--card); border: 1px solid var(--border-mid);
+      color: var(--text); font-family: var(--font); font-size: 12px;
+      padding: 4px 8px; border-radius: 3px; width: 100%; }
+    .siem-form input[type=text]:focus, .siem-form select:focus {
+      outline: none; border-color: var(--blue); }
+    .siem-form input[type=checkbox] { accent-color: var(--green); width: 14px; height: 14px; justify-self: start; }
+    .siem-subsection { grid-column: 1 / -1; margin-top: 4px;
+      font-size: 11px; font-weight: 600; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: 0.06em; padding-top: 6px;
+      border-top: 1px solid var(--border); }
+    .siem-footer { margin-top: 14px; display: flex; align-items: center; gap: 10px; }
+    .siem-note { font-size: 11px; color: var(--text-dim); margin-top: 10px;
+      grid-column: 1 / -1; }
   </style>
 </head>
 <body>
@@ -574,6 +598,85 @@
       </tr></thead>
       <tbody id="rules-tbody"></tbody>
     </table>
+
+    <!-- ── SIEM forwarding ──────────────────────────────────────────────────── -->
+    <div class="siem-section">
+      <div class="siem-heading">
+        SIEM Forwarding
+        <span class="settings-status" id="siem-status" style="display:none"></span>
+      </div>
+      <div class="siem-form" id="siem-form">
+
+        <label>Enabled</label>
+        <input type="checkbox" id="siem-enabled">
+
+        <label>Transport</label>
+        <select id="siem-transport">
+          <option value="https">HTTPS</option>
+          <option value="syslog">Syslog</option>
+        </select>
+
+        <label>Format</label>
+        <select id="siem-format">
+          <option value="json">JSON</option>
+          <option value="cef">CEF</option>
+          <option value="ocsf">OCSF</option>
+        </select>
+
+        <label>Replay URL base</label>
+        <input type="text" id="siem-replay-url" placeholder="https://replay.example.com (optional)">
+
+        <!-- HTTPS fields -->
+        <div class="siem-subsection" id="siem-https-hdr">HTTPS</div>
+
+        <label>URL</label>
+        <input type="text" id="siem-https-url" placeholder="https://logstash.example.com:8080/events">
+
+        <label>Token</label>
+        <input type="text" id="siem-https-token" placeholder="Bearer / Splunk HEC token (optional)">
+
+        <label>CA cert</label>
+        <input type="text" id="siem-https-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+
+        <label>Client cert</label>
+        <input type="text" id="siem-https-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+
+        <label>Client key</label>
+        <input type="text" id="siem-https-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+
+        <!-- Syslog fields -->
+        <div class="siem-subsection" id="siem-syslog-hdr">Syslog</div>
+
+        <label>Address</label>
+        <input type="text" id="siem-syslog-addr" placeholder="syslog.example.com:514">
+
+        <label>Protocol</label>
+        <select id="siem-syslog-proto">
+          <option value="udp">UDP</option>
+          <option value="tcp">TCP</option>
+          <option value="tcp-tls">TCP + TLS / mTLS</option>
+        </select>
+
+        <label>CA cert</label>
+        <input type="text" id="siem-syslog-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+
+        <label>Client cert</label>
+        <input type="text" id="siem-syslog-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+
+        <label>Client key</label>
+        <input type="text" id="siem-syslog-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+
+        <p class="siem-note">
+          The log server reloads this config automatically within 30 seconds.
+          Certificate paths must be readable by the log server process.
+        </p>
+      </div>
+
+      <div class="siem-footer">
+        <button class="btn-primary" id="btn-save-siem">Save SIEM config</button>
+        <span id="siem-path" style="font-size:11px;color:var(--text-dim)"></span>
+      </div>
+    </div>
   </div>
 
   <!-- ── Help tab ──────────────────────────────────────────────────────────── -->
@@ -1700,7 +1803,7 @@ function switchTab(tab) {
   document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
   document.querySelectorAll('.report-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
   if (tab === 'summary' || tab === 'anomalies') fetchReport();
-  if (tab === 'settings') fetchRules();
+  if (tab === 'settings') { fetchRules(); fetchSiemConfig(); }
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
@@ -1884,6 +1987,141 @@ function showSettingsStatus(msg, isErr) {
   clearTimeout(s._t);
   s._t = setTimeout(() => { s.style.display = 'none'; }, 3000);
 }
+
+// ── SIEM config ───────────────────────────────────────────────────────────────
+
+function siemTransportFields() {
+  const t = document.getElementById('siem-transport').value;
+  const httpsIds = ['siem-https-hdr','siem-https-url','siem-https-token',
+                    'siem-https-ca','siem-https-cert','siem-https-key'];
+  const syslogIds = ['siem-syslog-hdr','siem-syslog-addr','siem-syslog-proto',
+                     'siem-syslog-ca','siem-syslog-cert','siem-syslog-key'];
+  // Each field has a label sibling — show/hide both via the grid row trick:
+  // we find the label by iterating siem-form children
+  const form = document.getElementById('siem-form');
+  const children = Array.from(form.children);
+  httpsIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const idx = children.indexOf(el);
+    const label = idx > 0 ? children[idx - 1] : null;
+    const show = t === 'https';
+    el.style.display = show ? '' : 'none';
+    if (label && label.tagName === 'LABEL') label.style.display = show ? '' : 'none';
+  });
+  syslogIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const idx = children.indexOf(el);
+    const label = idx > 0 ? children[idx - 1] : null;
+    const show = t === 'syslog';
+    el.style.display = show ? '' : 'none';
+    if (label && label.tagName === 'LABEL') label.style.display = show ? '' : 'none';
+  });
+  // The subsection divs don't have labels
+  document.getElementById('siem-https-hdr').style.display = t === 'https' ? '' : 'none';
+  document.getElementById('siem-syslog-hdr').style.display = t === 'syslog' ? '' : 'none';
+}
+
+function siemTLSFields() {
+  const proto = document.getElementById('siem-syslog-proto').value;
+  const tlsIds = ['siem-syslog-ca','siem-syslog-cert','siem-syslog-key'];
+  const form = document.getElementById('siem-form');
+  const children = Array.from(form.children);
+  tlsIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const idx = children.indexOf(el);
+    const label = idx > 0 ? children[idx - 1] : null;
+    const show = proto === 'tcp-tls';
+    el.style.display = show ? '' : 'none';
+    if (label && label.tagName === 'LABEL') label.style.display = show ? '' : 'none';
+  });
+}
+
+document.getElementById('siem-transport').addEventListener('change', siemTransportFields);
+document.getElementById('siem-syslog-proto').addEventListener('change', siemTLSFields);
+
+async function fetchSiemConfig() {
+  try {
+    const res = await fetch('/api/siem-config');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const c = data.config || {};
+    document.getElementById('siem-path').textContent = data.path || '';
+    document.getElementById('siem-enabled').checked          = !!c.enabled;
+    document.getElementById('siem-transport').value          = c.transport || 'https';
+    document.getElementById('siem-format').value             = c.format    || 'json';
+    document.getElementById('siem-replay-url').value         = c.replay_url_base || '';
+    document.getElementById('siem-https-url').value          = (c.https  && c.https.url)        || '';
+    document.getElementById('siem-https-token').value        = (c.https  && c.https.token)      || '';
+    document.getElementById('siem-https-ca').value           = (c.https  && c.https.tls && c.https.tls.ca)   || '';
+    document.getElementById('siem-https-cert').value         = (c.https  && c.https.tls && c.https.tls.cert) || '';
+    document.getElementById('siem-https-key').value          = (c.https  && c.https.tls && c.https.tls.key)  || '';
+    document.getElementById('siem-syslog-addr').value        = (c.syslog && c.syslog.addr)      || '';
+    document.getElementById('siem-syslog-proto').value       = (c.syslog && c.syslog.protocol)  || 'udp';
+    document.getElementById('siem-syslog-ca').value          = (c.syslog && c.syslog.tls && c.syslog.tls.ca)   || '';
+    document.getElementById('siem-syslog-cert').value        = (c.syslog && c.syslog.tls && c.syslog.tls.cert) || '';
+    document.getElementById('siem-syslog-key').value         = (c.syslog && c.syslog.tls && c.syslog.tls.key)  || '';
+    siemTransportFields();
+    siemTLSFields();
+  } catch (err) {
+    showSiemStatus('Load failed: ' + err.message, true);
+  }
+}
+
+async function saveSiemConfig() {
+  const cfg = {
+    enabled:         document.getElementById('siem-enabled').checked,
+    transport:       document.getElementById('siem-transport').value,
+    format:          document.getElementById('siem-format').value,
+    replay_url_base: document.getElementById('siem-replay-url').value.trim(),
+    https: {
+      url:   document.getElementById('siem-https-url').value.trim(),
+      token: document.getElementById('siem-https-token').value.trim(),
+      tls: {
+        ca:   document.getElementById('siem-https-ca').value.trim(),
+        cert: document.getElementById('siem-https-cert').value.trim(),
+        key:  document.getElementById('siem-https-key').value.trim(),
+      },
+    },
+    syslog: {
+      addr:     document.getElementById('siem-syslog-addr').value.trim(),
+      protocol: document.getElementById('siem-syslog-proto').value,
+      tls: {
+        ca:   document.getElementById('siem-syslog-ca').value.trim(),
+        cert: document.getElementById('siem-syslog-cert').value.trim(),
+        key:  document.getElementById('siem-syslog-key').value.trim(),
+      },
+    },
+  };
+  const btn = document.getElementById('btn-save-siem');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/siem-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: cfg }),
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    showSiemStatus('Saved — log server reloads within 30 s', false);
+  } catch (err) {
+    showSiemStatus('Save failed: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showSiemStatus(msg, isErr) {
+  const s = document.getElementById('siem-status');
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  clearTimeout(s._t);
+  s._t = setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
+
+document.getElementById('btn-save-siem').addEventListener('click', saveSiemConfig);
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 

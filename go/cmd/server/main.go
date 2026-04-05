@@ -23,6 +23,7 @@ import (
 
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
+	"sudo-logger/internal/siem"
 )
 
 // validName matches safe directory name components: alphanumeric plus .-_
@@ -51,6 +52,8 @@ var (
 	flagStrictCertHost = flag.Bool("strict-cert-host", false,
 		"Reject sessions where the claimed host does not match the client certificate CN/SAN. "+
 			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
+	flagSiemConfig = flag.String("siem-config", "/etc/sudo-logger/siem.yaml",
+		"Path to SIEM forwarding config (YAML). Reloaded automatically every 30 s.")
 )
 
 type server struct {
@@ -71,6 +74,8 @@ type session struct {
 	startTime time.Time
 	writer    *iolog.Writer
 	lastSeq   uint64
+	exitCode  int32 // set from SESSION_END; 0 if connection was lost
+	incomplete bool  // true when connection dropped without SESSION_END
 }
 
 func main() {
@@ -102,6 +107,7 @@ func main() {
 		sessions: make(map[string]*session),
 	}
 
+	siem.Load(*flagSiemConfig)
 	log.Printf("sudo-logserver listening on %s, writing to %s", *flagListen, *flagLogDir)
 
 	for {
@@ -131,6 +137,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 					sess.id, remote, err)
 				_ = os.WriteFile(sess.writer.Dir()+"/INCOMPLETE",
 					[]byte("connection lost without session_end\n"), 0640)
+				sess.incomplete = true
 				srv.closeSession(sess)
 			}
 			return
@@ -214,6 +221,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			if sess != nil {
 				if end != nil {
+					sess.exitCode = end.ExitCode
 					log.Printf("[%s] end user=%s exit=%d seq=%d duration=%s",
 						sess.id, sess.user, end.ExitCode, end.FinalSeq,
 						time.Since(sess.startTime).Round(time.Second))
@@ -313,6 +321,19 @@ func (srv *server) closeSession(sess *session) {
 	srv.mu.Lock()
 	delete(srv.sessions, sess.id)
 	srv.mu.Unlock()
+
+	go siem.Send(siem.Event{
+		SessionID:  sess.id,
+		User:       sess.user,
+		Host:       sess.host,
+		RunasUser:  sess.runas,
+		Cwd:        sess.cwd,
+		Command:    sess.command,
+		StartTime:  sess.startTime,
+		EndTime:    time.Now(),
+		ExitCode:   sess.exitCode,
+		Incomplete: sess.incomplete,
+	})
 }
 
 func (srv *server) buildACK(sessionID string, seq uint64) []byte {

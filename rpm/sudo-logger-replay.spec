@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.11.0
+Version:        1.12.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -60,6 +60,13 @@ chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || 
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.12.0-1
+- feat: SIEM config panel in Settings tab (transport, format, TLS/mTLS paths)
+- New API: GET/PUT /api/siem-config — reads/writes /etc/sudo-logger/siem.yaml
+- New flag: -siem-config (default /etc/sudo-logger/siem.yaml)
+- Supported transports: https (mTLS required), syslog (udp/tcp/tcp-tls)
+- Supported formats: json, cef, ocsf
+
 * Sat Apr 04 2026 sudo-logger 1.11.0-1
 - feat: reads asciinema v2 session.cast format; all session metadata in cast header
 - perf: duration calculated via file tail-seek — O(1) regardless of session length

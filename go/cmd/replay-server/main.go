@@ -38,6 +38,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
+
+	"sudo-logger/internal/siem"
 )
 
 //go:embed static
@@ -47,6 +49,7 @@ var (
 	flagListen            = flag.String("listen", ":8080", "Listen address")
 	flagLogDir            = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
 	flagRules             = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
+	flagSiemConfig        = flag.String("siem-config", "/etc/sudo-logger/siem.yaml", "SIEM forwarding config file (shared with log server)")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	flagTLSKey            = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
 	flagHTPasswd          = flag.String("htpasswd", "", "Path to htpasswd file for HTTP Basic Auth (bcrypt hashes only; reload with SIGHUP)")
@@ -419,6 +422,16 @@ func main() {
 			handleGetRules(w, r)
 		case http.MethodPut:
 			handlePutRules(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/siem-config", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetSiemConfig(w, r)
+		case http.MethodPut:
+			handlePutSiemConfig(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -1075,6 +1088,67 @@ func handlePutRules(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
 		log.Printf("encode rules response: %v", err)
+	}
+}
+
+// ── SIEM config API ───────────────────────────────────────────────────────────
+
+// handleGetSiemConfig returns the current siem.yaml content as JSON,
+// creating a default (disabled) config if the file does not yet exist.
+func handleGetSiemConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := siem.Get()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"path":   *flagSiemConfig,
+		"config": cfg,
+	}); err != nil {
+		log.Printf("encode siem config: %v", err)
+	}
+}
+
+// handlePutSiemConfig validates and persists an updated SIEM config.
+// The log server picks up the change within 30 seconds via its file poller.
+func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Config siem.Config `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	cfg := body.Config
+
+	// Validate transport and format values to avoid writing garbage.
+	switch cfg.Transport {
+	case "", "https", "syslog": // ok
+	default:
+		http.Error(w, "transport must be https or syslog", http.StatusBadRequest)
+		return
+	}
+	switch cfg.Format {
+	case "", "json", "cef", "ocsf": // ok
+	default:
+		http.Error(w, "format must be json, cef, or ocsf", http.StatusBadRequest)
+		return
+	}
+
+	yamlBytes, err := yaml.Marshal(cfg)
+	if err != nil {
+		http.Error(w, "marshal yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	header := []byte("# SIEM forwarding configuration — managed by sudo-replay GUI\n" +
+		"# Log server reloads this file automatically every 30 seconds.\n\n")
+	if err := os.WriteFile(*flagSiemConfig, append(header, yamlBytes...), 0o640); err != nil {
+		log.Printf("write siem config: %v", err)
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("siem: config updated via GUI (enabled=%v transport=%s format=%s)",
+		cfg.Enabled, cfg.Transport, cfg.Format)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
+		log.Printf("encode siem response: %v", err)
 	}
 }
 
