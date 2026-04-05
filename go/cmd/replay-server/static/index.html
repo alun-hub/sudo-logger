@@ -482,6 +482,15 @@
     .siem-footer { margin-top: 14px; display: flex; align-items: center; gap: 10px; }
     .siem-note { font-size: 11px; color: var(--text-dim); margin-top: 10px;
       grid-column: 1 / -1; }
+    .cert-input { display: flex; gap: 6px; align-items: center; }
+    .cert-input input[type=text] { flex: 1; }
+    .btn-upload { background: var(--card); border: 1px solid var(--border-mid);
+      color: var(--text-sub); font-family: var(--font); font-size: 11px;
+      padding: 4px 9px; border-radius: 3px; cursor: pointer; white-space: nowrap;
+      flex-shrink: 0; transition: background 0.12s, color 0.12s; }
+    .btn-upload:hover { background: var(--card-hover); color: var(--text); }
+    .btn-upload.ok  { color: var(--green); border-color: var(--green); }
+    .btn-upload.err { color: var(--red);   border-color: var(--red); }
   </style>
 </head>
 <body>
@@ -636,13 +645,25 @@
         <input type="text" id="siem-https-token" placeholder="Bearer / Splunk HEC token (optional)">
 
         <label>CA cert</label>
-        <input type="text" id="siem-https-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+        <div class="cert-input">
+          <input type="text" id="siem-https-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+          <input type="file" id="siem-https-ca-file" accept=".crt,.pem,.key" style="display:none">
+          <button class="btn-upload" onclick="uploadCert('siem-https-ca')">Upload</button>
+        </div>
 
         <label>Client cert</label>
-        <input type="text" id="siem-https-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+        <div class="cert-input">
+          <input type="text" id="siem-https-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+          <input type="file" id="siem-https-cert-file" accept=".crt,.pem,.key" style="display:none">
+          <button class="btn-upload" onclick="uploadCert('siem-https-cert')">Upload</button>
+        </div>
 
         <label>Client key</label>
-        <input type="text" id="siem-https-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+        <div class="cert-input">
+          <input type="text" id="siem-https-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+          <input type="file" id="siem-https-key-file" accept=".crt,.pem,.key" style="display:none">
+          <button class="btn-upload" onclick="uploadCert('siem-https-key')">Upload</button>
+        </div>
 
         <!-- Syslog fields -->
         <div class="siem-subsection" id="siem-syslog-hdr">Syslog</div>
@@ -658,13 +679,25 @@
         </select>
 
         <label>CA cert</label>
-        <input type="text" id="siem-syslog-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+        <div class="cert-input">
+          <input type="text" id="siem-syslog-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+          <input type="file" id="siem-syslog-ca-file" accept=".crt,.pem,.key" style="display:none">
+          <button class="btn-upload" onclick="uploadCert('siem-syslog-ca')">Upload</button>
+        </div>
 
         <label>Client cert</label>
-        <input type="text" id="siem-syslog-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+        <div class="cert-input">
+          <input type="text" id="siem-syslog-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+          <input type="file" id="siem-syslog-cert-file" accept=".crt,.pem,.key" style="display:none">
+          <button class="btn-upload" onclick="uploadCert('siem-syslog-cert')">Upload</button>
+        </div>
 
         <label>Client key</label>
-        <input type="text" id="siem-syslog-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+        <div class="cert-input">
+          <input type="text" id="siem-syslog-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+          <input type="file" id="siem-syslog-key-file" accept=".crt,.pem,.key" style="display:none">
+          <button class="btn-upload" onclick="uploadCert('siem-syslog-key')">Upload</button>
+        </div>
 
         <p class="siem-note">
           The log server reloads this config automatically within 30 seconds.
@@ -2122,6 +2155,48 @@ function showSiemStatus(msg, isErr) {
 }
 
 document.getElementById('btn-save-siem').addEventListener('click', saveSiemConfig);
+
+// uploadCert opens a file picker for the cert/key field identified by fieldId,
+// uploads the chosen file to /api/siem-cert, and populates the path field on success.
+function uploadCert(fieldId) {
+  const fileInput = document.getElementById(fieldId + '-file');
+  fileInput.value = '';
+  fileInput.onchange = async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    // Find the upload button that triggered this (sibling of the file input)
+    const btn = fileInput.nextElementSibling;
+    const origText = btn.textContent;
+    btn.textContent = '…';
+    btn.disabled = true;
+    btn.classList.remove('ok', 'err');
+
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+
+    try {
+      const res = await fetch('/api/siem-cert', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg.trim() || 'HTTP ' + res.status);
+      }
+      const data = await res.json();
+      document.getElementById(fieldId).value = data.path;
+      btn.textContent = '✓';
+      btn.classList.add('ok');
+      setTimeout(() => { btn.textContent = origText; btn.classList.remove('ok'); }, 2500);
+    } catch (err) {
+      btn.textContent = '✗';
+      btn.classList.add('err');
+      showSiemStatus('Upload failed: ' + err.message, true);
+      setTimeout(() => { btn.textContent = origText; btn.classList.remove('err'); }, 3000);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  fileInput.click();
+}
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 

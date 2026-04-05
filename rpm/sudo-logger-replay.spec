@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.12.0
+Version:        1.12.1
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -60,6 +60,11 @@ chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || 
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.12.1-1
+- feat: cert/key upload buttons in SIEM settings — uploads PEM files to
+  /etc/sudo-logger/ via POST /api/siem-cert; path field auto-populated on success
+- Accepts .crt/.pem/.key, validates PEM content, max 64 KB, mode 0640
+
 * Sun Apr 05 2026 sudo-logger 1.12.0-1
 - feat: SIEM config panel in Settings tab (transport, format, TLS/mTLS paths)
 - New API: GET/PUT /api/siem-config — reads/writes /etc/sudo-logger/siem.yaml

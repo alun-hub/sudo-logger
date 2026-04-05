@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -435,6 +436,13 @@ func main() {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+	mux.HandleFunc("/api/siem-cert", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleUploadSiemCert(w, r)
 	})
 
 	staticFS, err := fs.Sub(staticFiles, "static")
@@ -1150,6 +1158,81 @@ func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
 		log.Printf("encode siem response: %v", err)
 	}
+}
+
+// handleUploadSiemCert accepts a PEM file upload (multipart field "file") and
+// saves it under /etc/sudo-logger/ with a validated filename.
+//
+// Only filenames matching [a-zA-Z0-9._-]{1,64}\.(crt|pem|key) are accepted.
+// The file must contain at least one PEM block and be ≤ 64 KB.
+// Saved with mode 0640 (root:sudologger) so the log server can read it.
+func handleUploadSiemCert(w http.ResponseWriter, r *http.Request) {
+	const maxSize = 64 * 1024 // 64 KB
+	r.Body = http.MaxBytesReader(w, r.Body, maxSize+1024)
+
+	if err := r.ParseMultipartForm(maxSize); err != nil {
+		http.Error(w, "file too large or bad multipart: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	f, hdr, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing file field", http.StatusBadRequest)
+		return
+	}
+	defer f.Close()
+
+	name := filepath.Base(hdr.Filename)
+	if !validCertName.MatchString(name) {
+		http.Error(w, "filename must match [a-zA-Z0-9._-]{1,64}.(crt|pem|key)", http.StatusBadRequest)
+		return
+	}
+
+	data := make([]byte, maxSize+1)
+	n, err := f.Read(data)
+	if err != nil && n == 0 {
+		http.Error(w, "read file: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if n > maxSize {
+		http.Error(w, "file exceeds 64 KB limit", http.StatusRequestEntityTooLarge)
+		return
+	}
+	data = data[:n]
+
+	if !containsPEMBlock(data) {
+		http.Error(w, "file does not contain a valid PEM block", http.StatusBadRequest)
+		return
+	}
+
+	destDir := filepath.Dir(*flagSiemConfig) // same dir as siem.yaml, e.g. /etc/sudo-logger
+	dest := filepath.Join(destDir, name)
+
+	// Path traversal guard — dest must stay inside destDir.
+	if filepath.Dir(dest) != destDir {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	if err := os.WriteFile(dest, data, 0o640); err != nil {
+		log.Printf("siem cert upload: write %s: %v", dest, err)
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("siem: cert uploaded → %s (%d bytes)", dest, n)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"path": dest}); err != nil {
+		log.Printf("encode cert upload response: %v", err)
+	}
+}
+
+// validCertName accepts safe filenames with a .crt, .pem, or .key extension.
+var validCertName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}\.(crt|pem|key)$`)
+
+// containsPEMBlock returns true if data contains at least one valid PEM block.
+func containsPEMBlock(data []byte) bool {
+	return bytes.Contains(data, []byte("-----BEGIN "))
 }
 
 // ── Risk scoring ──────────────────────────────────────────────────────────────
