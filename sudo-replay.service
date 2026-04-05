@@ -5,12 +5,13 @@ After=network.target
 [Service]
 Type=simple
 User=sudologger
+SyslogIdentifier=sudo-replay-server
 # Optional configuration file — create to add flags like -tls-cert, -tls-key,
 # -htpasswd, -trusted-user-header.  See sudo-replay-server(8) for all flags.
 # Example /etc/sudo-logger/replay.conf:
 #   REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/replay.key -htpasswd /etc/sudo-logger/replay.htpasswd
 EnvironmentFile=-/etc/sudo-logger/replay.conf
-ExecStart=/bin/sh -c 'exec /usr/bin/sudo-replay-server -listen :8080 -logdir /var/log/sudoreplay -rules /etc/sudo-logger/risk-rules.yaml $REPLAY_ARGS'
+ExecStart=/bin/sh -c 'exec /usr/bin/sudo-replay-server -listen :8080 -logdir /var/log/sudoreplay -rules /etc/sudo-logger/risk-rules.yaml -siem-config /etc/sudo-logger/siem.yaml $REPLAY_ARGS'
 Restart=on-failure
 RestartSec=3s
 

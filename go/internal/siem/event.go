@@ -11,18 +11,22 @@ import (
 // It is populated from the in-memory session struct at close time —
 // no file parsing required.
 type Event struct {
-	SessionID  string
-	TSID       string // user/host_YYYYmmdd-HHMMSS — matches ?tsid= in the replay GUI
-	User       string
-	Host       string
-	RunasUser  string
-	Cwd        string
-	Command    string
-	StartTime  time.Time
-	EndTime    time.Time
-	ExitCode   int32
-	Incomplete bool   // true when connection was lost without SESSION_END
-	ReplayURL  string // populated by Send() from Config.ReplayURLBase + TSID
+	SessionID       string
+	TSID            string // user/host_YYYYmmdd-HHMMSS — matches ?tsid= in the replay GUI
+	User            string
+	Host            string
+	RunasUser       string
+	RunasUID        int
+	RunasGID        int
+	Cwd             string
+	Command         string
+	ResolvedCommand string
+	Flags           string // sudo flags: login_shell, preserve_env, implied_shell
+	StartTime       time.Time
+	EndTime         time.Time
+	ExitCode        int32
+	Incomplete      bool   // true when connection was lost without SESSION_END
+	ReplayURL       string // populated by Send() from Config.ReplayURLBase + TSID
 }
 
 // durationSec returns the session length in seconds (≥ 0).
@@ -43,6 +47,8 @@ func (e Event) FormatJSON() ([]byte, error) {
 		"user":       e.User,
 		"host":       e.Host,
 		"runas":      e.RunasUser,
+		"runas_uid":  e.RunasUID,
+		"runas_gid":  e.RunasGID,
 		"command":    e.Command,
 		"cwd":        e.Cwd,
 		"start_time": e.StartTime.UTC().Format(time.RFC3339),
@@ -50,6 +56,12 @@ func (e Event) FormatJSON() ([]byte, error) {
 		"duration_s": e.durationSec(),
 		"exit_code":  e.ExitCode,
 		"incomplete": e.Incomplete,
+	}
+	if e.ResolvedCommand != "" {
+		obj["resolved_command"] = e.ResolvedCommand
+	}
+	if e.Flags != "" {
+		obj["flags"] = e.Flags
 	}
 	if e.ReplayURL != "" {
 		obj["replay_url"] = e.ReplayURL
@@ -86,24 +98,32 @@ func cefSeverity(exitCode int32, incomplete bool) int {
 func (e Event) FormatCEF() string {
 	sev := cefSeverity(e.ExitCode, e.Incomplete)
 	ext := fmt.Sprintf(
-		"rt=%d shost=%s suser=%s duser=%s dproc=%s "+
+		"rt=%d shost=%s suser=%s duser=%s duid=%d dgid=%d dproc=%s "+
 			"cs1=%s cs1Label=sessionId cs2=%s cs2Label=cwd "+
 			"cn1=%d cn1Label=exitCode cn2=%d cn2Label=durationSec",
 		e.StartTime.UnixMilli(),
 		cefEscape(e.Host),
 		cefEscape(e.User),
 		cefEscape(e.RunasUser),
+		e.RunasUID,
+		e.RunasGID,
 		cefEscape(e.Command),
 		cefEscape(e.SessionID),
 		cefEscape(e.Cwd),
 		e.ExitCode,
 		int64(e.durationSec()),
 	)
+	if e.ResolvedCommand != "" {
+		ext += " cs3=" + cefEscape(e.ResolvedCommand) + " cs3Label=resolvedCommand"
+	}
+	if e.Flags != "" {
+		ext += " cs4=" + cefEscape(e.Flags) + " cs4Label=flags"
+	}
 	if e.Incomplete {
-		ext += " cs4=incomplete cs4Label=status"
+		ext += " cs5=incomplete cs5Label=status"
 	}
 	if e.ReplayURL != "" {
-		ext += " cs3=" + cefEscape(e.ReplayURL) + " cs3Label=replayUrl"
+		ext += " cs6=" + cefEscape(e.ReplayURL) + " cs6Label=replayUrl"
 	}
 	return fmt.Sprintf(
 		"CEF:0|sudo-logger|sudo-logger|1.0|sudo-session|Privileged Command Session|%d|%s",
@@ -124,8 +144,24 @@ func (e Event) FormatOCSF() ([]byte, error) {
 		"cwd":        e.Cwd,
 		"incomplete": e.Incomplete,
 	}
+	if e.Flags != "" {
+		unmapped["flags"] = e.Flags
+	}
 	if e.ReplayURL != "" {
 		unmapped["replay_url"] = e.ReplayURL
+	}
+
+	processUser := map[string]any{
+		"name": e.RunasUser,
+		"uid":  fmt.Sprintf("%d", e.RunasUID),
+		"gid":  fmt.Sprintf("%d", e.RunasGID),
+	}
+	process := map[string]any{
+		"cmd_line": e.Command,
+		"user":     processUser,
+	}
+	if e.ResolvedCommand != "" {
+		process["file"] = map[string]any{"path": e.ResolvedCommand}
 	}
 
 	obj := map[string]any{
@@ -158,12 +194,7 @@ func (e Event) FormatOCSF() ([]byte, error) {
 				"type":    "User",
 			},
 		},
-		"process": map[string]any{
-			"cmd_line": e.Command,
-			"user": map[string]any{
-				"name": e.RunasUser,
-			},
-		},
+		"process": process,
 		"device": map[string]any{
 			"hostname": e.Host,
 		},

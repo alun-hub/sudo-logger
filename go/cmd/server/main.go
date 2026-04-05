@@ -65,17 +65,21 @@ type server struct {
 }
 
 type session struct {
-	id        string
-	user      string
-	host      string
-	runas     string
-	cwd       string
-	command   string
-	startTime time.Time
-	writer    *iolog.Writer
-	lastSeq   uint64
-	exitCode  int32 // set from SESSION_END; 0 if connection was lost
-	incomplete bool  // true when connection dropped without SESSION_END
+	id              string
+	user            string
+	host            string
+	runas           string
+	cwd             string
+	command         string
+	resolvedCommand string
+	flags           string
+	runasUID        int
+	runasGID        int
+	startTime       time.Time
+	writer          *iolog.Writer
+	lastSeq         uint64
+	exitCode        int32 // set from SESSION_END; 0 if connection was lost
+	incomplete      bool  // true when connection dropped without SESSION_END
 }
 
 func main() {
@@ -288,14 +292,18 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 	_ = os.WriteFile(w.Dir()+"/ACTIVE", []byte("session in progress\n"), 0640)
 
 	sess := &session{
-		id:        start.SessionID,
-		user:      start.User,
-		host:      start.Host,
-		runas:     runasUser,
-		cwd:       cwd,
-		command:   start.Command,
-		startTime: startTime,
-		writer:    w,
+		id:              start.SessionID,
+		user:            start.User,
+		host:            start.Host,
+		runas:           runasUser,
+		cwd:             cwd,
+		command:         start.Command,
+		resolvedCommand: start.ResolvedCommand,
+		flags:           start.Flags,
+		runasUID:        start.RunasUID,
+		runasGID:        start.RunasGID,
+		startTime:       startTime,
+		writer:          w,
 	}
 
 	srv.mu.Lock()
@@ -323,17 +331,21 @@ func (srv *server) closeSession(sess *session) {
 	srv.mu.Unlock()
 
 	go siem.Send(siem.Event{
-		SessionID:  sess.id,
-		TSID:       sess.user + "/" + sess.host + "_" + sess.startTime.UTC().Format("20060102-150405"),
-		User:       sess.user,
-		Host:       sess.host,
-		RunasUser:  sess.runas,
-		Cwd:        sess.cwd,
-		Command:    sess.command,
-		StartTime:  sess.startTime,
-		EndTime:    time.Now(),
-		ExitCode:   sess.exitCode,
-		Incomplete: sess.incomplete,
+		SessionID:       sess.id,
+		TSID:            sess.user + "/" + sess.host + "_" + sess.startTime.UTC().Format("20060102-150405"),
+		User:            sess.user,
+		Host:            sess.host,
+		RunasUser:       sess.runas,
+		RunasUID:        sess.runasUID,
+		RunasGID:        sess.runasGID,
+		Cwd:             sess.cwd,
+		Command:         sess.command,
+		ResolvedCommand: sess.resolvedCommand,
+		Flags:           sess.flags,
+		StartTime:       sess.startTime,
+		EndTime:         time.Now(),
+		ExitCode:        sess.exitCode,
+		Incomplete:      sess.incomplete,
 	})
 }
 
