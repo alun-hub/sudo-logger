@@ -810,6 +810,240 @@ body::after {
   font-family: 'JetBrains Mono', monospace;
   color: var(--green); font-size: 12px;
 }
+
+/* ── Web UI Demo Slides ───────────────────────────────────────────── */
+.s-ui-demo {
+  display: flex; flex-direction: column; align-items: center;
+  width: 100%; max-width: 1020px; gap: 14px;
+}
+
+.ui-frame {
+  width: 100%;
+  background: #09090f;
+  border: 1px solid #1e2230;
+  border-radius: 6px;
+  overflow: hidden;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #d4daf0;
+  box-shadow: 0 0 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,232,122,0.07);
+}
+
+.ui-topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px; height: 36px;
+  background: #0f1117;
+  border-bottom: 1px solid #1e2230;
+  flex-shrink: 0;
+}
+.ui-logo { color: #00e87a; font-weight: 700; font-size: 12px;
+  display: flex; align-items: center; gap: 6px; letter-spacing: 0.04em; flex-shrink: 0; }
+.ui-logo-icon { font-size: 13px; filter: drop-shadow(0 0 4px #00e87a88); }
+.ui-ver { font-size: 10px; color: #8890a8; background: #161921;
+  border: 1px solid #1e2230; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; }
+.ui-sp { flex: 1; }
+.ui-tabs { display: flex; gap: 2px; }
+.ui-tab { color: #4a5068; font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; padding: 3px 11px; border-radius: 3px;
+  border: 1px solid transparent; cursor: default; }
+.ui-tab.on { border-color: #00e87a; color: #00e87a; background: #003d20; }
+.ui-theme-btn { background: none; border: 1px solid #1e2230; color: #4a5068;
+  font-size: 11px; padding: 1px 6px; border-radius: 3px; cursor: default; }
+
+/* player layout */
+.ui-player-body {
+  display: grid;
+  grid-template-columns: 252px 1fr;
+  height: 364px;
+}
+.ui-sidebar {
+  background: #0f1117;
+  border-right: 1px solid #1e2230;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.ui-search-wrap { padding: 7px 8px; border-bottom: 1px solid #1e2230; }
+.ui-search-box {
+  width: 100%; background: #161921; border: 1px solid #1e2230;
+  color: #8890a8; font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  padding: 5px 9px; border-radius: 4px; display: flex; align-items: center; gap: 6px;
+}
+.ui-sortbar {
+  display: flex; gap: 3px; padding: 5px 8px;
+  border-bottom: 1px solid #1e2230;
+}
+.ui-sort-btn {
+  flex: 1; text-align: center; font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; padding: 3px 0; border-radius: 3px;
+  border: 1px solid #1e2230; color: #4a5068; cursor: default;
+}
+.ui-sort-btn.on { border-color: #00e87a; color: #00e87a; background: #003d20; }
+
+.ui-sess-card {
+  padding: 9px 11px; border-bottom: 1px solid #1e2230;
+  border-left: 2px solid transparent; cursor: default;
+}
+.ui-sess-card.on  { background: #1a2035; border-left-color: #00e87a; }
+.ui-sess-card.inc { border-left-color: #ff5f6d; }
+.ui-sess-card.live{ border-left-color: #4caf50; }
+.ui-sc-row1 { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; }
+.ui-sc-user { font-size: 11px; font-weight: 600; color: #d4daf0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.ui-sess-card.on .ui-sc-user { color: #00e87a; }
+.ui-sc-runas { font-size: 9px; padding: 1px 5px; border-radius: 2px;
+  border: 1px solid #1e2230; color: #4a5068; background: #161921; flex-shrink: 0; }
+.ui-sc-runas.nr { color: #4da8ff; border-color: rgba(77,168,255,0.3); background: rgba(77,168,255,0.06); }
+.ui-sc-cmd { font-size: 10px; color: #8890a8; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px; }
+.ui-sc-meta { display: flex; justify-content: space-between; }
+.ui-sc-date { font-size: 10px; color: #8890a8; }
+.ui-sc-dur  { font-size: 10px; color: #4da8ff; background: #161921;
+  border: 1px solid #1e2230; padding: 1px 5px; border-radius: 2px; }
+.ui-sess-card.on .ui-sc-dur { color: #00e87a; border-color: #003d20; }
+.ui-sc-inc { font-size: 9px; color: #ff5f6d; background: rgba(255,80,80,0.08);
+  border: 1px solid rgba(255,80,80,0.3); padding: 1px 5px; border-radius: 2px; flex-shrink: 0; }
+.ui-sc-live { font-size: 9px; color: #4caf50; background: rgba(76,175,80,0.08);
+  border: 1px solid rgba(76,175,80,0.35); padding: 1px 5px; border-radius: 2px; flex-shrink: 0; }
+
+/* risk badges */
+.ui-rb { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 2px;
+  border: 1px solid; flex-shrink: 0; white-space: nowrap; }
+.ui-rb.crit { color: #ff5f6d; border-color: rgba(255,95,109,0.45); background: rgba(255,95,109,0.09); }
+.ui-rb.high { color: #ff9f40; border-color: rgba(255,159,64,0.45); background: rgba(255,159,64,0.08); }
+.ui-rb.med  { color: #ffd666; border-color: rgba(255,214,102,0.4); background: rgba(255,214,102,0.07); }
+.ui-rb.low  { color: #8890a8; border-color: #2a2f42; background: #161921; }
+
+/* player main */
+.ui-player-main {
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.ui-info-bar {
+  padding: 6px 14px; background: #0f1117;
+  border-bottom: 1px solid #1e2230; flex-shrink: 0;
+}
+.ui-info-row { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+.ui-il { color: #4a5068; font-size: 10px; flex-shrink: 0; }
+.ui-iv { color: #d4daf0; font-size: 10px; }
+.ui-iv.g { color: #00e87a; }
+.ui-iv.b { color: #4da8ff; }
+.ui-iv.d { color: #8890a8; }
+
+.ui-terminal {
+  flex: 1; padding: 10px 14px; background: #09090f;
+  overflow: hidden; font-family: 'JetBrains Mono', monospace;
+}
+.ui-tl { font-size: 11px; line-height: 1.7; white-space: nowrap; overflow: hidden; }
+.ui-tp { color: #00e87a; margin-right: 6px; }
+.ui-tc { color: #d4daf0; }
+.ui-to { color: #8890a8; }
+
+.ui-controls {
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px;
+  background: #0f1117; border-top: 1px solid #1e2230; flex-shrink: 0;
+}
+.ui-btn-play {
+  background: #003d20; border: 1px solid #00e87a; color: #00e87a;
+  font-size: 11px; width: 28px; height: 24px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center; cursor: default;
+}
+.ui-btn-icon {
+  background: #161921; border: 1px solid #1e2230; color: #8890a8;
+  font-size: 10px; width: 24px; height: 24px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center; cursor: default;
+}
+.ui-time { font-size: 10px; color: #00e87a; min-width: 28px; text-align: center; }
+.ui-time.tot { color: #8890a8; }
+.ui-scrub { flex: 1; height: 3px; background: #2a2f42;
+  border-radius: 2px; position: relative; }
+.ui-scrub-fill { height: 100%; background: #00e87a; border-radius: 2px; width: 68%; }
+.ui-scrub-thumb {
+  position: absolute; top: 50%; transform: translate(-50%,-50%);
+  left: 68%; width: 9px; height: 9px; background: #00e87a;
+  border-radius: 50%; box-shadow: 0 0 5px #00e87a88;
+}
+.ui-speed {
+  background: #161921; border: 1px solid #1e2230; color: #8890a8;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  padding: 2px 4px; border-radius: 3px;
+}
+
+/* report / summary view */
+.ui-report-body {
+  padding: 18px 22px;
+  overflow: hidden;
+}
+.ui-report-cards { display: flex; gap: 10px; margin-bottom: 20px; }
+.ui-rc {
+  background: #161921; border: 1px solid #1e2230;
+  border-radius: 5px; padding: 13px 18px; min-width: 110px;
+}
+.ui-rc.warn { border-color: rgba(255,80,80,0.4); }
+.ui-rc-val { font-size: 26px; font-weight: 700; color: #00e87a; line-height: 1.1; }
+.ui-rc.warn .ui-rc-val { color: #ff5f6d; }
+.ui-rc-lbl { font-size: 10px; color: #8890a8; margin-top: 4px; }
+.ui-rc.filterable.on { border-color: #00e87a; box-shadow: 0 0 0 1px #00e87a; }
+.ui-rc.filterable.on .ui-rc-lbl { color: #00e87a; }
+
+.ui-sec-title {
+  font-size: 10px; color: #4a5068; letter-spacing: 0.08em; text-transform: uppercase;
+  margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1px solid #1e2230;
+}
+.ui-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+.ui-tbl th { text-align: left; color: #4a5068; font-weight: 500;
+  padding: 5px 10px; border-bottom: 1px solid #1e2230; font-size: 10px;
+  letter-spacing: 0.04em; white-space: nowrap; }
+.ui-tbl td { padding: 6px 10px; border-bottom: 1px solid #1e2230; color: #d4daf0; }
+.ui-tbl tr:last-child td { border-bottom: none; }
+.td-g { color: #00e87a !important; }
+.td-r { color: #ff5f6d !important; }
+.td-b { color: #4da8ff !important; }
+.td-d { color: #8890a8 !important; }
+
+/* anomaly badges */
+.ui-ak { display: inline-block; font-size: 9px; font-weight: 700;
+  padding: 1px 6px; border-radius: 3px; border: 1px solid; white-space: nowrap; }
+.ak-inc  { color: #ff5f6d; border-color: rgba(255,80,80,0.4);   background: rgba(255,80,80,0.08); }
+.ak-hr   { color: #ff9f40; border-color: rgba(255,159,64,0.4);  background: rgba(255,159,64,0.08); }
+.ak-rs   { color: #c984f8; border-color: rgba(201,132,248,0.4); background: rgba(201,132,248,0.07); }
+.ak-ah   { color: #ffd666; border-color: rgba(255,214,102,0.4); background: rgba(255,214,102,0.07); }
+.ak-ls   { color: #4da8ff; border-color: rgba(77,168,255,0.4);  background: rgba(77,168,255,0.07); }
+
+/* settings */
+.ui-rules-score {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  width: 30px; text-align: center; padding: 1px 0; border-radius: 3px;
+}
+.ui-settings-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.ui-settings-path { font-size: 10px; color: #4a5068; flex: 1; }
+.ui-settings-ok { font-size: 10px; color: #00e87a; background: #003d20;
+  padding: 2px 9px; border-radius: 3px; }
+.ui-btn-add { background: #003d20; border: 1px solid #00e87a; color: #00e87a;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  padding: 3px 10px; border-radius: 3px; cursor: default; }
+.ui-btn-edit { background: #161921; border: 1px solid #1e2230; color: #8890a8;
+  font-family: 'JetBrains Mono', monospace; font-size: 9px;
+  padding: 2px 8px; border-radius: 3px; cursor: default; }
+.ui-rules-conds { font-size: 10px; color: #4a5068;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 380px; }
+
+.ui-siem-heading {
+  font-size: 11px; font-weight: 700; color: #8890a8;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 12px 0 10px; border-top: 1px solid #1e2230;
+  display: flex; align-items: center; gap: 10px; margin-top: 6px;
+}
+.ui-siem-form {
+  display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px;
+  align-items: center; max-width: 560px;
+}
+.ui-siem-lbl { font-size: 10px; color: #8890a8; text-align: right; }
+.ui-siem-val { background: #161921; border: 1px solid #2a2f42;
+  color: #d4daf0; font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  padding: 4px 8px; border-radius: 3px; display: flex; align-items: center; }
+.ui-siem-val.focus { border-color: #4da8ff; }
+.ui-siem-check { accent-color: #00e87a; width: 13px; height: 13px; }
+.ui-siem-check-row { display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #8890a8; }
 </style>
 </head>
 <body>
@@ -820,7 +1054,7 @@ body::after {
 <div class="corner c-tr"></div>
 <div class="corner c-bl"></div>
 <div class="corner c-br"></div>
-<div id="counter">01 / 10</div>
+<div id="counter">01 / 13</div>
 <div id="progress"></div>
 <div class="nav-hint">← → navigate</div>
 
@@ -929,7 +1163,7 @@ body::after {
           <div class="a-desc">
             Central log receiver.<br>
             ed25519-signed ACKs per chunk.<br>
-            sudoreplay-compatible storage.
+            iolog storage — server-side, structured.
           </div>
         </div>
 
@@ -1041,10 +1275,10 @@ body::after {
         <div class="sec-card full">
           <div class="sec-icon">⌨</div>
           <div>
-            <div class="sec-title">Complete I/O capture — replayed with sudoreplay</div>
+            <div class="sec-title">Complete I/O capture — browser replay</div>
             <div class="sec-desc">
               stdin · stdout · stderr · tty input · tty output — all recorded in real time with full timing data.
-              Replay any session with <code>sudoreplay -d /var/log/sudoreplay &lt;TSID&gt;</code>.
+              Replay any session via the built-in web UI at <code>http://localhost:8080</code>.
             </div>
           </div>
         </div>
@@ -1237,8 +1471,8 @@ body::after {
         <div class="replay-desc">
           <h2>BROWSER<br>PLAYBACK</h2>
           <p class="lead">
-            A self-contained HTTP server reads the same iolog directories
-            as <code style="font-family:'JetBrains Mono',monospace;color:var(--green)">sudoreplay</code>
+            A self-contained HTTP server reads the iolog directories
+            written by sudo-logger-server
             and serves a full terminal player — no database, no dependencies.
           </p>
           <ul class="replay-feat-list">
@@ -1255,7 +1489,7 @@ body::after {
             <li>Single binary with embedded frontend</li>
           </ul>
           <div style="margin-top:20px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);line-height:2;">
-            <span style="color:var(--green-dim)">$</span> dnf install sudo-logger-replay-1.10.0-1.fc43.x86_64.rpm<br>
+            <span style="color:var(--green-dim)">$</span> dnf install sudo-logger-replay-1.13.0-1.fc43.x86_64.rpm<br>
             <span style="color:var(--green-dim)">$</span> systemctl enable --now sudo-replay<br>
             <span style="color:var(--text-dim)">→ http://localhost:8080</span>
           </div>
@@ -1269,14 +1503,389 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 10: DEPLOY ░░ -->
+  <!-- ░░ SLIDE 9 (new): SESSION PLAYER ░░ -->
   <div class="slide" id="s9">
+    <div class="s-ui-demo">
+      <div class="slide-heading" style="margin-bottom:0;">SESSION PLAYER</div>
+      <div class="ui-frame">
+        <!-- topbar -->
+        <div class="ui-topbar">
+          <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
+          <div class="ui-ver">v1.13.0</div>
+          <div class="ui-sp"></div>
+          <div class="ui-tabs">
+            <div class="ui-tab on">Sessions</div>
+            <div class="ui-tab">Summary</div>
+            <div class="ui-tab">Anomalies</div>
+            <div class="ui-tab">Settings</div>
+            <div class="ui-tab">Help</div>
+          </div>
+          <div class="ui-theme-btn">☀</div>
+        </div>
+        <!-- body -->
+        <div class="ui-player-body">
+          <!-- sidebar -->
+          <div class="ui-sidebar">
+            <div class="ui-search-wrap">
+              <div class="ui-search-box">🔍 user / host / command…</div>
+            </div>
+            <div class="ui-sortbar">
+              <div class="ui-sort-btn on">time</div>
+              <div class="ui-sort-btn">risk</div>
+              <div class="ui-sort-btn">dur</div>
+            </div>
+            <div class="ui-sess-card">
+              <div class="ui-sc-row1">
+                <span class="ui-sc-user">alun</span>
+                <span class="ui-sc-runas">root</span>
+                <span class="ui-rb crit">CRIT 91</span>
+              </div>
+              <div class="ui-sc-cmd">cat /etc/shadow</div>
+              <div class="ui-sc-meta">
+                <span class="ui-sc-date">prod01 · 14:31</span>
+                <span class="ui-sc-dur">2s</span>
+              </div>
+            </div>
+            <div class="ui-sess-card on">
+              <div class="ui-sc-row1">
+                <span class="ui-sc-user">alun</span>
+                <span class="ui-sc-runas">root</span>
+                <span class="ui-rb high">HIGH 72</span>
+              </div>
+              <div class="ui-sc-cmd">bash -i</div>
+              <div class="ui-sc-meta">
+                <span class="ui-sc-date">prod01 · 14:18</span>
+                <span class="ui-sc-dur">4m 22s</span>
+              </div>
+            </div>
+            <div class="ui-sess-card inc">
+              <div class="ui-sc-row1">
+                <span class="ui-sc-user">bob</span>
+                <span class="ui-sc-runas">root</span>
+                <span class="ui-sc-inc">INCOMPLETE</span>
+              </div>
+              <div class="ui-sc-cmd">rm -rf /var/log/*</div>
+              <div class="ui-sc-meta">
+                <span class="ui-sc-date">prod02 · 13:55</span>
+                <span class="ui-sc-dur">—</span>
+              </div>
+            </div>
+            <div class="ui-sess-card">
+              <div class="ui-sc-row1">
+                <span class="ui-sc-user">carl</span>
+                <span class="ui-sc-runas nr">www-data</span>
+                <span class="ui-rb med">MED 38</span>
+              </div>
+              <div class="ui-sc-cmd">systemctl restart nginx</div>
+              <div class="ui-sc-meta">
+                <span class="ui-sc-date">web03 · 12:47</span>
+                <span class="ui-sc-dur">1s</span>
+              </div>
+            </div>
+            <div class="ui-sess-card live">
+              <div class="ui-sc-row1">
+                <span class="ui-sc-user">alun</span>
+                <span class="ui-sc-runas">root</span>
+                <span class="ui-sc-live">● LIVE</span>
+              </div>
+              <div class="ui-sc-cmd">vi /etc/sudoers</div>
+              <div class="ui-sc-meta">
+                <span class="ui-sc-date">prod01 · 15:02</span>
+                <span class="ui-sc-dur">—</span>
+              </div>
+            </div>
+          </div>
+          <!-- main player -->
+          <div class="ui-player-main">
+            <div class="ui-info-bar">
+              <div class="ui-info-row" style="margin-bottom:3px;">
+                <span class="ui-il">user</span><span class="ui-iv g">alun</span>
+                <span class="ui-il">→</span><span class="ui-iv">root</span>
+                <span class="ui-il">host</span><span class="ui-iv">prod01</span>
+                <span class="ui-il">cmd</span><span class="ui-iv">bash -i</span>
+                <span class="ui-sp"></span>
+                <span class="ui-rb high" style="font-size:10px;padding:2px 7px;">HIGH RISK 72</span>
+              </div>
+              <div class="ui-info-row">
+                <span class="ui-il">cwd</span><span class="ui-iv">/root</span>
+                <span class="ui-il">dur</span><span class="ui-iv b">4m 22s</span>
+                <span class="ui-il">started</span><span class="ui-iv d">2026-04-05 14:18:53</span>
+              </div>
+            </div>
+            <div class="ui-terminal">
+              <div class="ui-tl"><span class="ui-tp">$</span><span class="ui-tc">bash -i</span></div>
+              <div class="ui-tl"><span class="ui-to">bash: cannot set terminal process group (-1): Inappropriate ioctl for device</span></div>
+              <div class="ui-tl"><span class="ui-to">bash: no job control in this shell</span></div>
+              <div class="ui-tl" style="margin-top:4px;"><span class="ui-tp">root@prod01:~#</span> <span class="ui-tc">id</span></div>
+              <div class="ui-tl"><span class="ui-to">uid=0(root) gid=0(root) groups=0(root)</span></div>
+              <div class="ui-tl"><span class="ui-tp">root@prod01:~#</span> <span class="ui-tc">cat /etc/passwd | grep -v nologin</span></div>
+              <div class="ui-tl"><span class="ui-to">root:x:0:0:root:/root:/bin/bash</span></div>
+              <div class="ui-tl"><span class="ui-to">alun:x:1000:1000::/home/alun:/bin/bash</span></div>
+              <div class="ui-tl"><span class="ui-to">bob:x:1001:1001::/home/bob:/bin/bash</span></div>
+              <div class="ui-tl"><span class="ui-tp">root@prod01:~#</span> <span class="ui-tc" style="color:#4da8ff;">_</span></div>
+            </div>
+            <div class="ui-controls">
+              <div class="ui-btn-play">▶</div>
+              <div class="ui-btn-icon" style="font-size:9px;">↺</div>
+              <span class="ui-time">1:48</span>
+              <div class="ui-scrub">
+                <div class="ui-scrub-fill"></div>
+                <div class="ui-scrub-thumb"></div>
+              </div>
+              <span class="ui-time tot">4:22</span>
+              <select class="ui-speed"><option>1×</option></select>
+              <div class="ui-btn-icon">⌨</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 10 (new): SUMMARY & ANOMALIES ░░ -->
+  <div class="slide" id="s10">
+    <div class="s-ui-demo">
+      <div class="slide-heading" style="margin-bottom:0;">SUMMARY &amp; ANOMALIES</div>
+      <div class="ui-frame">
+        <!-- topbar -->
+        <div class="ui-topbar">
+          <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
+          <div class="ui-ver">v1.13.0</div>
+          <div class="ui-sp"></div>
+          <div class="ui-tabs">
+            <div class="ui-tab">Sessions</div>
+            <div class="ui-tab on">Summary</div>
+            <div class="ui-tab">Anomalies</div>
+            <div class="ui-tab">Settings</div>
+            <div class="ui-tab">Help</div>
+          </div>
+          <div class="ui-theme-btn">☀</div>
+        </div>
+        <!-- summary body -->
+        <div class="ui-report-body">
+          <div class="ui-report-cards">
+            <div class="ui-rc filterable on">
+              <div class="ui-rc-val">247</div>
+              <div class="ui-rc-lbl">sessions</div>
+            </div>
+            <div class="ui-rc">
+              <div class="ui-rc-val">12</div>
+              <div class="ui-rc-lbl">unique users</div>
+            </div>
+            <div class="ui-rc warn filterable">
+              <div class="ui-rc-val">8</div>
+              <div class="ui-rc-lbl">high-risk</div>
+            </div>
+            <div class="ui-rc warn filterable">
+              <div class="ui-rc-val">3</div>
+              <div class="ui-rc-lbl">incomplete</div>
+            </div>
+            <div class="ui-rc">
+              <div class="ui-rc-val">14.2s</div>
+              <div class="ui-rc-lbl">avg duration</div>
+            </div>
+          </div>
+          <div class="ui-sec-title">User statistics</div>
+          <table class="ui-tbl">
+            <thead>
+              <tr>
+                <th>user</th>
+                <th>sessions</th>
+                <th>max risk</th>
+                <th>commands</th>
+                <th>last seen</th>
+                <th>top command</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="td-g">alun</td>
+                <td>89</td>
+                <td><span class="ui-rb crit">CRIT 91</span></td>
+                <td>156</td>
+                <td class="td-d">14:31:07</td>
+                <td class="td-d" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">cat /etc/shadow</td>
+              </tr>
+              <tr>
+                <td class="td-g">bob</td>
+                <td>45</td>
+                <td><span class="ui-rb high">HIGH 72</span></td>
+                <td>62</td>
+                <td class="td-d">13:55:11</td>
+                <td class="td-d">rm -rf /var/log/*</td>
+              </tr>
+              <tr>
+                <td class="td-g">carl</td>
+                <td>113</td>
+                <td><span class="ui-rb med">MED 38</span></td>
+                <td>198</td>
+                <td class="td-d">12:47:33</td>
+                <td class="td-d">systemctl restart nginx</td>
+              </tr>
+              <tr>
+                <td class="td-g">dana</td>
+                <td>32</td>
+                <td><span class="ui-rb low">LOW 12</span></td>
+                <td>41</td>
+                <td class="td-d">11:20:05</td>
+                <td class="td-d">journalctl -f</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 10b: ANOMALIES TAB ░░ -->
+  <div class="slide" id="s11">
+    <div class="s-ui-demo">
+      <div class="slide-heading" style="margin-bottom:0;">ANOMALY DETECTION &amp; SETTINGS</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%;max-width:1020px;">
+
+        <!-- Anomalies frame -->
+        <div class="ui-frame">
+          <div class="ui-topbar">
+            <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
+            <div class="ui-sp"></div>
+            <div class="ui-tabs">
+              <div class="ui-tab">Sessions</div>
+              <div class="ui-tab">Summary</div>
+              <div class="ui-tab on">Anomalies</div>
+            </div>
+          </div>
+          <div class="ui-report-body" style="padding:14px 16px;">
+            <div class="ui-report-cards" style="margin-bottom:14px;">
+              <div class="ui-rc warn" style="min-width:80px;">
+                <div class="ui-rc-val" style="font-size:20px;">3</div>
+                <div class="ui-rc-lbl">incomplete</div>
+              </div>
+              <div class="ui-rc warn" style="min-width:80px;">
+                <div class="ui-rc-val" style="font-size:20px;">8</div>
+                <div class="ui-rc-lbl">high-risk</div>
+              </div>
+              <div class="ui-rc" style="min-width:80px;">
+                <div class="ui-rc-val" style="font-size:20px;">2</div>
+                <div class="ui-rc-lbl">root shells</div>
+              </div>
+              <div class="ui-rc" style="min-width:80px;">
+                <div class="ui-rc-val" style="font-size:20px;">1</div>
+                <div class="ui-rc-lbl">after-hours</div>
+              </div>
+            </div>
+            <div class="ui-sec-title">Detected anomalies</div>
+            <table class="ui-tbl">
+              <thead>
+                <tr><th>type</th><th>user / command</th><th>risk</th><th>time</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="ui-ak ak-hr">HIGH RISK</span></td>
+                  <td class="td-d">alun / cat /etc/shadow</td>
+                  <td><span class="ui-rb crit">91</span></td>
+                  <td class="td-d">14:31</td>
+                </tr>
+                <tr>
+                  <td><span class="ui-ak ak-inc">INCOMPLETE</span></td>
+                  <td class="td-d">bob / rm -rf /var/log/*</td>
+                  <td class="td-d">—</td>
+                  <td class="td-d">13:55</td>
+                </tr>
+                <tr>
+                  <td><span class="ui-ak ak-rs">ROOT SHELL</span></td>
+                  <td class="td-d">alun / bash -i</td>
+                  <td><span class="ui-rb high">72</span></td>
+                  <td class="td-d">14:18</td>
+                </tr>
+                <tr>
+                  <td><span class="ui-ak ak-ah">AFTER HOURS</span></td>
+                  <td class="td-d">alun / vi /etc/crontab</td>
+                  <td><span class="ui-rb med">34</span></td>
+                  <td class="td-d">02:44</td>
+                </tr>
+                <tr>
+                  <td><span class="ui-ak ak-ls">LONG SESSION</span></td>
+                  <td class="td-d">carl / strace -p 1</td>
+                  <td><span class="ui-rb med">41</span></td>
+                  <td class="td-d">11:03</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Settings frame -->
+        <div class="ui-frame">
+          <div class="ui-topbar">
+            <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
+            <div class="ui-sp"></div>
+            <div class="ui-tabs">
+              <div class="ui-tab">Sessions</div>
+              <div class="ui-tab">Summary</div>
+              <div class="ui-tab">Anomalies</div>
+              <div class="ui-tab on">Settings</div>
+            </div>
+          </div>
+          <div class="ui-report-body" style="padding:14px 16px;">
+            <div class="ui-settings-toolbar">
+              <div class="ui-settings-path">/etc/sudo-replay/rules.yaml</div>
+              <div class="ui-settings-ok">● saved</div>
+              <div class="ui-btn-add">+ Add rule</div>
+            </div>
+            <div class="ui-sec-title">Risk rules</div>
+            <table class="ui-tbl" style="margin-bottom:0;">
+              <thead>
+                <tr><th>score</th><th>conditions</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="ui-rules-score" style="color:#ff5f6d;background:rgba(255,95,109,0.09);border:1px solid rgba(255,95,109,0.35);">90</span></td>
+                  <td><span class="ui-rules-conds">command ∈ [cat, less, grep] AND args match /etc/shadow</span></td>
+                  <td><div class="ui-btn-edit">edit</div></td>
+                </tr>
+                <tr>
+                  <td><span class="ui-rules-score" style="color:#ff9f40;background:rgba(255,159,64,0.08);border:1px solid rgba(255,159,64,0.35);">75</span></td>
+                  <td><span class="ui-rules-conds">command ∈ [bash, sh, zsh, python3] AND runas = root</span></td>
+                  <td><div class="ui-btn-edit">edit</div></td>
+                </tr>
+                <tr>
+                  <td><span class="ui-rules-score" style="color:#ffd666;background:rgba(255,214,102,0.07);border:1px solid rgba(255,214,102,0.3);">40</span></td>
+                  <td><span class="ui-rules-conds">hour &lt; 6 OR hour ≥ 22</span></td>
+                  <td><div class="ui-btn-edit">edit</div></td>
+                </tr>
+                <tr>
+                  <td><span class="ui-rules-score" style="color:#ffd666;background:rgba(255,214,102,0.07);border:1px solid rgba(255,214,102,0.3);">35</span></td>
+                  <td><span class="ui-rules-conds">command = strace OR command = ptrace</span></td>
+                  <td><div class="ui-btn-edit">edit</div></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="ui-siem-heading">SIEM Forwarding</div>
+            <div class="ui-siem-form">
+              <div class="ui-siem-lbl">enabled</div>
+              <div class="ui-siem-check-row"><input type="checkbox" class="ui-siem-check" checked disabled> <span>forward sessions to SIEM</span></div>
+              <div class="ui-siem-lbl">format</div>
+              <div class="ui-siem-val">JSON ▾</div>
+              <div class="ui-siem-lbl">endpoint</div>
+              <div class="ui-siem-val focus">https://siem.corp.example/ingest</div>
+              <div class="ui-siem-lbl">min risk score</div>
+              <div class="ui-siem-val">0</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 12: DEPLOY ░░ -->
+  <div class="slide" id="s12">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
-      <div class="sub">▸ RPM · systemd · mTLS · sudoreplay</div>
+      <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
 
       <div class="feat-grid">
-        <div class="feat"><span class="arr">→</span> Full replay with native sudo iolog format</div>
+        <div class="feat"><span class="arr">→</span> Full I/O replay — browser-based, pixel-accurate</div>
         <div class="feat"><span class="arr">→</span> Real-time streaming, zero local buffering</div>
         <div class="feat"><span class="arr">→</span> Freeze within ~1 s of network loss</div>
         <div class="feat"><span class="arr">→</span> Automatic recovery when network returns</div>
@@ -1300,7 +1909,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 10;
+  const N = 13;
   let cur = 0, busy = false;
 
   /* cursor */
