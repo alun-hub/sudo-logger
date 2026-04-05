@@ -25,7 +25,7 @@ Access on http://localhost:8080 — restrict to management network.
 
 %build
 cd go
-/usr/lib/golang/bin/go build -o sudo-replay-server ./cmd/replay-server
+/usr/lib/golang/bin/go build -mod=vendor -o sudo-replay-server ./cmd/replay-server
 
 %install
 install -D -m 0755 go/sudo-replay-server \

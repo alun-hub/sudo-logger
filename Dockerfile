@@ -3,13 +3,14 @@
 FROM golang:1.24-alpine AS builder
 WORKDIR /src
 
-# Copy only the Go source tree.
+# Copy the Go source tree (includes go/vendor — no network access needed).
 COPY go/ .
 
-# Build all binaries with CGO_ENABLED=0 to ensure they are fully static
-# and compatible with the distroless runtime (no musl/glibc dependencies).
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/sudo-logserver ./cmd/server && \
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/sudo-replay-server ./cmd/replay-server
+# GOPROXY=off ensures the build fails immediately if anything tries to fetch
+# a module from the internet. -mod=vendor uses the vendored dependencies.
+ENV GOPROXY=off
+RUN CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /usr/local/bin/sudo-logserver ./cmd/server && \
+    CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /usr/local/bin/sudo-replay-server ./cmd/replay-server
 
 # ---- Runtime stage ----
 # distroless/static-debian12:nonroot contains only minimal binaries,

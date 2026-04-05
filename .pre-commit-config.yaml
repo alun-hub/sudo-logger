@@ -1,3 +1,7 @@
+# Vendored dependencies are excluded globally — they are upstream code
+# that we do not lint, scan for secrets, or reformat.
+exclude: ^go/vendor/
+
 repos:
   # --- Secrets & credentials ---
   - repo: https://github.com/Yelp/detect-secrets
@@ -63,6 +67,6 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
-        args: ["--maxkb=500"]
+        args: ["--maxkb=1024"]
       - id: mixed-line-ending
         args: ["--fix=lf"]
