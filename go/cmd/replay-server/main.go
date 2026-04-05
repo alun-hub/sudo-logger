@@ -1101,10 +1101,22 @@ func handlePutRules(w http.ResponseWriter, r *http.Request) {
 
 // ── SIEM config API ───────────────────────────────────────────────────────────
 
-// handleGetSiemConfig returns the current siem.yaml content as JSON,
-// creating a default (disabled) config if the file does not yet exist.
+// handleGetSiemConfig reads siem.yaml from disk and returns it as JSON.
+// Reading from disk (not siem.Get()) ensures the replay-server always
+// reflects the saved state — siem.Load() is only called in the log server.
 func handleGetSiemConfig(w http.ResponseWriter, r *http.Request) {
-	cfg := siem.Get()
+	var cfg siem.Config
+	data, err := os.ReadFile(*flagSiemConfig)
+	if err != nil && !os.IsNotExist(err) {
+		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(data) > 0 {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			http.Error(w, "parse config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"path":   *flagSiemConfig,

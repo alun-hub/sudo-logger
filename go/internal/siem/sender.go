@@ -40,15 +40,15 @@ func Send(e Event) {
 		if err := sendHTTPS(cfg, e, body, contentType); err != nil {
 			log.Printf("siem: [%s] HTTPS error: %v", e.SessionID, err)
 		} else {
-			log.Printf("siem: [%s] sent user=%s host=%s cmd=%q format=%s transport=https",
-				e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format)
+			log.Printf("siem: [%s] sent user=%s host=%s cmd=%q format=%s transport=https replay_url=%q",
+				e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format, e.ReplayURL)
 		}
 	case "syslog":
 		if err := sendSyslog(cfg, e, body); err != nil {
 			log.Printf("siem: [%s] syslog error: %v", e.SessionID, err)
 		} else {
-			log.Printf("siem: [%s] sent user=%s host=%s cmd=%q format=%s transport=%s",
-				e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format, cfg.Syslog.Protocol)
+			log.Printf("siem: [%s] sent user=%s host=%s cmd=%q format=%s transport=%s replay_url=%q",
+				e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format, cfg.Syslog.Protocol, e.ReplayURL)
 		}
 	default:
 		log.Printf("siem: unknown transport %q — use https or syslog", cfg.Transport)

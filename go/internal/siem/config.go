@@ -107,7 +107,7 @@ func reloadConfig() error {
 	cfgCur = cfg
 	cfgMtime = info.ModTime()
 	cfgMu.Unlock()
-	log.Printf("siem: config loaded (enabled=%v transport=%s format=%s)",
-		cfg.Enabled, cfg.Transport, cfg.Format)
+	log.Printf("siem: config loaded (enabled=%v transport=%s format=%s replay_url_base=%q)",
+		cfg.Enabled, cfg.Transport, cfg.Format, cfg.ReplayURLBase)
 	return nil
 }
