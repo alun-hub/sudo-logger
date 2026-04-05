@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.12.2
+Version:        1.12.3
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -66,6 +66,9 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Apr 05 2026 sudo-logger 1.12.3-1
+- fix: replay_url_base placeholder updated to clarify field is required for links
+
 * Sun Apr 05 2026 sudo-logger 1.12.2-1
 - fix: install siem.yaml (disabled default) as %config(noreplace) 0664 root:sudologger
   so the replay service can write it without root; fixes "permission denied" on first save
