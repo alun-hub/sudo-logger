@@ -937,28 +937,27 @@
         Block Message
         <span class="settings-status" id="blocked-status" style="display:none"></span>
       </div>
-      <p style="color:var(--text-dim);font-size:13px;margin:0 0 10px">
+      <p class="siem-note" style="margin-bottom:10px">
         This message is shown to blocked users when they attempt to run sudo.
       </p>
-      <div class="form-group">
-        <label>Message text</label>
-        <textarea id="blocked-message" rows="3"
-          style="width:100%;box-sizing:border-box;font-family:var(--font-mono);font-size:13px;resize:vertical;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px"
-          placeholder="Your sudo access has been temporarily suspended. Contact security@example.com."></textarea>
+      <textarea id="blocked-message" class="form-input" rows="3"
+        style="resize:vertical;font-family:var(--font);width:100%;max-width:640px;box-sizing:border-box"
+        placeholder="Your sudo access has been temporarily suspended. Contact security@example.com."></textarea>
+      <div class="siem-footer">
+        <button class="btn-primary" id="btn-save-blocked-msg">Save message</button>
       </div>
-      <button class="settings-save" id="btn-save-blocked-msg">Save message</button>
     </div>
 
     <div class="siem-section">
-      <div class="siem-heading" style="display:flex;align-items:center;justify-content:space-between">
-        <span>Blocked Users</span>
-        <button class="settings-save" id="btn-add-blocked">+ Block user</button>
+      <div class="siem-heading">
+        Blocked Users
+        <button class="btn-primary" id="btn-add-blocked" style="margin-left:auto">+ Block user</button>
       </div>
-      <p style="color:var(--text-dim);font-size:12px;margin:4px 0 12px">
+      <p class="siem-note">
         Config file: <span class="settings-path" id="blocked-path"></span>
-        &nbsp;—&nbsp;log server picks up changes within 30 s.
+        &nbsp;— log server picks up changes within 30 s.
       </p>
-      <table class="report-table">
+      <table class="report-table" style="margin-top:12px">
         <thead><tr>
           <th>Username</th>
           <th>Hosts</th>
@@ -1001,7 +1000,7 @@
       <button class="btn-danger" id="blocked-modal-delete" hidden>Unblock user</button>
       <div style="flex:1"></div>
       <button class="btn-secondary" id="blocked-modal-cancel">Cancel</button>
-      <button class="settings-save" id="blocked-modal-save">Save</button>
+      <button class="btn-primary" id="blocked-modal-save">Save</button>
     </div>
   </div>
 </div>
@@ -2304,9 +2303,10 @@ let knownHosts = [];
 function showBlockedStatus(msg, isErr) {
   const el = document.getElementById('blocked-status');
   el.textContent = msg;
+  el.classList.remove('ok', 'err');
+  el.classList.add(isErr ? 'err' : 'ok');
   el.style.display = '';
-  el.style.color = isErr ? 'var(--red)' : 'var(--green)';
-  setTimeout(() => { el.style.display = 'none'; }, 4000);
+  setTimeout(() => { el.style.display = 'none'; el.classList.remove('ok', 'err'); }, 4000);
 }
 
 async function fetchBlockedUsers() {
@@ -2380,15 +2380,19 @@ function openBlockedModal(idx) {
     box.appendChild(note);
   } else {
     knownHosts.forEach(h => {
-      const label = document.createElement('label');
-      label.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer';
+      const wrap = document.createElement('div');
+      wrap.className = 'toggle-row';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
+      cb.id = 'bf-host-' + h;
       cb.value = h;
       cb.checked = u.hosts && u.hosts.includes(h);
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(h));
-      box.appendChild(label);
+      const lbl = document.createElement('label');
+      lbl.htmlFor = cb.id;
+      lbl.textContent = h;
+      wrap.appendChild(cb);
+      wrap.appendChild(lbl);
+      box.appendChild(wrap);
     });
   }
   document.getElementById('blocked-modal-delete').hidden = idx === -1;
@@ -2418,7 +2422,7 @@ async function saveBlockedConfig() {
 document.getElementById('blocked-modal-save').addEventListener('click', async () => {
   const username = document.getElementById('bf-username').value.trim();
   if (!username) { alert('Username is required'); return; }
-  const checkedHosts = [...document.querySelectorAll('#bf-hosts-checkboxes input:checked')].map(cb => cb.value);
+  const checkedHosts = [...document.querySelectorAll('#bf-hosts-checkboxes input[type=checkbox]:checked')].map(cb => cb.value);
   const u = {
     username,
     hosts: checkedHosts,
