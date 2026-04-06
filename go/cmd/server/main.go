@@ -243,6 +243,17 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("WARNING: %s claimed host=%q but cert CN=%q DNSNames=%v (use -strict-cert-host to enforce)",
 					remote, start.Host, certs[0].Subject.CommonName, certs[0].DNSNames)
 			}
+
+			// ── Block policy check BEFORE creating the session directory ──────
+			// Checking first avoids leaving an empty session.cast on disk for
+			// every denied attempt (which clutters the replay index).
+			if blocked, msg := isBlocked(start.User, start.Host); blocked {
+				log.Printf("SECURITY: [%s] user=%s host=%s denied by block policy",
+					start.SessionID, start.User, start.Host)
+				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
+				return
+			}
+
 			sess, err = srv.openSession(start)
 			if err != nil {
 				log.Printf("open session %s: %v", start.SessionID, err)
@@ -252,15 +263,6 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
 				sess.command, start.ResolvedCommand, sess.cwd, sess.writer.Dir())
 
-			// ── Handshake: check block policy before unblocking sudo ──────────
-			if blocked, msg := isBlocked(start.User, start.Host); blocked {
-				log.Printf("SECURITY: [%s] user=%s host=%s denied by block policy",
-					start.SessionID, start.User, start.Host)
-				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
-				srv.closeSession(sess)
-				sess = nil
-				return
-			}
 			if err := protocol.WriteMessage(w, protocol.MsgServerReady, nil); err != nil {
 				log.Printf("[%s] write SERVER_READY: %v", start.SessionID, err)
 				srv.closeSession(sess)

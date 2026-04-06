@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.13.0
+Version:        1.13.1
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,11 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Mon Apr 07 2026 sudo-logger 1.13.1-1
+- fix: check block policy before creating session directory — denied sessions
+  no longer leave an empty session.cast in the replay log (avoids ghost entries
+  in the replay index and the "duplicate logs" symptom)
+
 * Sun Apr 06 2026 sudo-logger 1.13.0-1
 - feat: enforce blocked-users policy during session startup handshake
   - new -blocked-users flag (default /etc/sudo-logger/blocked-users.yaml)
