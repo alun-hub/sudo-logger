@@ -664,21 +664,22 @@ static int plugin_open(unsigned int        version,
     }
 
     if (hdr[0] == MSG_SESSION_ERROR) {
-        /* Read error message for logging, then block sudo */
+        /* Drain the payload (technical detail — logged by the shipper, not
+         * shown to the user; DNS errors etc. are not actionable at the
+         * terminal and would only confuse the end user). */
         uint32_t elen;
         memcpy(&elen, hdr + 1, 4);
         elen = be32toh(elen);
         if (elen > 0 && elen < 512) {
             char errbuf[512] = {0};
             read_exact(g_shipper_fd, errbuf, elen);
-            if (g_tty_fd >= 0) {
-                write(g_tty_fd, BLOCKED_HDR,  sizeof(BLOCKED_HDR)  - 1);
-                write(g_tty_fd, errbuf, elen);
-                write(g_tty_fd, BLOCKED_TAIL, sizeof(BLOCKED_TAIL) - 1);
-            } else {
-                g_printf(SUDO_CONV_ERROR_MSG,
-                    "sudo-logger: cannot reach log server: %s\n", errbuf);
-            }
+        }
+        if (g_tty_fd >= 0) {
+            write(g_tty_fd, BLOCKED_HDR,  sizeof(BLOCKED_HDR)  - 1);
+            write(g_tty_fd, BLOCKED_TAIL, sizeof(BLOCKED_TAIL) - 1);
+        } else {
+            g_printf(SUDO_CONV_ERROR_MSG,
+                "sudo-logger: cannot reach log server — sudo blocked\n");
         }
         /* _exit bypasses sudo's own error path so it cannot print
          * "sudo: error initializing I/O plugin" after our banner. */

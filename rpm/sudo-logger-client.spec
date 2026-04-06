@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.12.1
+Version:        1.12.2
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Apr 07 2026 sudo-logger 1.12.2-1
+- fix: suppress technical error detail in SESSION_ERROR banner — DNS errors
+  and other infrastructure messages are drained but not shown on the terminal;
+  only the "cannot reach log server" header is displayed
+
 * Mon Apr 07 2026 sudo-logger 1.12.1-1
 - fix: suppress "sudo: error initializing I/O plugin" on SESSION_DENIED and
   SESSION_ERROR — plugin calls _exit(1) after displaying the banner instead of
