@@ -34,6 +34,7 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Building RPMs](#building-rpms)
 - [Performance and capacity](#performance-and-capacity)
 - [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ---
 
@@ -1458,3 +1459,14 @@ journalctl -u sudo-logserver -n 50
 
 Ensure you are running client ≥ 1.3.0 and server ≥ 1.3.0. Earlier versions
 used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).
+
+---
+
+## License
+
+sudo-logger is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+
+This means:
+- You are free to use, modify, and distribute this software
+- Any modifications must be released under the same license
+- If you run a modified version as a network service, you must make the source available to users of that service
