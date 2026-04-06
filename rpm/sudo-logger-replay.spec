@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.15.1
+Version:        1.15.2
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -66,6 +66,9 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Mon Apr 07 2026 sudo-logger 1.15.2-1
+- feat: add SVG logo to topbar (replaces unicode glyph) and browser tab favicon
+
 * Sun Apr 06 2026 sudo-logger 1.15.1-1
 - fix(replay): align Blocked Users tab with existing UI design system
   - replace non-existent settings-save class with btn-primary

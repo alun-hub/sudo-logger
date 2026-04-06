@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>sudo-replay</title>
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
   <link rel="stylesheet" href="vendor/xterm.css">
   <script src="vendor/xterm.js"></script>
   <script src="vendor/xterm-addon-fit.js"></script>
@@ -69,7 +70,7 @@
     }
     .logo { display: flex; align-items: center; gap: 8px; color: var(--green);
       font-weight: 700; font-size: 15px; font-family: var(--font); letter-spacing: 0.04em; }
-    .logo-icon { font-size: 17px; filter: drop-shadow(0 0 7px var(--green)); }
+    .logo-icon { width: 34px; height: 34px; filter: drop-shadow(0 0 6px var(--green)); flex-shrink: 0; }
     .badge { font-size: 12px; color: var(--text-sub); background: var(--card);
       border: 1px solid var(--border); padding: 2px 9px; border-radius: var(--radius);
       font-family: var(--font-ui); }
@@ -518,7 +519,7 @@
 <div class="layout">
 
   <header class="topbar">
-    <div class="logo"><span class="logo-icon">◈</span> sudo-replay</div>
+    <div class="logo"><img src="logo.svg" class="logo-icon" alt="sudo-replay"> sudo-replay</div>
     <span class="badge" id="session-count">loading…</span>
     <nav class="tab-nav">
       <button class="tab-btn active" data-tab="sessions">Sessions</button>
