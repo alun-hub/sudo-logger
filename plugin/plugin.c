@@ -658,8 +658,9 @@ static int plugin_open(unsigned int        version,
                     "sudo-logger: access blocked by security policy: %s\n", msgbuf);
             }
         }
-        *errstr = "sudo-logger: access blocked by security policy";
-        return -1;
+        /* _exit bypasses sudo's own error path so it cannot print
+         * "sudo: error initializing I/O plugin" after our banner. */
+        _exit(1);
     }
 
     if (hdr[0] == MSG_SESSION_ERROR) {
@@ -679,8 +680,9 @@ static int plugin_open(unsigned int        version,
                     "sudo-logger: cannot reach log server: %s\n", errbuf);
             }
         }
-        *errstr = "sudo-logger: log server unreachable — sudo blocked";
-        return -1;
+        /* _exit bypasses sudo's own error path so it cannot print
+         * "sudo: error initializing I/O plugin" after our banner. */
+        _exit(1);
     }
 
     if (hdr[0] != MSG_SESSION_READY) {
