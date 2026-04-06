@@ -1044,6 +1044,37 @@ body::after {
 .ui-siem-check { accent-color: #00e87a; width: 13px; height: 13px; }
 .ui-siem-check-row { display: flex; align-items: center; gap: 6px;
   font-size: 10px; color: #8890a8; }
+
+/* blocked users slide */
+.ak-bl { color: #ff3535; border-color: rgba(255,53,53,0.45); background: rgba(255,53,53,0.10); }
+.ui-block-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.ui-block-path { font-size: 10px; color: #4a5068; flex: 1; }
+.ui-btn-block { background: rgba(255,53,53,0.12); border: 1px solid rgba(255,53,53,0.45);
+  color: #ff3535; font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  padding: 3px 10px; border-radius: 3px; cursor: default; }
+.ui-denied-terminal {
+  background: #0a0c0d; border: 1px solid #1e2230; border-radius: 6px;
+  padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  line-height: 1.6; flex: 1;
+}
+.ui-denied-banner {
+  background: #3d0e0e; color: #ff3535; font-weight: 700;
+  padding: 4px 10px; border-radius: 3px; margin-bottom: 10px; font-size: 11px;
+  border: 1px solid rgba(255,53,53,0.4); letter-spacing: 0.03em;
+}
+.ui-denied-msg { color: #ffb3b3; font-size: 10px; margin-bottom: 8px; }
+.ui-denied-prompt { color: #4a5068; font-size: 10px; }
+.ui-denied-prompt span { color: #ff3535; }
+.ui-block-msg-area {
+  background: #161921; border: 1px solid #2a2f42; border-radius: 4px;
+  padding: 8px 10px; font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; color: #8890a8; margin-bottom: 10px; line-height: 1.5;
+}
+.ui-block-section-title {
+  font-size: 10px; font-weight: 700; color: #8890a8;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding-bottom: 8px; border-bottom: 1px solid #1e2230; margin-bottom: 10px;
+}
 </style>
 </head>
 <body>
@@ -1054,7 +1085,7 @@ body::after {
 <div class="corner c-tr"></div>
 <div class="corner c-bl"></div>
 <div class="corner c-br"></div>
-<div id="counter">01 / 13</div>
+<div id="counter">01 / 14</div>
 <div id="progress"></div>
 <div class="nav-hint">← → navigate</div>
 
@@ -1878,8 +1909,91 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 12: DEPLOY ░░ -->
+  <!-- ░░ SLIDE 12: BLOCK USERS ░░ -->
   <div class="slide" id="s12">
+    <div class="s-ui-demo">
+      <div class="slide-heading" style="margin-bottom:0;">CENTRAL SUDO BLOCK POLICY</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%;max-width:1020px;">
+
+        <!-- Blocked Users management frame -->
+        <div class="ui-frame">
+          <div class="ui-topbar">
+            <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
+            <div class="ui-sp"></div>
+            <div class="ui-tabs">
+              <div class="ui-tab">Sessions</div>
+              <div class="ui-tab">Summary</div>
+              <div class="ui-tab">Settings</div>
+              <div class="ui-tab on">Blocked Users</div>
+            </div>
+          </div>
+          <div class="ui-report-body" style="padding:14px 16px;">
+            <div class="ui-block-section-title">Block message</div>
+            <div class="ui-block-msg-area">Your sudo access has been suspended.<br>Contact security@example.com — Ref: SEC-4521.</div>
+            <div class="ui-block-toolbar">
+              <div class="ui-block-path">/etc/sudo-logger/blocked-users.yaml · reloaded every 30 s</div>
+              <div class="ui-btn-block">+ Block user</div>
+            </div>
+            <div class="ui-block-section-title">Blocked users</div>
+            <table class="ui-tbl">
+              <thead>
+                <tr><th>user</th><th>hosts</th><th>reason</th><th>since</th><th></th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="td-r">alice</td>
+                  <td class="td-d">all hosts</td>
+                  <td class="td-d">SEC-4521 — suspected compromise</td>
+                  <td class="td-d">14:02</td>
+                  <td><div class="ui-btn-edit">edit</div></td>
+                </tr>
+                <tr>
+                  <td class="td-r">bob</td>
+                  <td class="td-d">db-01, db-02</td>
+                  <td class="td-d">Policy violation</td>
+                  <td class="td-d">09:17</td>
+                  <td><div class="ui-btn-edit">edit</div></td>
+                </tr>
+                <tr>
+                  <td class="td-d">carl</td>
+                  <td class="td-d">web-01</td>
+                  <td class="td-d">Pending review</td>
+                  <td class="td-d">yesterday</td>
+                  <td><div class="ui-btn-edit">edit</div></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- What the blocked user sees -->
+        <div class="ui-frame" style="display:flex;flex-direction:column;">
+          <div class="ui-topbar">
+            <div class="ui-logo" style="color:#ff5f6d;">⬡ alice@web-03 — sudo bash</div>
+          </div>
+          <div style="padding:14px 16px;flex:1;display:flex;flex-direction:column;gap:10px;">
+            <div class="ui-block-section-title">What alice sees on her terminal</div>
+            <div class="ui-denied-terminal" style="display:flex;flex-direction:column;gap:0;">
+              <div style="color:#4a5068;font-size:10px;margin-bottom:8px;">[alice@web-03 ~]$ sudo bash</div>
+              <div class="ui-denied-banner">[ SUDO-LOGGER: ACCESS BLOCKED BY SECURITY POLICY ]</div>
+              <div class="ui-denied-msg">Your sudo access has been suspended.<br>Contact security@example.com — Ref: SEC-4521.</div>
+              <div class="ui-denied-prompt"><span>sudo:</span> session denied — command not executed</div>
+              <div style="color:#4a5068;font-size:10px;margin-top:10px;">[alice@web-03 ~]$ <span style="animation:blink 1s step-end infinite;display:inline-block;color:var(--green)">█</span></div>
+            </div>
+            <div style="font-size:10px;color:#4a5068;line-height:1.6;margin-top:auto;">
+              ▸ Block checked at <strong style="color:#8890a8">session startup handshake</strong> — command never executes<br>
+              ▸ Policy enforced by <strong style="color:#8890a8">log server</strong> — covers all hosts via one YAML file<br>
+              ▸ Changes propagate in <strong style="color:#8890a8">&lt; 30 s</strong> without service restart
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 13: DEPLOY ░░ -->
+  <div class="slide" id="s13">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
       <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
@@ -1896,6 +2010,7 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Summary / Anomalies / Settings tabs</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if shipper killed (&lt;150 ms)</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt;30 s propagation</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
@@ -1909,7 +2024,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 13;
+  const N = 14;
   let cur = 0, busy = false;
 
   /* cursor */
