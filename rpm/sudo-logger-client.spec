@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.11.0
+Version:        1.12.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sun Apr 06 2026 sudo-logger 1.12.0-1
+- feat: block users from sudo via central policy (SESSION_DENIED protocol msg)
+  - plugin handles MSG_SESSION_DENIED (0x0c) with distinct red banner
+  - shipper waits for server handshake (SERVER_READY/SESSION_DENIED) before
+    sending SESSION_READY to plugin; reuses bufio.Reader to avoid byte loss
+  - adds ARCHITECTURE.md
+
 * Sat Apr 04 2026 sudo-logger 1.11.0-1
 - feat: terminal dimensions (rows/cols) captured from command_info[] and sent
   in SESSION_START; stored in session.cast header for accurate replay

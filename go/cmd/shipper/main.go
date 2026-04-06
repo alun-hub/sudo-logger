@@ -319,8 +319,9 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	// ── Step 5: forward SESSION_START to server, then unblock sudo ────────
 	//
-	// SESSION_READY is sent only after SESSION_START has been forwarded so
-	// the server is always informed before sudo forks the child process.
+	// SESSION_READY is sent only after the server confirms the session is
+	// accepted (MsgServerReady) so that block-policy denials reach the plugin
+	// before sudo forks the child process.
 	serverBuf := bufio.NewWriter(serverConn)
 	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v",
 		start.SessionID, start.User, start.Host, start.Pid,
@@ -331,16 +332,53 @@ func handlePluginConn(pluginConn net.Conn) {
 		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(err.Error()))
 		return
 	}
-	// Sudo is now cleared to fork the child — which inherits the cgroup.
-	protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
+
+	// ── Step 5b: wait for server handshake (policy check) ────────────────
+	//
+	// The server sends MsgServerReady (session allowed) or MsgSessionDenied
+	// (user blocked by security policy).  A 10-second deadline is generous
+	// for an in-memory check without leaving the user stuck at the prompt.
+	serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	sr0 := bufio.NewReader(serverConn)
+	hsType, hsPlen, hsErr := protocol.ReadHeader(sr0)
+	serverConn.SetReadDeadline(time.Time{})
+
+	if hsErr != nil {
+		log.Printf("[%s] server handshake: %v", start.SessionID, hsErr)
+		markDead()
+		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(hsErr.Error()))
+		return
+	}
+	switch hsType {
+	case protocol.MsgSessionDenied:
+		denyPayload, _ := protocol.ReadPayload(sr0, hsPlen)
+		log.Printf("[%s] session denied by server policy for user=%s host=%s",
+			start.SessionID, start.User, start.Host)
+		protocol.WriteMessage(pw, protocol.MsgSessionDenied, denyPayload)
+		serverConn.Close()
+		return
+	case protocol.MsgServerReady:
+		_, _ = protocol.ReadPayload(sr0, hsPlen)
+		// Sudo is now cleared to fork the child — which inherits the cgroup.
+		protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
+	default:
+		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
+		markDead()
+		protocol.WriteMessage(pw, protocol.MsgSessionError,
+			[]byte(fmt.Sprintf("unexpected server handshake 0x%02x", hsType)))
+		return
+	}
 
 	// ── Step 6: read messages from server (ACKs + heartbeat replies) ──────
+	//
+	// sr0 is reused here (not a new bufio.Reader) to avoid silently dropping
+	// any bytes that bufio may have buffered during the handshake read above.
 	go func() {
 		defer func() {
 			serverConn.Close()
 			markDead()
 		}()
-		sr := bufio.NewReader(serverConn)
+		sr := sr0
 		for {
 			msgType, plen, err := protocol.ReadHeader(sr)
 			if err != nil {

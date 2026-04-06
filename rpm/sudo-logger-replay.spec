@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.14.1
+Version:        1.15.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -66,6 +66,12 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Apr 06 2026 sudo-logger 1.15.0-1
+- feat: Blocked Users tab in GUI for managing sudo block policy
+  - GET/PUT /api/blocked-users — reads/writes blocked-users.yaml
+  - GET /api/hosts — unique hosts from session history for host selector
+  - configurable block message, per-host or global blocking, add/edit/unblock
+
 * Sat Apr 05 2026 sudo-logger 1.14.1-1
 - feat: modernised web UI — Inter/system-ui font for UI chrome, monospace
   kept for terminal and commands; base font 13px → 14px, eliminate 10px text

@@ -17,6 +17,9 @@
 //	0x08  SESSION_ERROR   shipper→plugin          string error message — sudo blocked
 //	0x09  HEARTBEAT       shipper→server          empty — keepalive probe (every 400 ms)
 //	0x0a  HEARTBEAT_ACK   server→shipper          empty — immediate reply to HEARTBEAT
+//	0x0b  SERVER_READY    server→shipper          empty — session accepted, shipper may send SESSION_READY
+//	0x0c  SESSION_DENIED  server→shipper,         string block message — policy denial, sudo blocked
+//	                      shipper→plugin
 //
 // CHUNK stream types map to sudo's iolog event types (see iolog/iolog.go):
 //
@@ -46,6 +49,8 @@ const (
 	MsgSessionError  = uint8(0x08) // shipper→plugin: server connection failed
 	MsgHeartbeat     = uint8(0x09) // shipper→server: keepalive probe
 	MsgHeartbeatAck  = uint8(0x0a) // server→shipper: keepalive reply
+	MsgServerReady   = uint8(0x0b) // server→shipper: session accepted, proceed
+	MsgSessionDenied = uint8(0x0c) // server→shipper AND shipper→plugin: policy denial
 
 	StreamStdin  = uint8(0x00)
 	StreamStdout = uint8(0x01)

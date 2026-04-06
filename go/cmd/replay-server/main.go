@@ -55,6 +55,7 @@ var (
 	flagLogDir            = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
 	flagRules             = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
 	flagSiemConfig        = flag.String("siem-config", "/etc/sudo-logger/siem.yaml", "SIEM forwarding config file (shared with log server)")
+	flagBlockedUsers      = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml", "Blocked users config file (shared with log server)")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	flagTLSKey            = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
 	flagHTPasswd          = flag.String("htpasswd", "", "Path to htpasswd file for HTTP Basic Auth (bcrypt hashes only; reload with SIGHUP)")
@@ -363,6 +364,20 @@ var (
 	rulesMu         sync.RWMutex
 )
 
+// BlockedUser describes a single blocked user entry in blocked-users.yaml.
+type BlockedUser struct {
+	Username  string   `yaml:"username"   json:"username"`
+	Hosts     []string `yaml:"hosts"      json:"hosts"`
+	Reason    string   `yaml:"reason"     json:"reason"`
+	BlockedAt int64    `yaml:"blocked_at" json:"blocked_at"`
+}
+
+// BlockedUsersConfig is the top-level structure of blocked-users.yaml.
+type BlockedUsersConfig struct {
+	BlockMessage string        `yaml:"block_message" json:"block_message"`
+	Users        []BlockedUser `yaml:"users"         json:"users"`
+}
+
 // maxTtyOutBytes is the maximum number of ttyout bytes read for content scanning.
 const maxTtyOutBytes = 512 * 1024
 
@@ -462,6 +477,86 @@ func scanAllSessions(logDir string) ([]SessionInfo, error) {
 	return sessions, nil
 }
 
+// ── Blocked users API ─────────────────────────────────────────────────────────
+
+const blockedUsersFileHeader = "# Blocked users config — managed by sudo-replay GUI\n" +
+	"# Log server reloads this file automatically every 30 seconds.\n\n"
+
+func handleGetBlockedUsers(w http.ResponseWriter, r *http.Request) {
+	var cfg BlockedUsersConfig
+	data, err := os.ReadFile(*flagBlockedUsers)
+	if err != nil && !os.IsNotExist(err) {
+		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(data) > 0 {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			http.Error(w, "parse config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if cfg.Users == nil {
+		cfg.Users = []BlockedUser{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"path":   *flagBlockedUsers,
+		"config": cfg,
+	})
+}
+
+func handlePutBlockedUsers(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Config BlockedUsersConfig `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	for i, u := range body.Config.Users {
+		if u.Username == "" {
+			http.Error(w, fmt.Sprintf("user[%d]: username required", i), http.StatusBadRequest)
+			return
+		}
+	}
+	if body.Config.Users == nil {
+		body.Config.Users = []BlockedUser{}
+	}
+	yamlBytes, err := yaml.Marshal(body.Config)
+	if err != nil {
+		http.Error(w, "marshal yaml: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(*flagBlockedUsers, append([]byte(blockedUsersFileHeader), yamlBytes...), 0o640); err != nil {
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("blocked-users: config updated via GUI (%d blocked users)", len(body.Config.Users))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func handleGetHosts(w http.ResponseWriter, r *http.Request) {
+	all, err := index.get(*flagLogDir)
+	if err != nil {
+		http.Error(w, "index error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	seen := make(map[string]struct{})
+	for _, s := range all {
+		if s.Host != "" {
+			seen[s.Host] = struct{}{}
+		}
+	}
+	hosts := make([]string, 0, len(seen))
+	for h := range seen {
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"hosts": hosts})
+}
+
 func main() {
 	flag.Parse()
 
@@ -504,6 +599,23 @@ func main() {
 			return
 		}
 		handleUploadSiemCert(w, r)
+	})
+	mux.HandleFunc("/api/blocked-users", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetBlockedUsers(w, r)
+		case http.MethodPut:
+			handlePutBlockedUsers(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/hosts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleGetHosts(w, r)
 	})
 
 	staticFS, err := fs.Sub(staticFiles, "static")

@@ -62,6 +62,7 @@
 #define MSG_ACK_RESPONSE   0x06
 #define MSG_SESSION_READY  0x07
 #define MSG_SESSION_ERROR  0x08
+#define MSG_SESSION_DENIED 0x0c
 
 #define STREAM_STDIN   0x00
 #define STREAM_STDOUT  0x01
@@ -77,6 +78,9 @@
     "\r\n\033[42;97;1m[ SUDO-LOGGER: log server reconnected — input resumed ]\033[0m\r\n"
 #define BLOCKED_HDR \
     "\r\n\033[41;97;1m[ SUDO-LOGGER: cannot reach log server — sudo blocked ]\033[0m\r\n" \
+    "\033[33m"
+#define DENIED_HDR \
+    "\r\n\033[41;97;1m[ SUDO-LOGGER: ACCESS BLOCKED BY SECURITY POLICY ]\033[0m\r\n" \
     "\033[33m"
 #define BLOCKED_TAIL \
     "\033[0m\r\n"
@@ -634,6 +638,27 @@ static int plugin_open(unsigned int        version,
     uint8_t hdr[5];
     if (read_exact(g_shipper_fd, hdr, 5) < 0) {
         *errstr = "sudo-logger: no response from shipper";
+        return -1;
+    }
+
+    if (hdr[0] == MSG_SESSION_DENIED) {
+        /* Read the configurable block message and display it, then deny sudo */
+        uint32_t dlen;
+        memcpy(&dlen, hdr + 1, 4);
+        dlen = be32toh(dlen);
+        if (dlen > 0 && dlen < 512) {
+            char msgbuf[512] = {0};
+            read_exact(g_shipper_fd, msgbuf, dlen);
+            if (g_tty_fd >= 0) {
+                write(g_tty_fd, DENIED_HDR,   sizeof(DENIED_HDR)   - 1);
+                write(g_tty_fd, msgbuf, dlen);
+                write(g_tty_fd, BLOCKED_TAIL, sizeof(BLOCKED_TAIL) - 1);
+            } else {
+                g_printf(SUDO_CONV_ERROR_MSG,
+                    "sudo-logger: access blocked by security policy: %s\n", msgbuf);
+            }
+        }
+        *errstr = "sudo-logger: access blocked by security policy";
         return -1;
     }
 

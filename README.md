@@ -523,6 +523,10 @@ xdg-open http://localhost:8080
   changes and SIEM configuration are written back to disk immediately and take
   effect without a server restart. PEM certificates can be uploaded directly
   from the browser.
+- **Blocked Users tab** — security teams can block individual users from running
+  sudo, either globally or per host. A configurable message is shown to the
+  blocked user at the sudo prompt. The log server enforces blocks centrally and
+  reloads the policy every 30 seconds. See [Blocking users](#blocking-users).
 - **SIEM forwarding** — completed sessions are forwarded to an external SIEM
   after the session closes. Risk score and reasons are included in every event.
   See [SIEM forwarding](#siem-forwarding) below.
@@ -800,6 +804,67 @@ command, and verify the event appears within a few seconds.
 
 ---
 
+## Blocking users
+
+Security teams can block individual users from running sudo without modifying
+sudoers files on every host. When a blocked user runs sudo, they see a
+configurable message and the command is denied before it executes.
+
+### How it works
+
+1. The security team adds a user to the **Blocked Users** tab in the replay
+   interface.
+2. The config is written to `/etc/sudo-logger/blocked-users.yaml` (shared
+   between replay server and log server).
+3. The log server reloads the file every 30 seconds and enforces the policy
+   centrally for all incoming sessions.
+4. When the blocked user runs sudo, the log server denies the session during the
+   startup handshake — before the command is executed.
+5. The plugin displays the configured block message in a red banner at the
+   terminal, then exits without running the command.
+
+### Configuration
+
+Blocks are managed via the **Blocked Users** tab in the browser UI:
+
+- **Block message** — the text shown to blocked users. Customise this to
+  include a contact address or ticket reference.
+- **Block all hosts** — leave all host checkboxes unchecked to block the user
+  everywhere.
+- **Block specific hosts** — check individual hosts to block the user only on
+  those machines. The host list is populated from session history.
+- **Reason** — an internal note (not shown to users) for audit purposes.
+
+The underlying config file is YAML:
+
+```yaml
+# /etc/sudo-logger/blocked-users.yaml
+block_message: "Your sudo access has been suspended. Contact security@example.com."
+users:
+  - username: alice
+    hosts: []                 # empty = all hosts
+    reason: "Ticket SEC-123"
+    blocked_at: 1712425200
+  - username: bob
+    hosts: ["web-01", "db-02"]  # specific hosts only
+    reason: "Policy violation"
+    blocked_at: 1712425300
+```
+
+### Flag reference (log server, blocking-related)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-blocked-users file` | `/etc/sudo-logger/blocked-users.yaml` | Blocked users config (reloaded every 30 s) |
+
+### Flag reference (replay server, blocking-related)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-blocked-users file` | `/etc/sudo-logger/blocked-users.yaml` | Blocked users config (shared with log server) |
+
+---
+
 ## Prometheus metrics
 
 `sudo-replay-server` exposes a Prometheus-compatible metrics endpoint at `/metrics`.
@@ -996,6 +1061,8 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `SESSION_ERROR` | `0x08` | shipper → plugin | String error message — server unreachable, sudo blocked |
 | `HEARTBEAT` | `0x09` | shipper → server | Empty — keepalive probe sent every 400 ms |
 | `HEARTBEAT_ACK` | `0x0a` | server → shipper | Empty — immediate reply to HEARTBEAT |
+| `SERVER_READY` | `0x0b` | server → shipper | Empty — session accepted, shipper may send SESSION_READY |
+| `SESSION_DENIED` | `0x0c` | server → shipper → plugin | String block message — policy denial, sudo blocked |
 
 **CHUNK stream types:**
 

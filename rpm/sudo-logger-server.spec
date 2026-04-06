@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.12.0
+Version:        1.13.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,13 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Apr 06 2026 sudo-logger 1.13.0-1
+- feat: enforce blocked-users policy during session startup handshake
+  - new -blocked-users flag (default /etc/sudo-logger/blocked-users.yaml)
+  - reloads blocked-users.yaml every 30 s without restart
+  - sends SERVER_READY (0x0b) or SESSION_DENIED (0x0c) after SESSION_START
+  - per-user, per-host or global blocking; configurable block message
+
 * Sat Apr 06 2026 sudo-logger 1.12.0-1
 - refactor: move SIEM forwarding from log server to replay server (Alt 2)
   - log server now only writes exit_code file on SESSION_END; no more siem.Send()

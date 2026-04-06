@@ -24,6 +24,7 @@ import (
 
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
+	"gopkg.in/yaml.v3"
 )
 
 // validName matches safe directory name components: alphanumeric plus .-_
@@ -52,7 +53,72 @@ var (
 	flagStrictCertHost = flag.Bool("strict-cert-host", false,
 		"Reject sessions where the claimed host does not match the client certificate CN/SAN. "+
 			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
+	flagBlockedUsers = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml",
+		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
 )
+
+// BlockedUser describes a single blocked user entry.
+type BlockedUser struct {
+	Username  string   `yaml:"username"`
+	Hosts     []string `yaml:"hosts"`      // empty = all hosts
+	Reason    string   `yaml:"reason"`
+	BlockedAt int64    `yaml:"blocked_at"`
+}
+
+// BlockedUsersConfig is the top-level structure of blocked-users.yaml.
+type BlockedUsersConfig struct {
+	BlockMessage string        `yaml:"block_message"`
+	Users        []BlockedUser `yaml:"users"`
+}
+
+var (
+	blockedMu  sync.RWMutex
+	blockedCfg BlockedUsersConfig
+)
+
+func loadBlockedUsers(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			blockedMu.Lock()
+			blockedCfg = BlockedUsersConfig{}
+			blockedMu.Unlock()
+			return nil
+		}
+		return err
+	}
+	var cfg BlockedUsersConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse blocked-users: %w", err)
+	}
+	blockedMu.Lock()
+	blockedCfg = cfg
+	blockedMu.Unlock()
+	log.Printf("blocked-users: loaded %d blocked user(s) from %s", len(cfg.Users), path)
+	return nil
+}
+
+// isBlocked returns whether user is blocked on host, and the block message to show.
+// An empty Hosts list on a BlockedUser entry means "all hosts".
+func isBlocked(user, host string) (bool, string) {
+	blockedMu.RLock()
+	cfg := blockedCfg
+	blockedMu.RUnlock()
+	for _, bu := range cfg.Users {
+		if bu.Username != user {
+			continue
+		}
+		if len(bu.Hosts) == 0 {
+			return true, cfg.BlockMessage
+		}
+		for _, h := range bu.Hosts {
+			if h == host {
+				return true, cfg.BlockMessage
+			}
+		}
+	}
+	return false, ""
+}
 
 type server struct {
 	signKey ed25519.PrivateKey
@@ -90,6 +156,19 @@ func main() {
 	if err := os.MkdirAll(*flagLogDir, 0750); err != nil {
 		log.Fatalf("create log dir: %v", err)
 	}
+
+	if err := loadBlockedUsers(*flagBlockedUsers); err != nil {
+		log.Printf("blocked-users: initial load: %v", err)
+	}
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			if err := loadBlockedUsers(*flagBlockedUsers); err != nil {
+				log.Printf("blocked-users: reload: %v", err)
+			}
+		}
+	}()
 
 	ln, err := tls.Listen("tcp", *flagListen, tlsCfg)
 	if err != nil {
@@ -172,6 +251,22 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s dir=%s",
 				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
 				sess.command, start.ResolvedCommand, sess.cwd, sess.writer.Dir())
+
+			// ── Handshake: check block policy before unblocking sudo ──────────
+			if blocked, msg := isBlocked(start.User, start.Host); blocked {
+				log.Printf("SECURITY: [%s] user=%s host=%s denied by block policy",
+					start.SessionID, start.User, start.Host)
+				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
+				srv.closeSession(sess)
+				sess = nil
+				return
+			}
+			if err := protocol.WriteMessage(w, protocol.MsgServerReady, nil); err != nil {
+				log.Printf("[%s] write SERVER_READY: %v", start.SessionID, err)
+				srv.closeSession(sess)
+				sess = nil
+				return
+			}
 
 		case protocol.MsgChunk:
 			if sess == nil {
