@@ -22,6 +22,7 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Server installation](#2-server-installation)
   - [Client installation](#3-client-installation)
 - [Configuration](#configuration)
+  - [Distributed storage (S3 + PostgreSQL)](#distributed-storage-s3--postgresql)
 - [Web replay interface](#web-replay-interface)
   - [Authentication](#authentication)
 - [Viewing and replaying sessions](#viewing-and-replaying-sessions)
@@ -130,8 +131,42 @@ A TLS server running on a dedicated machine. For each client connection:
 - Streams terminal I/O as events into session.cast
 - Acknowledges every chunk with an ed25519-signed ACK
 - Replies to HEARTBEAT probes immediately with HEARTBEAT_ACK
-- Sessions stored as asciinema v2 recordings under
-  `/var/log/sudoreplay/<user>/<host>_<timestamp>/`
+- Sessions stored via the pluggable storage backend (see below)
+
+### Storage abstraction (`go/internal/store/`)
+
+The log server and replay server share a pluggable `SessionStore` interface with two backends selected at startup via `--storage`:
+
+| Backend | Flag | Use case |
+|---------|------|----------|
+| `local` (default) | `--storage=local` | Single-node deployment; sessions stored on local disk under `--logdir` |
+| `distributed` | `--storage=distributed` | Multi-node / Kubernetes; session cast files stored in S3 (or MinIO / NetApp StorageGRID), metadata in PostgreSQL |
+
+**Local storage** (`--storage=local`, default):
+- Zero new dependencies — identical to previous behavior
+- Sessions stored as `<logdir>/<user>/<host_timestamp>/session.cast`
+- Replay server detects completed sessions via inotify (fsnotify)
+
+**Distributed storage** (`--storage=distributed`):
+- Cast files uploaded to S3 after each session closes (async, 3 retries)
+- Session metadata, risk cache, and block policy stored in PostgreSQL
+- During upload, cast files are buffered locally in `--buffer-dir` (suitable for a K8s `emptyDir`)
+- Replay server detects completed sessions by polling `sudo_sessions` every 5 s
+- Both servers can run as multiple independent replicas — no shared filesystem required
+- Supports AWS S3, MinIO, and NetApp StorageGRID via configurable endpoint and path-style URLs
+
+**Migration tool** (`go/cmd/migrate-sessions`):
+One-time idempotent migrator for existing deployments switching from local to distributed storage. Walks the existing log directory, inserts metadata into PostgreSQL (`ON CONFLICT DO NOTHING`), and uploads each `session.cast` to S3. Safe to re-run.
+
+```bash
+migrate-sessions \
+  --logdir /var/log/sudoreplay \
+  --db-url postgres://user:pass@host/dbname \  # pragma: allowlist secret
+  --s3-bucket my-bucket \
+  [--s3-endpoint https://minio.internal:9000] \
+  [--s3-path-style] \
+  [--dry-run]
+```
 
 ---
 
@@ -431,6 +466,45 @@ ExecStart=/usr/bin/sudo-logserver \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-strict-cert-host` | off | Reject sessions where the `host` field in SESSION_START does not match the CN or DNS SANs of the client's TLS certificate. Recommended when each machine has its own certificate; leave off for shared-certificate setups. |
+
+### Distributed storage (S3 + PostgreSQL)
+
+Pass `--storage=distributed` plus the flags below to both `sudo-logserver` and
+`sudo-replay-server` when running in a multi-node or Kubernetes environment.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--storage` | `local` | Storage backend: `local` or `distributed` |
+| `--s3-bucket` | — | S3 bucket name (required for distributed) |
+| `--s3-region` | `us-east-1` | AWS region (or any value for MinIO/StorageGRID) |
+| `--s3-prefix` | `sessions/` | Key prefix for cast objects in the bucket |
+| `--s3-endpoint` | — | Custom endpoint URL for MinIO / NetApp StorageGRID (e.g. `https://minio.internal:9000`) |
+| `--s3-path-style` | `false` | Use path-style URLs — required for MinIO and NetApp StorageGRID |
+| `--s3-access-key` | — | Static access key (leave empty to use `AWS_ACCESS_KEY_ID` or IAM) |
+| `--s3-secret-key` | — | Static secret key (leave empty to use `AWS_SECRET_ACCESS_KEY` or IAM) |
+| `--db-url` | — | PostgreSQL DSN (e.g. `postgres://user@host:5432/sudologger?sslmode=require`); pass password via `PGPASSWORD` env var or the DSN |
+| `--buffer-dir` | `/var/lib/sudo-logger/buffer` | Local write-buffer directory for in-flight S3 uploads (use `emptyDir` in Kubernetes) |
+
+**Example (MinIO):**
+```bash
+sudo-logserver \
+  --storage=distributed \
+  --s3-bucket=sudo-logs \
+  --s3-endpoint=https://minio.internal:9000 \
+  --s3-path-style \
+  --s3-access-key=minioadmin \  # pragma: allowlist secret
+  --s3-secret-key=minioadmin \  # pragma: allowlist secret
+  --db-url=postgres://sudologger:secret@postgres:5432/sudologger?sslmode=require \  # pragma: allowlist secret
+  --buffer-dir=/var/lib/sudo-logger/buffer \
+  ...
+```
+
+**Credential priority (S3):**
+1. `--s3-access-key` / `--s3-secret-key` flags (static credentials — MinIO, StorageGRID)
+2. `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` environment variables
+3. IAM instance profile / IRSA (when running on AWS / EKS)
+
+**PostgreSQL schema** is applied automatically at startup with `CREATE TABLE IF NOT EXISTS` — no separate migration step required for new deployments.
 
 ### Tunable constants in `plugin/plugin.c`
 
@@ -990,20 +1064,27 @@ sudo-logger/
 │   ├── go.mod
 │   ├── cmd/
 │   │   ├── shipper/
-│   │   │   ├── main.go     # Local shipper daemon
-│   │   │   └── cgroup.go   # Per-session cgroup management + freeze tracking
+│   │   │   ├── main.go          # Local shipper daemon
+│   │   │   └── cgroup.go        # Per-session cgroup management + freeze tracking
 │   │   ├── server/
-│   │   │   └── main.go     # Remote log server
-│   │   └── replay-server/
-│   │       ├── main.go          # Web replay interface (HTTP + embedded SPA)
-│   │       ├── risk-rules.yaml  # Default risk scoring rules
-│   │       └── static/
-│   │           └── index.html   # Single-page terminal player (xterm.js)
+│   │   │   └── main.go          # Remote log server
+│   │   ├── replay-server/
+│   │   │   ├── main.go          # Web replay interface (HTTP + embedded SPA)
+│   │   │   ├── risk-rules.yaml  # Default risk scoring rules
+│   │   │   └── static/
+│   │   │       └── index.html   # Single-page terminal player (xterm.js)
+│   │   └── migrate-sessions/
+│   │       └── main.go          # One-time migrator: local → distributed storage
 │   └── internal/
 │       ├── protocol/
 │       │   └── protocol.go # Shared wire protocol
 │       ├── iolog/
 │       │   └── iolog.go    # asciinema v2 session writer
+│       ├── store/
+│       │   ├── store.go    # SessionStore / SessionWriter interfaces + New()
+│       │   ├── local.go    # Local filesystem backend (default)
+│       │   ├── local_test.go
+│       │   └── distributed.go  # S3 + PostgreSQL backend
 │       └── siem/
 │           ├── config.go   # YAML config loader (30 s polling)
 │           ├── event.go    # Event struct + JSON/CEF/OCSF formatters
@@ -1038,6 +1119,9 @@ cd go
 go build -o sudo-shipper       ./cmd/shipper
 go build -o sudo-logserver     ./cmd/server
 go build -o sudo-replay-server ./cmd/replay-server
+
+# Build the migration tool (optional, for distributed storage deployments)
+go build -o migrate-sessions   ./cmd/migrate-sessions
 ```
 
 ### Wire protocol
@@ -1349,13 +1433,22 @@ podman-compose up -d
 
 ## Kubernetes deployment
 
+### Storage modes
+
+Two deployment topologies are supported:
+
+| Mode | Replicas | Shared storage | Use case |
+|------|----------|---------------|----------|
+| **Local** (default) | 1 log-server + 1 replay-server | ReadWriteOnce PVC | Small / single-team deployments |
+| **Distributed** | N log-servers + M replay-servers | S3 + PostgreSQL | Multi-team, high-availability, multi-region |
+
 ### Why not standard Ingress?
 
 sudo-logserver speaks raw TCP with mutual TLS. Standard Kubernetes Ingress
 is HTTP/HTTPS only and terminates TLS — this breaks mTLS. Use a
 `LoadBalancer` Service instead (TCP passthrough).
 
-### Quick start
+### Quick start — local storage (single node)
 
 ```bash
 # 1. Create namespace
@@ -1364,7 +1457,7 @@ kubectl apply -f k8s/namespace.yaml
 # 2. Load PKI files as a Secret (run setup.sh first)
 bash k8s/create-secret.sh /path/to/pki
 
-# 3. Deploy
+# 3. Deploy (uses ReadWriteOnce PVC, single replica)
 kubectl apply -k k8s/
 
 # 4. Get the external IP
@@ -1374,12 +1467,117 @@ kubectl get svc -n sudo-logger sudo-logserver
 # LOGSERVER=<EXTERNAL-IP>:9876
 ```
 
+### Distributed storage (horizontal scaling)
+
+With `--storage=distributed` both servers share no local state — cast files go
+to S3 and all metadata goes to PostgreSQL. This enables:
+- Multiple `sudo-logserver` replicas behind a TCP load balancer
+- Multiple `sudo-replay-server` replicas behind an HTTP ingress
+- Zero-downtime rolling updates
+
+**Prerequisites:** an S3-compatible bucket and a PostgreSQL 14+ database. No
+manual schema migration is needed — the schema is applied automatically at
+startup.
+
+**Step 1 — create the Secret with PKI + credentials:**
+
+```bash
+kubectl create secret generic sudo-logger-tls \
+  --namespace sudo-logger \
+  --from-file=ca.crt=/path/to/pki/ca/ca.crt \
+  --from-file=server.crt=/path/to/pki/server/server.crt \
+  --from-file=server.key=/path/to/pki/server/server.key \
+  --from-file=hmac.key=/path/to/pki/hmac.key
+
+kubectl create secret generic sudo-logger-distributed \
+  --namespace sudo-logger \
+  --from-literal=db-url='postgres://sudologger:YOURPASSWORD@postgres:5432/sudologger?sslmode=require' \  # pragma: allowlist secret
+  --from-literal=s3-access-key='YOUR_ACCESS_KEY' \  # pragma: allowlist secret
+  --from-literal=s3-secret-key='YOUR_SECRET_KEY'  # pragma: allowlist secret
+```
+
+**Step 2 — patch the deployment** (`k8s/distributed/deployment-patch.yaml`):
+
+```yaml
+# k8s/distributed/deployment-patch.yaml
+- op: replace
+  path: /spec/template/spec/containers/0/args
+  value:
+    - -listen=:9876
+    - -cert=/etc/sudo-logger/server.crt
+    - -key=/etc/sudo-logger/server.key
+    - -ca=/etc/sudo-logger/ca.crt
+    - -signkey=/etc/sudo-logger/hmac.key
+    - -storage=distributed
+    - -s3-bucket=sudo-logs
+    - -s3-endpoint=https://minio.internal:9000
+    - -s3-path-style
+    - -buffer-dir=/var/lib/sudo-logger/buffer
+- op: replace
+  path: /spec/replicas
+  value: 3
+```
+
+Add env vars sourced from the Secret:
+```yaml
+env:
+  - name: S3_ACCESS_KEY
+    valueFrom:
+      secretKeyRef: { name: sudo-logger-distributed, key: s3-access-key }
+  - name: S3_SECRET_KEY
+    valueFrom:
+      secretKeyRef: { name: sudo-logger-distributed, key: s3-secret-key }
+  - name: DB_URL
+    valueFrom:
+      secretKeyRef: { name: sudo-logger-distributed, key: db-url }
+```
+
+Or pass `--s3-access-key` / `--s3-secret-key` / `--db-url` directly in args
+(not recommended for production — use Secrets or an external secrets manager).
+
+Replace the PVC volume with an `emptyDir` for the write buffer:
+
+```yaml
+volumes:
+  - name: tls-certs
+    secret:
+      secretName: sudo-logger-tls
+      defaultMode: 0400
+  - name: buffer
+    emptyDir: {}   # replaces the PVC — only holds in-flight uploads
+```
+
+And mount it:
+```yaml
+volumeMounts:
+  - name: tls-certs
+    mountPath: /etc/sudo-logger
+    readOnly: true
+  - name: buffer
+    mountPath: /var/lib/sudo-logger/buffer
+```
+
+**Step 3 — migrate existing sessions (first deployment only):**
+
+```bash
+# Run once from any machine that can reach S3 and PostgreSQL
+migrate-sessions \
+  --logdir /var/log/sudoreplay \
+  --db-url 'postgres://sudologger@postgres:5432/sudologger?sslmode=require' \  # pragma: allowlist secret
+  --s3-bucket sudo-logs \
+  --s3-endpoint https://minio.internal:9000 \
+  --s3-path-style \
+  --workers 8
+```
+
 ### Security notes
 
 - The container runs as UID 65532 (distroless `nonroot`) with a read-only
   root filesystem and all Linux capabilities dropped.
 - TLS private key and ACK signing key are mounted read-only from a Kubernetes
   Secret (`defaultMode: 0400`).
+- Store S3 credentials and the database URL in Kubernetes Secrets (or an
+  external secrets manager such as Vault or ESO), not in deployment args.
 - Consider using `loadBalancerSourceRanges` in `service.yaml` to restrict
   which IP ranges can reach port 9876.
 

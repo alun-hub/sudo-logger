@@ -24,6 +24,7 @@ import (
 	"flag"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -40,11 +41,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 
 	"sudo-logger/internal/siem"
+	"sudo-logger/internal/store"
 )
 
 //go:embed static
@@ -60,7 +61,22 @@ var (
 	flagTLSKey            = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
 	flagHTPasswd          = flag.String("htpasswd", "", "Path to htpasswd file for HTTP Basic Auth (bcrypt hashes only; reload with SIGHUP)")
 	flagTrustedUserHeader = flag.String("trusted-user-header", "", "Header containing pre-authenticated username (e.g. X-Forwarded-User)")
+
+	// Storage backend flags.
+	flagStorage     = flag.String("storage", "local", "Storage backend: local|distributed")
+	flagS3Bucket    = flag.String("s3-bucket", "", "S3 bucket name (distributed storage)")
+	flagS3Region    = flag.String("s3-region", "us-east-1", "S3 region (distributed storage)")
+	flagS3Prefix    = flag.String("s3-prefix", "sessions/", "S3 key prefix (distributed storage)")
+	flagS3Endpoint  = flag.String("s3-endpoint", "", "S3-compatible endpoint URL, e.g. https://minio.internal:9000")
+	flagS3PathStyle = flag.Bool("s3-path-style", false, "Use path-style S3 URLs (required for MinIO/StorageGRID)")
+	flagS3AccessKey = flag.String("s3-access-key", "", "Static S3 access key (leave empty to use IAM/env)")
+	flagS3SecretKey = flag.String("s3-secret-key", "", "Static S3 secret key (leave empty to use IAM/env)")
+	flagDBURL       = flag.String("db-url", "", "PostgreSQL DSN (distributed storage)")
+	flagBufferDir   = flag.String("buffer-dir", "/var/lib/sudo-logger/buffer", "Local write-buffer dir for S3 uploads")
 )
+
+// sessionStore is the active storage backend, initialised in main().
+var sessionStore store.SessionStore
 
 // ctxKey is the unexported type for context keys in this package.
 type ctxKey int
@@ -349,14 +365,6 @@ type RuleSet struct {
 	Rules []Rule `yaml:"rules"`
 }
 
-// riskCache is the on-disk cache written to risk.json beside each session directory.
-type riskCache struct {
-	RulesHash string   `json:"rules_hash"`
-	Score     int      `json:"score"`
-	Level     string   `json:"level"`
-	Reasons   []string `json:"reasons"`
-}
-
 // Global rule state — reloaded from disk when the rules file changes.
 var (
 	globalRules     []Rule
@@ -381,100 +389,91 @@ type BlockedUsersConfig struct {
 // maxTtyOutBytes is the maximum number of ttyout bytes read for content scanning.
 const maxTtyOutBytes = 512 * 1024
 
-// sessionIndex is an in-memory cache of all parsed session metadata.
-// It is rebuilt from disk at most once per indexTTL to avoid a full directory
-// scan on every /api/sessions request.
-type sessionIndex struct {
+// sessionCache is a TTL-based in-memory cache of scored SessionInfo values.
+// It wraps sessionStore.ListSessions and adds risk scoring on top.
+type sessionCache struct {
 	mu       sync.RWMutex
 	sessions []SessionInfo
 	built    bool
 	lastScan time.Time
 }
 
-const indexTTL = 30 * time.Second
+const cacheTTL = 30 * time.Second
 
-var index = &sessionIndex{}
+var cache = &sessionCache{}
 
-// get returns a snapshot of all sessions, rebuilding the index if stale.
-func (idx *sessionIndex) get(logDir string) ([]SessionInfo, error) {
-	idx.mu.RLock()
-	if idx.built && time.Since(idx.lastScan) < indexTTL {
-		snap := make([]SessionInfo, len(idx.sessions))
-		copy(snap, idx.sessions)
-		idx.mu.RUnlock()
+// get returns a scored snapshot of all sessions, rebuilding if stale.
+func (c *sessionCache) get(ctx context.Context) ([]SessionInfo, error) {
+	c.mu.RLock()
+	if c.built && time.Since(c.lastScan) < cacheTTL {
+		snap := make([]SessionInfo, len(c.sessions))
+		copy(snap, c.sessions)
+		c.mu.RUnlock()
 		return snap, nil
 	}
-	idx.mu.RUnlock()
-	return idx.rebuild(logDir)
+	c.mu.RUnlock()
+	return c.rebuild(ctx)
 }
 
-// rebuild scans the log directory and replaces the cached session list.
-// Double-checked locking prevents redundant scans when multiple requests
-// arrive simultaneously after cache expiry.
-func (idx *sessionIndex) rebuild(logDir string) ([]SessionInfo, error) {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	// Another goroutine may have rebuilt while we waited for the write lock.
-	if idx.built && time.Since(idx.lastScan) < indexTTL {
-		snap := make([]SessionInfo, len(idx.sessions))
-		copy(snap, idx.sessions)
+// rebuild fetches records from the store, scores each one, and updates the cache.
+func (c *sessionCache) rebuild(ctx context.Context) ([]SessionInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.built && time.Since(c.lastScan) < cacheTTL {
+		snap := make([]SessionInfo, len(c.sessions))
+		copy(snap, c.sessions)
 		return snap, nil
 	}
-	// Reload rules if the file has changed (cheap — only re-parses on hash change).
 	if err := loadRules(*flagRules); err != nil {
 		log.Printf("risk rules reload: %v", err)
 	}
-	sessions, err := scanAllSessions(logDir)
+	records, err := sessionStore.ListSessions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	idx.sessions = sessions
-	idx.built = true
-	idx.lastScan = time.Now()
-	log.Printf("session index rebuilt: %d sessions", len(sessions))
+	sessions := make([]SessionInfo, 0, len(records))
+	for _, rec := range records {
+		info := recordToInfo(rec)
+		info.RiskScore, info.RiskReasons = scoreSession(&info)
+		info.RiskLevel = riskLevel(info.RiskScore)
+		sessions = append(sessions, info)
+	}
+	c.sessions = sessions
+	c.built = true
+	c.lastScan = time.Now()
+	log.Printf("session cache rebuilt: %d sessions", len(sessions))
 	snap := make([]SessionInfo, len(sessions))
 	copy(snap, sessions)
 	return snap, nil
 }
 
-// scanAllSessions walks the two-level logDir/<user>/<session> hierarchy and
-// returns metadata for every parseable session directory.
-func scanAllSessions(logDir string) ([]SessionInfo, error) {
-	sessions := make([]SessionInfo, 0)
-	userEntries, err := os.ReadDir(logDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return sessions, nil
-		}
-		return nil, fmt.Errorf("read logdir: %w", err)
+// invalidate forces the next get() to rebuild from the store.
+func (c *sessionCache) invalidate() {
+	c.mu.Lock()
+	c.built = false
+	c.mu.Unlock()
+}
+
+// recordToInfo converts a store.SessionRecord to a SessionInfo (without risk fields).
+func recordToInfo(r store.SessionRecord) SessionInfo {
+	return SessionInfo{
+		TSID:            r.TSID,
+		SessionID:       r.SessionID,
+		User:            r.User,
+		Host:            r.Host,
+		Runas:           r.Runas,
+		RunasUID:        r.RunasUID,
+		RunasGID:        r.RunasGID,
+		Command:         r.Command,
+		ResolvedCommand: r.ResolvedCommand,
+		Cwd:             r.Cwd,
+		Flags:           r.Flags,
+		StartTime:       r.StartTime,
+		Duration:        r.Duration,
+		ExitCode:        r.ExitCode,
+		Incomplete:      r.Incomplete,
+		InProgress:      r.InProgress,
 	}
-	for _, userEntry := range userEntries {
-		if !userEntry.IsDir() {
-			continue
-		}
-		userDir := filepath.Join(logDir, userEntry.Name())
-		sessEntries, err := os.ReadDir(userDir)
-		if err != nil {
-			continue
-		}
-		for _, sessEntry := range sessEntries {
-			if !sessEntry.IsDir() {
-				continue
-			}
-			sessDir := filepath.Join(userDir, sessEntry.Name())
-			if _, err := os.Stat(filepath.Join(sessDir, "session.cast")); err != nil {
-				continue // not a cast session directory
-			}
-			tsid := userEntry.Name() + "/" + sessEntry.Name()
-			info, err := parseSession(sessDir, tsid)
-			if err != nil {
-				log.Printf("parse session %s: %v", sessDir, err)
-				continue
-			}
-			sessions = append(sessions, *info)
-		}
-	}
-	return sessions, nil
 }
 
 // ── Blocked users API ─────────────────────────────────────────────────────────
@@ -537,7 +536,7 @@ func handlePutBlockedUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetHosts(w http.ResponseWriter, r *http.Request) {
-	all, err := index.get(*flagLogDir)
+	all, err := cache.get(r.Context())
 	if err != nil {
 		http.Error(w, "index error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -565,7 +564,37 @@ func main() {
 	}
 
 	siem.Load(*flagSiemConfig)
-	go watchSessions(*flagLogDir)
+
+	var storeErr error
+	sessionStore, storeErr = store.New(store.Config{
+		Backend:          *flagStorage,
+		LogDir:           *flagLogDir,
+		BlockedUsersPath: *flagBlockedUsers,
+		S3Bucket:         *flagS3Bucket,
+		S3Region:         *flagS3Region,
+		S3Prefix:         *flagS3Prefix,
+		S3Endpoint:       *flagS3Endpoint,
+		S3PathStyle:      *flagS3PathStyle,
+		S3AccessKey:      *flagS3AccessKey,
+		S3SecretKey:      *flagS3SecretKey,
+		DBURL:            *flagDBURL,
+		BufferDir:        *flagBufferDir,
+	})
+	if storeErr != nil {
+		log.Fatalf("init storage: %v", storeErr)
+	}
+	defer sessionStore.Close()
+
+	// Watch for completed sessions and forward to SIEM.
+	siemCh := make(chan string, 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sessionStore.WatchSessions(ctx, siemCh)
+	go func() {
+		for tsid := range siemCh {
+			go sendSiemEvent(tsid)
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/sessions", handleListSessions)
@@ -624,10 +653,10 @@ func main() {
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
-	// Pre-warm the session index so the first request is served from cache.
+	// Pre-warm the session cache so the first request is served from cache.
 	go func() {
-		if _, err := index.rebuild(*flagLogDir); err != nil {
-			log.Printf("initial session index build: %v", err)
+		if _, err := cache.rebuild(ctx); err != nil {
+			log.Printf("initial session cache build: %v", err)
 		}
 	}()
 
@@ -695,7 +724,7 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 		to = v
 	}
 
-	result, err := listSessions(*flagLogDir, q, sortBy, order, from, to, limit, offset)
+	result, err := listSessions(r.Context(), q, sortBy, order, from, to, limit, offset)
 	if err != nil {
 		log.Printf("list sessions: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -722,25 +751,6 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the resolved path stays within the log directory.
-	// EvalSymlinks resolves all symlinks so a symlink pointing outside logdir
-	// is caught even when filepath.Abs would pass it through.
-	absLogDir, err := filepath.EvalSymlinks(*flagLogDir)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	sessDir := filepath.Join(absLogDir, tsid)
-	absSessDir, err := filepath.EvalSymlinks(sessDir)
-	if err != nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-	if !strings.HasPrefix(absSessDir, absLogDir+string(filepath.Separator)) {
-		http.Error(w, "invalid tsid", http.StatusBadRequest)
-		return
-	}
-
 	// Record who viewed this session before streaming the response.
 	// Prefer the configured base URL (from SIEM config) so the logged link
 	// matches what operators expect, regardless of the request's Host header.
@@ -758,11 +768,25 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	recordView(viewer, tsid, replayURL)
 	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", viewer, r.RemoteAddr, tsid, replayURL)
 
-	events, err := readEvents(absSessDir)
+	rawEvents, err := sessionStore.ReadEvents(r.Context(), tsid)
 	if err != nil {
 		log.Printf("read events %s: %v", tsid, err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, "session not found", http.StatusNotFound)
 		return
+	}
+
+	// Convert store.RawEvent → PlaybackEvent (base64-encode data, map kind to type).
+	events := make([]PlaybackEvent, 0, len(rawEvents))
+	for _, e := range rawEvents {
+		evType := 4 // TtyOut
+		if e.Kind == "i" {
+			evType = 3 // TtyIn
+		}
+		events = append(events, PlaybackEvent{
+			T:    e.T,
+			Type: evType,
+			Data: base64.StdEncoding.EncodeToString(e.Data),
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(events); err != nil {
@@ -822,7 +846,7 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions, err := index.get(*flagLogDir)
+	sessions, err := cache.get(r.Context())
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -880,9 +904,9 @@ func validateTSID(tsid string) error {
 	return nil
 }
 
-// listSessions filters, sorts and paginates sessions from the in-memory index.
-func listSessions(logDir, q, sortBy, order string, from, to int64, limit, offset int) (*SessionList, error) {
-	all, err := index.get(logDir)
+// listSessions filters, sorts and paginates sessions from the in-memory cache.
+func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, limit, offset int) (*SessionList, error) {
+	all, err := cache.get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -961,114 +985,6 @@ func matchesAll(s SessionInfo, q string) bool {
 	return true
 }
 
-// parseSession reads the asciinema v2 header from session.cast.
-func parseSession(sessDir, tsid string) (*SessionInfo, error) {
-	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
-	if !scanner.Scan() {
-		return nil, fmt.Errorf("empty cast file")
-	}
-
-	var hdr struct {
-		Timestamp       int64   `json:"timestamp"`
-		SessionID       string  `json:"session_id"`
-		User            string  `json:"user"`
-		Host            string  `json:"host"`
-		RunasUser       string  `json:"runas_user"`
-		RunasUID        int     `json:"runas_uid"`
-		RunasGID        int     `json:"runas_gid"`
-		Cwd             string  `json:"cwd"`
-		Command         string  `json:"command"`
-		ResolvedCommand string  `json:"resolved_command"`
-		Flags           string  `json:"flags"`
-	}
-	if err := json.Unmarshal(scanner.Bytes(), &hdr); err != nil {
-		return nil, fmt.Errorf("parse cast header: %w", err)
-	}
-
-	info := &SessionInfo{
-		TSID:            tsid,
-		SessionID:       hdr.SessionID,
-		User:            hdr.User,
-		Host:            hdr.Host,
-		Runas:           hdr.RunasUser,
-		RunasUID:        hdr.RunasUID,
-		RunasGID:        hdr.RunasGID,
-		Command:         hdr.Command,
-		ResolvedCommand: hdr.ResolvedCommand,
-		Cwd:             hdr.Cwd,
-		Flags:           hdr.Flags,
-		StartTime:       hdr.Timestamp,
-		Duration:        castLastTime(sessDir),
-	}
-
-	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {
-		info.Incomplete = true
-	}
-	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
-		info.InProgress = true
-	}
-
-	// Read exit code written by logserver on SESSION_END.
-	if data, err := os.ReadFile(filepath.Join(sessDir, "exit_code")); err == nil {
-		if v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 32); err == nil {
-			info.ExitCode = int32(v)
-		}
-	}
-
-	info.RiskScore, info.RiskReasons = scoreSession(info, sessDir)
-	info.RiskLevel = riskLevel(info.RiskScore)
-
-	return info, nil
-}
-
-// castLastTime reads the timestamp of the last event line in session.cast
-// by seeking to the file tail — O(1) regardless of recording length.
-func castLastTime(sessDir string) float64 {
-	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-
-	fi, err := f.Stat()
-	if err != nil || fi.Size() == 0 {
-		return 0
-	}
-
-	const tailSize = 8 * 1024
-	readFrom := fi.Size() - tailSize
-	if readFrom < 0 {
-		readFrom = 0
-	}
-	buf := make([]byte, fi.Size()-readFrom)
-	if _, err := f.ReadAt(buf, readFrom); err != nil {
-		return 0
-	}
-
-	lines := bytes.Split(bytes.TrimRight(buf, "\n"), []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 || line[0] != '[' {
-			continue
-		}
-		var event []json.RawMessage
-		if json.Unmarshal(line, &event) != nil || len(event) < 1 {
-			continue
-		}
-		var t float64
-		if json.Unmarshal(event[0], &t) == nil {
-			return t
-		}
-	}
-	return 0
-}
 
 func handleReport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -1082,7 +998,7 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64); err == nil {
 		to = v
 	}
-	report, err := buildReport(*flagLogDir, from, to)
+	report, err := buildReport(r.Context(), from, to)
 	if err != nil {
 		log.Printf("build report: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -1094,8 +1010,8 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildReport(logDir string, from, to int64) (*ReportData, error) {
-	all, err := index.get(logDir)
+func buildReport(ctx context.Context, from, to int64) (*ReportData, error) {
+	all, err := cache.get(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1387,10 +1303,8 @@ func handlePutRules(w http.ResponseWriter, r *http.Request) {
 	if err := loadRules(*flagRules); err != nil {
 		log.Printf("reload after write: %v", err)
 	}
-	// Invalidate session index so next request re-scores with new rules.
-	index.mu.Lock()
-	index.built = false
-	index.mu.Unlock()
+	// Invalidate session cache so next request re-scores with new rules.
+	cache.invalidate()
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
 		log.Printf("encode rules response: %v", err)
@@ -1547,91 +1461,27 @@ func containsPEMBlock(data []byte) bool {
 
 // ── SIEM forwarding ───────────────────────────────────────────────────────────
 
-// watchSessions uses fsnotify to watch for sessions completing under logDir.
-// When the ACTIVE marker file is removed (or a session directory is created
-// without one) we know the session just finished — send the SIEM event then.
-func watchSessions(logDir string) {
-	watcher, err := fsnotify.NewWatcher()
+// sendSiemEvent looks up the completed session by tsid and forwards it to the
+// configured SIEM.
+func sendSiemEvent(tsid string) {
+	ctx := context.Background()
+
+	// Invalidate the cache so the completed session is visible, then find it.
+	cache.invalidate()
+	all, err := cache.get(ctx)
 	if err != nil {
-		log.Printf("siem watcher: create: %v", err)
+		log.Printf("siem: list sessions for %s: %v", tsid, err)
 		return
 	}
-	defer watcher.Close()
-
-	// Watch the top-level log dir for new per-user dirs, and each user dir
-	// for new session dirs.
-	watchSubdirs(watcher, logDir)
-	if err := watcher.Add(logDir); err != nil {
-		log.Printf("siem watcher: watch %s: %v", logDir, err)
-		return
-	}
-
-	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			// New subdirectory created — add a watch on it so we see session dirs.
-			if event.Has(fsnotify.Create) {
-				fi, err := os.Stat(event.Name)
-				if err == nil && fi.IsDir() {
-					watchSubdirs(watcher, event.Name)
-					_ = watcher.Add(event.Name)
-				}
-			}
-			// ACTIVE file removed → session just ended cleanly.
-			// INCOMPLETE file created → session ended abnormally.
-			if event.Has(fsnotify.Remove) && filepath.Base(event.Name) == "ACTIVE" {
-				go sendSiemEvent(filepath.Dir(event.Name))
-			}
-			if event.Has(fsnotify.Create) && filepath.Base(event.Name) == "INCOMPLETE" {
-				go sendSiemEvent(filepath.Dir(event.Name))
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			log.Printf("siem watcher: %v", err)
+	var info *SessionInfo
+	for i := range all {
+		if all[i].TSID == tsid {
+			info = &all[i]
+			break
 		}
 	}
-}
-
-// watchSubdirs adds a fsnotify watch on every immediate subdirectory of dir.
-func watchSubdirs(watcher *fsnotify.Watcher, dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			sub := filepath.Join(dir, e.Name())
-			_ = watcher.Add(sub)
-		}
-	}
-}
-
-// sendSiemEvent parses the completed session in sessDir and forwards it to the
-// configured SIEM.  The sessDir is expected to be user/host_timestamp inside
-// the log root.
-func sendSiemEvent(sessDir string) {
-	// Derive the TSID from the directory structure: …/<user>/<session-dir>
-	// tsid = user/session-dir  (matches ?tsid= format in the replay GUI)
-	rel, err := filepath.Rel(*flagLogDir, sessDir)
-	if err != nil {
-		log.Printf("siem: sendSiemEvent rel path: %v", err)
-		return
-	}
-	parts := strings.SplitN(rel, string(filepath.Separator), 2)
-	if len(parts) != 2 {
-		log.Printf("siem: unexpected session path %s", sessDir)
-		return
-	}
-	tsid := url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
-
-	info, err := parseSession(sessDir, tsid)
-	if err != nil {
-		log.Printf("siem: parse session %s: %v", sessDir, err)
+	if info == nil {
+		log.Printf("siem: session %s not found after completion", tsid)
 		return
 	}
 
@@ -1804,16 +1654,21 @@ func stripANSI(s string) string {
 	return string(out)
 }
 
-// loadTtyOut reads "o" (output) events from session.cast up to maxTtyOutBytes,
+// loadTtyOut reads "o" (output) events via the store up to maxTtyOutBytes,
 // strips ANSI codes, and returns lowercase text for pattern matching.
-func loadTtyOut(sessDir string) string {
-	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
+func loadTtyOut(ctx context.Context, tsid string) string {
+	rc, err := sessionStore.OpenCast(ctx, tsid)
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer rc.Close()
 
-	scanner := bufio.NewScanner(f)
+	return parseTtyOut(rc)
+}
+
+// parseTtyOut extracts and lowercases terminal output from a cast reader.
+func parseTtyOut(r io.Reader) string {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 2*1024*1024), 2*1024*1024)
 	// Skip header line.
 	if !scanner.Scan() {
@@ -1845,49 +1700,18 @@ func loadTtyOut(sessDir string) string {
 	return strings.ToLower(stripANSI(sb.String()))
 }
 
-// loadRiskCache reads risk.json from sessDir and returns it if the
-// stored rules hash matches the currently loaded rules.
-func loadRiskCache(sessDir, rulesHash string) *riskCache {
-	data, err := os.ReadFile(filepath.Join(sessDir, "risk.json"))
-	if err != nil {
-		return nil
-	}
-	var rc riskCache
-	if err := json.Unmarshal(data, &rc); err != nil {
-		return nil
-	}
-	if rc.RulesHash != rulesHash {
-		return nil // rules changed — cache is stale
-	}
-	return &rc
-}
 
-// saveRiskCache writes the risk score to risk.json in sessDir.
-// Failure is silently ignored (replay server may lack write access).
-func saveRiskCache(sessDir, rulesHash string, score int, reasons []string) {
-	rc := riskCache{
-		RulesHash: rulesHash,
-		Score:     score,
-		Level:     riskLevel(score),
-		Reasons:   reasons,
-	}
-	data, err := json.Marshal(rc)
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(filepath.Join(sessDir, "risk.json"), data, 0o644)
-}
-
-// scoreSession computes a risk score (0–100) for a session using the
-// globally loaded rules.  Results are cached in risk.json next to the
-// session files so ttyout is only read once per session per rules version.
-func scoreSession(s *SessionInfo, sessDir string) (int, []string) {
+// scoreSession computes a risk score (0–100) for a session using the globally
+// loaded rules.  Results are cached via sessionStore so ttyout is only read
+// once per session per rules version.
+func scoreSession(s *SessionInfo) (int, []string) {
 	rulesMu.RLock()
 	rules := globalRules
 	rulesHash := globalRulesHash
 	rulesMu.RUnlock()
 
-	if cached := loadRiskCache(sessDir, rulesHash); cached != nil {
+	ctx := context.Background()
+	if cached, _ := sessionStore.GetRiskCache(ctx, s.TSID, rulesHash); cached != nil {
 		return cached.Score, cached.Reasons
 	}
 
@@ -1897,11 +1721,11 @@ func scoreSession(s *SessionInfo, sessDir string) (int, []string) {
 		cmdBase = strings.ToLower(filepath.Base(parts[0]))
 	}
 
-	// Lazy ttyout loader — only read disk if a content rule is evaluated.
+	// Lazy ttyout loader — only read from store if a content rule is evaluated.
 	var contentOnce sync.Once
 	var contentText string
 	getContent := func() string {
-		contentOnce.Do(func() { contentText = loadTtyOut(sessDir) })
+		contentOnce.Do(func() { contentText = loadTtyOut(ctx, s.TSID) })
 		return contentText
 	}
 
@@ -1922,60 +1746,6 @@ func scoreSession(s *SessionInfo, sessDir string) (int, []string) {
 		reasons = append(reasons, rule.Reason)
 	}
 
-	saveRiskCache(sessDir, rulesHash, score, reasons)
+	_ = sessionStore.SaveRiskCache(ctx, s.TSID, rulesHash, score, reasons)
 	return score, reasons
-}
-
-// readEvents parses session.cast and returns playback events.
-// "o" (output) events map to Type 4, "i" (input) events map to Type 3,
-// preserving the API contract expected by the frontend player.
-func readEvents(sessDir string) ([]PlaybackEvent, error) {
-	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
-	if err != nil {
-		return nil, fmt.Errorf("open cast: %w", err)
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 2*1024*1024), 2*1024*1024)
-
-	// Skip header line.
-	if !scanner.Scan() {
-		return nil, fmt.Errorf("empty cast file")
-	}
-
-	events := make([]PlaybackEvent, 0)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 || line[0] != '[' {
-			continue
-		}
-		// Event: [float64, string, string]
-		var raw [3]json.RawMessage
-		if json.Unmarshal(line, &raw) != nil {
-			continue
-		}
-		var t float64
-		var kind, data string
-		if json.Unmarshal(raw[0], &t) != nil {
-			continue
-		}
-		if json.Unmarshal(raw[1], &kind) != nil {
-			continue
-		}
-		if json.Unmarshal(raw[2], &data) != nil {
-			continue
-		}
-
-		eventType := 4 // TtyOut
-		if kind == "i" {
-			eventType = 3 // TtyIn
-		}
-		events = append(events, PlaybackEvent{
-			T:    t,
-			Type: eventType,
-			Data: base64.StdEncoding.EncodeToString([]byte(data)),
-		})
-	}
-	return events, scanner.Err()
 }

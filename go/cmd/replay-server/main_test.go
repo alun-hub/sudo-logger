@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"sudo-logger/internal/store"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -313,7 +315,8 @@ func TestStripANSI(t *testing.T) {
 // ── scoreSession ──────────────────────────────────────────────────────────────
 
 // makeTestSession creates a minimal session.cast and a corresponding
-// SessionInfo for use in scoring tests.
+// SessionInfo for use in scoring tests.  It also initialises the global
+// sessionStore so that scoreSession can read from it.
 func makeTestSession(t *testing.T, baseDir, command string) (string, *SessionInfo) {
 	t.Helper()
 	sessDir := filepath.Join(baseDir, "alice", "host_20260101-120000")
@@ -328,6 +331,16 @@ func makeTestSession(t *testing.T, baseDir, command string) (string, *SessionInf
 	if err := os.WriteFile(filepath.Join(sessDir, "session.cast"), []byte(cast), 0o644); err != nil {
 		t.Fatalf("write cast: %v", err)
 	}
+
+	// Point the global store at the test directory so scoreSession can read
+	// the cast file and persist the risk cache.
+	var err error
+	sessionStore, err = store.New(store.Config{Backend: "local", LogDir: baseDir})
+	if err != nil {
+		t.Fatalf("init test store: %v", err)
+	}
+	t.Cleanup(func() { sessionStore.Close() })
+
 	s := &SessionInfo{
 		TSID:    "alice/host_20260101-120000",
 		User:    "alice",
@@ -340,7 +353,7 @@ func makeTestSession(t *testing.T, baseDir, command string) (string, *SessionInf
 
 func TestScoreSessionHighRisk(t *testing.T) {
 	dir := t.TempDir()
-	sessDir, s := makeTestSession(t, dir, "visudo /etc/sudoers")
+	_, s := makeTestSession(t, dir, "visudo /etc/sudoers")
 
 	rulesMu.Lock()
 	globalRules = []Rule{
@@ -354,7 +367,7 @@ func TestScoreSessionHighRisk(t *testing.T) {
 	globalRulesHash = "test-visudo"
 	rulesMu.Unlock()
 
-	score, reasons := scoreSession(s, sessDir)
+	score, reasons := scoreSession(s)
 	if score < 50 {
 		t.Errorf("expected score >= 50 for visudo, got %d", score)
 	}
@@ -365,7 +378,7 @@ func TestScoreSessionHighRisk(t *testing.T) {
 
 func TestScoreSessionLowRisk(t *testing.T) {
 	dir := t.TempDir()
-	sessDir, s := makeTestSession(t, dir, "echo hello")
+	_, s := makeTestSession(t, dir, "echo hello")
 
 	rulesMu.Lock()
 	globalRules = []Rule{
@@ -379,7 +392,7 @@ func TestScoreSessionLowRisk(t *testing.T) {
 	globalRulesHash = "test-echo"
 	rulesMu.Unlock()
 
-	score, _ := scoreSession(s, sessDir)
+	score, _ := scoreSession(s)
 	if score != 0 {
 		t.Errorf("expected score 0 for echo, got %d", score)
 	}
@@ -387,7 +400,7 @@ func TestScoreSessionLowRisk(t *testing.T) {
 
 func TestScoreSessionScoreCap(t *testing.T) {
 	dir := t.TempDir()
-	sessDir, s := makeTestSession(t, dir, "something dangerous")
+	_, s := makeTestSession(t, dir, "something dangerous")
 
 	rulesMu.Lock()
 	globalRules = []Rule{
@@ -397,7 +410,7 @@ func TestScoreSessionScoreCap(t *testing.T) {
 	globalRulesHash = "test-cap"
 	rulesMu.Unlock()
 
-	score, _ := scoreSession(s, sessDir)
+	score, _ := scoreSession(s)
 	if score > 100 {
 		t.Errorf("score %d exceeds cap of 100", score)
 	}
@@ -405,7 +418,7 @@ func TestScoreSessionScoreCap(t *testing.T) {
 
 func TestScoreSessionCachesResult(t *testing.T) {
 	dir := t.TempDir()
-	sessDir, s := makeTestSession(t, dir, "visudo /etc/sudoers")
+	_, s := makeTestSession(t, dir, "visudo /etc/sudoers")
 
 	rulesMu.Lock()
 	globalRules = []Rule{
@@ -414,9 +427,9 @@ func TestScoreSessionCachesResult(t *testing.T) {
 	globalRulesHash = "test-cache"
 	rulesMu.Unlock()
 
-	score1, reasons1 := scoreSession(s, sessDir)
+	score1, reasons1 := scoreSession(s)
 	// Second call should return identical results from the on-disk cache.
-	score2, reasons2 := scoreSession(s, sessDir)
+	score2, reasons2 := scoreSession(s)
 	if score1 != score2 {
 		t.Errorf("cached score %d != original %d", score2, score1)
 	}
@@ -442,7 +455,7 @@ func TestScoreSessionIncompleteRule(t *testing.T) {
 	globalRulesHash = "test-incomplete"
 	rulesMu.Unlock()
 
-	score, reasons := scoreSession(s, sessDir)
+	score, reasons := scoreSession(s)
 	if score < 40 {
 		t.Errorf("expected score >= 40 for incomplete session, got %d", score)
 	}
@@ -480,7 +493,7 @@ func TestScoreSessionContentRule(t *testing.T) {
 	globalRulesHash = "test-content"
 	rulesMu.Unlock()
 
-	score, reasons := scoreSession(s, sessDir)
+	score, reasons := scoreSession(s)
 	if score < 50 {
 		t.Errorf("expected score >= 50 for shadow content, got %d", score)
 	}

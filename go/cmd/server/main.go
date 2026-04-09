@@ -8,6 +8,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
@@ -17,14 +18,13 @@ import (
 	"log"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
-	"gopkg.in/yaml.v3"
+	"sudo-logger/internal/store"
 )
 
 // validName matches safe directory name components: alphanumeric plus .-_
@@ -55,74 +55,23 @@ var (
 			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
 	flagBlockedUsers = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml",
 		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
+
+	// Storage backend flags.
+	flagStorage    = flag.String("storage", "local", "Storage backend: local|distributed")
+	flagS3Bucket   = flag.String("s3-bucket", "", "S3 bucket name (distributed storage)")
+	flagS3Region   = flag.String("s3-region", "us-east-1", "S3 region (distributed storage)")
+	flagS3Prefix   = flag.String("s3-prefix", "sessions/", "S3 key prefix (distributed storage)")
+	flagS3Endpoint = flag.String("s3-endpoint", "", "S3-compatible endpoint URL, e.g. https://minio.internal:9000")
+	flagS3PathStyle = flag.Bool("s3-path-style", false, "Use path-style S3 URLs (required for MinIO/StorageGRID)")
+	flagS3AccessKey = flag.String("s3-access-key", "", "Static S3 access key (leave empty to use IAM/env)")
+	flagS3SecretKey = flag.String("s3-secret-key", "", "Static S3 secret key (leave empty to use IAM/env)")
+	flagDBURL      = flag.String("db-url", "", "PostgreSQL DSN (distributed storage)")
+	flagBufferDir  = flag.String("buffer-dir", "/var/lib/sudo-logger/buffer", "Local write-buffer dir for S3 uploads")
 )
-
-// BlockedUser describes a single blocked user entry.
-type BlockedUser struct {
-	Username  string   `yaml:"username"`
-	Hosts     []string `yaml:"hosts"`      // empty = all hosts
-	Reason    string   `yaml:"reason"`
-	BlockedAt int64    `yaml:"blocked_at"`
-}
-
-// BlockedUsersConfig is the top-level structure of blocked-users.yaml.
-type BlockedUsersConfig struct {
-	BlockMessage string        `yaml:"block_message"`
-	Users        []BlockedUser `yaml:"users"`
-}
-
-var (
-	blockedMu  sync.RWMutex
-	blockedCfg BlockedUsersConfig
-)
-
-func loadBlockedUsers(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			blockedMu.Lock()
-			blockedCfg = BlockedUsersConfig{}
-			blockedMu.Unlock()
-			return nil
-		}
-		return err
-	}
-	var cfg BlockedUsersConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse blocked-users: %w", err)
-	}
-	blockedMu.Lock()
-	blockedCfg = cfg
-	blockedMu.Unlock()
-	log.Printf("blocked-users: loaded %d blocked user(s) from %s", len(cfg.Users), path)
-	return nil
-}
-
-// isBlocked returns whether user is blocked on host, and the block message to show.
-// An empty Hosts list on a BlockedUser entry means "all hosts".
-func isBlocked(user, host string) (bool, string) {
-	blockedMu.RLock()
-	cfg := blockedCfg
-	blockedMu.RUnlock()
-	for _, bu := range cfg.Users {
-		if bu.Username != user {
-			continue
-		}
-		if len(bu.Hosts) == 0 {
-			return true, cfg.BlockMessage
-		}
-		for _, h := range bu.Hosts {
-			if h == host {
-				return true, cfg.BlockMessage
-			}
-		}
-	}
-	return false, ""
-}
 
 type server struct {
-	signKey ed25519.PrivateKey
-	logDir  string
+	signKey      ed25519.PrivateKey
+	sessionStore store.SessionStore
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -136,7 +85,7 @@ type session struct {
 	cwd       string
 	command   string
 	startTime time.Time
-	writer    *iolog.Writer
+	writer    store.SessionWriter
 	lastSeq   uint64
 }
 
@@ -153,22 +102,30 @@ func main() {
 		log.Fatalf("build TLS config: %v", err)
 	}
 
-	if err := os.MkdirAll(*flagLogDir, 0750); err != nil {
-		log.Fatalf("create log dir: %v", err)
+	if *flagStorage == "local" {
+		if err := os.MkdirAll(*flagLogDir, 0750); err != nil {
+			log.Fatalf("create log dir: %v", err)
+		}
 	}
 
-	if err := loadBlockedUsers(*flagBlockedUsers); err != nil {
-		log.Printf("blocked-users: initial load: %v", err)
+	sessionStore, err := store.New(store.Config{
+		Backend:          *flagStorage,
+		LogDir:           *flagLogDir,
+		BlockedUsersPath: *flagBlockedUsers,
+		S3Bucket:         *flagS3Bucket,
+		S3Region:         *flagS3Region,
+		S3Prefix:         *flagS3Prefix,
+		S3Endpoint:       *flagS3Endpoint,
+		S3PathStyle:      *flagS3PathStyle,
+		S3AccessKey:      *flagS3AccessKey,
+		S3SecretKey:      *flagS3SecretKey,
+		DBURL:            *flagDBURL,
+		BufferDir:        *flagBufferDir,
+	})
+	if err != nil {
+		log.Fatalf("init storage: %v", err)
 	}
-	go func() {
-		t := time.NewTicker(30 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			if err := loadBlockedUsers(*flagBlockedUsers); err != nil {
-				log.Printf("blocked-users: reload: %v", err)
-			}
-		}
-	}()
+	defer sessionStore.Close()
 
 	ln, err := tls.Listen("tcp", *flagListen, tlsCfg)
 	if err != nil {
@@ -177,12 +134,12 @@ func main() {
 	defer ln.Close()
 
 	srv := &server{
-		signKey: signKey,
-		logDir:  *flagLogDir,
-		sessions: make(map[string]*session),
+		signKey:      signKey,
+		sessionStore: sessionStore,
+		sessions:     make(map[string]*session),
 	}
 
-	log.Printf("sudo-logserver listening on %s, writing to %s", *flagListen, *flagLogDir)
+	log.Printf("sudo-logserver listening on %s, storage=%s logdir=%s", *flagListen, *flagStorage, *flagLogDir)
 
 	for {
 		conn, err := ln.Accept()
@@ -209,8 +166,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			if sess != nil {
 				log.Printf("SECURITY: [%s] %s dropped connection without session_end — session may be incomplete (shipper killed?): %v",
 					sess.id, remote, err)
-				_ = os.WriteFile(sess.writer.Dir()+"/INCOMPLETE",
-					[]byte("connection lost without session_end\n"), 0640)
+				_ = sess.writer.MarkIncomplete()
 				srv.closeSession(sess)
 			}
 			return
@@ -247,7 +203,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			// ── Block policy check BEFORE creating the session directory ──────
 			// Checking first avoids leaving an empty session.cast on disk for
 			// every denied attempt (which clutters the replay index).
-			if blocked, msg := isBlocked(start.User, start.Host); blocked {
+			if blocked, msg, _ := srv.sessionStore.IsBlocked(context.Background(), start.User, start.Host); blocked {
 				log.Printf("SECURITY: [%s] user=%s host=%s denied by block policy",
 					start.SessionID, start.User, start.Host)
 				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
@@ -259,9 +215,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("open session %s: %v", start.SessionID, err)
 				return
 			}
-			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s dir=%s",
+			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s tsid=%s",
 				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
-				sess.command, start.ResolvedCommand, sess.cwd, sess.writer.Dir())
+				sess.command, start.ResolvedCommand, sess.cwd, sess.writer.TSID())
 
 			if err := protocol.WriteMessage(w, protocol.MsgServerReady, nil); err != nil {
 				log.Printf("[%s] write SERVER_READY: %v", start.SessionID, err)
@@ -312,8 +268,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			if sess != nil {
 				if end != nil {
-					_ = os.WriteFile(sess.writer.Dir()+"/exit_code",
-						[]byte(strconv.Itoa(int(end.ExitCode))), 0640)
+					_ = sess.writer.WriteExitCode(end.ExitCode)
 					log.Printf("[%s] end user=%s exit=%d seq=%d duration=%s",
 						sess.id, sess.user, end.ExitCode, end.FinalSeq,
 						time.Since(sess.startTime).Round(time.Second))
@@ -352,8 +307,8 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 		cwd = "/"
 	}
 
-	w, err := iolog.NewWriter(
-		srv.logDir,
+	w, err := srv.sessionStore.CreateSession(
+		context.Background(),
 		iolog.SessionMeta{
 			SessionID:       start.SessionID,
 			User:            user,
@@ -371,13 +326,13 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 		startTime,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create iolog: %w", err)
+		return nil, fmt.Errorf("create session: %w", err)
 	}
 
 	// Mark the session as active so the replay server can distinguish
 	// "currently recording" from "ended cleanly" or "ended abruptly (INCOMPLETE)".
 	// Removed by closeSession() regardless of how the session ends.
-	_ = os.WriteFile(w.Dir()+"/ACTIVE", []byte("session in progress\n"), 0640)
+	_ = w.MarkActive()
 
 	sess := &session{
 		id:        start.SessionID,
@@ -406,7 +361,7 @@ func (srv *server) closeSession(sess *session) {
 	if sess == nil {
 		return
 	}
-	_ = os.Remove(sess.writer.Dir() + "/ACTIVE")
+	_ = sess.writer.MarkDone()
 	if err := sess.writer.Close(); err != nil {
 		log.Printf("[%s] close writer: %v", sess.id, err)
 	}

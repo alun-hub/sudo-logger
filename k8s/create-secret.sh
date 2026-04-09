@@ -8,7 +8,7 @@
 #   ca/ca.crt
 #   server/server.crt
 #   server/server.key
-#   hmac.key
+#   hmac.key  (ed25519 signing key for ACKs, passed to server via -signkey)
 #
 # Applies directly to the cluster unless --dry-run is passed.
 set -euo pipefail

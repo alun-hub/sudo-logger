@@ -6,14 +6,17 @@ metadata:
   labels:
     app: sudo-logserver
 spec:
-  # Keep at 1 replica unless you add a ReadWriteMany PVC and a TCP load
-  # balancer with connection-level stickiness. See README for details.
+  # Local storage (default): keep at 1 replica — only one writer to the PVC.
+  # Distributed storage (--storage=distributed): raise replicas freely;
+  # no shared filesystem is needed. See README for distributed deployment.
   replicas: 1
   selector:
     matchLabels:
       app: sudo-logserver
   strategy:
-    type: Recreate   # ensures only one writer to the PVC at a time
+    # Recreate ensures the old pod releases the PVC before the new one starts.
+    # Switch to RollingUpdate when using distributed storage (no PVC).
+    type: Recreate
   template:
     metadata:
       labels:
@@ -34,7 +37,20 @@ spec:
             - -cert=/etc/sudo-logger/server.crt
             - -key=/etc/sudo-logger/server.key
             - -ca=/etc/sudo-logger/ca.crt
-            - -hmackey=/etc/sudo-logger/hmac.key
+            - -signkey=/etc/sudo-logger/hmac.key
+            - -blocked-users=/var/log/sudoreplay/blocked-users.yaml
+            # --- Distributed storage (S3 + PostgreSQL) ---
+            # Uncomment and fill in to switch to distributed mode.
+            # Remove the -logdir and -blocked-users flags above; those are
+            # local-storage-only. Replace the PVC volume with an emptyDir.
+            # - -storage=distributed
+            # - -s3-bucket=sudo-logs
+            # - -s3-endpoint=https://minio.internal:9000   # omit for AWS
+            # - -s3-path-style                              # MinIO / StorageGRID
+            # - -s3-access-key=$(S3_ACCESS_KEY)            # from Secret env var
+            # - -s3-secret-key=$(S3_SECRET_KEY)
+            # - -db-url=$(DB_URL)
+            # - -buffer-dir=/var/lib/sudo-logger/buffer
 
           ports:
             - name: tls
@@ -83,3 +99,7 @@ spec:
         - name: logs
           persistentVolumeClaim:
             claimName: sudoreplay-logs
+        # For distributed storage: replace the PVC above with an emptyDir.
+        # The emptyDir only holds in-flight S3 uploads; no persistent storage needed.
+        # - name: buffer
+        #   emptyDir: {}
