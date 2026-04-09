@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.15.2
+Version:        1.16.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -11,7 +11,9 @@ BuildRequires:  golang
 %global debug_package %{nil}
 
 Requires:       systemd
-Requires:       sudo-logger-server
+# sudo-logger-server is only required for single-node (local storage) deployments.
+# In distributed mode (--storage=distributed) the replay server runs independently.
+Recommends:     sudo-logger-server
 
 %description
 Browser-based session replay interface for sudo-logserver.
@@ -66,6 +68,14 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Wed Apr 09 2026 sudo-logger 1.16.0-1
+- feat: wire replay-server to SessionStore interface; supports both local
+  (filesystem) and distributed (S3 + PostgreSQL) backends via --storage flag
+- feat: new flags --storage, --s3-bucket, --s3-endpoint, --db-url, and
+  related S3/PostgreSQL options matching the log-server flags
+- feat: session watch for distributed backend polls sudo_sessions table
+  every 5 s instead of inotify (no shared filesystem required)
+
 * Mon Apr 07 2026 sudo-logger 1.15.2-1
 - feat: add SVG logo to topbar (replaces unicode glyph) and browser tab favicon
 

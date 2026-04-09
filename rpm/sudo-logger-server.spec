@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.13.1
+Version:        1.14.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,15 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Wed Apr 09 2026 sudo-logger 1.14.0-1
+- feat: pluggable storage abstraction (go/internal/store) with local and
+  distributed backends; --storage=distributed routes cast files to S3
+  (AWS/MinIO/StorageGRID) and session metadata to PostgreSQL, enabling
+  horizontal scaling with multiple log-server replicas in Kubernetes
+- feat: new flags --storage, --s3-bucket, --s3-region, --s3-prefix,
+  --s3-endpoint, --s3-path-style, --s3-access-key, --s3-secret-key,
+  --db-url, --buffer-dir (local storage behavior unchanged by default)
+
 * Mon Apr 07 2026 sudo-logger 1.13.1-1
 - fix: check block policy before creating session directory — denied sessions
   no longer leave an empty session.cast in the replay log (avoids ghost entries
