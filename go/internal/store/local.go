@@ -60,6 +60,12 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.BlockedUsersPath == "" {
 		cfg.BlockedUsersPath = "/etc/sudo-logger/blocked-users.yaml"
 	}
+	if cfg.SiemConfigPath == "" {
+		cfg.SiemConfigPath = "/etc/sudo-logger/siem.yaml"
+	}
+	if cfg.RiskRulesPath == "" {
+		cfg.RiskRulesPath = "/etc/sudo-logger/risk-rules.yaml"
+	}
 
 	ls := &LocalStore{
 		cfg:    cfg,
@@ -252,6 +258,100 @@ func (ls *LocalStore) WatchSessions(ctx context.Context, ch chan<- string) {
 func (ls *LocalStore) Close() error {
 	ls.stopOnce.Do(func() { close(ls.stopCh) })
 	return nil
+}
+
+// ── Config API (siem.yaml / risk-rules.yaml) ──────────────────────────────────
+
+func (ls *LocalStore) configFilePath(key string) string {
+	switch key {
+	case "siem.yaml":
+		return ls.cfg.SiemConfigPath
+	case "risk-rules.yaml":
+		return ls.cfg.RiskRulesPath
+	default:
+		return ""
+	}
+}
+
+// GetConfig reads a named config file from disk.
+func (ls *LocalStore) GetConfig(_ context.Context, key string) (string, error) {
+	path := ls.configFilePath(key)
+	if path == "" {
+		return "", fmt.Errorf("unknown config key %q", key)
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// SetConfig writes a named config file to disk.
+func (ls *LocalStore) SetConfig(_ context.Context, key, value string) error {
+	path := ls.configFilePath(key)
+	if path == "" {
+		return fmt.Errorf("unknown config key %q", key)
+	}
+	return os.WriteFile(path, []byte(value), 0o640)
+}
+
+// ── Blocked-users policy API ──────────────────────────────────────────────────
+
+const localBlockedUsersHeader = "# Blocked users config — managed by sudo-replay GUI\n" +
+	"# Log server reloads this file automatically every 30 seconds.\n\n"
+
+// GetBlockedPolicy returns the in-memory blocked-users policy (kept fresh by
+// the background reload goroutine).
+func (ls *LocalStore) GetBlockedPolicy(_ context.Context) (BlockedPolicy, error) {
+	ls.blockedMu.RLock()
+	cur := ls.blockedCfg
+	ls.blockedMu.RUnlock()
+	p := BlockedPolicy{BlockMessage: cur.BlockMessage}
+	for _, u := range cur.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
+		}
+		p.Users = append(p.Users, BlockedUserEntry{
+			Username:  u.Username,
+			Hosts:     hosts,
+			Reason:    u.Reason,
+			BlockedAt: u.BlockedAt,
+		})
+	}
+	if p.Users == nil {
+		p.Users = []BlockedUserEntry{}
+	}
+	return p, nil
+}
+
+// SaveBlockedPolicy writes the blocked-users policy to blocked-users.yaml.
+// The background reload goroutine will pick up the change within 30 seconds.
+func (ls *LocalStore) SaveBlockedPolicy(_ context.Context, policy BlockedPolicy) error {
+	raw := blockedUsersConfig{BlockMessage: policy.BlockMessage}
+	for _, u := range policy.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
+		}
+		raw.Users = append(raw.Users, blockedUser{
+			Username:  u.Username,
+			Hosts:     hosts,
+			Reason:    u.Reason,
+			BlockedAt: u.BlockedAt,
+		})
+	}
+	if raw.Users == nil {
+		raw.Users = []blockedUser{}
+	}
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(ls.cfg.BlockedUsersPath, append([]byte(localBlockedUsersHeader), data...), 0o640)
 }
 
 // resolveSessionDir converts tsid to an absolute directory path and checks

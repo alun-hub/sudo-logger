@@ -424,8 +424,10 @@ func (c *sessionCache) rebuild(ctx context.Context) ([]SessionInfo, error) {
 		copy(snap, c.sessions)
 		return snap, nil
 	}
-	if err := loadRules(*flagRules); err != nil {
+	if rulesText, err := sessionStore.GetConfig(ctx, "risk-rules.yaml"); err != nil {
 		log.Printf("risk rules reload: %v", err)
+	} else if err := loadRulesFromText(rulesText); err != nil {
+		log.Printf("risk rules parse: %v", err)
 	}
 	records, err := sessionStore.ListSessions(ctx)
 	if err != nil {
@@ -478,21 +480,24 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 
 // ── Blocked users API ─────────────────────────────────────────────────────────
 
-const blockedUsersFileHeader = "# Blocked users config — managed by sudo-replay GUI\n" +
-	"# Log server reloads this file automatically every 30 seconds.\n\n"
-
 func handleGetBlockedUsers(w http.ResponseWriter, r *http.Request) {
-	var cfg BlockedUsersConfig
-	data, err := os.ReadFile(*flagBlockedUsers)
-	if err != nil && !os.IsNotExist(err) {
+	policy, err := sessionStore.GetBlockedPolicy(r.Context())
+	if err != nil {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if len(data) > 0 {
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			http.Error(w, "parse config: "+err.Error(), http.StatusInternalServerError)
-			return
+	cfg := BlockedUsersConfig{BlockMessage: policy.BlockMessage}
+	for _, u := range policy.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
 		}
+		cfg.Users = append(cfg.Users, BlockedUser{
+			Username:  u.Username,
+			Hosts:     hosts,
+			Reason:    u.Reason,
+			BlockedAt: u.BlockedAt,
+		})
 	}
 	if cfg.Users == nil {
 		cfg.Users = []BlockedUser{}
@@ -521,12 +526,20 @@ func handlePutBlockedUsers(w http.ResponseWriter, r *http.Request) {
 	if body.Config.Users == nil {
 		body.Config.Users = []BlockedUser{}
 	}
-	yamlBytes, err := yaml.Marshal(body.Config)
-	if err != nil {
-		http.Error(w, "marshal yaml: "+err.Error(), http.StatusInternalServerError)
-		return
+	policy := store.BlockedPolicy{BlockMessage: body.Config.BlockMessage}
+	for _, u := range body.Config.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
+		}
+		policy.Users = append(policy.Users, store.BlockedUserEntry{
+			Username:  u.Username,
+			Hosts:     hosts,
+			Reason:    u.Reason,
+			BlockedAt: u.BlockedAt,
+		})
 	}
-	if err := os.WriteFile(*flagBlockedUsers, append([]byte(blockedUsersFileHeader), yamlBytes...), 0o640); err != nil {
+	if err := sessionStore.SaveBlockedPolicy(r.Context(), policy); err != nil {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -559,17 +572,14 @@ func handleGetHosts(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 
-	if err := loadRules(*flagRules); err != nil {
-		log.Fatalf("load risk rules: %v", err)
-	}
-
-	siem.Load(*flagSiemConfig)
-
+	// Initialise storage first — rules and siem config may be loaded from DB.
 	var storeErr error
 	sessionStore, storeErr = store.New(store.Config{
 		Backend:          *flagStorage,
 		LogDir:           *flagLogDir,
 		BlockedUsersPath: *flagBlockedUsers,
+		SiemConfigPath:   *flagSiemConfig,
+		RiskRulesPath:    *flagRules,
 		S3Bucket:         *flagS3Bucket,
 		S3Region:         *flagS3Region,
 		S3Prefix:         *flagS3Prefix,
@@ -584,6 +594,25 @@ func main() {
 		log.Fatalf("init storage: %v", storeErr)
 	}
 	defer sessionStore.Close()
+
+	// Load risk rules from store (file for local, DB for distributed).
+	if rulesText, err := sessionStore.GetConfig(context.Background(), "risk-rules.yaml"); err != nil {
+		log.Fatalf("load risk rules: %v", err)
+	} else if rulesText == "" {
+		log.Printf("risk rules: no config found — scoring disabled")
+	} else if err := loadRulesFromText(rulesText); err != nil {
+		log.Fatalf("parse risk rules: %v", err)
+	}
+
+	// Start SIEM background reload. In distributed mode poll the DB; in local
+	// mode use the file-based poller (which has mtime optimisation).
+	if *flagStorage == "distributed" {
+		siem.LoadWithFunc(func() (string, error) {
+			return sessionStore.GetConfig(context.Background(), "siem.yaml")
+		})
+	} else {
+		siem.Load(*flagSiemConfig)
+	}
 
 	// Watch for completed sessions and forward to SIEM.
 	siemCh := make(chan string, 100)
@@ -1293,14 +1322,13 @@ func handlePutRules(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "marshal yaml: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	content := []byte(rulesFileHeader)
-	content = append(content, yamlBody...)
-	if err := os.WriteFile(*flagRules, content, 0o644); err != nil {
-		log.Printf("write rules file: %v", err)
+	content := string(rulesFileHeader) + string(yamlBody)
+	if err := sessionStore.SetConfig(r.Context(), "risk-rules.yaml", content); err != nil {
+		log.Printf("write rules: %v", err)
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := loadRules(*flagRules); err != nil {
+	if err := loadRulesFromText(content); err != nil {
 		log.Printf("reload after write: %v", err)
 	}
 	// Invalidate session cache so next request re-scores with new rules.
@@ -1313,18 +1341,18 @@ func handlePutRules(w http.ResponseWriter, r *http.Request) {
 
 // ── SIEM config API ───────────────────────────────────────────────────────────
 
-// handleGetSiemConfig reads siem.yaml from disk and returns it as JSON.
-// Reading from disk (not siem.Get()) ensures the replay-server always
-// reflects the saved state — siem.Load() is only called in the log server.
+// handleGetSiemConfig reads the siem config from the store and returns it as JSON.
+// Using the store (rather than siem.Get()) ensures the response reflects the
+// persisted state even before the background reload cycle fires.
 func handleGetSiemConfig(w http.ResponseWriter, r *http.Request) {
-	var cfg siem.Config
-	data, err := os.ReadFile(*flagSiemConfig)
-	if err != nil && !os.IsNotExist(err) {
+	text, err := sessionStore.GetConfig(r.Context(), "siem.yaml")
+	if err != nil {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if len(data) > 0 {
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
+	var cfg siem.Config
+	if text != "" {
+		if err := yaml.Unmarshal([]byte(text), &cfg); err != nil {
 			http.Error(w, "parse config: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -1369,13 +1397,16 @@ func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "marshal yaml: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	header := []byte("# SIEM forwarding configuration — managed by sudo-replay GUI\n" +
-		"# Log server reloads this file automatically every 30 seconds.\n\n")
-	if err := os.WriteFile(*flagSiemConfig, append(header, yamlBytes...), 0o640); err != nil {
+	content := "# SIEM forwarding configuration — managed by sudo-replay GUI\n" +
+		"# Reload cycle: 30 s (file poller for local, DB poll for distributed).\n\n" +
+		string(yamlBytes)
+	if err := sessionStore.SetConfig(r.Context(), "siem.yaml", content); err != nil {
 		log.Printf("write siem config: %v", err)
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Apply immediately so this replica doesn't wait for the next reload cycle.
+	siem.Set(cfg)
 	log.Printf("siem: config updated via GUI (enabled=%v transport=%s format=%s)",
 		cfg.Enabled, cfg.Transport, cfg.Format)
 	w.Header().Set("Content-Type", "application/json")
@@ -1549,6 +1580,32 @@ func loadRules(path string) error {
 	var rs RuleSet
 	if err := yaml.Unmarshal(data, &rs); err != nil {
 		return fmt.Errorf("parse rules file: %w", err)
+	}
+	rulesMu.Lock()
+	globalRules = rs.Rules
+	globalRulesHash = hash
+	rulesMu.Unlock()
+	log.Printf("risk rules loaded: %d rules (hash %s)", len(rs.Rules), hash)
+	return nil
+}
+
+// loadRulesFromText parses YAML rules from an in-memory string.
+// A empty text is treated as "no rules" and is a no-op.
+func loadRulesFromText(text string) error {
+	if text == "" {
+		return nil
+	}
+	data := []byte(text)
+	hash := computeRulesHash(data)
+	rulesMu.RLock()
+	unchanged := hash == globalRulesHash
+	rulesMu.RUnlock()
+	if unchanged {
+		return nil
+	}
+	var rs RuleSet
+	if err := yaml.Unmarshal(data, &rs); err != nil {
+		return fmt.Errorf("parse rules: %w", err)
 	}
 	rulesMu.Lock()
 	globalRules = rs.Rules

@@ -77,6 +77,53 @@ func Load(path string) {
 	}()
 }
 
+// LoadWithFunc is like Load but uses loader to fetch the raw YAML text each
+// cycle instead of reading a file. Use this in distributed deployments where
+// the config is stored in a database rather than on disk.
+func LoadWithFunc(loader func() (string, error)) {
+	applyLoader(loader)
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			applyLoader(loader)
+		}
+	}()
+}
+
+// Set directly replaces the current in-memory configuration.
+// Call this after writing a new config to persistent storage so that the
+// running process picks up the change immediately without waiting for the
+// next reload cycle.
+func Set(cfg Config) {
+	cfgMu.Lock()
+	cfgCur = cfg
+	cfgMu.Unlock()
+	log.Printf("siem: config applied (enabled=%v transport=%s format=%s replay_url_base=%q)",
+		cfg.Enabled, cfg.Transport, cfg.Format, cfg.ReplayURLBase)
+}
+
+func applyLoader(loader func() (string, error)) {
+	text, err := loader()
+	if err != nil {
+		log.Printf("siem: load error: %v", err)
+		return
+	}
+	if text == "" {
+		return // not configured yet
+	}
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(text), &cfg); err != nil {
+		log.Printf("siem: parse config: %v", err)
+		return
+	}
+	cfgMu.Lock()
+	cfgCur = cfg
+	cfgMu.Unlock()
+	log.Printf("siem: config loaded (enabled=%v transport=%s format=%s replay_url_base=%q)",
+		cfg.Enabled, cfg.Transport, cfg.Format, cfg.ReplayURLBase)
+}
+
 // Get returns a snapshot of the current configuration.
 func Get() Config {
 	cfgMu.RLock()

@@ -89,6 +89,23 @@ type SessionStore interface {
 	// Returns (true, blockMessage, nil) when denied.
 	IsBlocked(ctx context.Context, user, host string) (bool, string, error)
 
+	// GetConfig retrieves a named configuration blob (e.g. "siem.yaml",
+	// "risk-rules.yaml"). Returns ("", nil) if the key has not been stored yet.
+	// LocalStore reads the corresponding file; DistributedStore queries sudo_config.
+	GetConfig(ctx context.Context, key string) (string, error)
+
+	// SetConfig stores a named configuration blob.
+	// LocalStore writes the corresponding file; DistributedStore upserts sudo_config.
+	SetConfig(ctx context.Context, key, value string) error
+
+	// GetBlockedPolicy returns the full blocked-users policy for the GUI.
+	// LocalStore reads blocked-users.yaml; DistributedStore queries sudo_blocked_users.
+	GetBlockedPolicy(ctx context.Context) (BlockedPolicy, error)
+
+	// SaveBlockedPolicy replaces the full blocked-users policy.
+	// LocalStore writes blocked-users.yaml; DistributedStore updates sudo_blocked_users.
+	SaveBlockedPolicy(ctx context.Context, policy BlockedPolicy) error
+
 	// WatchSessions delivers TSIDs for newly completed sessions to ch.
 	// The implementation decides the delivery mechanism:
 	//   LocalStore       — fsnotify on the log directory
@@ -131,6 +148,20 @@ type RawEvent struct {
 	Data []byte  // raw bytes; callers base64-encode for JSON transport
 }
 
+// BlockedUserEntry is a single entry in the blocked-users policy.
+type BlockedUserEntry struct {
+	Username  string   // required
+	Hosts     []string // empty = blocked on all hosts
+	Reason    string
+	BlockedAt int64 // unix seconds
+}
+
+// BlockedPolicy is the full blocked-users configuration.
+type BlockedPolicy struct {
+	BlockMessage string
+	Users        []BlockedUserEntry
+}
+
 // RiskCache is the persisted result of a risk-scoring run.
 type RiskCache struct {
 	RulesHash string
@@ -154,6 +185,14 @@ type Config struct {
 	// BlockedUsersPath is the YAML file listing blocked users.
 	// Default: /etc/sudo-logger/blocked-users.yaml
 	BlockedUsersPath string
+
+	// SiemConfigPath is the path to siem.yaml (LocalStore only).
+	// Default: /etc/sudo-logger/siem.yaml
+	SiemConfigPath string
+
+	// RiskRulesPath is the path to risk-rules.yaml (LocalStore only).
+	// Default: /etc/sudo-logger/risk-rules.yaml
+	RiskRulesPath string
 
 	// ── DistributedStore fields ──────────────────────────────────────────────
 
