@@ -1,6 +1,6 @@
 # ---- Build stage ----
-# Updated to Go 1.24 for latest performance and security fixes.
-FROM golang:1.24-alpine AS builder
+# Go 1.25+ required by go.mod.
+FROM golang:1.25-alpine AS builder
 WORKDIR /src
 
 # Copy the Go source tree (includes go/vendor — no network access needed).

@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Distributed storage deployment (MinIO + PostgreSQL).
+# Apply with: kubectl apply -k k8s/  (after running deploy-local.sh first)
+#
+# Secrets are created by deploy-local.sh — not managed by kustomize.
+
+resources:
+  - namespace.yaml
+  - service.yaml
+  - postgresql.yaml
+  - minio.yaml
+  - deployment-distributed.yaml
+  - replay-server.yaml

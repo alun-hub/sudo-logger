@@ -21,3 +21,6 @@ go/cmd/ebpf-recorder/recorder_bpfeb.o
 go/cmd/ebpf-recorder/recorder_bpfel.go
 go/cmd/ebpf-recorder/recorder_bpfel.o
 bin/
+
+# PKI files — certificates and private keys must never be committed
+pki/

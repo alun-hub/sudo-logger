@@ -148,9 +148,10 @@ CREATE TABLE IF NOT EXISTS sudo_blocked_users (
     username    TEXT NOT NULL,
     host        TEXT,
     reason      TEXT,
-    blocked_at  BIGINT,
-    PRIMARY KEY (username, COALESCE(host, ''))
+    blocked_at  BIGINT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS sudo_blocked_users_uk
+    ON sudo_blocked_users (username, COALESCE(host, ''));
 
 CREATE TABLE IF NOT EXISTS sudo_config (
     key   TEXT PRIMARY KEY,

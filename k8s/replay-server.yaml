@@ -1,0 +1,111 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sudo-replay-server
+  namespace: sudo-logger
+  labels:
+    app: sudo-replay-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sudo-replay-server
+  template:
+    metadata:
+      labels:
+        app: sudo-replay-server
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+
+      containers:
+        - name: sudo-replay-server
+          image: localhost/sudo-logger:latest
+          imagePullPolicy: Never
+          command: [/usr/local/bin/sudo-replay-server]
+          args:
+            - -listen=:8080
+            - -storage=distributed
+            - -s3-bucket=sudo-logs
+            - -s3-endpoint=http://minio:9000
+            - -s3-path-style
+            - -s3-access-key=$(S3_ACCESS_KEY)
+            - -s3-secret-key=$(S3_SECRET_KEY)
+            - -db-url=$(DB_URL)
+            - -buffer-dir=/var/lib/sudo-logger/buffer
+
+          env:
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sudo-logger-distributed
+                  key: s3-access-key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sudo-logger-distributed
+                  key: s3-secret-key
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sudo-logger-distributed
+                  key: db-url
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          volumeMounts:
+            - name: buffer
+              mountPath: /var/lib/sudo-logger/buffer
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+          readinessProbe:
+            httpGet:
+              path: /api/sessions
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /api/sessions
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+
+      volumes:
+        - name: buffer
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sudo-replay-server
+  namespace: sudo-logger
+spec:
+  type: NodePort
+  selector:
+    app: sudo-replay-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080
