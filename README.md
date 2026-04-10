@@ -506,6 +506,20 @@ sudo-logserver \
 
 **PostgreSQL schema** is applied automatically at startup with `CREATE TABLE IF NOT EXISTS` — no separate migration step required for new deployments.
 
+**Importing risk rules into the database** — in distributed mode, risk rules are stored in PostgreSQL rather than on disk. To seed the database from an existing `risk-rules.yaml`:
+
+```bash
+sudo cat /etc/sudo-logger/risk-rules.yaml | python3 -c "
+import yaml, json, sys
+data = yaml.safe_load(sys.stdin)
+print(json.dumps({'rules': data.get('rules', [])}))
+" | curl -s -X PUT http://<replay-server>:8080/api/rules \
+     -H "Content-Type: application/json" \
+     --data-binary @-
+```
+
+After import, rules are served from the database and changes via the Settings UI are persisted there automatically.
+
 ### Tunable constants in `plugin/plugin.c`
 
 | Constant | Default | Description |

@@ -723,7 +723,7 @@
         </div>
 
         <p class="siem-note">
-          The log server reloads this config automatically within 30 seconds.
+          Changes reload within 30 seconds.
           Certificate paths must be readable by the log server process.
         </p>
       </div>
@@ -2234,7 +2234,7 @@ async function saveSiemConfig() {
       body: JSON.stringify({ config: cfg }),
     });
     if (!res.ok) { const t = await res.text(); throw new Error(t); }
-    showSiemStatus('Saved — log server reloads within 30 s', false);
+    showSiemStatus('Saved — reloads within 30 s', false);
   } catch (err) {
     showSiemStatus('Save failed: ' + err.message, true);
   } finally {
@@ -2413,7 +2413,7 @@ async function saveBlockedConfig() {
       body: JSON.stringify({ config: blockedData }),
     });
     if (!res.ok) { const t = await res.text(); throw new Error(t); }
-    showBlockedStatus('Saved — log server reloads within 30 s', false);
+    showBlockedStatus('Saved — effective within 30 s', false);
     renderBlockedTable();
   } catch (err) {
     showBlockedStatus('Save failed: ' + err.message, true);

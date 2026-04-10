@@ -1367,7 +1367,7 @@ func handleGetSiemConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePutSiemConfig validates and persists an updated SIEM config.
-// The log server picks up the change within 30 seconds via its file poller.
+// Both servers reload within 30 s (file poller for local, DB poll for distributed).
 func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Config siem.Config `json:"config"`
