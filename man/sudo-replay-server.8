@@ -1,4 +1,4 @@
-.TH SUDO\-REPLAY\-SERVER 8 "2026-04-06" "sudo-logger 1.13.0" "System Administration"
+.TH SUDO\-REPLAY\-SERVER 8 "2026-04-11" "sudo-logger 1.17.0" "System Administration"
 .SH NAME
 sudo\-replay\-server \- web interface for replaying sudo session recordings
 .SH SYNOPSIS
@@ -7,13 +7,30 @@ sudo\-replay\-server \- web interface for replaying sudo session recordings
 [\fB\-logdir\fR \fIdir\fR]
 [\fB\-rules\fR \fIfile\fR]
 [\fB\-siem-config\fR \fIfile\fR]
+[\fB\-storage\fR \fIbackend\fR]
+[\fB\-s3\-bucket\fR \fIname\fR]
+[\fB\-db\-url\fR \fIDSN\fR]
 .SH DESCRIPTION
 .B sudo\-replay\-server
 is a self-contained HTTP server that reads asciinema v2 session recordings written by
 .BR sudo\-logserver (8)
 and serves a browser-based terminal player.
 .PP
-No database or external dependencies are required.
+In
+.B local storage mode
+(default) sessions are read directly from the filesystem under
+.BR \-logdir .
+In
+.B distributed storage mode
+session recordings are stored in S3 (or an S3-compatible store such as MinIO)
+and metadata is held in PostgreSQL; specify
+.B \-storage=distributed
+together with
+.B \-s3\-bucket
+and
+.BR \-db\-url .
+.PP
+No external dependencies are required in local mode.
 The frontend (xterm.js and supporting CSS) is embedded in the binary.
 .PP
 Features of the web interface:
@@ -79,11 +96,16 @@ Risk levels:
 configuring SIEM forwarding.  Rule changes take effect without a server restart.
 .PP
 .B SIEM forwarding
-\(em completed sessions are forwarded to an external SIEM after the session
-closes.
-The server watches the log directory for ACTIVE marker removal using
-.BR inotify (7)
-and sends an event as soon as the marker disappears.
+\(em completed sessions are forwarded after each session closes.
+In local storage mode the server watches for
+.B ACTIVE
+marker removal using
+.BR inotify (7).
+In distributed storage mode it polls the
+.B sudo_sessions
+PostgreSQL table every 5 seconds; a PostgreSQL advisory lock
+.RB ( pg_try_advisory_lock )
+ensures that only one replica forwards events when multiple pods are running.
 Events include all session metadata and the computed risk score.
 .PP
 Three event formats are supported:
@@ -137,7 +159,7 @@ Risk score and reasons are included in the
 .B unmapped
 object.
 .PP
-Two transport protocols are supported:
+Three transport protocols are supported:
 .TP
 .B https
 HTTP POST with TLS.
@@ -146,6 +168,8 @@ certificate is not accepted.
 The CA certificate must be configured so the server certificate can be
 verified.
 A bearer or Splunk HEC token can optionally be set.
+Certificate upload via the Settings UI is available in local storage mode only;
+in distributed (Kubernetes) mode manage certificates with Kubernetes Secrets.
 .TP
 .B syslog
 RFC 5424 syslog message.
@@ -158,10 +182,20 @@ Three sub-protocols are available:
 (reliable, TLS 1.2+, mTLS optional).
 Facility: LOG_AUTHPRIV (10).
 Severity: NOTICE on success, WARNING on non-zero exit or incomplete session.
+.TP
+.B stdout
+Writes each event as a single line to standard output.
+The container runtime collects the output and the log aggregation pipeline
+(Fluentd, Promtail, Vector, etc.) forwards it to the SIEM.
+Recommended for Kubernetes deployments: no TLS certificates or endpoint
+configuration required.
 .PP
 SIEM configuration is stored in
 .B /etc/sudo-logger/siem.yaml
-and is also writable via the Settings tab in the browser.
+(local mode) or in the
+.B sudo_config
+PostgreSQL table (distributed mode),
+and is writable via the Settings tab in the browser.
 .PP
 The server runs as the
 .B sudologger
@@ -220,6 +254,41 @@ If the file does not exist, SIEM forwarding is disabled.
 The Settings tab in the browser provides a GUI for editing this file.
 Default:
 .BR /etc/sudo-logger/siem.yaml .
+.TP
+.BI \-storage " backend"
+Storage backend to use.
+.B local
+(default) reads sessions from the local filesystem under
+.BR \-logdir .
+.B distributed
+reads session metadata from PostgreSQL and cast files from S3.
+.TP
+.BI \-s3\-bucket " name"
+S3 bucket name (required when
+.BR \-storage=distributed ).
+.TP
+.BI \-s3\-endpoint " url"
+Override the S3 endpoint URL (required for MinIO and StorageGRID, e.g.\&
+.BR https://minio.internal:9000 ).
+.TP
+.B \-s3\-path\-style
+Force path-style S3 URLs.
+Required for MinIO and StorageGRID.
+.TP
+.BI \-s3\-access\-key " key"
+Static S3 access key.
+Leave empty to use the standard AWS credential chain.
+.TP
+.BI \-s3\-secret\-key " key"
+Static S3 secret key (see
+.BR \-s3\-access\-key ).
+.TP
+.BI \-db\-url " DSN"
+PostgreSQL connection string (required when
+.BR \-storage=distributed ).
+Example:
+.IR "postgres://user:pass@host:5432/dbname?sslmode=require" .\" pragma: allowlist secret
+The schema is created automatically at startup.
 .TP
 .BI \-tls-cert " file"
 Path to a PEM-encoded TLS certificate.
@@ -297,6 +366,15 @@ sudo\-replay\-server \-trusted\-user\-header X\-Forwarded\-User
 .EE
 .SH API
 .TP
+.B GET /healthz
+Always returns
+.B 200 OK
+with body
+.BR ok .
+Use this endpoint for Kubernetes liveness and readiness probes in preference to
+.B /api/sessions
+(which performs a full session scan).
+.TP
 .B GET /api/sessions
 Returns a paginated, filtered list of sessions.
 Query parameters:
@@ -352,6 +430,17 @@ Filename must match
 .BR [a-zA-Z0-9._-]{1,64}\\.(crt|pem|key) .
 Maximum 64 KB.
 Returns the saved path.
+.SH SIGNALS
+.TP
+.B SIGTERM\fR / \fBSIGINT
+Initiate a graceful shutdown.
+The server stops accepting new HTTP connections and waits up to 30 seconds
+for in-flight requests to complete before the process exits.
+.TP
+.B SIGHUP
+Reload the htpasswd file (when
+.B \-htpasswd
+is in use) without restarting the server.
 .SH FILES
 .TP
 .B /var/log/sudoreplay/
@@ -365,12 +454,42 @@ Default risk-scoring rules file (read/write; the Settings tab updates this file)
 .B /etc/sudo-logger/siem.yaml
 SIEM forwarding configuration (read/write; the Settings tab updates this file).
 Not installed by default; created on first save via the Settings UI.
+In distributed storage mode the configuration is stored in the
+.B sudo_config
+PostgreSQL table instead of a file.
 Must be readable by the
 .B sudologger
 service user.
 See
 .B SIEM CONFIG FILE
 below.
+.PP
+.B PostgreSQL tables (distributed storage mode only):
+.RS
+.TP
+.B sudo_sessions
+Session metadata: user, host, command, start/end times, exit code, status.
+.TP
+.B sudo_risk_cache
+Cached risk scores and reasons, keyed by session ID and rules-file hash.
+.TP
+.B sudo_blocked_users
+Blocked-user policy (replaces blocked-users.yaml).
+.TP
+.B sudo_config
+SIEM configuration and other key-value settings (replaces siem.yaml).
+.TP
+.B sudo_access_log
+Audit log of session views: who viewed which session and when.
+In local storage mode this log is kept in memory (up to 10,000 entries)
+and is lost on restart.
+.TP
+.B sudo_access_log (indexes)
+.B sudo_access_log_viewer
+(by viewer) and
+.B sudo_access_log_viewed_at
+(by view time descending) for efficient lookups.
+.RE
 .SH SIEM CONFIG FILE
 The SIEM configuration file is a YAML document at
 .B /etc/sudo-logger/siem.yaml
@@ -387,9 +506,14 @@ to enable forwarding.
 .TP
 .B transport
 String.
-.B https
+.BR https ,
+.BR syslog ,
 or
-.BR syslog .
+.BR stdout .
+Use
+.B stdout
+in Kubernetes environments to let the container runtime collect events
+(no TLS certificates or endpoint configuration required).
 .TP
 .B format
 String.

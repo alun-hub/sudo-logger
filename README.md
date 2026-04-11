@@ -466,6 +466,7 @@ ExecStart=/usr/bin/sudo-logserver \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-strict-cert-host` | off | Reject sessions where the `host` field in SESSION_START does not match the CN or DNS SANs of the client's TLS certificate. Recommended when each machine has its own certificate; leave off for shared-certificate setups. |
+| `-health-listen addr` | *(disabled)* | Start a plain HTTP listener on `addr` (e.g. `:9877`) that serves `/healthz` (always 200) and `/metrics` (Prometheus text format). Disabled by default; enable in Kubernetes to replace the TCP socket liveness probe. |
 
 ### Distributed storage (S3 + PostgreSQL)
 
@@ -609,9 +610,10 @@ xdg-open http://localhost:8080
   Levels: Low (0–24) · Medium (25–49) · High (50–74) · Critical (75+). Risk
   badges are shown on session cards and in the session info bar.
 - **Settings tab** — browser UI for risk rules and SIEM forwarding. Rule
-  changes and SIEM configuration are written back to disk immediately and take
-  effect without a server restart. PEM certificates can be uploaded directly
-  from the browser.
+  changes and SIEM configuration are written back immediately (disk in local
+  mode, PostgreSQL in distributed mode) and take effect without a server
+  restart. PEM certificate upload is available in local storage mode; in
+  distributed mode manage certificates via Kubernetes Secrets.
 - **Blocked Users tab** — security teams can block individual users from running
   sudo, either globally or per host. A configurable message is shown to the
   blocked user at the sudo prompt. The log server enforces blocks centrally and
@@ -794,23 +796,30 @@ so that the computed **risk score** and **risk reasons** can be included.
 
 ### How it works
 
-The replay server watches the log directory for `ACTIVE` marker file removal
-using inotify.  When a session ends (cleanly or abnormally), the server:
+**Local storage mode** — the replay server watches the log directory for `ACTIVE`
+marker file removal using inotify.
 
-1. Reads session metadata from the `session.cast` header.
-2. Reads the exit code from the `exit_code` file (written by `sudo-logserver`
-   on clean `SESSION_END`).
-3. Computes the risk score using the configured rules.
-4. Sends a structured event to the configured SIEM endpoint.
+**Distributed storage mode** — the replay server polls the `sudo_sessions`
+PostgreSQL table every 5 seconds.  A PostgreSQL advisory lock
+(`pg_try_advisory_lock`) ensures that only one replica forwards events when
+multiple replay-server pods are running.
+
+When a session ends (cleanly or abnormally), the server:
+
+1. Reads session metadata from the store (file header / PostgreSQL row).
+2. Computes the risk score using the configured rules.
+3. Sends a structured event to the configured SIEM endpoint.
 
 ### Configuration
 
 Configure SIEM forwarding via the **Settings tab** in the browser, or by
-editing `/etc/sudo-logger/siem.yaml` directly.
+editing `/etc/sudo-logger/siem.yaml` directly.  In distributed mode the
+configuration is stored in PostgreSQL (`sudo_config` table) and the Settings UI
+writes directly to the database — no shared filesystem is required.
 
 ```yaml
 enabled: true
-transport: syslog        # https | syslog
+transport: syslog        # https | syslog | stdout
 format: json             # json | cef | ocsf
 replay_url_base: https://replay.example.com:8080
 
@@ -831,6 +840,28 @@ https:
 ```
 
 The `https` transport requires mutual TLS (client certificate mandatory).
+
+#### Stdout transport (Kubernetes / container environments)
+
+Set `transport: stdout` to write each event as a single JSON/CEF/OCSF line to
+the container's standard output instead of pushing to an external endpoint.
+The container runtime (Docker, containerd) collects the output and your log
+aggregation pipeline (Fluentd, Promtail, Vector, etc.) forwards it to your SIEM.
+
+This is the recommended transport for Kubernetes deployments: no TLS
+certificates to manage, no endpoint to configure, and the replay-server pod
+needs no outbound network access to the SIEM.
+
+```yaml
+enabled: true
+transport: stdout
+format: json
+replay_url_base: https://replay.example.com:8080
+```
+
+> **Note:** Certificate upload via the Settings UI (`POST /api/siem-cert`) is
+> not available in distributed mode.  Manage TLS certificates for the `https`
+> transport using Kubernetes Secrets and volume mounts.
 
 ### Event formats
 

@@ -168,6 +168,10 @@ For processes that escape to foreign cgroups before the namespace is established
 
 ## Session storage
 
+Two storage backends are supported, selected with the `-storage` flag on both the log server and the replay server.
+
+### Local storage (default)
+
 The log server writes sessions to disk in a two-level hierarchy:
 
 ```
@@ -187,31 +191,76 @@ line 1:  JSON header  {"version":2, "width":..., "height":..., "user":..., "host
 line 2+: JSON events  [relative_time, "o"|"i", base64_data]
 ```
 
+### Distributed storage (Kubernetes / multi-replica)
+
+Specify `-storage=distributed -s3-bucket=<name> -db-url=<DSN>` on both servers.
+
+| What | Where |
+|------|-------|
+| `session.cast` files | S3 or S3-compatible store (MinIO, StorageGRID) |
+| Session metadata | PostgreSQL `sudo_sessions` table |
+| Risk score cache | PostgreSQL `sudo_risk_cache` table |
+| Blocked-user policy | PostgreSQL `sudo_blocked_users` table |
+| SIEM / server config | PostgreSQL `sudo_config` table |
+| Session access audit | PostgreSQL `sudo_access_log` table |
+
+The log server buffers cast files locally (configurable with `-buffer-dir`) and uploads them to S3 after each session closes.
+
+The PostgreSQL schema is created automatically at first startup.
+
 ---
 
 ## Replay server
 
-The replay server is a self-contained HTTP server that embeds a single-page application (vanilla JavaScript + vendored xterm.js). It reads session data directly from the log directory on disk — there is no API between the log server and the replay server.
+The replay server is a self-contained HTTP server that embeds a single-page application (vanilla JavaScript + vendored xterm.js). In local mode it reads session data directly from the log directory on disk. In distributed mode it fetches cast files from S3 and reads metadata from PostgreSQL.
 
 ### Session index
 
-Sessions are discovered by scanning the two-level directory tree. The index is rebuilt at most once per 30 seconds and cached in memory. A file-system watcher (`fsnotify`) triggers an immediate rebuild when new session directories appear.
+**Local mode:** Sessions are discovered by scanning the two-level directory tree. The index is rebuilt at most once per 30 seconds and cached in memory. A file-system watcher (`fsnotify`) triggers an immediate rebuild when new session directories appear.
+
+**Distributed mode:** Session metadata is read from PostgreSQL on each request (with database-side filtering and pagination). No full-scan index is needed.
 
 ### Risk scoring
 
-A YAML rules file (`/etc/sudo-logger/risk-rules.yaml`) defines scoring rules. Each rule can match on command name, terminal output content, run-as user, session duration, time of day, and whether the session ended cleanly. Scores accumulate across matching rules (capped at 100). Computed scores are cached in `risk.json` alongside the session and invalidated when the rules change.
+A YAML rules file (`/etc/sudo-logger/risk-rules.yaml`) defines scoring rules. Each rule can match on command name, terminal output content, run-as user, session duration, time of day, and whether the session ended cleanly. Scores accumulate across matching rules (capped at 100). Computed scores are cached in `risk.json` alongside the session (local mode) or in `sudo_risk_cache` (distributed mode) and invalidated when the rules change.
+
+### SIEM forwarding
+
+Completed sessions are forwarded after each session closes:
+
+- **Local mode:** The replay server watches for removal of the `ACTIVE` marker using `inotify(7)`.
+- **Distributed mode:** The replay server polls `sudo_sessions` every 5 seconds for newly completed sessions.
+
+When multiple replay-server replicas run (distributed mode), only one pod forwards events. Leader election uses a PostgreSQL advisory lock (`pg_try_advisory_lock(0x5349454d)`) acquired on a dedicated connection at startup. The lock is released automatically when the connection closes (pod death or restart), allowing another replica to take over within one poll cycle.
+
+Three SIEM transports are supported: `https` (mTLS POST), `syslog` (UDP/TCP/TCP-TLS), and `stdout` (write to container stdout for Fluentd/Promtail/Vector collection — recommended for Kubernetes).
+
+### Access log
+
+Who viewed which session is recorded in the access log:
+
+- **Local mode:** In-memory ring buffer (up to 10,000 entries); lost on restart.
+- **Distributed mode:** Persisted to the `sudo_access_log` PostgreSQL table; shared across all replicas and survives pod restarts.
+
+### Health and metrics
+
+| Path | Description |
+|------|-------------|
+| `GET /healthz` | Always returns `200 ok`. Use for K8s liveness/readiness probes. |
+| `GET /metrics` | Prometheus metrics (views total). |
 
 ### API endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/healthz` | Health check (K8s probes) |
 | `GET` | `/api/sessions` | Session list with filtering, sorting, pagination |
 | `GET` | `/api/session/events` | Stream playback events for a session |
 | `GET` | `/api/access-log` | Audit log of who viewed which sessions |
 | `GET` | `/api/report` | Aggregate statistics and anomaly detection |
 | `GET/PUT` | `/api/rules` | Risk scoring rules |
 | `GET/PUT` | `/api/siem-config` | SIEM forwarding configuration |
-| `POST` | `/api/siem-cert` | Upload TLS certificate for SIEM |
+| `POST` | `/api/siem-cert` | Upload TLS certificate for SIEM (local mode only) |
 | `GET/PUT` | `/api/blocked-users` | Blocked users policy |
 | `GET` | `/api/hosts` | Unique host names seen in session history |
 | `GET` | `/metrics` | Prometheus metrics |
@@ -220,15 +269,19 @@ A YAML rules file (`/etc/sudo-logger/risk-rules.yaml`) defines scoring rules. Ea
 
 ## Block policy
 
-Security teams can block individual users from running sudo without touching sudoers files. The policy is stored in `/etc/sudo-logger/blocked-users.yaml` and shared between the log server (enforcement) and replay server (management UI).
+Security teams can block individual users from running sudo without touching sudoers files.
+
+In **local mode** the policy is stored in `/etc/sudo-logger/blocked-users.yaml`.
+In **distributed mode** it is stored in the `sudo_blocked_users` PostgreSQL table, shared across all replicas automatically.
 
 ```
 security team (browser)
   └─ PUT /api/blocked-users
-       └─ replay server writes blocked-users.yaml
+       └─ replay server writes blocked-users.yaml (local)
+          or updates sudo_blocked_users table (distributed)
 
 log server (background goroutine)
-  └─ reloads blocked-users.yaml every 30 s
+  └─ reloads policy every 30 s
 
 next sudo attempt by blocked user
   └─ log server sends SESSION_DENIED during startup handshake
@@ -243,18 +296,44 @@ Blocking is per-user and optionally per-host. An empty host list means "all host
 
 ## Configuration files
 
+### Local storage mode
+
 | File | Used by | Hot-reloaded |
 |------|---------|--------------|
 | `/etc/sudo-logger/server.conf` | log server (systemd env) | No (restart required) |
 | `/etc/sudo-logger/shipper.conf` | shipper (systemd env) | No |
 | `/etc/sudo-logger/risk-rules.yaml` | replay server | On each request |
-| `/etc/sudo-logger/siem.yaml` | replay server, log server | Every 30 s |
+| `/etc/sudo-logger/siem.yaml` | replay server | Every 30 s |
 | `/etc/sudo-logger/blocked-users.yaml` | log server, replay server | Every 30 s |
 | `/etc/sudo-logger/ack-sign.key` | log server | No |
 | `/etc/sudo-logger/ack-verify.key` | shipper | No |
 | `/etc/sudo-logger/server.crt/.key` | log server | No |
 | `/etc/sudo-logger/client.crt/.key` | shipper | No |
 | `/etc/sudo-logger/ca.crt` | log server, shipper | No |
+
+### Distributed storage mode (Kubernetes)
+
+File-based config for SIEM and blocked-users is replaced by PostgreSQL tables (`sudo_config`, `sudo_blocked_users`). TLS certificates are managed as Kubernetes Secrets and mounted into pods. Only the shipper and plugin config files remain on disk.
+
+---
+
+## Log server health and metrics
+
+When `-health-listen=:9877` is set, the log server starts a plain HTTP listener with:
+
+| Path | Description |
+|------|-------------|
+| `GET /healthz` | Always returns `200 ok`. Use for K8s liveness/readiness probes instead of a TCP-socket check. |
+| `GET /metrics` | Prometheus text format with `sudologger_sessions_active`, `sudologger_sessions_total`, `sudologger_sessions_incomplete_total`. |
+
+## Graceful shutdown
+
+Both the log server and the replay server handle `SIGTERM` / `SIGINT` gracefully:
+
+- **Log server:** Closes the TLS accept loop so no new shipper connections are accepted. Active sessions have up to 30 seconds to send `SESSION_END`. Sessions still open after the drain window are marked `INCOMPLETE`.
+- **Replay server:** Calls `http.Server.Shutdown` with a 30-second timeout so in-flight HTTP requests complete before the process exits.
+
+In Kubernetes set `terminationGracePeriodSeconds: 40` on the pod spec to give the 30-second drain window a 10-second buffer before the container is forcibly killed.
 
 ---
 
@@ -270,3 +349,5 @@ Blocking is per-user and optionally per-host. An empty host list means "all host
 | Host identity verified | Log server checks that claimed `host` in SESSION_START matches the TLS client certificate CN/SAN |
 | Plugin socket access restricted | Shipper verifies `SO_PEERCRED`; only root (sudo) can connect |
 | Block policy enforced centrally | Policy check happens at the log server during startup handshake, before sudo forks the child |
+| SIEM cert upload blocked in K8s | `/api/siem-cert` returns 501 in distributed mode; use Kubernetes Secrets instead |
+| Single SIEM forwarder in multi-replica | PostgreSQL advisory lock ensures exactly one replica forwards events |

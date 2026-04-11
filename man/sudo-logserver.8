@@ -1,4 +1,4 @@
-.TH SUDO\-LOGSERVER 8 "2026-04-06" "sudo-logger 1.12.0" "System Administration"
+.TH SUDO\-LOGSERVER 8 "2026-04-11" "sudo-logger 1.17.0" "System Administration"
 .SH NAME
 sudo\-logserver \- remote TLS server for sudo session recordings
 .SH SYNOPSIS
@@ -10,6 +10,10 @@ sudo\-logserver \- remote TLS server for sudo session recordings
 [\fB\-ca\fR \fIfile\fR]
 [\fB\-signkey\fR \fIfile\fR]
 [\fB\-strict\-cert\-host\fR]
+[\fB\-health\-listen\fR \fIaddr\fR]
+[\fB\-storage\fR \fIbackend\fR]
+[\fB\-s3\-bucket\fR \fIname\fR]
+[\fB\-db\-url\fR \fIDSN\fR]
 .SH DESCRIPTION
 .B sudo\-logserver
 is a TLS server that receives sudo session recordings from one or more
@@ -92,6 +96,86 @@ Disabled by default to support the common case of a single shared client
 certificate (e.g.\& CN=\fIsudo-client\fR).
 Enable this flag when each machine has its own certificate to prevent a
 compromised shipper on host A from forging log entries attributed to host B.
+.TP
+.BI \-health\-listen " addr"
+Start a plain HTTP server on
+.I addr
+(e.g.\&
+.BR :9877 )
+serving two endpoints:
+.B /healthz
+(always returns 200 OK) and
+.B /metrics
+(Prometheus text format with
+.BR sudologger_sessions_active ,
+.BR sudologger_sessions_total ,
+and
+.BR sudologger_sessions_incomplete_total ).
+Disabled by default.
+Enable in Kubernetes to replace the TCP-socket liveness probe with an HTTP
+health check and to expose session-level metrics.
+.TP
+.BI \-storage " backend"
+Storage backend to use.
+.B local
+(default) writes sessions to the local filesystem under
+.BR \-logdir .
+.B distributed
+stores cast files in S3 (or any S3-compatible endpoint such as MinIO) and
+session metadata in PostgreSQL.
+.TP
+.BI \-s3\-bucket " name"
+S3 bucket name (required when
+.BR \-storage=distributed ).
+.TP
+.BI \-s3\-endpoint " url"
+Override the S3 endpoint URL.
+Required for MinIO or NetApp StorageGRID deployments
+(e.g.\&
+.BR https://minio.internal:9000 ).
+.TP
+.B \-s3\-path\-style
+Force path-style S3 URLs.
+Required for MinIO and StorageGRID.
+.TP
+.BI \-s3\-access\-key " key"
+Static S3 access key.
+Leave empty to use the standard AWS credential chain
+(environment variables, instance profile, IRSA).
+.TP
+.BI \-s3\-secret\-key " key"
+Static S3 secret key (see
+.BR \-s3\-access\-key ).
+.TP
+.BI \-db\-url " DSN"
+PostgreSQL connection string (required when
+.BR \-storage=distributed ).
+Example:
+.IR "postgres://user:pass@host:5432/dbname?sslmode=require" .
+The schema (tables
+.BR sudo_sessions ,
+.BR sudo_risk_cache ,
+.BR sudo_blocked_users ,
+.BR sudo_config ,
+.BR sudo_access_log )
+is created automatically at startup.
+.TP
+.BI \-buffer\-dir " dir"
+Local write-buffer directory used to stage cast files before uploading them to
+S3 (distributed mode only).
+In Kubernetes use an
+.B emptyDir
+volume.
+Default:
+.BR /var/lib/sudo-logger/buffer .
+.SH SIGNALS
+.TP
+.B SIGTERM\fR / \fBSIGINT
+Stop accepting new shipper connections and wait up to 30 seconds for active
+sessions to complete before the process exits.
+Sessions that are still open after the drain window are marked
+.B INCOMPLETE
+and closed.
 .SH FILES
 .TP
 .B /etc/sudo-logger/server.conf
