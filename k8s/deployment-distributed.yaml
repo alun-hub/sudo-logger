@@ -21,6 +21,7 @@ spec:
       labels:
         app: sudo-logserver
     spec:
+      terminationGracePeriodSeconds: 40
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -33,6 +34,7 @@ spec:
           imagePullPolicy: Never
           args:
             - -listen=:9876
+            - -health-listen=:9877
             - -cert=/etc/sudo-logger/server.crt
             - -key=/etc/sudo-logger/server.key
             - -ca=/etc/sudo-logger/ca.crt
@@ -67,6 +69,9 @@ spec:
             - name: tls
               containerPort: 9876
               protocol: TCP
+            - name: health
+              containerPort: 9877
+              protocol: TCP
 
           volumeMounts:
             - name: tls-certs
@@ -90,22 +95,25 @@ spec:
               memory: 256Mi
 
           livenessProbe:
-            tcpSocket:
-              port: 9876
+            httpGet:
+              path: /healthz
+              port: 9877
             initialDelaySeconds: 5
             periodSeconds: 15
             failureThreshold: 3
 
           readinessProbe:
-            tcpSocket:
-              port: 9876
+            httpGet:
+              path: /healthz
+              port: 9877
             initialDelaySeconds: 3
             periodSeconds: 5
+
 
       volumes:
         - name: tls-certs
           secret:
-            secretName: sudo-logger-tls
+            secretName: sudo-logger-tls  # pragma: allowlist secret
             defaultMode: 0400
         - name: buffer
           emptyDir: {}

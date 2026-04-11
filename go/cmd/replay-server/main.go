@@ -603,6 +603,9 @@ func main() {
 	}()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, "ok")
+	})
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
 	mux.HandleFunc("/api/access-log", handleAccessLog)
@@ -669,38 +672,68 @@ func main() {
 	// Build middleware chain (innermost first):
 	//   basicAuth (optional) → accessLog → handler
 	var handler http.Handler = mux
+	var htStore *htpasswdStore
 	if *flagHTPasswd != "" {
-		store, err := newHTPasswd(*flagHTPasswd)
+		var err error
+		htStore, err = newHTPasswd(*flagHTPasswd)
 		if err != nil {
 			log.Fatalf("htpasswd: %v", err)
 		}
-		// Reload credentials on SIGHUP — no restart required for password rotation.
-		sighup := make(chan os.Signal, 1)
-		signal.Notify(sighup, syscall.SIGHUP)
-		go func() {
-			for range sighup {
-				if err := store.reload(); err != nil {
-					log.Printf("htpasswd reload: %v", err)
-				}
-			}
-		}()
-		handler = basicAuthMiddleware(handler, store)
+		handler = basicAuthMiddleware(handler, htStore)
 	}
 	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
 
-	// Start server with TLS if certificates are provided.
+	// Build the HTTP server so we can call Shutdown() on SIGTERM.
+	var httpSrv *http.Server
 	if *flagTLSCert != "" || *flagTLSKey != "" {
 		if *flagTLSCert == "" || *flagTLSKey == "" {
 			log.Fatal("both -tls-cert and -tls-key must be specified together")
 		}
-		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
-		srv := &http.Server{Addr: *flagListen, Handler: handler, TLSConfig: tlsCfg}
+		httpSrv = &http.Server{
+			Addr:      *flagListen,
+			Handler:   handler,
+			TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		}
+	} else {
+		httpSrv = &http.Server{Addr: *flagListen, Handler: handler}
+	}
+
+	// Signal handling: SIGHUP reloads htpasswd; SIGTERM/SIGINT triggers graceful shutdown.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		for sig := range sigCh {
+			switch sig {
+			case syscall.SIGHUP:
+				if htStore != nil {
+					if err := htStore.reload(); err != nil {
+						log.Printf("htpasswd reload: %v", err)
+					}
+				}
+			default:
+				log.Printf("sudo-replay-server: received %v — shutting down", sig)
+				shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := httpSrv.Shutdown(shutCtx); err != nil {
+					log.Printf("sudo-replay-server: shutdown: %v", err)
+				}
+				shutCancel()
+			}
+		}
+	}()
+
+	// Start serving.
+	var serveErr error
+	if httpSrv.TLSConfig != nil && *flagTLSCert != "" {
 		log.Printf("sudo-replay-server listening on %s (TLS), logdir=%s", *flagListen, *flagLogDir)
-		log.Fatal(srv.ListenAndServeTLS(*flagTLSCert, *flagTLSKey))
+		serveErr = httpSrv.ListenAndServeTLS(*flagTLSCert, *flagTLSKey)
 	} else {
 		log.Printf("sudo-replay-server listening on %s, logdir=%s", *flagListen, *flagLogDir)
-		log.Fatal(http.ListenAndServe(*flagListen, handler))
+		serveErr = httpSrv.ListenAndServe()
 	}
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		log.Fatalf("listen: %v", serveErr)
+	}
+	log.Printf("sudo-replay-server: shutdown complete")
 }
 
 func handleListSessions(w http.ResponseWriter, r *http.Request) {

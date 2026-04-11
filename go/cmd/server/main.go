@@ -16,10 +16,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"sudo-logger/internal/iolog"
@@ -66,7 +70,8 @@ var (
 	flagS3AccessKey = flag.String("s3-access-key", "", "Static S3 access key (leave empty to use IAM/env)")
 	flagS3SecretKey = flag.String("s3-secret-key", "", "Static S3 secret key (leave empty to use IAM/env)")
 	flagDBURL      = flag.String("db-url", "", "PostgreSQL DSN (distributed storage)")
-	flagBufferDir  = flag.String("buffer-dir", "/var/lib/sudo-logger/buffer", "Local write-buffer dir for S3 uploads")
+	flagBufferDir      = flag.String("buffer-dir", "/var/lib/sudo-logger/buffer", "Local write-buffer dir for S3 uploads")
+	flagHealthListen   = flag.String("health-listen", "", "Plain HTTP address for /healthz and /metrics (e.g. :9877); disabled when empty")
 )
 
 type server struct {
@@ -75,6 +80,10 @@ type server struct {
 
 	mu       sync.Mutex
 	sessions map[string]*session
+
+	// Prometheus counters — monotonically increasing since process start.
+	sessionsTotal      atomic.Int64
+	sessionsIncomplete atomic.Int64
 }
 
 type session struct {
@@ -139,16 +148,73 @@ func main() {
 		sessions:     make(map[string]*session),
 	}
 
+	// Optional plain-HTTP server for health probes and Prometheus metrics.
+	// Disabled by default (flag empty); enabled in K8s via --health-listen=:9877.
+	if *flagHealthListen != "" {
+		healthMux := http.NewServeMux()
+		healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprintln(w, "ok")
+		})
+		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+			srv.mu.Lock()
+			active := len(srv.sessions)
+			srv.mu.Unlock()
+			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+			fmt.Fprintf(w, "# HELP sudologger_sessions_active Sessions currently being recorded.\n")
+			fmt.Fprintf(w, "# TYPE sudologger_sessions_active gauge\n")
+			fmt.Fprintf(w, "sudologger_sessions_active %d\n", active)
+			fmt.Fprintf(w, "# HELP sudologger_sessions_total Sessions closed since last restart.\n")
+			fmt.Fprintf(w, "# TYPE sudologger_sessions_total counter\n")
+			fmt.Fprintf(w, "sudologger_sessions_total %d\n", srv.sessionsTotal.Load())
+			fmt.Fprintf(w, "# HELP sudologger_sessions_incomplete_total Sessions that ended without SESSION_END since last restart.\n")
+			fmt.Fprintf(w, "# TYPE sudologger_sessions_incomplete_total counter\n")
+			fmt.Fprintf(w, "sudologger_sessions_incomplete_total %d\n", srv.sessionsIncomplete.Load())
+		})
+		go func() {
+			if err := http.ListenAndServe(*flagHealthListen, healthMux); err != nil {
+				log.Printf("health/metrics listener: %v", err)
+			}
+		}()
+		log.Printf("health/metrics listening on %s", *flagHealthListen)
+	}
+
 	log.Printf("sudo-logserver listening on %s, storage=%s logdir=%s", *flagListen, *flagStorage, *flagLogDir)
+
+	// Graceful shutdown: close the TLS listener on SIGTERM/SIGINT so that
+	// ln.Accept() returns an error and the loop exits. Then wait up to 30 s
+	// for in-flight sessions to complete before the process exits.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-quit
+		log.Printf("sudo-logserver: received %v — stopping listener", sig)
+		ln.Close()
+	}()
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Printf("accept: %v", err)
-			continue
+			// A closed listener returns a permanent error; exit cleanly.
+			log.Printf("sudo-logserver: listener closed: %v", err)
+			break
 		}
 		go srv.handleConn(conn.(*tls.Conn))
 	}
+
+	// Drain: wait for active sessions to finish, up to 30 s.
+	const drainTimeout = 30 * time.Second
+	deadline := time.Now().Add(drainTimeout)
+	for time.Now().Before(deadline) {
+		srv.mu.Lock()
+		active := len(srv.sessions)
+		srv.mu.Unlock()
+		if active == 0 {
+			break
+		}
+		log.Printf("sudo-logserver: draining %d active session(s)...", active)
+		time.Sleep(500 * time.Millisecond)
+	}
+	log.Printf("sudo-logserver: shutdown complete")
 }
 
 func (srv *server) handleConn(conn *tls.Conn) {
@@ -167,6 +233,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("SECURITY: [%s] %s dropped connection without session_end — session may be incomplete (shipper killed?): %v",
 					sess.id, remote, err)
 				_ = sess.writer.MarkIncomplete()
+				srv.sessionsIncomplete.Add(1)
 				srv.closeSession(sess)
 			}
 			return
@@ -368,6 +435,7 @@ func (srv *server) closeSession(sess *session) {
 	srv.mu.Lock()
 	delete(srv.sessions, sess.id)
 	srv.mu.Unlock()
+	srv.sessionsTotal.Add(1)
 }
 
 func (srv *server) buildACK(sessionID string, seq uint64) []byte {

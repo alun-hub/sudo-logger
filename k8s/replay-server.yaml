@@ -16,6 +16,7 @@ spec:
       labels:
         app: sudo-replay-server
     spec:
+      terminationGracePeriodSeconds: 40
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -79,17 +80,18 @@ spec:
 
           readinessProbe:
             httpGet:
-              path: /api/sessions
+              path: /healthz
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
 
           livenessProbe:
             httpGet:
-              path: /api/sessions
+              path: /healthz
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 20
+
 
       volumes:
         - name: buffer
