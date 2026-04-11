@@ -92,37 +92,14 @@ func viewerFromContext(r *http.Request) string {
 	return "-"
 }
 
-// viewLogEntry records a single session-view event.
-type viewLogEntry struct {
-	Time    time.Time `json:"time"`
-	Viewer  string    `json:"viewer"`
-	TSID    string    `json:"tsid"`
-	ReplayURL string  `json:"replay_url,omitempty"`
-}
+var viewsTotal atomic.Int64 // monotonic per-process counter for Prometheus
 
-// viewLog is a bounded ring buffer of the most recent session-view events.
-const viewLogMax = 10_000
-
-var (
-	viewLogMu      sync.Mutex
-	viewLogEntries []viewLogEntry
-	viewsTotal     atomic.Int64 // monotonic counter; never reset
-)
-
-func recordView(viewer, tsid, replayURL string) {
+func recordView(r *http.Request, tsid, replayURL string) {
 	viewsTotal.Add(1)
-	viewLogMu.Lock()
-	defer viewLogMu.Unlock()
-	if len(viewLogEntries) >= viewLogMax {
-		// Drop oldest entry.
-		viewLogEntries = viewLogEntries[1:]
+	viewer := viewerFromContext(r)
+	if err := sessionStore.RecordView(r.Context(), tsid, viewer, replayURL); err != nil {
+		log.Printf("record view: %v", err)
 	}
-	viewLogEntries = append(viewLogEntries, viewLogEntry{
-		Time:      time.Now().UTC(),
-		Viewer:    viewer,
-		TSID:      tsid,
-		ReplayURL: replayURL,
-	})
 }
 
 // loggingResponseWriter captures the HTTP status code for access logging.
@@ -794,7 +771,7 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		replayURL = scheme + "://" + r.Host + "/?tsid=" + url.QueryEscape(tsid)
 	}
 	viewer := viewerFromContext(r)
-	recordView(viewer, tsid, replayURL)
+	recordView(r, tsid, replayURL)
 	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", viewer, r.RemoteAddr, tsid, replayURL)
 
 	rawEvents, err := sessionStore.ReadEvents(r.Context(), tsid)
@@ -840,29 +817,15 @@ func handleAccessLog(w http.ResponseWriter, r *http.Request) {
 		limit = v
 	}
 
-	viewLogMu.Lock()
-	snap := make([]viewLogEntry, len(viewLogEntries))
-	copy(snap, viewLogEntries)
-	viewLogMu.Unlock()
-
-	// Reverse so newest is first.
-	for i, j := 0, len(snap)-1; i < j; i, j = i+1, j-1 {
-		snap[i], snap[j] = snap[j], snap[i]
-	}
-
-	result := snap[:0]
-	for _, e := range snap {
-		if filterViewer != "" && e.Viewer != filterViewer {
-			continue
-		}
-		result = append(result, e)
-		if len(result) >= limit {
-			break
-		}
+	entries, err := sessionStore.ListAccessLog(r.Context(), filterViewer, limit)
+	if err != nil {
+		log.Printf("list access log: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(result); err != nil {
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
 		log.Printf("encode access log: %v", err)
 	}
 }
@@ -1380,9 +1343,9 @@ func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Validate transport and format values to avoid writing garbage.
 	switch cfg.Transport {
-	case "", "https", "syslog": // ok
+	case "", "https", "syslog", "stdout": // ok
 	default:
-		http.Error(w, "transport must be https or syslog", http.StatusBadRequest)
+		http.Error(w, "transport must be https, syslog, or stdout", http.StatusBadRequest)
 		return
 	}
 	switch cfg.Format {
@@ -1422,6 +1385,14 @@ func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 // The file must contain at least one PEM block and be ≤ 64 KB.
 // Saved with mode 0640 (root:sudologger) so the log server can read it.
 func handleUploadSiemCert(w http.ResponseWriter, r *http.Request) {
+	if *flagStorage == "distributed" {
+		http.Error(w,
+			"cert upload is not supported in distributed mode; "+
+				"mount certificates via Kubernetes Secrets instead",
+			http.StatusNotImplemented)
+		return
+	}
+
 	const maxSize = 64 * 1024 // 64 KB
 	r.Body = http.MaxBytesReader(w, r.Body, maxSize+1024)
 

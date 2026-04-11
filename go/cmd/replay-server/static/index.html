@@ -646,6 +646,7 @@
         <select id="siem-transport">
           <option value="https">HTTPS</option>
           <option value="syslog">Syslog</option>
+          <option value="stdout">Stdout (container logs)</option>
         </select>
 
         <label>Format</label>
@@ -2151,6 +2152,7 @@ function siemTransportFields() {
   // The subsection divs don't have labels
   document.getElementById('siem-https-hdr').style.display = t === 'https' ? '' : 'none';
   document.getElementById('siem-syslog-hdr').style.display = t === 'syslog' ? '' : 'none';
+  // stdout: no endpoint or cert config needed — show only format and replay URL
 }
 
 function siemTLSFields() {

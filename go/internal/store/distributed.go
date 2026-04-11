@@ -157,6 +157,16 @@ CREATE TABLE IF NOT EXISTS sudo_config (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS sudo_access_log (
+    id         BIGSERIAL PRIMARY KEY,
+    tsid       TEXT NOT NULL,
+    viewer     TEXT NOT NULL,
+    replay_url TEXT,
+    viewed_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS sudo_access_log_viewer   ON sudo_access_log(viewer);
+CREATE INDEX IF NOT EXISTS sudo_access_log_viewed_at ON sudo_access_log(viewed_at DESC);
 `)
 	return err
 }
@@ -326,7 +336,37 @@ LIMIT 1`,
 // WatchSessions implements SessionStore.
 // Polls sudo_sessions every 5 s for newly completed sessions and sends their
 // TSIDs to ch.
+//
+// In distributed deployments multiple replicas may run concurrently. A
+// PostgreSQL session-level advisory lock (pg_try_advisory_lock) ensures only
+// one replica forwards events. If the lock-holder pod dies, the DB connection
+// closes and PostgreSQL releases the lock automatically; another replica
+// acquires it on its next poll cycle.
 func (d *DistributedStore) WatchSessions(ctx context.Context, ch chan<- string) {
+	// Acquire a dedicated connection so the advisory lock stays on one
+	// connection for the lifetime of this goroutine.
+	conn, err := d.db.Acquire(ctx)
+	if err != nil {
+		log.Printf("store/distributed: WatchSessions: acquire conn: %v", err)
+		return
+	}
+	defer conn.Release()
+
+	// 0x5349454d = "SIEM" in ASCII — arbitrary but stable identifier.
+	const siemLockID int64 = 0x5349454d
+	var locked bool
+	if err := conn.QueryRow(ctx,
+		"SELECT pg_try_advisory_lock($1)", siemLockID).Scan(&locked); err != nil {
+		log.Printf("store/distributed: WatchSessions: advisory lock query: %v", err)
+		return
+	}
+	if !locked {
+		log.Printf("store/distributed: WatchSessions: another replica holds the SIEM leader lock — not forwarding events from this pod")
+		<-ctx.Done()
+		return
+	}
+	log.Printf("store/distributed: WatchSessions: acquired SIEM leader lock")
+
 	lastCheck := time.Now()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -336,7 +376,7 @@ func (d *DistributedStore) WatchSessions(ctx context.Context, ch chan<- string) 
 		case <-ctx.Done():
 			return
 		case t := <-ticker.C:
-			rows, err := d.db.Query(ctx, `
+			rows, err := conn.Query(ctx, `
 SELECT tsid FROM sudo_sessions
 WHERE updated_at > $1 AND in_progress = FALSE
 ORDER BY updated_at ASC`,
@@ -360,6 +400,54 @@ ORDER BY updated_at ASC`,
 			lastCheck = t
 		}
 	}
+}
+
+// RecordView implements SessionStore.
+// Inserts a session-view event into sudo_access_log.
+func (d *DistributedStore) RecordView(ctx context.Context, tsid, viewer, replayURL string) error {
+	_, err := d.db.Exec(ctx,
+		`INSERT INTO sudo_access_log (tsid, viewer, replay_url) VALUES ($1, $2, $3)`,
+		tsid, viewer, replayURL,
+	)
+	return err
+}
+
+// ListAccessLog implements SessionStore.
+// Returns entries from sudo_access_log, newest first, filtered by viewer.
+func (d *DistributedStore) ListAccessLog(ctx context.Context, viewer string, limit int) ([]AccessLogEntry, error) {
+	var rows interface{ Next() bool; Scan(...any) error; Close() }
+	var err error
+	if viewer != "" {
+		rows, err = d.db.Query(ctx, `
+SELECT tsid, viewer, COALESCE(replay_url,''), viewed_at
+FROM sudo_access_log
+WHERE viewer = $1
+ORDER BY viewed_at DESC
+LIMIT $2`, viewer, limit)
+	} else {
+		rows, err = d.db.Query(ctx, `
+SELECT tsid, viewer, COALESCE(replay_url,''), viewed_at
+FROM sudo_access_log
+ORDER BY viewed_at DESC
+LIMIT $1`, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []AccessLogEntry
+	for rows.Next() {
+		var e AccessLogEntry
+		if err := rows.Scan(&e.TSID, &e.Viewer, &e.ReplayURL, &e.Time); err != nil {
+			return nil, err
+		}
+		result = append(result, e)
+	}
+	if result == nil {
+		result = []AccessLogEntry{}
+	}
+	return result, nil
 }
 
 // Close implements SessionStore.

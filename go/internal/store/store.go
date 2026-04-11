@@ -109,12 +109,30 @@ type SessionStore interface {
 	// WatchSessions delivers TSIDs for newly completed sessions to ch.
 	// The implementation decides the delivery mechanism:
 	//   LocalStore       — fsnotify on the log directory
-	//   DistributedStore — DB polling loop
+	//   DistributedStore — DB polling loop (advisory lock ensures only one replica forwards)
 	// The goroutine exits when ctx is cancelled.
 	WatchSessions(ctx context.Context, ch chan<- string)
 
+	// RecordView appends a session-view event to the access log.
+	// LocalStore stores it in an in-memory ring buffer (10 000 entries).
+	// DistributedStore persists it to the sudo_access_log table.
+	RecordView(ctx context.Context, tsid, viewer, replayURL string) error
+
+	// ListAccessLog returns recent session-view events, newest first.
+	// viewer filters to a specific viewer when non-empty.
+	// limit caps the number of entries (max 1000).
+	ListAccessLog(ctx context.Context, viewer string, limit int) ([]AccessLogEntry, error)
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
+}
+
+// AccessLogEntry records a single session-view event.
+type AccessLogEntry struct {
+	Time      time.Time `json:"time"`
+	Viewer    string    `json:"viewer"`
+	TSID      string    `json:"tsid"`
+	ReplayURL string    `json:"replay_url,omitempty"`
 }
 
 // SessionRecord carries the metadata the replay-server needs to list, filter,

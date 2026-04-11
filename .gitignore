@@ -24,3 +24,4 @@ bin/
 
 # PKI files — certificates and private keys must never be committed
 pki/
+.gitnexus

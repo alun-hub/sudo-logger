@@ -50,8 +50,14 @@ func Send(e Event) {
 			log.Printf("siem: [%s] sent user=%s host=%s cmd=%q format=%s transport=%s replay_url=%q",
 				e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format, cfg.Syslog.Protocol, e.ReplayURL)
 		}
+	case "stdout":
+		// Write a single line to stdout for container log collectors
+		// (Fluentd, Promtail, Vector, etc.).  No TLS or endpoint config needed.
+		fmt.Fprintf(os.Stdout, "%s\n", bytes.TrimRight(body, "\n"))
+		log.Printf("siem: [%s] stdout user=%s host=%s cmd=%q format=%s replay_url=%q",
+			e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format, e.ReplayURL)
 	default:
-		log.Printf("siem: unknown transport %q — use https or syslog", cfg.Transport)
+		log.Printf("siem: unknown transport %q — use https, syslog, or stdout", cfg.Transport)
 	}
 }
 

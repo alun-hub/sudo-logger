@@ -34,9 +34,16 @@ type LocalStore struct {
 	blockedMu  sync.RWMutex
 	blockedCfg blockedUsersConfig
 
+	// access log — bounded in-memory ring buffer (same behaviour as before
+	// the store abstraction was introduced).
+	viewMu  sync.Mutex
+	viewLog []AccessLogEntry
+
 	stopOnce sync.Once
 	stopCh   chan struct{}
 }
+
+const viewLogMax = 10_000
 
 // blockedUsersConfig mirrors the YAML structure of blocked-users.yaml.
 type blockedUsersConfig struct {
@@ -252,6 +259,49 @@ func (ls *LocalStore) WatchSessions(ctx context.Context, ch chan<- string) {
 			log.Printf("store/local: watcher error: %v", err)
 		}
 	}
+}
+
+// RecordView implements SessionStore.
+// Appends a session-view event to the in-memory ring buffer.
+func (ls *LocalStore) RecordView(_ context.Context, tsid, viewer, replayURL string) error {
+	ls.viewMu.Lock()
+	defer ls.viewMu.Unlock()
+	if len(ls.viewLog) >= viewLogMax {
+		ls.viewLog = ls.viewLog[1:]
+	}
+	ls.viewLog = append(ls.viewLog, AccessLogEntry{
+		Time:      time.Now().UTC(),
+		Viewer:    viewer,
+		TSID:      tsid,
+		ReplayURL: replayURL,
+	})
+	return nil
+}
+
+// ListAccessLog implements SessionStore.
+// Returns entries from the ring buffer, newest first, filtered by viewer.
+func (ls *LocalStore) ListAccessLog(_ context.Context, viewer string, limit int) ([]AccessLogEntry, error) {
+	ls.viewMu.Lock()
+	snap := make([]AccessLogEntry, len(ls.viewLog))
+	copy(snap, ls.viewLog)
+	ls.viewMu.Unlock()
+
+	// Reverse so newest is first.
+	for i, j := 0, len(snap)-1; i < j; i, j = i+1, j-1 {
+		snap[i], snap[j] = snap[j], snap[i]
+	}
+
+	result := snap[:0]
+	for _, e := range snap {
+		if viewer != "" && e.Viewer != viewer {
+			continue
+		}
+		result = append(result, e)
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result, nil
 }
 
 // Close implements SessionStore.
