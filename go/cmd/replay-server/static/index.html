@@ -82,6 +82,14 @@
       cursor: pointer; font-size: 15px; padding: 3px 8px; border-radius: var(--radius);
       flex-shrink: 0; transition: color 0.12s, border-color 0.12s; line-height: 1.4; }
     .theme-btn:hover { color: var(--text-sub); border-color: var(--border-mid); }
+    .user-chip { display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+      font-family: var(--font-ui); font-size: 12px; color: var(--text-sub); }
+    .user-chip .user-name { color: var(--text); font-weight: 500; }
+    .logout-btn { background: none; border: 1px solid var(--border); color: var(--text-dim);
+      cursor: pointer; font-size: 12px; padding: 2px 8px; border-radius: var(--radius);
+      text-decoration: none; transition: color 0.12s, border-color 0.12s; line-height: 1.6;
+      font-family: var(--font-ui); }
+    .logout-btn:hover { color: var(--red, #f47067); border-color: var(--red, #f47067); }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────────── */
     .sidebar { grid-area: sidebar; display: flex; flex-direction: column;
@@ -541,6 +549,10 @@
       <button class="tab-btn" data-tab="help">Help</button>
     </nav>
     <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
+    <div class="user-chip" id="user-chip" hidden>
+      <span class="user-name" id="user-name"></span>
+      <a href="/oauth2/sign_out" class="logout-btn" id="logout-btn">Sign out</a>
+    </div>
     <button class="theme-btn" id="theme-toggle" title="Toggle light / dark mode">☀</button>
   </header>
 
@@ -2579,6 +2591,26 @@ setInterval(pollSessions, 15_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) pollSessions(); });
 
 fetchSessions();
+
+// ── Current user ──────────────────────────────────────────────────────────────
+
+async function fetchCurrentUser() {
+  try {
+    const res = await fetch('/api/me');
+    if (!res.ok) return;
+    const { user, logoutUrl } = await res.json();
+    if (!user) return;
+    document.getElementById('user-name').textContent = user;
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutUrl) {
+      logoutBtn.href = logoutUrl;
+    } else {
+      logoutBtn.remove();
+    }
+    document.getElementById('user-chip').removeAttribute('hidden');
+  } catch (_) { /* not fatal */ }
+}
+fetchCurrentUser();
 </script>
 </body>
 </html>

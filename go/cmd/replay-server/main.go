@@ -670,6 +670,24 @@ func main() {
 		}
 		handleGetHosts(w, r)
 	})
+	mux.HandleFunc("/api/me", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		user := ""
+		if *flagTrustedUserHeader != "" {
+			user = r.Header.Get(*flagTrustedUserHeader)
+		} else if u, _, ok := r.BasicAuth(); ok {
+			user = u
+		}
+		logoutURL := ""
+		if *flagTrustedUserHeader != "" {
+			logoutURL = "/oauth2/sign_out"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"user":%q,"logoutUrl":%q}`, user, logoutURL)
+	})
 
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
