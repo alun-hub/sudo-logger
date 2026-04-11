@@ -378,7 +378,15 @@ func (d *DistributedStore) WatchSessions(ctx context.Context, ch chan<- string) 
 	}
 	log.Printf("store/distributed: WatchSessions: acquired SIEM leader lock")
 
-	lastCheck := time.Now()
+	// Use a DB-side timestamp for lastCheck so there is no skew between the
+	// Go server clock and the PostgreSQL clock (updated_at is set by NOW()).
+	var lastCheck time.Time
+	if err := conn.QueryRow(ctx, `SELECT NOW()`).Scan(&lastCheck); err != nil {
+		log.Printf("store/distributed: WatchSessions: initial timestamp: %v", err)
+		lastCheck = time.Now()
+	}
+	log.Printf("store/distributed: WatchSessions: starting poll from %s", lastCheck.UTC().Format(time.RFC3339))
+
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -386,29 +394,42 @@ func (d *DistributedStore) WatchSessions(ctx context.Context, ch chan<- string) 
 		select {
 		case <-ctx.Done():
 			return
-		case t := <-ticker.C:
+		case <-ticker.C:
+			// Fetch the current DB time before querying so we do not miss
+			// sessions that complete between the SELECT and the next tick.
+			var pollUntil time.Time
+			if err := conn.QueryRow(ctx, `SELECT NOW()`).Scan(&pollUntil); err != nil {
+				log.Printf("store/distributed: watch poll timestamp: %v", err)
+				continue
+			}
 			rows, err := conn.Query(ctx, `
 SELECT tsid FROM sudo_sessions
-WHERE updated_at > $1 AND in_progress = FALSE
+WHERE updated_at > $1 AND updated_at <= $2 AND in_progress = FALSE
 ORDER BY updated_at ASC`,
-				lastCheck,
+				lastCheck, pollUntil,
 			)
 			if err != nil {
 				log.Printf("store/distributed: watch poll: %v", err)
-				lastCheck = t
 				continue
 			}
+			var found int
 			for rows.Next() {
 				var tsid string
 				if rows.Scan(&tsid) == nil {
+					found++
+					log.Printf("store/distributed: WatchSessions: session completed: %s", tsid)
 					select {
 					case ch <- tsid:
 					default:
+						log.Printf("store/distributed: WatchSessions: siemCh full, dropping %s", tsid)
 					}
 				}
 			}
 			rows.Close()
-			lastCheck = t
+			if found > 0 {
+				log.Printf("store/distributed: WatchSessions: forwarded %d session(s) to SIEM", found)
+			}
+			lastCheck = pollUntil
 		}
 	}
 }
