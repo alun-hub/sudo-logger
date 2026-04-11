@@ -16,10 +16,18 @@
 # incomplete:       true when session ended without a clean session_end
 # after_hours:      true when session started between 23:00 and 05:59 local time
 # min_duration:     minimum session length in seconds
+#
+# Design notes:
+#   - Avoid standalone content: rules without also_any — they fire on ps/log output.
+#   - Prefer command_base_any for known binaries (exact basename match, no FPs).
+#   - Read access to sensitive files scores low; confirmed writes score higher.
+#   - Scores are additive: a session can accumulate points from multiple rules.
 
 rules:
 
-  # ── Logging and audit tampering ────────────────────────────────────────────
+  # ── Logging and audit tampering ───────────────────────────────────────────
+  # High confidence: disabling the logger or audit system is almost never a
+  # legitimate operation outside of deliberate incident response.
 
   - id: stop_sudo_logger
     score: 50
@@ -30,14 +38,6 @@ rules:
     content:
       contains_any: [sudo-log, sudolog]
       also_any:     [stop, disable, kill, purge, uninstall]
-
-  - id: cgroup_escape
-    score: 75
-    reason: "cgroup escape attempt — possible freeze evasion"
-    command:
-      contains_any: [cgclassify, cgexec, /sys/fs/cgroup, cgroup.procs]
-    content:
-      contains_any: [cgclassify, cgexec, /sys/fs/cgroup, cgroup.procs]
 
   - id: stop_auditd
     score: 45
@@ -51,7 +51,7 @@ rules:
 
   - id: auditctl_disable
     score: 45
-    reason: "audit disabled via auditctl"
+    reason: "audit logging disabled via auditctl"
     command:
       contains_any: [auditctl]
       also_any:     ["-e 0", "-e0"]
@@ -61,7 +61,7 @@ rules:
 
   - id: audit_log_tampered
     score: 40
-    reason: "audit log tampered"
+    reason: "audit log file tampered"
     command:
       contains_any: [/var/log/audit]
       also_any:     ["rm ", "> ", truncate, shred, "dd "]
@@ -69,9 +69,39 @@ rules:
       contains_any: [/var/log/audit]
       also_any:     ["rm ", truncate, shred, "dd "]
 
+  - id: history_suppressed
+    score: 30
+    reason: "shell history suppressed"
+    # unset HISTFILE, HISTSIZE=0, redirecting .bash_history to /dev/null, history -c
+    command:
+      contains_any: ["HISTFILE=", "HISTSIZE=0", "HISTFILESIZE=0", "history -c"]
+    content:
+      contains_any: ["unset HISTFILE", "HISTFILE=/dev/null", "HISTSIZE=0", "HISTFILESIZE=0", "history -c"]
+
+  - id: bash_history_tampered
+    score: 30
+    reason: "shell history file deleted or truncated"
+    command:
+      contains_any: [.bash_history, .zsh_history]
+      also_any:     ["rm ", "> ", truncate, shred]
+    content:
+      contains_any: [.bash_history, .zsh_history]
+      also_any:     ["rm ", "> ", truncate, shred]
+
+  - id: cgroup_escape
+    score: 75
+    reason: "cgroup manipulation — possible freeze/container escape"
+    command:
+      contains_any: [cgclassify, cgexec, cgroup.procs]
+    content:
+      # Require an active write pattern to avoid false positives in ps/log output
+      contains_any: [cgclassify, cgexec]
+
+  # ── Security controls ─────────────────────────────────────────────────────
+
   - id: selinux_disabled
     score: 35
-    reason: "SELinux set to permissive/disabled"
+    reason: "SELinux set to permissive or disabled"
     command:
       contains_any: [setenforce]
       also_any:     [" 0", permissive]
@@ -84,8 +114,10 @@ rules:
     reason: "SELinux disabled in config"
     command:
       contains_any: [/etc/selinux/config, /etc/sysconfig/selinux]
+      also_any:     ["tee ", "sed -i", "awk ", ">> ", "> ", "cp ", "mv "]
     content:
-      contains_any: [selinux=disabled, selinux=permissive]
+      contains_any: ["selinux=disabled", "selinux=permissive"]
+      also_any:     ["tee ", "sed -i", ">> ", "> "]
 
   - id: apparmor_disabled
     score: 35
@@ -97,199 +129,254 @@ rules:
       contains_any: [apparmor, aa-teardown, aa-disable]
       also_any:     [stop, disable, teardown]
 
-  # ── Authentication and access control ─────────────────────────────────────
-
-  - id: sudoers_path
-    score: 40
-    reason: "sudoers file accessed"
+  - id: firewall_disabled
+    score: 25
+    reason: "firewall stopped or disabled"
     command:
-      contains_any: [/etc/sudoers]
+      contains_any: [firewalld, "ufw "]
+      also_any:     [stop, disable]
     content:
-      contains_any: [/etc/sudoers]
+      contains_any: [firewalld, "ufw disable", "ufw "]
+      also_any:     [stop, disable]
+
+  - id: iptables_flush
+    score: 25
+    reason: "iptables rules flushed"
+    command:
+      contains_any: [iptables, ip6tables]
+      also_any:     [" -F", --flush]
+    content:
+      contains_any: [iptables, ip6tables]
+      also_any:     [" -F", --flush]
+
+  - id: nft_flush
+    score: 25
+    reason: "nftables ruleset flushed"
+    command:
+      contains_any: ["flush ruleset", "flush table"]
+    content:
+      contains_any: ["flush ruleset", "flush table"]
+
+  - id: intrusion_prevention_stopped
+    score: 25
+    reason: "intrusion prevention service stopped"
+    command:
+      contains_any: [fail2ban, sshguard]
+      also_any:     [stop, disable, kill]
+    content:
+      contains_any: [fail2ban, sshguard]
+      also_any:     [stop, disable, kill]
+
+  # ── Authentication and privilege escalation ───────────────────────────────
+  # Read access is noteworthy but low risk; confirmed writes score much higher.
+  # Rules are additive: both read+write rules fire when a file is modified.
 
   - id: visudo
     score: 60
-    reason: "sudoers edited via visudo"
+    reason: "sudoers file edited via visudo"
     command_base_any: [visudo]
 
-  - id: shadow_accessed
+  - id: sudoers_write
+    score: 45
+    reason: "sudoers file directly modified"
+    command:
+      contains_any: [/etc/sudoers]
+      also_any:     [">> ", "> ", "tee ", "sed -i", "awk ", "cp ", "mv "]
+    content:
+      contains_any: [/etc/sudoers]
+      also_any:     [">> ", "> ", "tee "]
+
+  - id: sudoers_read
+    score: 15
+    reason: "sudoers file read"
+    command:
+      contains_any: [/etc/sudoers]
+
+  - id: shadow_write
+    score: 40
+    reason: "shadow password file modified"
+    command:
+      contains_any: [/etc/shadow]
+      also_any:     [">> ", "> ", "tee ", "cp ", "mv ", "sed -i", "awk "]
+    content:
+      contains_any: [/etc/shadow]
+      also_any:     [">> ", "> ", "tee "]
+
+  - id: shadow_read
+    score: 15
+    reason: "shadow password file read"
+    command:
+      contains_any: [/etc/shadow]
+
+  - id: suid_set
     score: 35
-    reason: "shadow password file accessed"
+    reason: "SUID bit set on file"
     command:
-      contains_any: [/etc/shadow]
+      contains_any: [chmod]
+      also_any:     ["+s", "u+s", " 4755", " 4777", " 6755", " 6777"]
     content:
-      contains_any: [/etc/shadow]
-
-  - id: pam_modified
-    score: 30
-    reason: "PAM configuration accessed"
-    command:
-      contains_any: [/etc/pam.d/, /etc/pam.conf]
-    content:
-      contains_any: [/etc/pam.d/, /etc/pam.conf]
-
-  - id: ssh_authorized_keys
-    score: 30
-    reason: "SSH authorized keys modified"
-    command:
-      contains_any: [authorized_keys]
-    content:
-      contains_any: [authorized_keys]
-
-  - id: sshd_config
-    score: 25
-    reason: "SSH server config accessed"
-    command:
-      contains_any: [/etc/ssh/sshd_config]
-    content:
-      contains_any: [/etc/ssh/sshd_config]
-
-  - id: passwd_file_modified
-    score: 25
-    reason: "passwd file modified"
-    command:
-      contains_any: [/etc/passwd]
-      also_any:     [">>", "> ", "tee ", "sed -i", "awk "]
-    content:
-      contains_any: [/etc/passwd]
-      also_any:     [">>", "tee "]
+      contains_any: [chmod]
+      also_any:     ["+s", "u+s", " 4755", " 4777", " 6755", " 6777"]
 
   - id: usermod_privileged_group
     score: 25
     reason: "user added to privileged group"
     command:
       contains_any: [usermod]
-      also_any:     [sudo, wheel]
+      also_any:     [sudo, wheel, admin, root]
     content:
       contains_any: [usermod]
-      also_any:     [sudo, wheel]
+      also_any:     [sudo, wheel, admin, root]
 
   - id: user_created
     score: 15
     reason: "user account created"
     command_base_any: [useradd, adduser]
 
-  - id: user_created_in_shell
-    score: 15
-    reason: "user account created"
-    content:
-      contains_any: [useradd, adduser]
-
   - id: user_deleted
     score: 15
     reason: "user account deleted"
     command_base_any: [userdel, deluser]
-
-  - id: user_deleted_in_shell
-    score: 15
-    reason: "user account deleted"
-    content:
-      contains_any: [userdel, deluser]
 
   - id: password_changed
     score: 15
     reason: "user password changed"
     command_base_any: [passwd, chpasswd]
 
-  - id: password_changed_in_shell
-    score: 15
-    reason: "user password changed"
+  - id: pam_modified
+    score: 25
+    reason: "PAM configuration modified"
+    command:
+      contains_any: [/etc/pam.d/, /etc/pam.conf]
+      also_any:     [">> ", "> ", "tee ", "sed -i", "cp ", "mv "]
     content:
-      contains_any: [chpasswd, "passwd "]
+      contains_any: [/etc/pam.d/, /etc/pam.conf]
+      also_any:     [">> ", "> ", "tee "]
 
-  # ── Firewall and network security ──────────────────────────────────────────
-
-  - id: iptables_flush
+  - id: ssh_authorized_keys_write
     score: 30
-    reason: "iptables rules flushed"
+    reason: "SSH authorized_keys modified"
     command:
-      contains_any: [iptables, ip6tables]
-      also_any:     [" -f", --flush]
+      contains_any: [authorized_keys]
+      also_any:     [">> ", "> ", "tee ", "cp ", "mv ", "sed -i"]
     content:
-      contains_any: [iptables, ip6tables]
-      also_any:     [" -f", --flush]
+      contains_any: [authorized_keys]
+      also_any:     [">> ", "> ", "tee "]
 
-  - id: nft_flush
-    score: 30
-    reason: "nftables rules flushed"
+  - id: ssh_authorized_keys_read
+    score: 10
+    reason: "SSH authorized_keys accessed"
     command:
-      contains_any: [nft]
-      also_any:     ["flush ruleset", "flush table"]
-    content:
-      contains_any: [nft]
-      also_any:     ["flush ruleset", "flush table"]
+      contains_any: [authorized_keys]
 
-  - id: firewall_disabled
+  - id: sshd_config
+    score: 20
+    reason: "SSH server config accessed"
+    command:
+      contains_any: [/etc/ssh/sshd_config]
+
+  - id: passwd_file_modified
     score: 25
-    reason: "firewall service disabled"
+    reason: "/etc/passwd modified"
     command:
-      contains_any: [firewalld, "ufw "]
-      also_any:     [stop, disable]
+      contains_any: [/etc/passwd]
+      also_any:     [">> ", "> ", "tee ", "sed -i", "awk "]
     content:
-      contains_any: [firewalld, "ufw "]
-      also_any:     [stop, disable]
+      contains_any: [/etc/passwd]
+      also_any:     [">> ", "> ", "tee "]
 
-  - id: ufw_disable
-    score: 25
-    reason: "firewall service disabled"
-    command:
-      contains_any: ["ufw disable"]
-    content:
-      contains_any: ["ufw disable"]
+  # ── Persistence ────────────────────────────────────────────────────────────
 
-  - id: intrusion_prevention_stopped
-    score: 25
-    reason: "intrusion prevention stopped"
-    command:
-      contains_any: [fail2ban, sshguard]
-      also_any:     [stop, disable, kill]
-    content:
-      contains_any: [fail2ban, sshguard]
-      also_any:     [stop, disable, kill]
-
-  # ── Persistence and system modification ───────────────────────────────────
-
-  - id: crontab_modified
-    score: 15
-    reason: "cron schedule modified"
+  - id: crontab_write
+    score: 20
+    reason: "crontab modified"
+    # command_base_any matches the crontab binary exactly — no false positives
+    # from crontab appearing in ps output or log files.
     command_base_any: [crontab]
 
-  - id: crontab_modified_in_shell
-    score: 15
-    reason: "cron schedule modified"
+  - id: cron_file_write
+    score: 20
+    reason: "cron config file written"
+    command:
+      contains_any: [/etc/cron.d/, /etc/cron.daily/, /etc/cron.weekly/, /etc/cron.monthly/, /etc/crontab, /var/spool/cron/]
+      also_any:     ["tee ", ">> ", "> ", "cp ", "mv ", "sed -i"]
     content:
-      contains_any: [crontab, /etc/cron]
+      contains_any: [/etc/cron.d/, /etc/cron.daily/, /etc/cron.weekly/, /etc/cron.monthly/, /etc/crontab, /var/spool/cron/]
+      also_any:     ["tee ", ">> ", "> "]
+
+  - id: systemd_unit_write
+    score: 20
+    reason: "systemd unit file installed"
+    command:
+      contains_any: [/etc/systemd/system/, /usr/lib/systemd/system/]
+      also_any:     ["tee ", "cp ", "mv ", ">> ", "> "]
+    content:
+      contains_any: [/etc/systemd/system/, /usr/lib/systemd/system/]
+      also_any:     ["tee ", "cp ", "mv "]
 
   - id: kernel_module_loaded
     score: 20
     reason: "kernel module loaded"
+    # command_base_any avoids false positives when ps -ef shows a modprobe process
     command_base_any: [insmod, modprobe]
 
-  - id: kernel_module_loaded_in_shell
-    score: 20
-    reason: "kernel module loaded"
+  - id: ld_preload
+    score: 40
+    reason: "LD_PRELOAD set — possible library injection"
+    command:
+      contains_any: ["LD_PRELOAD="]
     content:
-      contains_any: [insmod, modprobe]
+      contains_any: ["LD_PRELOAD=/", "export LD_PRELOAD"]
 
-  - id: insecure_permissions
+  - id: core_pattern_write
+    score: 40
+    reason: "kernel core_pattern modified — known privilege escalation vector"
+    command:
+      contains_any: [/proc/sys/kernel/core_pattern]
+      also_any:     ["tee ", "echo ", "> "]
+    content:
+      contains_any: [/proc/sys/kernel/core_pattern]
+      also_any:     ["> ", "tee "]
+
+  # ── Data access and exfiltration ──────────────────────────────────────────
+
+  - id: ssh_private_key_read
+    score: 20
+    reason: "SSH private key accessed"
+    command:
+      contains_any: [id_rsa, id_ed25519, id_ecdsa, id_dsa, "/.ssh/"]
+      also_any:     [cat, less, more, cp, scp, base64, xxd, strings]
+
+  - id: remote_exec
+    score: 40
+    reason: "remote script piped to shell — possible supply-chain attack"
+    command:
+      contains_any: ["| bash", "| sh", "|bash", "|sh"]
+      also_any:     ["curl ", "wget ", "http://", "https://"]
+    content:
+      contains_any: ["| bash", "| sh", "|bash", "|sh"]
+      also_any:     ["curl ", "wget "]
+
+  # ── Insecure permissions ───────────────────────────────────────────────────
+
+  - id: world_writable
     score: 15
-    reason: "insecure permissions on system files"
+    reason: "world-writable permissions set"
     command:
       contains_any: [chmod]
       also_any:     ["777", "a+w", "o+w"]
-
-  - id: insecure_permissions_in_shell
-    score: 15
-    reason: "insecure permissions on system files"
     content:
       contains_any: [chmod]
       also_any:     ["777", "a+w", "o+w"]
 
   # ── Shell execution ────────────────────────────────────────────────────────
+  # Running an interactive shell as root is common in legitimate sysadmin work
+  # (e.g. sudo bash for a maintenance window). Score is kept low — the session
+  # content and other rules contribute additional points for suspicious activity.
 
   - id: root_shell
-    score: 20
-    reason: "root shell invoked"
+    score: 10
+    reason: "interactive root shell started"
     runas: root
     command_base_any: [bash, sh, zsh, fish, ksh, tcsh, csh, dash]
 
@@ -307,5 +394,5 @@ rules:
 
   - id: long_session
     score: 5
-    reason: "extended session duration"
+    reason: "extended session (>2 h)"
     min_duration: 7200
