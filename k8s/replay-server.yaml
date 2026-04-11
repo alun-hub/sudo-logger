@@ -37,6 +37,7 @@ spec:
             - -s3-secret-key=$(S3_SECRET_KEY)
             - -db-url=$(DB_URL)
             - -buffer-dir=/var/lib/sudo-logger/buffer
+            - -trusted-user-header=X-Forwarded-User
 
           env:
             - name: S3_ACCESS_KEY

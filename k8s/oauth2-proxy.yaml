@@ -1,0 +1,150 @@
+---
+# oauth2-proxy — GitHub-authenticated reverse proxy for sudo-replay-server.
+#
+# Prerequisites (one-time):
+#   1. Create a GitHub OAuth App at https://github.com/settings/developers
+#      - Application name:  sudo-replay (or anything)
+#      - Homepage URL:      http://replay.192.168.1.176.nip.io
+#      - Callback URL:      http://replay.192.168.1.176.nip.io/oauth2/callback
+#      Copy the Client ID and Client Secret.
+#
+#   2. Generate a random 32-byte cookie secret:
+#        python3 -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+#
+#   3. Create the Kubernetes Secret (replace the placeholders):
+#        kubectl create secret generic oauth2-proxy \
+#          --namespace sudo-logger \
+#          --from-literal=client-id=<GITHUB_CLIENT_ID> \
+#          --from-literal=client-secret=<GITHUB_CLIENT_SECRET> \
+#          --from-literal=cookie-secret=<BASE64_COOKIE_SECRET>
+#
+#   4. Edit --github-user below to your GitHub username(s),
+#      or replace with --github-org=<org> for org-based access.
+#
+#   5. kubectl apply -f k8s/oauth2-proxy.yaml
+#
+# Access: http://replay.192.168.1.176.nip.io  (redirects to GitHub login)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: sudo-logger
+  labels:
+    app: oauth2-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+
+      containers:
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+          imagePullPolicy: IfNotPresent
+
+          args:
+            - --provider=github
+            - --upstream=http://sudo-replay-server:8080
+            - --http-address=0.0.0.0:4180
+            - --redirect-url=http://replay.192.168.1.176.nip.io/oauth2/callback
+            # Restrict access to specific GitHub user(s) — comma-separated.
+            # Replace with your GitHub username(s).
+            # Alternatively use: --github-org=<your-org>
+            - --github-user=alun-hub
+            - --email-domain=*
+            - --cookie-secure=false   # HTTP only; set true if TLS is added later
+            - --cookie-name=_oauth2_replay
+            - --client-id=$(GITHUB_CLIENT_ID)
+            - --client-secret=$(GITHUB_CLIENT_SECRET)
+            - --cookie-secret=$(COOKIE_SECRET)
+
+          env:
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy
+                  key: client-id
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy
+                  key: client-secret
+            - name: COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oauth2-proxy
+                  key: cookie-secret
+
+          ports:
+            - name: http
+              containerPort: 4180
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 4180
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 4180
+            initialDelaySeconds: 10
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy
+  namespace: sudo-logger
+spec:
+  selector:
+    app: oauth2-proxy
+  ports:
+    - name: http
+      port: 4180
+      targetPort: 4180
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sudo-replay-server
+  namespace: sudo-logger
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: replay.192.168.1.176.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  number: 4180
