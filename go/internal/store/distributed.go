@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -214,7 +215,7 @@ ON CONFLICT (tsid) DO NOTHING`,
 		return nil, fmt.Errorf("insert session row: %w", err)
 	}
 
-	return &distributedWriter{w: w, tsid: tsid, d: d}, nil
+	return &distributedWriter{w: w, tsid: tsid, d: d, startTime: startTime}, nil
 }
 
 // ListSessions implements SessionStore.
@@ -272,6 +273,16 @@ func (d *DistributedStore) OpenCast(ctx context.Context, tsid string) (io.ReadCl
 		Key:    aws.String(d.s3Key(tsid)),
 	})
 	if err != nil {
+		// If the session is still in-progress the cast file has not been
+		// uploaded to S3 yet (it lives on the log-server pod).  Return a
+		// minimal empty cast so callers get an empty event list without error.
+		var inProgress bool
+		if dbErr := d.db.QueryRow(ctx,
+			`SELECT in_progress FROM sudo_sessions WHERE tsid=$1`, tsid,
+		).Scan(&inProgress); dbErr == nil && inProgress {
+			header := `{"version":2,"width":80,"height":24}` + "\n"
+			return io.NopCloser(strings.NewReader(header)), nil
+		}
 		return nil, fmt.Errorf("s3 get %s: %w", tsid, err)
 	}
 	return out.Body, nil
@@ -608,9 +619,10 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
 // ── distributedWriter ─────────────────────────────────────────────────────────
 
 type distributedWriter struct {
-	w    *iolog.Writer
-	tsid string
-	d    *DistributedStore
+	w         *iolog.Writer
+	tsid      string
+	d         *DistributedStore
+	startTime time.Time
 }
 
 func (dw *distributedWriter) WriteOutput(data []byte, ts int64) error {
@@ -633,9 +645,10 @@ func (dw *distributedWriter) MarkIncomplete() error {
 }
 
 func (dw *distributedWriter) MarkDone() error {
+	duration := time.Since(dw.startTime).Seconds()
 	_, err := dw.d.db.Exec(context.Background(),
-		`UPDATE sudo_sessions SET in_progress=FALSE, updated_at=NOW() WHERE tsid=$1`,
-		dw.tsid)
+		`UPDATE sudo_sessions SET in_progress=FALSE, duration=$1, updated_at=NOW() WHERE tsid=$2`,
+		duration, dw.tsid)
 	return err
 }
 

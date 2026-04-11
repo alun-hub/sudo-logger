@@ -573,9 +573,24 @@ func main() {
 	defer sessionStore.Close()
 
 	// Load risk rules from store (file for local, DB for distributed).
-	if rulesText, err := sessionStore.GetConfig(context.Background(), "risk-rules.yaml"); err != nil {
+	rulesText, err := sessionStore.GetConfig(context.Background(), "risk-rules.yaml")
+	if err != nil {
 		log.Fatalf("load risk rules: %v", err)
-	} else if rulesText == "" {
+	}
+	// In distributed mode the rules are stored in PostgreSQL.  On first
+	// deployment the table is empty, so seed it from the -rules file so that
+	// scoring works immediately without a manual UI save.
+	if rulesText == "" && *flagStorage == "distributed" {
+		if data, ferr := os.ReadFile(*flagRules); ferr == nil && len(data) > 0 {
+			rulesText = string(data)
+			if serr := sessionStore.SetConfig(context.Background(), "risk-rules.yaml", rulesText); serr != nil {
+				log.Printf("risk rules: could not seed to DB: %v", serr)
+			} else {
+				log.Printf("risk rules: seeded %s into distributed config", *flagRules)
+			}
+		}
+	}
+	if rulesText == "" {
 		log.Printf("risk rules: no config found — scoring disabled")
 	} else if err := loadRulesFromText(rulesText); err != nil {
 		log.Fatalf("parse risk rules: %v", err)
