@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.17.0
+Version:        1.18.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,6 +68,12 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.18.0-1
+- feat: rename freeze_timeout → network_outage in API, badges and warn-bar;
+  badge text changed to "⏱ network outage", warn-bar updated accordingly
+- fix: incomplete_session risk rule (+15) suppressed for network_outage
+  sessions (network loss is not a security event)
+
 * Sat Apr 12 2026 sudo-logger 1.17.0-1
 - feat: show distinct amber ⏱ badge and warn-bar for freeze-timeout sessions
   instead of red ⚠ incomplete badge; freeze-timeout sessions no longer

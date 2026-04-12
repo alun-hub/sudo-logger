@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.15.0
+Version:        1.16.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,13 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.16.0-1
+- feat: handle SESSION_FREEZING (0x0f) — sets freezeCandidate on active
+  session so TCP-drop handler calls MarkNetworkOutage instead of
+  MarkIncomplete; post-hoc upgrade via MarkSessionNetworkOutage if session
+  already closed; SESSION_ABANDON now also calls MarkSessionNetworkOutage
+- rename: freeze_timeout column/markers → network_outage throughout
+
 * Sat Apr 12 2026 sudo-logger 1.15.0-1
 - feat: handle SESSION_ABANDON (0x0e) — marks session as freeze_timeout
   instead of generic incomplete when the shipper's freeze-timeout watchdog

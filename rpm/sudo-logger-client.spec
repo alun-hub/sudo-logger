@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.13.0
+Version:        1.14.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.14.0-1
+- feat: send SESSION_FREEZING (0x0f) on first network loss (~800 ms after
+  markDead) so the server can mark the session as network-outage rather
+  than shipper-killed; SESSION_ABANDON (0x0e) kept as fallback
+
 * Sat Apr 12 2026 sudo-logger 1.13.0-1
 - feat: freeze-timeout watchdog in shipper terminates frozen sessions after
   configurable duration of server unreachability (default 5 min, flag:
