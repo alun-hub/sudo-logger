@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.12.2
+Version:        1.13.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,19 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat Apr 12 2026 sudo-logger 1.13.0-1
+- feat: freeze-timeout watchdog in shipper terminates frozen sessions after
+  configurable duration of server unreachability (default 5 min, flag:
+  -freeze-timeout); prevents permanent hangs when the TCP connection to the
+  log server dies (OS retransmission timer expired)
+- feat: new FREEZE_TIMEOUT protocol message (0x0d) sent from shipper to
+  plugin before closing the connection; plugin distinguishes this from a
+  plain shipper death and shows a distinct amber banner:
+  "gave up waiting for log server — session terminated"
+- feat: plugin calls unfreeze_session_cgroup() on receiving FREEZE_TIMEOUT
+  (or any shipper death) to ensure the cgroup is thawed before sending
+  SIGTERM — guarantees the signal reaches the frozen shell
+
 * Mon Apr 07 2026 sudo-logger 1.12.2-1
 - fix: suppress technical error detail in SESSION_ERROR banner — DNS errors
   and other infrastructure messages are drained but not shown on the terminal;

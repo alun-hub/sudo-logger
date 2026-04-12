@@ -119,6 +119,10 @@ sudo session:
 - Recovers automatically when the network returns; the TCP connection
   remains alive as long as the OS retransmission timeout has not expired
   (typically several minutes on Linux with default settings)
+- Terminates frozen sessions that have been unreachable for longer than
+  `-freeze-timeout` (default 5 min) — sends `FREEZE_TIMEOUT` to the plugin,
+  which unfreezes the cgroup and prints a human-readable banner before
+  killing the session
 - Creates a per-session cgroup subtree to freeze all child processes
 - Tracks processes that escape to foreign cgroups (moved by GNOME/systemd)
   and freezes them via SIGSTOP when safe (see [Freeze mechanism](#freeze-mechanism))
@@ -204,6 +208,7 @@ migrate-sessions \
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
 - Freeze within ~1 s of network loss; automatic recovery when network returns
+- Frozen sessions automatically terminated after configurable timeout (default 5 min) with a human-readable error banner — prevents permanent hangs when the TCP connection dies
 - Terminal sessions (bash, zsh, …) frozen via `cgroup.freeze` — no job control triggered
 - GUI programs with own process group (gvim, okular, …) frozen via direct SIGSTOP/SIGCONT
 - cgroup namespace isolation (`CLONE_NEWCGROUP`) prevents child processes from escaping the freeze cgroup, even with `CAP_SYS_ADMIN`
@@ -217,13 +222,17 @@ migrate-sessions \
 
 ## Limitations
 
-- **Recovery depends on TCP connection surviving**: the shipper keeps the
-  TCP connection alive by writing heartbeats into the kernel send buffer
-  even when the network is down. Recovery happens automatically when the
-  network returns, as long as the OS retransmission timeout has not expired.
-  On Linux with default settings this is typically several minutes. If the
-  connection is truly gone (OS gave up), the freeze is permanent for the
-  current session — the user must Ctrl+C and start a new sudo session.
+- **Recovery window limited by TCP retransmission timeout**: the shipper
+  keeps the TCP connection alive by writing heartbeats into the kernel send
+  buffer even when the network is down. Recovery happens automatically when
+  the network returns, as long as the OS retransmission timeout has not
+  expired. On Linux with default settings this is typically several minutes.
+  If the connection is truly gone (OS gave up), automatic recovery is no
+  longer possible. The freeze-timeout watchdog (default 5 min) handles this
+  case: it terminates the frozen session, unfreezes the cgroup, and prints
+  a human-readable error banner so the user knows why the session ended.
+  Without this, a dead TCP connection would cause a permanent freeze that
+  could only be broken with `kill -9` from another terminal.
 
 - **No session buffer on reconnect**: chunks sent during the window between
   network loss and freeze detection (~400–800 ms) may not be acknowledged.
@@ -536,6 +545,12 @@ After import, rules are served from the database and changes via the Settings UI
 |----------|---------|-------------|
 | `ackLagLimit` | `2s` | Unacknowledged chunk age before reporting dead to plugin |
 | `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
+
+### Shipper command-line flags (relevant to freeze behaviour)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-freeze-timeout` | `5m` | Terminate a frozen session after this duration of server unreachability. Prevents permanent hangs when the TCP connection dies. Set to `0` to disable (not recommended). |
 
 ### Blocking GUI applications (sudoers)
 
@@ -1193,6 +1208,7 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `HEARTBEAT_ACK` | `0x0a` | server → shipper | Empty — immediate reply to HEARTBEAT |
 | `SERVER_READY` | `0x0b` | server → shipper | Empty — session accepted, shipper may send SESSION_READY |
 | `SESSION_DENIED` | `0x0c` | server → shipper → plugin | String block message — policy denial, sudo blocked |
+| `FREEZE_TIMEOUT` | `0x0d` | shipper → plugin | Empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
 
 **CHUNK stream types:**
 
@@ -1294,6 +1310,42 @@ the plugin writes the freeze banner to the terminal. When the network returns,
 the cgroup is unfrozen and the banner clears automatically. If bash was moved
 out of the session cgroup and ended up backgrounded (visible as
 `[1]+ Stopped sudo bash` in the parent shell), run `fg` to restore it.
+
+**Freeze-timeout (permanent hang prevention):** if the server connection
+cannot be recovered — because the OS TCP retransmission timer expired and
+the kernel closed the socket — the session would remain frozen permanently
+until killed from another terminal. The shipper's freeze-timeout watchdog
+prevents this:
+
+```
+Shipper detects server dead (markDead())
+    │
+    └─ frozenSince = time.Now()
+
+Watchdog goroutine (checks every 10 s)
+    │
+    └─ time.Since(frozenSince) >= freeze-timeout (default 5 min)
+           │
+           ├── cg.unfreeze()                 ← release cgroup freeze first
+           ├── send FREEZE_TIMEOUT (0x0d) to plugin socket
+           └── close plugin connection → plugin detects EOF → kill(-pgrp, SIGTERM)
+```
+
+The plugin distinguishes `FREEZE_TIMEOUT` from an ordinary shipper death
+and prints a different banner:
+
+```
+[ SUDO-LOGGER: gave up waiting for log server — session terminated ]
+```
+
+The `-freeze-timeout` flag (default `5m`) controls how long the shipper
+waits before giving up. Set to `0` to disable (not recommended — sessions
+may hang indefinitely if the log server is permanently unreachable).
+
+The freeze-timeout is also the reason the plugin calls
+`unfreeze_session_cgroup()` itself on receiving `FREEZE_TIMEOUT`: even if
+the shipper is already dead, the plugin ensures the cgroup is unfrozen so
+the SIGTERM actually reaches the shell.
 
 `log_ttyin()` always returns 1 and never blocks. Blocking there would
 prevent sudo's event loop from processing signals, breaking Ctrl+C.
