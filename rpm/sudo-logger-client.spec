@@ -146,7 +146,7 @@ fi
   markDead) so the server can mark the session as network-outage rather
   than shipper-killed; SESSION_ABANDON (0x0e) kept as fallback
 
-* Sat Apr 12 2026 sudo-logger 1.13.0-1
+* Sun Apr 12 2026 sudo-logger 1.13.0-1
 - feat: freeze-timeout watchdog in shipper terminates frozen sessions after
   configurable duration of server unreachability (default 5 min, flag:
   -freeze-timeout); prevents permanent hangs when the TCP connection to the
@@ -159,17 +159,17 @@ fi
   (or any shipper death) to ensure the cgroup is thawed before sending
   SIGTERM — guarantees the signal reaches the frozen shell
 
-* Mon Apr 07 2026 sudo-logger 1.12.2-1
+* Tue Apr 07 2026 sudo-logger 1.12.2-1
 - fix: suppress technical error detail in SESSION_ERROR banner — DNS errors
   and other infrastructure messages are drained but not shown on the terminal;
   only the "cannot reach log server" header is displayed
 
-* Mon Apr 07 2026 sudo-logger 1.12.1-1
+* Tue Apr 07 2026 sudo-logger 1.12.1-1
 - fix: suppress "sudo: error initializing I/O plugin" on SESSION_DENIED and
   SESSION_ERROR — plugin calls _exit(1) after displaying the banner instead of
   returning -1, so sudo never reaches its own error-message code path
 
-* Sun Apr 06 2026 sudo-logger 1.12.0-1
+* Mon Apr 06 2026 sudo-logger 1.12.0-1
 - feat: block users from sudo via central policy (SESSION_DENIED protocol msg)
   - plugin handles MSG_SESSION_DENIED (0x0c) with distinct red banner
   - shipper waits for server handshake (SERVER_READY/SESSION_DENIED) before
