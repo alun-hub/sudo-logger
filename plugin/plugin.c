@@ -470,10 +470,13 @@ static void *monitor_thread_fn(void *arg)
         }
 
         if (!fresh && !was_frozen) {
-            /* Freeze banner is written directly to the TTY by sudo-shipper
-             * (writeTTYFreezeMsg) so it appears immediately even when sudo
-             * is SIGTSTP'd due to job-control propagation.  Only track state
-             * here so UNFREEZE_MSG fires correctly on recovery. */
+            /* Freeze banner is also written directly to the TTY by sudo-shipper
+             * (writeTTYFreezeMsg) at markDead() time for immediate display.
+             * Write it here too as a fallback: when sudo is SIGTSTP'd and later
+             * resumed with fg, the monitor thread shows the banner again so the
+             * user understands why fg hangs. */
+            if (g_tty_fd >= 0)
+                write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
             was_frozen = 1;
         } else if (fresh && was_frozen) {
             if (g_tty_fd >= 0)
