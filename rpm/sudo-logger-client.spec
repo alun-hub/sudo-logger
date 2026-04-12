@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.14.0
+Version:        1.15.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.15.0-1
+- fix: write FREEZE_MSG directly to TTY from shipper at markDead() time
+  so the banner appears immediately even when sudo is auto-backgrounded
+  by SIGSTOP job-control propagation; tty_path sent in SESSION_START
+
 * Mon Apr 13 2026 sudo-logger 1.14.0-1
 - feat: send SESSION_FREEZING (0x0f) on first network loss (~800 ms after
   markDead) so the server can mark the session as network-outage rather

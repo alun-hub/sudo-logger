@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.16.0
+Version:        1.17.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,10 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.17.0-1
+- fix: write FREEZE_MSG directly to TTY from shipper (writeTTYFreezeMsg);
+  validate tty_path from SESSION_START before opening
+
 * Mon Apr 13 2026 sudo-logger 1.16.0-1
 - feat: handle SESSION_FREEZING (0x0f) — sets freezeCandidate on active
   session so TCP-drop handler calls MarkNetworkOutage instead of
