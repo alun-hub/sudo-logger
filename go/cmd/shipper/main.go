@@ -59,7 +59,7 @@ var (
 	flagKey     = flag.String("key", "/etc/sudo-logger/client.key", "Client TLS key")
 	flagCA      = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate")
 	flagVerifyKey     = flag.String("verifykey", "/etc/sudo-logger/ack-verify.key", "ed25519 public key for ACK verification (PEM)")
-	flagFreezeTimeout = flag.Duration("freeze-timeout", 5*time.Minute, "Terminate a frozen session after this duration of server unreachability (0 = never)")
+	flagFreezeTimeout = flag.Duration("freeze-timeout", 3*time.Minute, "Terminate a frozen session after this duration of server unreachability (0 = never)")
 	flagDebug         = flag.Bool("debug", false, "Enable verbose debug logging")
 )
 

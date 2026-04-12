@@ -72,6 +72,19 @@ from the server.
 Default:
 .BR /etc/sudo-logger/ack-verify.key .
 .TP
+.BI \-freeze-timeout " duration"
+Terminate a frozen session after this duration of server unreachability.
+The session cgroup is unfrozen and the child process receives SIGTERM.
+The session is marked as
+.I network_outage
+in the replay UI regardless of this value (that signal is sent within 800\~ms
+of the first missed heartbeat).
+Set to
+.B 0
+to never terminate frozen sessions automatically.
+Default:
+.BR 3m .
+.TP
 .B \-debug
 Enable verbose debug logging.
 By default only errors and key events (session start, freeze/unfreeze) are

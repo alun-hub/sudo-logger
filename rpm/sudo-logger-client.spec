@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.15.2
+Version:        1.15.3
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue Apr 14 2026 sudo-logger 1.15.3-1
+- fix: lower -freeze-timeout default from 5 min to 3 min; SESSION_FREEZING
+  is sent at 800 ms so the replay network_outage distinction is unaffected,
+  but users no longer wait up to 5 min for a frozen session to terminate
+
 * Mon Apr 13 2026 sudo-logger 1.15.2-1
 - fix: set serverConnAlive=false before closing server connection on
   SESSION_END so the heartbeat goroutine cannot fire markDead() after a
