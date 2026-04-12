@@ -587,6 +587,13 @@ func handlePluginConn(pluginConn net.Conn) {
 
 		case protocol.MsgSessionEnd:
 			forward(protocol.MsgSessionEnd, payload)
+			// Mark the connection as intentionally closed before closing the
+			// socket.  The heartbeat goroutine may still fire once after this
+			// and call markDead() — setting serverConnAlive=false here ensures
+			// firstFreeze is false so no spurious SESSION_FREEZING is sent.
+			sessionAckMu.Lock()
+			serverConnAlive = false
+			sessionAckMu.Unlock()
 			serverConn.Close()
 			return
 
