@@ -309,6 +309,11 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 	}
 
+	// pluginWriteMu serialises writes to pw (plugin connection) so that the
+	// watchdog goroutine can send MsgFreezeTimeout without racing the main
+	// loop's ACK_RESPONSE writes.
+	var pluginWriteMu sync.Mutex
+
 	// ── Freeze-timeout watchdog ───────────────────────────────────────────
 	// If the session remains frozen (server unreachable) for longer than
 	// -freeze-timeout, unfreeze the cgroup and close the plugin connection so
@@ -333,6 +338,14 @@ func handlePluginConn(pluginConn net.Conn) {
 				log.Printf("[%s] server unreachable for >%v — terminating frozen session",
 					start.SessionID, *flagFreezeTimeout)
 				cg.unfreeze() // let signals reach bash before sudo is killed
+				// Notify the plugin with a specific message so it can show a
+				// human-readable banner instead of the generic "shipper lost".
+				pluginWriteMu.Lock()
+				_ = protocol.WriteMessage(pw, protocol.MsgFreezeTimeout, nil)
+				pluginWriteMu.Unlock()
+				// Give the plugin one monitor-thread cycle (150 ms) to read the
+				// message before the socket is closed.
+				time.Sleep(200 * time.Millisecond)
 				pluginConn.Close()
 				return
 			}
@@ -523,7 +536,10 @@ func handlePluginConn(pluginConn net.Conn) {
 		case protocol.MsgAckQuery:
 			ts, seq := readAck()
 			resp := protocol.EncodeAckResponse(ts, seq)
-			if err := protocol.WriteMessage(pw, protocol.MsgAckResponse, resp); err != nil {
+			pluginWriteMu.Lock()
+			err := protocol.WriteMessage(pw, protocol.MsgAckResponse, resp)
+			pluginWriteMu.Unlock()
+			if err != nil {
 				log.Printf("write ack response: %v", err)
 				return
 			}

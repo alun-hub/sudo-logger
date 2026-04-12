@@ -50,7 +50,8 @@ const (
 	MsgHeartbeat     = uint8(0x09) // shipper→server: keepalive probe
 	MsgHeartbeatAck  = uint8(0x0a) // server→shipper: keepalive reply
 	MsgServerReady   = uint8(0x0b) // server→shipper: session accepted, proceed
-	MsgSessionDenied = uint8(0x0c) // server→shipper AND shipper→plugin: policy denial
+	MsgSessionDenied  = uint8(0x0c) // server→shipper AND shipper→plugin: policy denial
+	MsgFreezeTimeout  = uint8(0x0d) // shipper→plugin: server unreachable for too long, session will be terminated
 
 	StreamStdin  = uint8(0x00)
 	StreamStdout = uint8(0x01)

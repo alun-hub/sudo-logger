@@ -63,6 +63,7 @@
 #define MSG_SESSION_READY  0x07
 #define MSG_SESSION_ERROR  0x08
 #define MSG_SESSION_DENIED 0x0c
+#define MSG_FREEZE_TIMEOUT 0x0d
 
 #define STREAM_STDIN   0x00
 #define STREAM_STDOUT  0x01
@@ -86,6 +87,8 @@
     "\033[0m\r\n"
 #define TERMINATE_MSG \
     "\r\n\033[41;97;1m[ SUDO-LOGGER: shipper lost — session terminated ]\033[0m\r\n"
+#define TIMEOUT_MSG \
+    "\r\n\033[43;30;1m[ SUDO-LOGGER: gave up waiting for log server — session terminated ]\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
 static sudo_printf_t g_printf;
@@ -99,8 +102,9 @@ static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
 static time_t g_last_ack_query = 0;  /* when we last queried the shipper */
 
 /* Background monitor thread */
-static _Atomic int    g_monitor_stop  = 0;
-static _Atomic int    g_shipper_dead  = 0;  /* set when socket drops; triggers session termination */
+static _Atomic int    g_monitor_stop   = 0;
+static _Atomic int    g_shipper_dead   = 0;  /* set when socket drops; triggers session termination */
+static _Atomic int    g_freeze_timeout = 0;  /* set when shipper sends MSG_FREEZE_TIMEOUT */
 static int            g_monitor_started = 0;
 static pthread_t      g_monitor_thread;
 static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
@@ -202,6 +206,38 @@ static void refresh_ack_cache(void)
 {
     if (g_shipper_fd < 0)
         return;
+
+    /*
+     * Poll for unsolicited messages from the shipper (e.g. MSG_FREEZE_TIMEOUT)
+     * before sending ACK_QUERY.  If data is already in the receive buffer we
+     * must drain it first; otherwise we would try to interpret a
+     * MSG_FREEZE_TIMEOUT header as an MSG_ACK_RESPONSE and misparse the stream.
+     */
+    {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(g_shipper_fd, &rfds);
+        struct timeval tv = { .tv_sec = 0, .tv_usec = 0 }; /* non-blocking */
+        if (select(g_shipper_fd + 1, &rfds, NULL, NULL, &tv) > 0) {
+            uint8_t hdr[5];
+            if (read_exact(g_shipper_fd, hdr, 5) == 0) {
+                uint32_t plen;
+                memcpy(&plen, hdr + 1, 4);
+                plen = be32toh(plen);
+                if (hdr[0] == MSG_FREEZE_TIMEOUT)
+                    atomic_store(&g_freeze_timeout, 1);
+                /* Drain payload regardless of message type. */
+                for (uint32_t rem = plen; rem > 0; ) {
+                    uint8_t drain[64];
+                    uint32_t n = rem < (uint32_t)sizeof(drain)
+                                 ? rem : (uint32_t)sizeof(drain);
+                    if (read_exact(g_shipper_fd, drain, n) < 0)
+                        break;
+                    rem -= n;
+                }
+            }
+        }
+    }
 
     if (send_msg(g_shipper_fd, MSG_ACK_QUERY, NULL, 0) < 0)
         return;
@@ -421,8 +457,12 @@ static void *monitor_thread_fn(void *arg)
          *     SIGHUP to the child session as usual.
          */
         if (atomic_load(&g_shipper_dead)) {
-            if (g_tty_fd >= 0)
-                write(g_tty_fd, TERMINATE_MSG, sizeof(TERMINATE_MSG) - 1);
+            if (g_tty_fd >= 0) {
+                if (atomic_load(&g_freeze_timeout))
+                    write(g_tty_fd, TIMEOUT_MSG, sizeof(TIMEOUT_MSG) - 1);
+                else
+                    write(g_tty_fd, TERMINATE_MSG, sizeof(TERMINATE_MSG) - 1);
+            }
             unfreeze_session_cgroup();
             kill(-getpgrp(), SIGTERM);
             return NULL;
