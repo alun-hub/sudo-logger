@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.18.0
+Version:        1.18.1
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,20 +68,26 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Tue Apr 14 2026 sudo-logger 1.18.1-1
+- fix: command_base_any, command, and content are now ORed in matchesRule;
+  previously command_base_any was a hard AND prerequisite, so a rule with
+  command_base_any=visudo would never fire for a "sudo bash" session where
+  the user typed visudo — only direct "sudo visudo" invocations matched
+
 * Mon Apr 13 2026 sudo-logger 1.18.0-1
 - feat: rename freeze_timeout → network_outage in API, badges and warn-bar;
   badge text changed to "⏱ network outage", warn-bar updated accordingly
 - fix: incomplete_session risk rule (+15) suppressed for network_outage
   sessions (network loss is not a security event)
 
-* Sat Apr 12 2026 sudo-logger 1.17.0-1
+* Sun Apr 12 2026 sudo-logger 1.17.0-1
 - feat: show distinct amber ⏱ badge and warn-bar for freeze-timeout sessions
   instead of red ⚠ incomplete badge; freeze-timeout sessions no longer
   trigger the incomplete_session risk rule (+15) since it is a network event
 - fix: TIMEOUT_MSG terminal banner changed from unreadable amber/black to
   red background with white text (same style as FREEZE_MSG)
 
-* Wed Apr 09 2026 sudo-logger 1.16.0-1
+* Thu Apr 09 2026 sudo-logger 1.16.0-1
 - feat: wire replay-server to SessionStore interface; supports both local
   (filesystem) and distributed (S3 + PostgreSQL) backends via --storage flag
 - feat: new flags --storage, --s3-bucket, --s3-endpoint, --db-url, and
@@ -89,34 +95,34 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 - feat: session watch for distributed backend polls sudo_sessions table
   every 5 s instead of inotify (no shared filesystem required)
 
-* Mon Apr 07 2026 sudo-logger 1.15.2-1
+* Tue Apr 07 2026 sudo-logger 1.15.2-1
 - feat: add SVG logo to topbar (replaces unicode glyph) and browser tab favicon
 
-* Sun Apr 06 2026 sudo-logger 1.15.1-1
+* Mon Apr 06 2026 sudo-logger 1.15.1-1
 - fix(replay): align Blocked Users tab with existing UI design system
   - replace non-existent settings-save class with btn-primary
   - use siem-footer/siem-note/form-input/toggle-row design patterns
   - fix settings-status to use .ok/.err classes instead of inline style
 
-* Sun Apr 06 2026 sudo-logger 1.15.0-1
+* Mon Apr 06 2026 sudo-logger 1.15.0-1
 - feat: Blocked Users tab in GUI for managing sudo block policy
   - GET/PUT /api/blocked-users — reads/writes blocked-users.yaml
   - GET /api/hosts — unique hosts from session history for host selector
   - configurable block message, per-host or global blocking, add/edit/unblock
 
-* Sat Apr 05 2026 sudo-logger 1.14.1-1
+* Sun Apr 05 2026 sudo-logger 1.14.1-1
 - feat: modernised web UI — Inter/system-ui font for UI chrome, monospace
   kept for terminal and commands; base font 13px → 14px, eliminate 10px text
 - topbar 42px → 48px, sidebar 300px → 320px, tighter session card spacing
 - refreshed light theme with higher contrast colours
 
-* Sat Apr 05 2026 sudo-logger 1.14.0-1
+* Sun Apr 05 2026 sudo-logger 1.14.0-1
 - feat: Prometheus /metrics endpoint (sessions_total, sessions_active,
   sessions_incomplete, sessions_by_risk, session_views_total)
 - feat: session-view audit log — GET /api/access-log with ?viewer= and ?limit=
 - feat: structured journalctl line per session view with direct replay URL
 
-* Sat Apr 06 2026 sudo-logger 1.13.0-1
+* Mon Apr 06 2026 sudo-logger 1.13.0-1
 - feat: SIEM forwarding moved to replay server using fsnotify (Alt 2)
   - watches for ACTIVE marker removal; sends event after session fully closed
   - risk_score and risk_reasons included in JSON/CEF/OCSF SIEM events

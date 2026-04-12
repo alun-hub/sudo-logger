@@ -324,7 +324,7 @@ type MatchPattern struct {
 }
 
 // Rule is a single risk-scoring rule loaded from the rules YAML file.
-// All specified conditions are ANDed; command and content are ORed with each other.
+// Metadata conditions are ANDed; command_base_any, command, and content are ORed with each other.
 type Rule struct {
 	ID             string        `yaml:"id"               json:"id"`
 	Score          int           `yaml:"score"            json:"score"`
@@ -1684,8 +1684,11 @@ func matchPattern(p *MatchPattern, text string) bool {
 }
 
 // matchesRule returns true when all conditions in the rule are satisfied.
-// Metadata conditions (runas, incomplete, etc.) are all ANDed.
-// command and content patterns are ORed with each other.
+// Metadata conditions (runas, incomplete, after_hours, min_duration) are ANDed.
+// command_base_any, command, and content are ORed with each other — at least
+// one must match if any of the three is specified. This allows a single rule
+// to catch both "sudo visudo" (command_base_any matches) and "sudo bash →
+// type visudo" (content matches) without requiring separate rules.
 func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func() string) bool {
 	if rule.Incomplete != nil {
 		// A freeze-timeout is a network event, not a security incident — treat
@@ -1710,25 +1713,24 @@ func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func
 	if rule.Runas != "" && !strings.EqualFold(s.Runas, rule.Runas) {
 		return false
 	}
-	if len(rule.CommandBaseAny) > 0 {
-		found := false
-		for _, b := range rule.CommandBaseAny {
-			if cmdBase == strings.ToLower(b) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	// command and content are ORed — at least one must match if either is defined.
+	// command_base_any, command, and content are all ORed — at least one must
+	// match if any is specified.
+	hasCmdBase := len(rule.CommandBaseAny) > 0
 	hasCmd := rule.Command != nil
 	hasCon := rule.Content != nil
-	if hasCmd || hasCon {
+	if hasCmdBase || hasCmd || hasCon {
+		cmdBaseMatch := false
+		if hasCmdBase {
+			for _, b := range rule.CommandBaseAny {
+				if cmdBase == strings.ToLower(b) {
+					cmdBaseMatch = true
+					break
+				}
+			}
+		}
 		cmdMatch := hasCmd && matchPattern(rule.Command, cmd)
 		conMatch := hasCon && matchPattern(rule.Content, getContent())
-		if !cmdMatch && !conMatch {
+		if !cmdBaseMatch && !cmdMatch && !conMatch {
 			return false
 		}
 	}
