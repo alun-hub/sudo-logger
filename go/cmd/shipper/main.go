@@ -33,8 +33,9 @@ var (
 	flagCert    = flag.String("cert", "/etc/sudo-logger/client.crt", "Client TLS certificate")
 	flagKey     = flag.String("key", "/etc/sudo-logger/client.key", "Client TLS key")
 	flagCA      = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate")
-	flagVerifyKey = flag.String("verifykey", "/etc/sudo-logger/ack-verify.key", "ed25519 public key for ACK verification (PEM)")
-	flagDebug   = flag.Bool("debug", false, "Enable verbose debug logging")
+	flagVerifyKey     = flag.String("verifykey", "/etc/sudo-logger/ack-verify.key", "ed25519 public key for ACK verification (PEM)")
+	flagFreezeTimeout = flag.Duration("freeze-timeout", 5*time.Minute, "Terminate a frozen session after this duration of server unreachability (0 = never)")
+	flagDebug         = flag.Bool("debug", false, "Enable verbose debug logging")
 )
 
 // debugLog is a no-op by default; replaced with log.Printf when -debug is set.
@@ -221,11 +222,17 @@ func handlePluginConn(pluginConn net.Conn) {
 		ackDebtStartNs int64
 	)
 
+	// frozenSince tracks when the session first became frozen (server
+	// unreachable).  Zero means not currently frozen.  Protected by
+	// sessionAckMu so it stays in sync with serverConnAlive transitions.
+	var frozenSince time.Time
+
 	updateAck := func(ts int64, seq uint64) {
 		sessionAckMu.Lock()
 		serverConnAlive = true // connection recovered
 		sessionAckSeq = seq
 		ackDebtStartNs = 0
+		frozenSince = time.Time{} // reset — server is reachable again
 		sessionAckMu.Unlock()
 		cg.unfreeze() // nil-safe; no-op when not frozen
 	}
@@ -281,6 +288,9 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	markDead := func() {
 		sessionAckMu.Lock()
+		if serverConnAlive {
+			frozenSince = time.Now() // record when freeze began
+		}
 		serverConnAlive = false
 		ackDebtStartNs = 0
 		sessionAckMu.Unlock()
@@ -292,10 +302,41 @@ func handlePluginConn(pluginConn net.Conn) {
 		wasAlive := serverConnAlive
 		serverConnAlive = true
 		ackDebtStartNs = 0 // heartbeat proves server is alive; reset ACK debt
+		frozenSince = time.Time{}
 		sessionAckMu.Unlock()
 		if !wasAlive {
 			cg.unfreeze()
 		}
+	}
+
+	// ── Freeze-timeout watchdog ───────────────────────────────────────────
+	// If the session remains frozen (server unreachable) for longer than
+	// -freeze-timeout, unfreeze the cgroup and close the plugin connection so
+	// the plugin kills sudo cleanly instead of hanging forever.
+	// Disabled when -freeze-timeout=0.
+	if *flagFreezeTimeout > 0 {
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				sessionAckMu.Lock()
+				since := frozenSince
+				sessionAckMu.Unlock()
+
+				if since.IsZero() {
+					continue // not frozen
+				}
+				if time.Since(since) < *flagFreezeTimeout {
+					continue // frozen but within allowed window
+				}
+
+				log.Printf("[%s] server unreachable for >%v — terminating frozen session",
+					start.SessionID, *flagFreezeTimeout)
+				cg.unfreeze() // let signals reach bash before sudo is killed
+				pluginConn.Close()
+				return
+			}
+		}()
 	}
 
 	// serverWriteMu serialises writes to serverBuf from the main loop and

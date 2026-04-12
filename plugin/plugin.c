@@ -293,6 +293,90 @@ static int ack_is_fresh_locked(void)
 }
 
 /*
+ * unfreeze_session_cgroup — unfreeze the session cgroup and kill its processes.
+ *
+ * When the shipper dies unexpectedly, cgroup.freeze=1 remains set.  PTY
+ * hangup (SIGHUP) from sudo's exit is queued but never delivered to frozen
+ * bash, leaving it permanently stuck.  This function:
+ *   1. Writes 0 to cgroup.freeze so pending signals can be delivered.
+ *   2. Writes 1 to cgroup.kill (Linux 5.14+) for instant cleanup if available.
+ *
+ * Path discovery: read /proc/self/cgroup to find sudo's current cgroup, then
+ * derive the session sub-cgroup by appending g_session_id (or recognising
+ * that sudo is still inside it when moveSudoOut has not yet been called).
+ */
+static void unfreeze_session_cgroup(void)
+{
+    if (!g_session_id[0])
+        return;
+
+    /* Find sudo's current cgroup v2 path ("0::<relpath>"). */
+    FILE *f = fopen("/proc/self/cgroup", "r");
+    if (!f)
+        return;
+
+    char line[512];
+    char parent[512] = "";
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "0::/", 4) != 0)
+            continue;
+        char *nl = strchr(line, '\n');
+        if (nl)
+            *nl = '\0';
+        if (snprintf(parent, sizeof(parent), "/sys/fs/cgroup%s", line + 3) >=
+            (int)sizeof(parent))
+            parent[0] = '\0';
+        break;
+    }
+    fclose(f);
+    if (!parent[0])
+        return;
+
+    /*
+     * Two cases:
+     *   A) sudo was moved to parent cgroup — parent ends with the shipper's
+     *      base dir, and g_session_id is a sub-directory of it.
+     *   B) sudo is still in the session cgroup (moveSudoOut not yet called) —
+     *      parent itself ends with g_session_id.
+     */
+    char session_cg[640];
+    size_t plen  = strlen(parent);
+    size_t idlen = strlen(g_session_id);
+    if (plen >= idlen + 1 &&
+        parent[plen - idlen - 1] == '/' &&
+        strcmp(parent + plen - idlen, g_session_id) == 0) {
+        /* Case B: sudo is inside the session cgroup. */
+        if (snprintf(session_cg, sizeof(session_cg), "%s", parent) >=
+            (int)sizeof(session_cg))
+            return;
+    } else {
+        /* Case A: sudo was moved out; session cgroup is a sub-directory. */
+        if (snprintf(session_cg, sizeof(session_cg), "%s/%s", parent,
+                     g_session_id) >= (int)sizeof(session_cg))
+            return;
+    }
+
+    char path[680];
+    int fd;
+
+    /* Step 1: unfreeze so queued signals (SIGHUP, SIGTERM) can be delivered. */
+    snprintf(path, sizeof(path), "%s/cgroup.freeze", session_cg);
+    fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        (void)write(fd, "0\n", 2);
+        close(fd);
+    }
+
+    /* Step 2: cgroup.kill (Linux 5.14+) — instant SIGKILL to all remainders. */
+    snprintf(path, sizeof(path), "%s/cgroup.kill", session_cg);
+    fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        (void)write(fd, "1\n", 2);
+        close(fd);
+    }
+}
+
+/*
  * Background monitor thread.
  *
  * Polls ACK state every 150 ms.  On freeze, sets g_frozen (which makes
@@ -339,6 +423,7 @@ static void *monitor_thread_fn(void *arg)
         if (atomic_load(&g_shipper_dead)) {
             if (g_tty_fd >= 0)
                 write(g_tty_fd, TERMINATE_MSG, sizeof(TERMINATE_MSG) - 1);
+            unfreeze_session_cgroup();
             kill(-getpgrp(), SIGTERM);
             return NULL;
         }
