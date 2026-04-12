@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.16.0
+Version:        1.17.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,6 +68,13 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sat Apr 12 2026 sudo-logger 1.17.0-1
+- feat: show distinct amber ⏱ badge and warn-bar for freeze-timeout sessions
+  instead of red ⚠ incomplete badge; freeze-timeout sessions no longer
+  trigger the incomplete_session risk rule (+15) since it is a network event
+- fix: TIMEOUT_MSG terminal banner changed from unreadable amber/black to
+  red background with white text (same style as FREEZE_MSG)
+
 * Wed Apr 09 2026 sudo-logger 1.16.0-1
 - feat: wire replay-server to SessionStore interface; supports both local
   (filesystem) and distributed (S3 + PostgreSQL) backends via --storage flag

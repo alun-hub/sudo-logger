@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.14.0
+Version:        1.15.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,13 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sat Apr 12 2026 sudo-logger 1.15.0-1
+- feat: handle SESSION_ABANDON (0x0e) — marks session as freeze_timeout
+  instead of generic incomplete when the shipper's freeze-timeout watchdog
+  fired; distinguishes network outages from shipper kills in the replay UI
+- feat(distributed): add freeze_timeout column (ALTER TABLE IF NOT EXISTS
+  for existing PostgreSQL deployments)
+
 * Wed Apr 09 2026 sudo-logger 1.14.0-1
 - feat: pluggable storage abstraction (go/internal/store) with local and
   distributed backends; --storage=distributed routes cast files to S3
