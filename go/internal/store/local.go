@@ -40,7 +40,8 @@ type LocalStore struct {
 	viewLog []AccessLogEntry
 
 	// sessionDirs maps session_id → absolute session directory path.
-	// Populated by CreateSession; used by MarkSessionFreezeTimeout to locate
+	// Populated by CreateSession; used by MarkSessionNetworkOutage to locate
+
 	// the session directory without scanning the full log tree.
 	// sync.Map is safe for concurrent use; values are never deleted (entries
 	// are small strings and the process lifetime matches session lifetime).
@@ -161,7 +162,7 @@ func (ls *LocalStore) CreateSession(_ context.Context, meta iolog.SessionMeta, s
 	if err != nil {
 		return nil, fmt.Errorf("create iolog writer: %w", err)
 	}
-	// Remember the directory so MarkSessionFreezeTimeout can find it later
+	// Remember the directory so MarkSessionNetworkOutage can find it later
 	// without scanning the full log tree.
 	if meta.SessionID != "" {
 		ls.sessionDirs.Store(meta.SessionID, w.Dir())
@@ -416,10 +417,10 @@ func (ls *LocalStore) SaveBlockedPolicy(_ context.Context, policy BlockedPolicy)
 	return os.WriteFile(ls.cfg.BlockedUsersPath, append([]byte(localBlockedUsersHeader), data...), 0o640)
 }
 
-// MarkSessionFreezeTimeout implements SessionStore.
-// Writes a FREEZE_TIMEOUT marker file to the session directory so the replay
+// MarkSessionNetworkOutage implements SessionStore.
+// Writes a NETWORK_OUTAGE marker file to the session directory so the replay
 // UI can distinguish a freeze-timeout termination from a shipper crash.
-func (ls *LocalStore) MarkSessionFreezeTimeout(_ context.Context, sessionID string) error {
+func (ls *LocalStore) MarkSessionNetworkOutage(_ context.Context, sessionID string) error {
 	v, ok := ls.sessionDirs.Load(sessionID)
 	if !ok {
 		// Session was created before this process started (e.g. server restarted
@@ -427,7 +428,7 @@ func (ls *LocalStore) MarkSessionFreezeTimeout(_ context.Context, sessionID stri
 		return nil
 	}
 	dir := v.(string)
-	return os.WriteFile(filepath.Join(dir, "FREEZE_TIMEOUT"),
+	return os.WriteFile(filepath.Join(dir, "NETWORK_OUTAGE"),
 		[]byte("session terminated by freeze-timeout watchdog\n"), 0o640)
 }
 
@@ -484,6 +485,15 @@ func (lw *localWriter) MarkActive() error {
 func (lw *localWriter) MarkIncomplete() error {
 	return os.WriteFile(filepath.Join(lw.w.Dir(), "INCOMPLETE"),
 		[]byte("connection lost without session_end\n"), 0o640)
+}
+
+func (lw *localWriter) MarkNetworkOutage() error {
+	// Write both INCOMPLETE and NETWORK_OUTAGE so the session is correctly
+	// flagged as both incomplete AND caused by network loss.
+	_ = os.WriteFile(filepath.Join(lw.w.Dir(), "INCOMPLETE"),
+		[]byte("connection lost without session_end\n"), 0o640)
+	return os.WriteFile(filepath.Join(lw.w.Dir(), "NETWORK_OUTAGE"),
+		[]byte("session terminated due to network outage\n"), 0o640)
 }
 
 func (lw *localWriter) MarkDone() error {
@@ -600,8 +610,8 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {
 		rec.Incomplete = true
 	}
-	if _, err := os.Stat(filepath.Join(sessDir, "FREEZE_TIMEOUT")); err == nil {
-		rec.FreezeTimeout = true
+	if _, err := os.Stat(filepath.Join(sessDir, "NETWORK_OUTAGE")); err == nil {
+		rec.NetworkOutage = true
 	}
 	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
 		rec.InProgress = true

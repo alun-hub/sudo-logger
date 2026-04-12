@@ -241,7 +241,7 @@ type SessionInfo struct {
 	Duration        float64  `json:"duration"`   // seconds
 	ExitCode        int32    `json:"exit_code"`
 	Incomplete      bool     `json:"incomplete,omitempty"`      // true if session ended without clean session_end
-	FreezeTimeout   bool     `json:"freeze_timeout,omitempty"`  // true when terminated by freeze-timeout watchdog (network outage)
+	NetworkOutage   bool     `json:"network_outage,omitempty"`  // true when terminated by network loss (not a shipper kill)
 	InProgress      bool     `json:"in_progress,omitempty"`     // true if session is still being recorded
 	RiskScore       int      `json:"risk_score"`
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
@@ -452,7 +452,7 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 		Duration:        r.Duration,
 		ExitCode:        r.ExitCode,
 		Incomplete:      r.Incomplete,
-		FreezeTimeout:   r.FreezeTimeout,
+		NetworkOutage:   r.NetworkOutage,
 		InProgress:      r.InProgress,
 	}
 }
@@ -1691,7 +1691,7 @@ func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func
 		// A freeze-timeout is a network event, not a security incident — treat
 		// it as "not unexpectedly terminated" for risk scoring purposes so it
 		// doesn't accumulate the same score as a shipper-killed session.
-		incompleteForSecurity := s.Incomplete && !s.FreezeTimeout
+		incompleteForSecurity := s.Incomplete && !s.NetworkOutage
 		if *rule.Incomplete != incompleteForSecurity {
 			return false
 		}

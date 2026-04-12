@@ -40,6 +40,12 @@ type SessionWriter interface {
 	// before a clean SESSION_END.
 	MarkIncomplete() error
 
+	// MarkNetworkOutage writes the NETWORK_OUTAGE marker when the session is
+	// known to have ended because of network loss (not a shipper kill).
+	// Called instead of MarkIncomplete when the server received SESSION_FREEZING
+	// on the existing connection before the TCP timeout fired.
+	MarkNetworkOutage() error
+
 	// MarkDone removes the ACTIVE marker on a clean session end.
 	MarkDone() error
 
@@ -106,13 +112,12 @@ type SessionStore interface {
 	// LocalStore writes blocked-users.yaml; DistributedStore updates sudo_blocked_users.
 	SaveBlockedPolicy(ctx context.Context, policy BlockedPolicy) error
 
-	// MarkSessionFreezeTimeout marks a previously-incomplete session as having
-	// been terminated by the shipper's freeze-timeout watchdog (server was
-	// unreachable for too long), rather than by an unexpected shipper death.
-	// Called by the log-server when it receives a SESSION_ABANDON message on a
-	// new connection from the shipper after the freeze fired.
-	// Returns nil if the session is not found (idempotent — safe to call twice).
-	MarkSessionFreezeTimeout(ctx context.Context, sessionID string) error
+	// MarkSessionNetworkOutage upgrades a session's termination reason from
+	// generic INCOMPLETE to NETWORK_OUTAGE.  Called by the log-server when it
+	// receives SESSION_FREEZING or SESSION_ABANDON from the shipper after the
+	// session was already closed.
+	// Returns nil if the session is not found (idempotent).
+	MarkSessionNetworkOutage(ctx context.Context, sessionID string) error
 
 	// WatchSessions delivers TSIDs for newly completed sessions to ch.
 	// The implementation decides the delivery mechanism:
@@ -162,9 +167,9 @@ type SessionRecord struct {
 	StartTime       int64   // unix seconds
 	Duration        float64 // seconds; 0 while in progress
 	ExitCode        int32
-	Incomplete      bool
-	FreezeTimeout   bool // true when terminated by freeze-timeout (not shipper kill)
-	InProgress      bool
+	Incomplete    bool
+	NetworkOutage bool // true when terminated by network loss (not a shipper kill)
+	InProgress    bool
 }
 
 // RawEvent is a single playback event read from a session cast file.

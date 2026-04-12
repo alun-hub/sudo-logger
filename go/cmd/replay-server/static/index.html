@@ -162,10 +162,10 @@
       border: 1px solid rgba(255,80,80,0.3); padding: 1px 6px; border-radius: 3px;
       flex-shrink: 0; font-family: var(--font-ui); }
     .session-card.incomplete { border-left-color: var(--red) !important; }
-    .sc-freeze-timeout { font-size: 11px; color: #e67e00; background: rgba(230,126,0,0.08);
+    .sc-network-outage { font-size: 11px; color: #e67e00; background: rgba(230,126,0,0.08);
       border: 1px solid rgba(230,126,0,0.35); padding: 1px 6px; border-radius: 3px;
       flex-shrink: 0; font-family: var(--font-ui); }
-    .session-card.freeze-timeout { border-left-color: #e67e00 !important; }
+    .session-card.network-outage { border-left-color: #e67e00 !important; }
     .warn-bar-timeout { display: flex; align-items: center; gap: 6px; padding: 6px 16px;
       background: rgba(230,126,0,0.07); border-bottom: 1px solid rgba(230,126,0,0.25);
       font-size: 12px; color: #e67e00; font-family: var(--font-ui); }
@@ -1298,7 +1298,7 @@ function renderSessionList(sessions) {
   const q = fetchState.q;
   const frag = document.createDocumentFragment();
   for (const s of sessions) {
-    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : '') + (s.freeze_timeout ? ' freeze-timeout' : s.incomplete ? ' incomplete' : '') + (s.in_progress ? ' in-progress' : ''));
+    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : '') + (s.network_outage ? ' network-outage' : s.incomplete ? ' incomplete' : '') + (s.in_progress ? ' in-progress' : ''));
     card.dataset.tsid = s.tsid;
 
     // user@host row with runas badge
@@ -1322,7 +1322,7 @@ function renderSessionList(sessions) {
       meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
     }
     if (s.in_progress) meta.appendChild(el('span', 'sc-live', 'live'));
-    if (s.freeze_timeout) meta.appendChild(el('span', 'sc-freeze-timeout', '⏱ freeze-timeout'));
+    if (s.network_outage) meta.appendChild(el('span', 'sc-network-outage', '⏱ network outage'));
     else if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
 
     card.appendChild(userRow);
@@ -1465,8 +1465,8 @@ function renderInfoBar(sess) {
   }
 
   // Warning bar for incomplete sessions
-  if (sess.freeze_timeout) {
-    const warn = el('div', 'warn-bar-timeout', '⏱ Session terminated by freeze-timeout — log server was unreachable for too long. Recording up to the network loss is intact.');
+  if (sess.network_outage) {
+    const warn = el('div', 'warn-bar-timeout', '⏱ Session terminated by network outage — client lost connectivity to log server. Recording up to the network loss is intact.');
     elInfoBar.appendChild(warn);
   } else if (sess.incomplete) {
     const warn = el('div', 'warn-bar', '⚠ Session incomplete — shipper was killed or crashed before session_end. Recording may be truncated.');

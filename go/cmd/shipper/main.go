@@ -288,6 +288,7 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	markDead := func() {
 		sessionAckMu.Lock()
+		firstFreeze := serverConnAlive && frozenSince.IsZero()
 		if serverConnAlive {
 			frozenSince = time.Now() // record when freeze began
 		}
@@ -295,6 +296,12 @@ func handlePluginConn(pluginConn net.Conn) {
 		ackDebtStartNs = 0
 		sessionAckMu.Unlock()
 		cg.freeze() // nil-safe; freezes all session processes via cgroup
+		// On first freeze, notify the server immediately so it can mark the
+		// session as a network outage rather than a shipper kill, while the
+		// server is likely still reachable (~800 ms after network loss).
+		if firstFreeze {
+			go reportSessionFreezing(*flagServer, tlsCfg, start.SessionID)
+		}
 	}
 
 	markAlive := func() {
@@ -654,6 +661,51 @@ func reportSessionAbandon(server string, cfg *tls.Config, sessionID string) {
 		return
 	}
 	log.Printf("[%s] SESSION_ABANDON sent to server", sessionID)
+}
+
+// reportSessionFreezing opens a fresh TLS connection to the server and sends a
+// SESSION_FREEZING message so the server knows this session was frozen due to
+// network loss — not a shipper kill.  Called on the first markDead() call while
+// the server is likely still reachable (~800 ms after network loss).
+//
+// Best-effort: if the connection fails, the session will be marked as generic
+// INCOMPLETE; SESSION_ABANDON may upgrade it later if the network recovers.
+func reportSessionFreezing(server string, cfg *tls.Config, sessionID string) {
+	const dialTimeout = 10 * time.Second
+
+	tcpAddr, err := net.ResolveTCPAddr("tcp", server)
+	if err != nil {
+		log.Printf("[%s] SESSION_FREEZING: resolve %s: %v", sessionID, server, err)
+		return
+	}
+	rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
+	if err != nil {
+		log.Printf("[%s] SESSION_FREEZING: dial: %v", sessionID, err)
+		return
+	}
+	defer rawTCP.Close()
+
+	tlsCfgClone := cfg.Clone()
+	if tlsCfgClone.ServerName == "" {
+		if host, _, splitErr := net.SplitHostPort(server); splitErr == nil {
+			tlsCfgClone.ServerName = host
+		} else {
+			tlsCfgClone.ServerName = tcpAddr.IP.String()
+		}
+	}
+	tlsConn := tls.Client(rawTCP, tlsCfgClone)
+	tlsConn.SetDeadline(time.Now().Add(dialTimeout))
+	defer tlsConn.Close()
+	if err := tlsConn.Handshake(); err != nil {
+		log.Printf("[%s] SESSION_FREEZING: TLS handshake: %v", sessionID, err)
+		return
+	}
+	w := bufio.NewWriter(tlsConn)
+	if err := protocol.WriteMessage(w, protocol.MsgSessionFreezing, []byte(sessionID)); err != nil {
+		log.Printf("[%s] SESSION_FREEZING: write: %v", sessionID, err)
+		return
+	}
+	log.Printf("[%s] SESSION_FREEZING sent to server", sessionID)
 }
 
 // verifyAckSig checks the ed25519 signature attached to an ACK from the server.

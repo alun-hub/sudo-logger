@@ -96,6 +96,10 @@ type session struct {
 	startTime time.Time
 	writer    store.SessionWriter
 	lastSeq   uint64
+	// freezeCandidate is set when SESSION_FREEZING is received for this session,
+	// meaning the shipper declared the network dead.  When the TCP connection
+	// subsequently drops, MarkNetworkOutage is used instead of MarkIncomplete.
+	freezeCandidate bool
 }
 
 func main() {
@@ -230,9 +234,15 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		msgType, plen, err := protocol.ReadHeader(r)
 		if err != nil {
 			if sess != nil {
-				log.Printf("SECURITY: [%s] %s dropped connection without session_end — session may be incomplete (shipper killed?): %v",
-					sess.id, remote, err)
-				_ = sess.writer.MarkIncomplete()
+				if sess.freezeCandidate {
+					log.Printf("[%s] %s connection lost after SESSION_FREEZING — marking network outage",
+						sess.id, remote)
+					_ = sess.writer.MarkNetworkOutage()
+				} else {
+					log.Printf("SECURITY: [%s] %s dropped connection without session_end — session may be incomplete (shipper killed?): %v",
+						sess.id, remote, err)
+					_ = sess.writer.MarkIncomplete()
+				}
 				srv.sessionsIncomplete.Add(1)
 				srv.closeSession(sess)
 			}
@@ -344,20 +354,39 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			return
 
+		case protocol.MsgSessionFreezing:
+			// Sent by the shipper on a NEW connection at markDead() time (~800 ms
+			// after network loss), while the server is likely still reachable.
+			// If the session is still active, set freezeCandidate so the TCP-drop
+			// handler calls MarkNetworkOutage instead of MarkIncomplete.
+			// If the session is already closed (TCP died before this message
+			// arrived), upgrade the stored termination reason directly.
+			sid := string(payload)
+			log.Printf("SESSION_FREEZING from %s session_id=%s", remote, sid)
+			srv.mu.Lock()
+			activeSess := srv.sessions[sid]
+			srv.mu.Unlock()
+			if activeSess != nil {
+				activeSess.freezeCandidate = true
+			} else {
+				if err := srv.sessionStore.MarkSessionNetworkOutage(context.Background(), sid); err != nil {
+					log.Printf("mark network-outage session_id=%s: %v", sid, err)
+				}
+			}
+			return
+
 		case protocol.MsgSessionAbandon:
-			// Sent by the shipper on a NEW connection after freeze-timeout fires.
-			// The old session connection is already dead and MarkIncomplete() was
-			// already called.  This message upgrades the termination reason so the
-			// replay UI can distinguish a freeze-timeout from a shipper kill.
+			// Fallback: sent by the shipper on a NEW connection after freeze-timeout
+			// fires (5 min), only if network has recovered.  Upgrades the stored
+			// termination reason in case SESSION_FREEZING was not received earlier.
 			if sess != nil {
-				// Unexpected: abandon arrived on an active session connection.
 				log.Printf("[%s] SESSION_ABANDON on active connection — ignoring", sess.id)
 				return
 			}
 			sid := string(payload)
 			log.Printf("SESSION_ABANDON from %s session_id=%s", remote, sid)
-			if err := srv.sessionStore.MarkSessionFreezeTimeout(context.Background(), sid); err != nil {
-				log.Printf("mark freeze-timeout session_id=%s: %v", sid, err)
+			if err := srv.sessionStore.MarkSessionNetworkOutage(context.Background(), sid); err != nil {
+				log.Printf("mark network-outage session_id=%s: %v", sid, err)
 			}
 			return
 
