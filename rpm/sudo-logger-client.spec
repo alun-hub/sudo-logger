@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.15.1
+Version:        1.15.2
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.15.2-1
+- fix: set serverConnAlive=false before closing server connection on
+  SESSION_END so the heartbeat goroutine cannot fire markDead() after a
+  clean session end and send a spurious SESSION_FREEZING — prevents all
+  normal sessions being incorrectly marked as network_outage in replay UI
+
 * Mon Apr 13 2026 sudo-logger 1.15.1-1
 - fix: restore FREEZE_MSG write in plugin monitor_thread as fallback;
   shipper direct TTY write is primary (immediate), plugin write fires
