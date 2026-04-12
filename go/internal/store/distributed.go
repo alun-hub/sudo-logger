@@ -365,8 +365,8 @@ LIMIT 1`,
 // In distributed deployments multiple replicas may run concurrently. A
 // PostgreSQL session-level advisory lock (pg_try_advisory_lock) ensures only
 // one replica forwards events. If the lock-holder pod dies, the DB connection
-// closes and PostgreSQL releases the lock automatically; another replica
-// acquires it on its next poll cycle.
+// closes and PostgreSQL releases the lock automatically; a waiting replica
+// acquires it within 30 seconds.
 func (d *DistributedStore) WatchSessions(ctx context.Context, ch chan<- string) {
 	// Acquire a dedicated connection so the advisory lock stays on one
 	// connection for the lifetime of this goroutine.
@@ -386,10 +386,26 @@ func (d *DistributedStore) WatchSessions(ctx context.Context, ch chan<- string) 
 		return
 	}
 	if !locked {
-		log.Printf("store/distributed: WatchSessions: another replica holds the SIEM leader lock — not forwarding events from this pod")
-		<-ctx.Done()
-		return
+		log.Printf("store/distributed: WatchSessions: another replica holds the SIEM leader lock — retrying every 30 s")
+		retryTicker := time.NewTicker(30 * time.Second)
+		defer retryTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-retryTicker.C:
+				if err := conn.QueryRow(ctx,
+					"SELECT pg_try_advisory_lock($1)", siemLockID).Scan(&locked); err != nil {
+					log.Printf("store/distributed: WatchSessions: advisory lock retry: %v", err)
+					continue
+				}
+				if locked {
+					goto acquired
+				}
+			}
+		}
 	}
+acquired:
 	log.Printf("store/distributed: WatchSessions: acquired SIEM leader lock")
 
 	// Use a DB-side timestamp for lastCheck so there is no skew between the

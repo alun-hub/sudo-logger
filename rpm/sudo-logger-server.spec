@@ -100,10 +100,11 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
-* Mon Apr 13 2026 sudo-logger 1.17.1-1
-- fix: set serverConnAlive=false before closing connection on SESSION_END
-  to prevent heartbeat goroutine from sending spurious SESSION_FREEZING,
-  which caused all normal sessions to be marked as network_outage
+* Tue Apr 14 2026 sudo-logger 1.17.1-1
+- fix(distributed): WatchSessions retries advisory lock every 30 s instead of
+  blocking until shutdown; fixes SIEM events never firing after a K8s rolling
+  update where the new pod sees the old pod holding the lock, which is released
+  when the old pod terminates but was never re-acquired
 
 * Mon Apr 13 2026 sudo-logger 1.17.0-1
 - fix: write FREEZE_MSG directly to TTY from shipper (writeTTYFreezeMsg);
