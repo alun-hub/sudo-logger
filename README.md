@@ -195,7 +195,7 @@ migrate-sessions \
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-shipper` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the shipper process can access |
 | **Active session terminated if shipper dies** | If the shipper socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the shipper restarts (~2 s). |
-| **Incomplete session detection** | If the shipper is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session |
+| **Incomplete session detection** | If the shipper is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 
 ---
 
@@ -1209,6 +1209,7 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `SERVER_READY` | `0x0b` | server → shipper | Empty — session accepted, shipper may send SESSION_READY |
 | `SESSION_DENIED` | `0x0c` | server → shipper → plugin | String block message — policy denial, sudo blocked |
 | `FREEZE_TIMEOUT` | `0x0d` | shipper → plugin | Empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
+| `SESSION_ABANDON` | `0x0e` | shipper → server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session as `freeze_timeout` |
 
 **CHUNK stream types:**
 
@@ -1346,6 +1347,40 @@ The freeze-timeout is also the reason the plugin calls
 `unfreeze_session_cgroup()` itself on receiving `FREEZE_TIMEOUT`: even if
 the shipper is already dead, the plugin ensures the cgroup is unfrozen so
 the SIGTERM actually reaches the shell.
+
+**Distinguishing freeze-timeout from shipper-killed in the replay UI:**
+
+When the freeze-timeout fires, the shipper is still alive and knows why
+the session ended. After terminating the plugin it opens a **new** TLS
+connection to the server and sends `SESSION_ABANDON (0x0e)` with the
+session ID:
+
+```
+Freeze-timeout fires
+    │
+    ├── cg.unfreeze() + FREEZE_TIMEOUT → plugin → session killed
+    │
+    └── goroutine: dial server (new connection, 30 s timeout)
+            │
+            ├── Success → SESSION_ABANDON(session_id)
+            │            Server: marks session freeze_timeout=true
+            │            UI: amber ⏱ badge, no risk score added
+            │
+            └── Fail (server still unreachable)
+                         Session stays as generic INCOMPLETE
+                         UI: red ⚠ badge (cannot distinguish)
+```
+
+This covers the common case — a temporary outage where the server came
+back before or shortly after the timeout fired. For permanent outages
+where the server never becomes reachable, the session remains as generic
+INCOMPLETE (the shipper cannot contact an unreachable server).
+
+| Termination cause | Badge | Risk score | Server sees |
+|-------------------|-------|-----------|-------------|
+| Shipper killed/crashed | ⚠ incomplete (red) | +15 | EOF/RST on active conn |
+| Freeze-timeout (network outage) | ⏱ freeze-timeout (amber) | +0 | SESSION_ABANDON on new conn |
+| Freeze-timeout (server still down) | ⚠ incomplete (red) | +15 | EOF/RST, no ABANDON |
 
 `log_ttyin()` always returns 1 and never blocks. Blocking there would
 prevent sudo's event loop from processing signals, breaking Ctrl+C.
