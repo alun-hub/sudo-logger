@@ -94,7 +94,24 @@ The plugin never waits for the server. It polls the shipper for the latest ACK t
 
 If the shipper stops receiving ACKs or heartbeat replies for ~800 ms, it calls `cgroup.freeze` on the session cgroup. This suspends all child processes at the kernel level — they cannot be unfrozen with `fg`, `kill -CONT`, or by escaping to another cgroup (see [Cgroup isolation](#cgroup-isolation) below). When the connection recovers, the shipper unfreezes and the session continues transparently.
 
-### 4. Shutdown
+### 4. Freeze-timeout and network-outage detection
+
+If the network does not recover, the shipper's freeze-timeout watchdog (default 5 min, `-freeze-timeout`) terminates the session. Two out-of-band messages allow the server to distinguish a **network outage** from a **shipper kill**:
+
+| Time | Actor | Event |
+|------|-------|-------|
+| t = 0 | — | Network drops |
+| t ≈ 800 ms | Shipper | `markDead()` fires; cgroup frozen; shipper opens a **new TLS connection** and sends **SESSION_FREEZING (0x0f)** with the session ID |
+| t ≈ 800 ms | Server | Receives SESSION_FREEZING; sets `freezeCandidate = true` on the active session |
+| t ≈ 3.4 min | Server | TCP ETIMEDOUT — connection drops; because `freezeCandidate` is set, calls `MarkNetworkOutage()` instead of `MarkIncomplete()` |
+| t = 5 min | Shipper | Freeze-timeout fires; unfreeze cgroup; send `MsgFreezeTimeout` to plugin; send **SESSION_ABANDON (0x0e)** as fallback (succeeds only if network has recovered) |
+
+**Why two messages?**
+SESSION_FREEZING is sent at t≈800 ms when the server is still likely reachable over TCP. SESSION_ABANDON is sent at t=5 min after the watchdog fires — by then the network is often still down, making it unreliable as the sole signal. SESSION_ABANDON is kept as a fallback for sessions where SESSION_FREEZING was lost.
+
+The replay server shows a distinct **⏱ network outage** badge for these sessions and suppresses the `incomplete_session` risk rule (+15 pts) — a network event is not a security incident.
+
+### 5. Shutdown
 
 ```
 plugin_close()
@@ -343,6 +360,7 @@ In Kubernetes set `terminationGracePeriodSeconds: 40` on the pod spec to give th
 |----------|-----------|
 | Sudo blocked if server unreachable | Plugin waits for `SESSION_READY`; times out and returns -1 if shipper is down |
 | Session frozen on network loss | Shipper calls `cgroup.freeze` within ~800 ms of last ACK/heartbeat |
+| Network outage vs shipper kill | SESSION_FREEZING sent at t≈800 ms; server marks session `network_outage` instead of generic `incomplete` |
 | Freeze cannot be escaped by the user | `unshare(CLONE_NEWCGROUP)` in plugin at session start; subtree appears as root to all children |
 | ACKs cannot be forged | ed25519 signature over `sessionID‖seq‖ts_ns`; private key stays on log server |
 | ACKs cannot be replayed across sessions | Session ID is included in every signed message |
