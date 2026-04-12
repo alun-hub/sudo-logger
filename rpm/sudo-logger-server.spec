@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.17.0
+Version:        1.17.1
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,11 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.17.1-1
+- fix: set serverConnAlive=false before closing connection on SESSION_END
+  to prevent heartbeat goroutine from sending spurious SESSION_FREEZING,
+  which caused all normal sessions to be marked as network_outage
+
 * Mon Apr 13 2026 sudo-logger 1.17.0-1
 - fix: write FREEZE_MSG directly to TTY from shipper (writeTTYFreezeMsg);
   validate tty_path from SESSION_START before opening
