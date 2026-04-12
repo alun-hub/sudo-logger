@@ -94,6 +94,7 @@
 static sudo_printf_t g_printf;
 static int           g_shipper_fd = -1;
 static int           g_tty_fd     = -1;
+static char          g_tty_path[64] = "";  /* actual device path, e.g. /dev/pts/3 */
 static char          g_session_id[320];
 static uint64_t      g_seq        = 0;
 
@@ -469,8 +470,10 @@ static void *monitor_thread_fn(void *arg)
         }
 
         if (!fresh && !was_frozen) {
-            if (g_tty_fd >= 0)
-                write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+            /* Freeze banner is written directly to the TTY by sudo-shipper
+             * (writeTTYFreezeMsg) so it appears immediately even when sudo
+             * is SIGTSTP'd due to job-control propagation.  Only track state
+             * here so UNFREEZE_MSG fires correctly on recovery. */
             was_frozen = 1;
         } else if (fresh && was_frozen) {
             if (g_tty_fd >= 0)
@@ -639,6 +642,11 @@ static int plugin_open(unsigned int        version,
     atomic_store(&g_shipper_dead, 0);
 
     g_tty_fd = open("/dev/tty", O_WRONLY | O_NOCTTY | O_CLOEXEC);
+    if (g_tty_fd >= 0) {
+        const char *tn = ttyname(g_tty_fd);
+        if (tn)
+            strncpy(g_tty_path, tn, sizeof(g_tty_path) - 1);
+    }
 
     const char *user    = "unknown";
     const char *host    = "unknown";
@@ -740,12 +748,14 @@ static int plugin_open(unsigned int        version,
         "\"runas_uid\":%d,\"runas_gid\":%d,"
         "\"cwd\":\"%s\",\"flags\":\"%s\","
         "\"rows\":%d,\"cols\":%d,"
+        "\"tty_path\":\"%s\","
         "\"ts\":%lld,\"pid\":%d}",
         g_session_id, user, host, cmd,
         resolved_j, runas_user_j,
         runas_uid, runas_gid,
         cwd_j, flags,
         term_rows, term_cols,
+        g_tty_path,
         (long long)now_sec(), (int)getpid());
 
     /* snprintf returns the number of bytes that *would* have been written,

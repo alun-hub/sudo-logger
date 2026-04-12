@@ -80,6 +80,7 @@ type SessionStart struct {
 	Flags           string `json:"flags,omitempty"`            // set sudo flags: login_shell, preserve_env, implied_shell
 	Rows            int    `json:"rows,omitempty"`             // terminal height from command_info[lines=]
 	Cols            int    `json:"cols,omitempty"`             // terminal width from command_info[cols=]
+	TtyPath         string `json:"tty_path,omitempty"`         // controlling terminal device, e.g. /dev/pts/3; empty for non-tty sessions
 }
 
 // Chunk is a decoded CHUNK message.

@@ -20,12 +20,37 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
 
 	"sudo-logger/internal/protocol"
 )
+
+// freezeMsgTTY is the same banner the plugin would write but sent directly
+// to the TTY device by the shipper so it appears even when sudo is SIGTSTP'd.
+const freezeMsgTTY = "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable — input frozen ]\033[0m\r\n" +
+	"\033[33mWaiting for log server to come back...\033[0m\r\n"
+
+// validTTYPath restricts tty_path to known safe device paths.
+var validTTYPath = regexp.MustCompile(`^/dev/(pts/\d{1,6}|tty[a-zA-Z0-9]{0,10})$`)
+
+// writeTTYFreezeMsg writes the freeze banner directly to the session's
+// controlling terminal.  Called in a goroutine at markDead() time so the
+// message appears immediately even when sudo is stopped by job control.
+func writeTTYFreezeMsg(ttyPath string) {
+	if ttyPath == "" || !validTTYPath.MatchString(ttyPath) {
+		return
+	}
+	f, err := os.OpenFile(ttyPath, os.O_WRONLY, 0)
+	if err != nil {
+		log.Printf("freeze banner: open %s: %v", ttyPath, err)
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(freezeMsgTTY)
+}
 
 var (
 	flagServer  = flag.String("server", "logserver:9876", "Remote log server address")
@@ -300,6 +325,9 @@ func handlePluginConn(pluginConn net.Conn) {
 		// session as a network outage rather than a shipper kill, while the
 		// server is likely still reachable (~800 ms after network loss).
 		if firstFreeze {
+			// Write freeze banner directly to the TTY so it appears immediately
+			// even when sudo is stopped by job control (SIGTSTP propagation).
+			go writeTTYFreezeMsg(start.TtyPath)
 			go reportSessionFreezing(*flagServer, tlsCfg, start.SessionID)
 		}
 	}
