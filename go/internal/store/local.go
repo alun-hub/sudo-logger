@@ -39,6 +39,13 @@ type LocalStore struct {
 	viewMu  sync.Mutex
 	viewLog []AccessLogEntry
 
+	// sessionDirs maps session_id → absolute session directory path.
+	// Populated by CreateSession; used by MarkSessionFreezeTimeout to locate
+	// the session directory without scanning the full log tree.
+	// sync.Map is safe for concurrent use; values are never deleted (entries
+	// are small strings and the process lifetime matches session lifetime).
+	sessionDirs sync.Map // map[string]string
+
 	stopOnce sync.Once
 	stopCh   chan struct{}
 }
@@ -153,6 +160,11 @@ func (ls *LocalStore) CreateSession(_ context.Context, meta iolog.SessionMeta, s
 	w, err := iolog.NewWriter(ls.cfg.LogDir, meta, startTime)
 	if err != nil {
 		return nil, fmt.Errorf("create iolog writer: %w", err)
+	}
+	// Remember the directory so MarkSessionFreezeTimeout can find it later
+	// without scanning the full log tree.
+	if meta.SessionID != "" {
+		ls.sessionDirs.Store(meta.SessionID, w.Dir())
 	}
 	return &localWriter{w: w, logDir: ls.cfg.LogDir}, nil
 }
@@ -404,6 +416,21 @@ func (ls *LocalStore) SaveBlockedPolicy(_ context.Context, policy BlockedPolicy)
 	return os.WriteFile(ls.cfg.BlockedUsersPath, append([]byte(localBlockedUsersHeader), data...), 0o640)
 }
 
+// MarkSessionFreezeTimeout implements SessionStore.
+// Writes a FREEZE_TIMEOUT marker file to the session directory so the replay
+// UI can distinguish a freeze-timeout termination from a shipper crash.
+func (ls *LocalStore) MarkSessionFreezeTimeout(_ context.Context, sessionID string) error {
+	v, ok := ls.sessionDirs.Load(sessionID)
+	if !ok {
+		// Session was created before this process started (e.g. server restarted
+		// mid-outage). Not an error — the session stays as generic INCOMPLETE.
+		return nil
+	}
+	dir := v.(string)
+	return os.WriteFile(filepath.Join(dir, "FREEZE_TIMEOUT"),
+		[]byte("session terminated by freeze-timeout watchdog\n"), 0o640)
+}
+
 // resolveSessionDir converts tsid to an absolute directory path and checks
 // that it stays within logDir (path-traversal guard).
 func (ls *LocalStore) resolveSessionDir(tsid string) (string, error) {
@@ -572,6 +599,9 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 
 	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {
 		rec.Incomplete = true
+	}
+	if _, err := os.Stat(filepath.Join(sessDir, "FREEZE_TIMEOUT")); err == nil {
+		rec.FreezeTimeout = true
 	}
 	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
 		rec.InProgress = true

@@ -106,6 +106,14 @@ type SessionStore interface {
 	// LocalStore writes blocked-users.yaml; DistributedStore updates sudo_blocked_users.
 	SaveBlockedPolicy(ctx context.Context, policy BlockedPolicy) error
 
+	// MarkSessionFreezeTimeout marks a previously-incomplete session as having
+	// been terminated by the shipper's freeze-timeout watchdog (server was
+	// unreachable for too long), rather than by an unexpected shipper death.
+	// Called by the log-server when it receives a SESSION_ABANDON message on a
+	// new connection from the shipper after the freeze fired.
+	// Returns nil if the session is not found (idempotent — safe to call twice).
+	MarkSessionFreezeTimeout(ctx context.Context, sessionID string) error
+
 	// WatchSessions delivers TSIDs for newly completed sessions to ch.
 	// The implementation decides the delivery mechanism:
 	//   LocalStore       — fsnotify on the log directory
@@ -155,6 +163,7 @@ type SessionRecord struct {
 	Duration        float64 // seconds; 0 while in progress
 	ExitCode        int32
 	Incomplete      bool
+	FreezeTimeout   bool // true when terminated by freeze-timeout (not shipper kill)
 	InProgress      bool
 }
 

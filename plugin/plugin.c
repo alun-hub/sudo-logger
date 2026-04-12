@@ -88,7 +88,7 @@
 #define TERMINATE_MSG \
     "\r\n\033[41;97;1m[ SUDO-LOGGER: shipper lost — session terminated ]\033[0m\r\n"
 #define TIMEOUT_MSG \
-    "\r\n\033[43;30;1m[ SUDO-LOGGER: gave up waiting for log server — session terminated ]\033[0m\r\n"
+    "\r\n\033[41;97;1m[ SUDO-LOGGER: gave up waiting for log server — session terminated ]\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
 static sudo_printf_t g_printf;

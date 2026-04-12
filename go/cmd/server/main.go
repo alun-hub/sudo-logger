@@ -344,6 +344,23 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			return
 
+		case protocol.MsgSessionAbandon:
+			// Sent by the shipper on a NEW connection after freeze-timeout fires.
+			// The old session connection is already dead and MarkIncomplete() was
+			// already called.  This message upgrades the termination reason so the
+			// replay UI can distinguish a freeze-timeout from a shipper kill.
+			if sess != nil {
+				// Unexpected: abandon arrived on an active session connection.
+				log.Printf("[%s] SESSION_ABANDON on active connection — ignoring", sess.id)
+				return
+			}
+			sid := string(payload)
+			log.Printf("SESSION_ABANDON from %s session_id=%s", remote, sid)
+			if err := srv.sessionStore.MarkSessionFreezeTimeout(context.Background(), sid); err != nil {
+				log.Printf("mark freeze-timeout session_id=%s: %v", sid, err)
+			}
+			return
+
 		default:
 			log.Printf("unknown msg 0x%02x len=%d from %s", msgType, plen, remote)
 		}

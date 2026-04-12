@@ -131,10 +131,14 @@ CREATE TABLE IF NOT EXISTS sudo_sessions (
     duration         DOUBLE PRECISION,
     exit_code        INT,
     incomplete       BOOLEAN DEFAULT FALSE,
+    freeze_timeout   BOOLEAN DEFAULT FALSE,
     in_progress      BOOLEAN DEFAULT TRUE,
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- schema migration: add freeze_timeout column to existing deployments
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS freeze_timeout BOOLEAN DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS sudo_risk_cache (
     tsid        TEXT PRIMARY KEY REFERENCES sudo_sessions(tsid) ON DELETE CASCADE,
@@ -224,7 +228,7 @@ func (d *DistributedStore) ListSessions(ctx context.Context) ([]SessionRecord, e
 SELECT tsid, session_id, "user", host, runas, runas_uid, runas_gid,
        command, resolved_command, cwd, flags, start_time,
        COALESCE(duration, 0), COALESCE(exit_code, 0),
-       incomplete, in_progress
+       incomplete, freeze_timeout, in_progress
 FROM sudo_sessions
 ORDER BY start_time DESC`)
 	if err != nil {
@@ -239,7 +243,7 @@ ORDER BY start_time DESC`)
 			&r.TSID, &r.SessionID, &r.User, &r.Host, &r.Runas,
 			&r.RunasUID, &r.RunasGID, &r.Command, &r.ResolvedCommand,
 			&r.Cwd, &r.Flags, &r.StartTime, &r.Duration, &r.ExitCode,
-			&r.Incomplete, &r.InProgress,
+			&r.Incomplete, &r.FreezeTimeout, &r.InProgress,
 		); err != nil {
 			return nil, fmt.Errorf("scan session row: %w", err)
 		}
@@ -325,6 +329,16 @@ ON CONFLICT (tsid) DO UPDATE
       cached_at=NOW()`,
 		tsid, rulesHash, score, riskLevel(score), reasonsJSON,
 	)
+	return err
+}
+
+// MarkSessionFreezeTimeout implements SessionStore.
+// Updates the session row by session_id (not tsid) — the server receives
+// SESSION_ABANDON on a new connection and only has the session_id at hand.
+func (d *DistributedStore) MarkSessionFreezeTimeout(ctx context.Context, sessionID string) error {
+	_, err := d.db.Exec(ctx,
+		`UPDATE sudo_sessions SET freeze_timeout=TRUE, updated_at=NOW() WHERE session_id=$1`,
+		sessionID)
 	return err
 }
 
@@ -661,6 +675,13 @@ func (dw *distributedWriter) MarkActive() error { return nil }
 func (dw *distributedWriter) MarkIncomplete() error {
 	_, err := dw.d.db.Exec(context.Background(),
 		`UPDATE sudo_sessions SET incomplete=TRUE, in_progress=FALSE, updated_at=NOW() WHERE tsid=$1`,
+		dw.tsid)
+	return err
+}
+
+func (dw *distributedWriter) MarkFreezeTimeout() error {
+	_, err := dw.d.db.Exec(context.Background(),
+		`UPDATE sudo_sessions SET freeze_timeout=TRUE, updated_at=NOW() WHERE tsid=$1`,
 		dw.tsid)
 	return err
 }

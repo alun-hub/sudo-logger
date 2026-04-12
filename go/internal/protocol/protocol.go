@@ -52,6 +52,7 @@ const (
 	MsgServerReady   = uint8(0x0b) // server→shipper: session accepted, proceed
 	MsgSessionDenied  = uint8(0x0c) // server→shipper AND shipper→plugin: policy denial
 	MsgFreezeTimeout  = uint8(0x0d) // shipper→plugin: server unreachable for too long, session will be terminated
+	MsgSessionAbandon = uint8(0x0e) // shipper→server (new conn): freeze-timeout fired; payload = session_id UTF-8
 
 	StreamStdin  = uint8(0x00)
 	StreamStdout = uint8(0x01)

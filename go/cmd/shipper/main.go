@@ -347,6 +347,9 @@ func handlePluginConn(pluginConn net.Conn) {
 				// message before the socket is closed.
 				time.Sleep(200 * time.Millisecond)
 				pluginConn.Close()
+				// Tell the server why this session ended so the replay UI can
+				// distinguish a freeze-timeout from a shipper kill.
+				go reportSessionAbandon(*flagServer, tlsCfg, start.SessionID)
 				return
 			}
 		}()
@@ -607,6 +610,50 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 			cg.freeze()
 		}
 	}
+}
+
+// reportSessionAbandon opens a fresh TLS connection to the server and sends a
+// SESSION_ABANDON message so the server can mark the session as terminated by
+// freeze-timeout rather than by an unexpected shipper death.
+//
+// Best-effort: if the server is still unreachable, the function logs and
+// returns without error.  The session will remain as generic INCOMPLETE.
+func reportSessionAbandon(server string, cfg *tls.Config, sessionID string) {
+	const dialTimeout = 30 * time.Second
+
+	tcpAddr, err := net.ResolveTCPAddr("tcp", server)
+	if err != nil {
+		log.Printf("[%s] SESSION_ABANDON: resolve %s: %v", sessionID, server, err)
+		return
+	}
+	rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
+	if err != nil {
+		log.Printf("[%s] SESSION_ABANDON: dial: %v", sessionID, err)
+		return
+	}
+	defer rawTCP.Close()
+
+	tlsCfgClone := cfg.Clone()
+	if tlsCfgClone.ServerName == "" {
+		if host, _, splitErr := net.SplitHostPort(server); splitErr == nil {
+			tlsCfgClone.ServerName = host
+		} else {
+			tlsCfgClone.ServerName = tcpAddr.IP.String()
+		}
+	}
+	tlsConn := tls.Client(rawTCP, tlsCfgClone)
+	tlsConn.SetDeadline(time.Now().Add(dialTimeout))
+	defer tlsConn.Close()
+	if err := tlsConn.Handshake(); err != nil {
+		log.Printf("[%s] SESSION_ABANDON: TLS handshake: %v", sessionID, err)
+		return
+	}
+	w := bufio.NewWriter(tlsConn)
+	if err := protocol.WriteMessage(w, protocol.MsgSessionAbandon, []byte(sessionID)); err != nil {
+		log.Printf("[%s] SESSION_ABANDON: write: %v", sessionID, err)
+		return
+	}
+	log.Printf("[%s] SESSION_ABANDON sent to server", sessionID)
 }
 
 // verifyAckSig checks the ed25519 signature attached to an ACK from the server.

@@ -240,8 +240,9 @@ type SessionInfo struct {
 	StartTime       int64    `json:"start_time"` // unix seconds
 	Duration        float64  `json:"duration"`   // seconds
 	ExitCode        int32    `json:"exit_code"`
-	Incomplete      bool     `json:"incomplete,omitempty"`  // true if shipper was killed mid-session
-	InProgress      bool     `json:"in_progress,omitempty"` // true if session is still being recorded
+	Incomplete      bool     `json:"incomplete,omitempty"`      // true if session ended without clean session_end
+	FreezeTimeout   bool     `json:"freeze_timeout,omitempty"`  // true when terminated by freeze-timeout watchdog (network outage)
+	InProgress      bool     `json:"in_progress,omitempty"`     // true if session is still being recorded
 	RiskScore       int      `json:"risk_score"`
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
 	RiskReasons     []string `json:"risk_reasons,omitempty"`
@@ -451,6 +452,7 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 		Duration:        r.Duration,
 		ExitCode:        r.ExitCode,
 		Incomplete:      r.Incomplete,
+		FreezeTimeout:   r.FreezeTimeout,
 		InProgress:      r.InProgress,
 	}
 }
@@ -1685,8 +1687,14 @@ func matchPattern(p *MatchPattern, text string) bool {
 // Metadata conditions (runas, incomplete, etc.) are all ANDed.
 // command and content patterns are ORed with each other.
 func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func() string) bool {
-	if rule.Incomplete != nil && *rule.Incomplete != s.Incomplete {
-		return false
+	if rule.Incomplete != nil {
+		// A freeze-timeout is a network event, not a security incident — treat
+		// it as "not unexpectedly terminated" for risk scoring purposes so it
+		// doesn't accumulate the same score as a shipper-killed session.
+		incompleteForSecurity := s.Incomplete && !s.FreezeTimeout
+		if *rule.Incomplete != incompleteForSecurity {
+			return false
+		}
 	}
 	if rule.AfterHours != nil {
 		t := time.Unix(s.StartTime, 0)
