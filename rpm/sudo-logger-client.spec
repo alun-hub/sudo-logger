@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.15.0
+Version:        1.15.1
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Apr 13 2026 sudo-logger 1.15.1-1
+- fix: restore FREEZE_MSG write in plugin monitor_thread as fallback;
+  shipper direct TTY write is primary (immediate), plugin write fires
+  on fg resume as reminder
+
 * Mon Apr 13 2026 sudo-logger 1.15.0-1
 - fix: write FREEZE_MSG directly to TTY from shipper at markDead() time
   so the banner appears immediately even when sudo is auto-backgrounded
