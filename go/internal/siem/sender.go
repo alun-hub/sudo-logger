@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -77,6 +78,34 @@ func encodeEvent(e Event, format string) ([]byte, string, error) {
 
 // ── HTTPS transport ───────────────────────────────────────────────────────────
 
+// httpsClientMu guards the cached http.Client and its key.
+var (
+	httpsClientMu  sync.Mutex
+	httpsClientKey string // CA+Cert+Key paths, tab-separated
+	httpsClient    *http.Client
+)
+
+// getHTTPSClient returns a cached *http.Client for the given TLS config.
+// The client is rebuilt only when the certificate file paths change.
+func getHTTPSClient(c TLSCfg) (*http.Client, error) {
+	key := c.CA + "\t" + c.Cert + "\t" + c.Key
+	httpsClientMu.Lock()
+	defer httpsClientMu.Unlock()
+	if httpsClient != nil && key == httpsClientKey {
+		return httpsClient, nil
+	}
+	tlsCfg, err := buildTLSConfig(c)
+	if err != nil {
+		return nil, err
+	}
+	httpsClient = &http.Client{
+		Transport: &http.Transport{TLSClientConfig: tlsCfg},
+		Timeout:   5 * time.Second,
+	}
+	httpsClientKey = key // pragma: allowlist secret
+	return httpsClient, nil
+}
+
 // sendHTTPS POSTs body to cfg.HTTPS.URL.
 // TLS client certificates are required (mTLS); the CA field must point to the
 // server CA so the certificate can be verified.
@@ -84,14 +113,9 @@ func encodeEvent(e Event, format string) ([]byte, string, error) {
 //   - "Authorization: Splunk <token>"  when the URL contains /services/collector
 //   - "Authorization: Bearer <token>"  otherwise
 func sendHTTPS(cfg Config, e Event, body []byte, contentType string) error {
-	tlsCfg, err := buildTLSConfig(cfg.HTTPS.TLS)
+	client, err := getHTTPSClient(cfg.HTTPS.TLS)
 	if err != nil {
 		return fmt.Errorf("build TLS: %w", err)
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{TLSClientConfig: tlsCfg},
-		Timeout:   5 * time.Second,
 	}
 
 	req, err := http.NewRequest(http.MethodPost, cfg.HTTPS.URL, bytes.NewReader(body))

@@ -70,7 +70,14 @@ type castHeader struct {
 // NewWriter creates the session directory and opens session.cast for writing.
 func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, error) {
 	ts := startTime.UTC().Format("20060102-150405")
-	dir := filepath.Join(baseDir, meta.User, fmt.Sprintf("%s_%s", meta.Host, ts))
+	// Append the last 6 characters of the session ID as a suffix to make the
+	// directory name unique even when two sessions start within the same second.
+	// Falls back to the bare timestamp when SessionID is too short (e.g. tests).
+	dirName := fmt.Sprintf("%s_%s", meta.Host, ts)
+	if len(meta.SessionID) >= 6 {
+		dirName += "-" + meta.SessionID[len(meta.SessionID)-6:]
+	}
+	dir := filepath.Join(baseDir, meta.User, dirName)
 
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
@@ -181,9 +188,14 @@ func (w *Writer) CastPath() string {
 	return filepath.Join(w.dir, "session.cast")
 }
 
-// Close flushes and closes the cast file.
+// Close syncs and closes the cast file.
+// Sync is called first so that kernel crash or power loss cannot silently
+// truncate the tail of a security recording.
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if err := w.castF.Sync(); err != nil {
+		return err
+	}
 	return w.castF.Close()
 }

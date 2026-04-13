@@ -244,8 +244,8 @@ func TestRiskLevel(t *testing.T) {
 		{100, "critical"},
 	}
 	for _, c := range cases {
-		if got := riskLevel(c.score); got != c.level {
-			t.Errorf("riskLevel(%d) = %q, want %q", c.score, got, c.level)
+		if got := store.RiskLevel(c.score); got != c.level {
+			t.Errorf("store.RiskLevel(%d) = %q, want %q", c.score, got, c.level)
 		}
 	}
 }

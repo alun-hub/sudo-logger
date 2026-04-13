@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.15.3
+Version:        1.15.4
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,14 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Mon Apr 14 2026 sudo-logger 1.15.4-1
+- fix: cgroup child-process tracker polls every 50 ms instead of 10 ms,
+  reducing CPU overhead during frozen sessions
+- fix: lingerCgroup reachability check is now a plain TCP dial instead of a
+  full TLS handshake, preventing certificate-load errors during network outage
+- refactor: extract shared reportSessionMsg helper; SESSION_FREEZING and
+  SESSION_ABANDON are now one-liners (no logic change)
+
 * Tue Apr 14 2026 sudo-logger 1.15.3-1
 - fix: lower -freeze-timeout default from 5 min to 3 min; SESSION_FREEZING
   is sent at 800 ms so the replay network_outage distinction is unaffected,

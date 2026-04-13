@@ -752,7 +752,7 @@ func localSaveRiskCache(sessDir, rulesHash string, score int, reasons []string) 
 	}{
 		RulesHash: rulesHash,
 		Score:     score,
-		Level:     riskLevel(score),
+		Level:     RiskLevel(score),
 		Reasons:   reasons,
 	}
 	data, err := json.Marshal(rc)
@@ -762,21 +762,6 @@ func localSaveRiskCache(sessDir, rulesHash string, score int, reasons []string) 
 	_ = os.WriteFile(filepath.Join(sessDir, "risk.json"), data, 0o644)
 }
 
-// riskLevel converts a numeric score to a level string.
-// Kept here so LocalStore can populate the risk cache Level field without
-// importing the replay-server package.
-func riskLevel(score int) string {
-	switch {
-	case score >= 75:
-		return "critical"
-	case score >= 50:
-		return "high"
-	case score >= 25:
-		return "medium"
-	default:
-		return "low"
-	}
-}
 
 // localWatchSubdirs adds a fsnotify watch on every immediate subdirectory of dir.
 func localWatchSubdirs(watcher *fsnotify.Watcher, dir string) {

@@ -263,6 +263,21 @@ type Config struct {
 	BufferDir string
 }
 
+// RiskLevel converts a numeric risk score to a level string.
+// The thresholds mirror the UI display: critical ≥75, high ≥50, medium ≥25.
+func RiskLevel(score int) string {
+	switch {
+	case score >= 75:
+		return "critical"
+	case score >= 50:
+		return "high"
+	case score >= 25:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
 // New returns a SessionStore for the backend named by cfg.Backend.
 // Returns an error if the backend name is unknown or if required configuration
 // fields are missing.

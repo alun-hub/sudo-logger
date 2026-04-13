@@ -617,27 +617,15 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 	const dialTimeout = 2 * time.Second
 
 	serverReachable := func() bool {
-		tcpAddr, err := net.ResolveTCPAddr("tcp", server)
+		// A plain TCP connection is sufficient to verify network reachability.
+		// A full TLS handshake would waste a round-trip and leave the server with
+		// a connection that never sends SESSION_START.
+		conn, err := net.DialTimeout("tcp", server, dialTimeout)
 		if err != nil {
 			return false
 		}
-		rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
-		if err != nil {
-			return false
-		}
-		defer rawTCP.Close()
-		cfg := tlsCfg.Clone()
-		if cfg.ServerName == "" {
-			if host, _, splitErr := net.SplitHostPort(server); splitErr == nil {
-				cfg.ServerName = host
-			} else {
-				cfg.ServerName = tcpAddr.IP.String()
-			}
-		}
-		tlsConn := tls.Client(rawTCP, cfg)
-		tlsConn.SetDeadline(time.Now().Add(dialTimeout))
-		defer tlsConn.Close()
-		return tlsConn.Handshake() == nil
+		conn.Close()
+		return true
 	}
 
 	for {
@@ -657,65 +645,34 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 // reportSessionAbandon opens a fresh TLS connection to the server and sends a
 // SESSION_ABANDON message so the server can mark the session as terminated by
 // freeze-timeout rather than by an unexpected shipper death.
-//
-// Best-effort: if the server is still unreachable, the function logs and
-// returns without error.  The session will remain as generic INCOMPLETE.
+// Best-effort: logs and returns on any error.
 func reportSessionAbandon(server string, cfg *tls.Config, sessionID string) {
-	const dialTimeout = 30 * time.Second
-
-	tcpAddr, err := net.ResolveTCPAddr("tcp", server)
-	if err != nil {
-		log.Printf("[%s] SESSION_ABANDON: resolve %s: %v", sessionID, server, err)
-		return
-	}
-	rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
-	if err != nil {
-		log.Printf("[%s] SESSION_ABANDON: dial: %v", sessionID, err)
-		return
-	}
-	defer rawTCP.Close()
-
-	tlsCfgClone := cfg.Clone()
-	if tlsCfgClone.ServerName == "" {
-		if host, _, splitErr := net.SplitHostPort(server); splitErr == nil {
-			tlsCfgClone.ServerName = host
-		} else {
-			tlsCfgClone.ServerName = tcpAddr.IP.String()
-		}
-	}
-	tlsConn := tls.Client(rawTCP, tlsCfgClone)
-	tlsConn.SetDeadline(time.Now().Add(dialTimeout))
-	defer tlsConn.Close()
-	if err := tlsConn.Handshake(); err != nil {
-		log.Printf("[%s] SESSION_ABANDON: TLS handshake: %v", sessionID, err)
-		return
-	}
-	w := bufio.NewWriter(tlsConn)
-	if err := protocol.WriteMessage(w, protocol.MsgSessionAbandon, []byte(sessionID)); err != nil {
-		log.Printf("[%s] SESSION_ABANDON: write: %v", sessionID, err)
-		return
-	}
-	log.Printf("[%s] SESSION_ABANDON sent to server", sessionID)
+	reportSessionMsg(server, cfg, sessionID, protocol.MsgSessionAbandon, 30*time.Second)
 }
 
 // reportSessionFreezing opens a fresh TLS connection to the server and sends a
 // SESSION_FREEZING message so the server knows this session was frozen due to
 // network loss — not a shipper kill.  Called on the first markDead() call while
 // the server is likely still reachable (~800 ms after network loss).
-//
-// Best-effort: if the connection fails, the session will be marked as generic
-// INCOMPLETE; SESSION_ABANDON may upgrade it later if the network recovers.
+// Best-effort: logs and returns on any error.
 func reportSessionFreezing(server string, cfg *tls.Config, sessionID string) {
-	const dialTimeout = 10 * time.Second
+	reportSessionMsg(server, cfg, sessionID, protocol.MsgSessionFreezing, 10*time.Second)
+}
+
+// reportSessionMsg dials a fresh TLS connection to server and sends a single
+// framed message of msgType with sessionID as the payload.
+// Used by reportSessionAbandon and reportSessionFreezing.
+func reportSessionMsg(server string, cfg *tls.Config, sessionID string, msgType uint8, dialTimeout time.Duration) {
+	label := fmt.Sprintf("0x%02x", msgType)
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", server)
 	if err != nil {
-		log.Printf("[%s] SESSION_FREEZING: resolve %s: %v", sessionID, server, err)
+		log.Printf("[%s] %s: resolve %s: %v", sessionID, label, server, err)
 		return
 	}
 	rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
 	if err != nil {
-		log.Printf("[%s] SESSION_FREEZING: dial: %v", sessionID, err)
+		log.Printf("[%s] %s: dial: %v", sessionID, label, err)
 		return
 	}
 	defer rawTCP.Close()
@@ -732,15 +689,15 @@ func reportSessionFreezing(server string, cfg *tls.Config, sessionID string) {
 	tlsConn.SetDeadline(time.Now().Add(dialTimeout))
 	defer tlsConn.Close()
 	if err := tlsConn.Handshake(); err != nil {
-		log.Printf("[%s] SESSION_FREEZING: TLS handshake: %v", sessionID, err)
+		log.Printf("[%s] %s: TLS handshake: %v", sessionID, label, err)
 		return
 	}
 	w := bufio.NewWriter(tlsConn)
-	if err := protocol.WriteMessage(w, protocol.MsgSessionFreezing, []byte(sessionID)); err != nil {
-		log.Printf("[%s] SESSION_FREEZING: write: %v", sessionID, err)
+	if err := protocol.WriteMessage(w, msgType, []byte(sessionID)); err != nil {
+		log.Printf("[%s] %s: write: %v", sessionID, label, err)
 		return
 	}
-	log.Printf("[%s] SESSION_FREEZING sent to server", sessionID)
+	log.Printf("[%s] %s sent to server", sessionID, label)
 }
 
 // verifyAckSig checks the ed25519 signature attached to an ACK from the server.

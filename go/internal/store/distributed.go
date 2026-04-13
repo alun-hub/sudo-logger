@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -16,10 +17,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"sudo-logger/internal/iolog"
 )
+
+// s3UploadSem limits the number of concurrent S3 uploads so that a burst of
+// closing sessions (e.g. after a restart) does not exhaust memory or open
+// file descriptors. 8 concurrent uploads is generous for typical deployments.
+var s3UploadSem = make(chan struct{}, 8)
 
 // ── DistributedStore ──────────────────────────────────────────────────────────
 
@@ -190,18 +197,19 @@ func (d *DistributedStore) bufferPath(tsid string) string {
 
 // CreateSession implements SessionStore.
 func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.SessionMeta, startTime time.Time) (SessionWriter, error) {
-	ts := startTime.UTC().Format("20060102-150405")
-	tsid := meta.User + "/" + meta.Host + "_" + ts
-
-	bufPath := d.bufferPath(tsid)
-	if err := os.MkdirAll(filepath.Dir(bufPath), 0o750); err != nil {
-		return nil, fmt.Errorf("create buffer dir: %w", err)
-	}
-
+	// Let iolog.NewWriter create the buffer directory (with session-ID suffix for
+	// uniqueness). We then derive tsid from the actual directory path so there
+	// is a single source of truth for the naming scheme.
 	w, err := iolog.NewWriter(d.cfg.BufferDir, meta, startTime)
 	if err != nil {
 		return nil, fmt.Errorf("create iolog writer: %w", err)
 	}
+	rel, err := filepath.Rel(d.cfg.BufferDir, w.Dir())
+	if err != nil {
+		_ = w.Close()
+		return nil, fmt.Errorf("derive tsid from buffer path: %w", err)
+	}
+	tsid := filepath.ToSlash(rel)
 
 	_, err = d.db.Exec(ctx, `
 INSERT INTO sudo_sessions
@@ -215,7 +223,7 @@ ON CONFLICT (tsid) DO NOTHING`,
 		startTime.Unix(),
 	)
 	if err != nil {
-		w.Close()
+		_ = w.Close()
 		return nil, fmt.Errorf("insert session row: %w", err)
 	}
 
@@ -327,7 +335,7 @@ ON CONFLICT (tsid) DO UPDATE
       level=EXCLUDED.level,
       reasons=EXCLUDED.reasons,
       cached_at=NOW()`,
-		tsid, rulesHash, score, riskLevel(score), reasonsJSON,
+		tsid, rulesHash, score, RiskLevel(score), reasonsJSON,
 	)
 	return err
 }
@@ -379,33 +387,27 @@ func (d *DistributedStore) WatchSessions(ctx context.Context, ch chan<- string) 
 
 	// 0x5349454d = "SIEM" in ASCII — arbitrary but stable identifier.
 	const siemLockID int64 = 0x5349454d
-	var locked bool
-	if err := conn.QueryRow(ctx,
-		"SELECT pg_try_advisory_lock($1)", siemLockID).Scan(&locked); err != nil {
-		log.Printf("store/distributed: WatchSessions: advisory lock query: %v", err)
-		return
-	}
-	if !locked {
-		log.Printf("store/distributed: WatchSessions: another replica holds the SIEM leader lock — retrying every 30 s")
-		retryTicker := time.NewTicker(30 * time.Second)
-		defer retryTicker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-retryTicker.C:
-				if err := conn.QueryRow(ctx,
-					"SELECT pg_try_advisory_lock($1)", siemLockID).Scan(&locked); err != nil {
-					log.Printf("store/distributed: WatchSessions: advisory lock retry: %v", err)
-					continue
-				}
-				if locked {
-					goto acquired
-				}
-			}
+
+	// Try to acquire the session-level advisory lock. Retry every 30 s when
+	// another replica already holds it; PostgreSQL releases the lock automatically
+	// if the holding connection drops.
+	for {
+		var locked bool
+		if err := conn.QueryRow(ctx,
+			"SELECT pg_try_advisory_lock($1)", siemLockID).Scan(&locked); err != nil {
+			log.Printf("store/distributed: WatchSessions: advisory lock: %v", err)
+			return
+		}
+		if locked {
+			break
+		}
+		log.Printf("store/distributed: WatchSessions: another replica holds the SIEM leader lock — retrying in 30 s")
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
 		}
 	}
-acquired:
 	log.Printf("store/distributed: WatchSessions: acquired SIEM leader lock")
 
 	// Use a DB-side timestamp for lastCheck so there is no skew between the
@@ -526,19 +528,15 @@ func (d *DistributedStore) Close() error {
 // GetConfig retrieves a named config blob from sudo_config.
 // Returns ("", nil) when the key does not exist yet.
 func (d *DistributedStore) GetConfig(ctx context.Context, key string) (string, error) {
-	rows, err := d.db.Query(ctx, `SELECT value FROM sudo_config WHERE key = $1`, key)
+	var value string
+	err := d.db.QueryRow(ctx, `SELECT value FROM sudo_config WHERE key = $1`, key).Scan(&value)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
 		return "", err
 	}
-	defer rows.Close()
-	if rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err != nil {
-			return "", err
-		}
-		return value, nil
-	}
-	return "", rows.Err()
+	return value, nil
 }
 
 // SetConfig upserts a named config blob into sudo_config.
@@ -730,7 +728,11 @@ func (dw *distributedWriter) Close() error {
 func (dw *distributedWriter) TSID() string { return dw.tsid }
 
 // uploadToS3 uploads the local buffer file to S3 with up to 3 retries.
+// Acquires s3UploadSem to bound the number of concurrent uploads.
 func (dw *distributedWriter) uploadToS3() {
+	s3UploadSem <- struct{}{}
+	defer func() { <-s3UploadSem }()
+
 	bufPath := dw.d.bufferPath(dw.tsid)
 	const maxAttempts = 3
 

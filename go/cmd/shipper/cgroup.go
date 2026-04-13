@@ -18,7 +18,7 @@
 //     an app-*.scope cgroup before our tracker sees them.  They have no
 //     controlling TTY, so they are hard-frozen via SIGSTOP/SIGCONT.
 //
-// The tracker polls /proc/<pid>/task/<pid>/children every 10 ms and also
+// The tracker polls /proc/<pid>/task/<pid>/children every 50 ms and also
 // re-checks every known PID's cgroup membership so late GNOME migrations are
 // caught even if the PID was initially seen inside our cgroup.
 //
@@ -189,7 +189,7 @@ func (cg *cgroupSession) moveSudoOut() {
 }
 
 // trackDescendants runs as a goroutine for the lifetime of the session.
-// Every 10 ms it:
+// Every 50 ms it:
 //  1. Discovers new child PIDs via /proc/PID/task/PID/children.
 //  2. Removes dead PIDs from the tracking set.
 //  3. Moves sudo to the parent cgroup once a child appears.
@@ -197,7 +197,7 @@ func (cg *cgroupSession) moveSudoOut() {
 //     late GNOME/systemd migrations are caught and tracked via SIGSTOP.
 func (cg *cgroupSession) trackDescendants() {
 	defer close(cg.trackDone)
-	ticker := time.NewTicker(10 * time.Millisecond)
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
 	seen := map[int]struct{}{cg.sudoPid: {}}

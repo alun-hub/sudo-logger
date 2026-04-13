@@ -394,14 +394,20 @@ func (c *sessionCache) get(ctx context.Context) ([]SessionInfo, error) {
 }
 
 // rebuild fetches records from the store, scores each one, and updates the cache.
+// The write lock is held only for the staleness check and the final state update,
+// so concurrent readers are not blocked during I/O and scoring.
 func (c *sessionCache) rebuild(ctx context.Context) ([]SessionInfo, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.built && time.Since(c.lastScan) < cacheTTL {
 		snap := make([]SessionInfo, len(c.sessions))
 		copy(snap, c.sessions)
+		c.mu.Unlock()
 		return snap, nil
 	}
+	c.mu.Unlock()
+
+	// Perform all I/O and CPU-heavy scoring without holding the lock so that
+	// concurrent readers (e.g. the session-list endpoint) are not blocked.
 	if rulesText, err := sessionStore.GetConfig(ctx, "risk-rules.yaml"); err != nil {
 		log.Printf("risk rules reload: %v", err)
 	} else if err := loadRulesFromText(rulesText); err != nil {
@@ -415,15 +421,19 @@ func (c *sessionCache) rebuild(ctx context.Context) ([]SessionInfo, error) {
 	for _, rec := range records {
 		info := recordToInfo(rec)
 		info.RiskScore, info.RiskReasons = scoreSession(&info)
-		info.RiskLevel = riskLevel(info.RiskScore)
+		info.RiskLevel = store.RiskLevel(info.RiskScore)
 		sessions = append(sessions, info)
 	}
+
+	c.mu.Lock()
 	c.sessions = sessions
 	c.built = true
 	c.lastScan = time.Now()
-	log.Printf("session cache rebuilt: %d sessions", len(sessions))
 	snap := make([]SessionInfo, len(sessions))
 	copy(snap, sessions)
+	c.mu.Unlock()
+
+	log.Printf("session cache rebuilt: %d sessions", len(sessions))
 	return snap, nil
 }
 
@@ -922,7 +932,7 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 		if s.Incomplete {
 			incomplete++
 		}
-		byRisk[riskLevel(s.RiskScore)]++
+		byRisk[store.RiskLevel(s.RiskScore)]++
 	}
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -1397,6 +1407,23 @@ func handleGetSiemConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// validateTLSPaths returns an error if any non-empty path in c is not an
+// absolute path or contains a ".." component.
+func validateTLSPaths(label string, c siem.TLSCfg) error {
+	for _, p := range []string{c.CA, c.Cert, c.Key} {
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			return fmt.Errorf("%s TLS path %q must be absolute", label, p)
+		}
+		if strings.Contains(filepath.Clean(p), "..") {
+			return fmt.Errorf("%s TLS path %q must not contain '..'", label, p)
+		}
+	}
+	return nil
+}
+
 // handlePutSiemConfig validates and persists an updated SIEM config.
 // Both servers reload within 30 s (file poller for local, DB poll for distributed).
 func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
@@ -1420,6 +1447,16 @@ func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 	case "", "json", "cef", "ocsf": // ok
 	default:
 		http.Error(w, "format must be json, cef, or ocsf", http.StatusBadRequest)
+		return
+	}
+
+	// Validate TLS certificate file paths to prevent path traversal.
+	if err := validateTLSPaths("https", cfg.HTTPS.TLS); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateTLSPaths("syslog", cfg.Syslog.TLS); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -1580,20 +1617,6 @@ func sendSiemEvent(tsid string) {
 }
 
 // ── Risk scoring ──────────────────────────────────────────────────────────────
-
-// riskLevel converts a numeric score to a level string.
-func riskLevel(score int) string {
-	switch {
-	case score >= 75:
-		return "critical"
-	case score >= 50:
-		return "high"
-	case score >= 25:
-		return "medium"
-	default:
-		return "low"
-	}
-}
 
 // computeRulesHash returns a short FNV-32 hex hash of the YAML content.
 func computeRulesHash(data []byte) string {
