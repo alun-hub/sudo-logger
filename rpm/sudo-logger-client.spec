@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.15.4
+Version:        1.15.5
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -120,6 +120,16 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue Apr 14 2026 sudo-logger 1.15.5-1
+- security: raise SIEM client TLS minimum version from 1.2 to 1.3
+- security: server rejects SESSION_START payloads exceeding 64 KB
+  (MaxSessionStartPayload constant added to protocol package)
+- fix: cgroup child-process tracker polls every 50 ms instead of 10 ms
+- fix: lingerCgroup reachability check uses plain TCP dial, not full TLS
+- fix: schema versioning in distributed store — DDL skipped on restart
+  when version already matches (no client-side effect)
+- refactor: deduplicated riskLevel, reportSessionMsg, WatchSessions goto
+
 * Mon Apr 14 2026 sudo-logger 1.15.4-1
 - fix: cgroup child-process tracker polls every 50 ms instead of 10 ms,
   reducing CPU overhead during frozen sessions
