@@ -119,9 +119,34 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 	return s3.NewFromConfig(awsCfg, s3Opts...), nil
 }
 
-// applySchema creates the required tables if they do not already exist.
+// currentSchemaVersion is incremented whenever the DDL changes.
+// applySchema skips the full DDL when the stored version already matches,
+// avoiding unnecessary round-trips to PostgreSQL on every startup.
+//
+// Version history:
+//
+//	1 — initial schema (sudo_sessions, sudo_risk_cache, sudo_blocked_users, sudo_config, sudo_access_log)
+//	2 — added network_outage column to sudo_sessions
+//	3 — added sudo_schema_version table; schema version tracking
+const currentSchemaVersion = 3
+
+// applySchema creates the required tables when starting up.
+// It reads a version number from sudo_schema_version and skips the full DDL
+// if the schema is already at the current version, so that production restarts
+// do not issue unnecessary DDL round-trips to PostgreSQL.
 func applySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, `
+	// Fast path: check stored version. If the table does not exist yet
+	// (fresh install), the query returns an error and we fall through to
+	// the full DDL.
+	var storedVersion int
+	if err := pool.QueryRow(ctx, `SELECT version FROM sudo_schema_version LIMIT 1`).Scan(&storedVersion); err == nil {
+		if storedVersion >= currentSchemaVersion {
+			return nil
+		}
+	}
+
+	// Full DDL — all statements are idempotent (IF NOT EXISTS / IF NOT EXISTS).
+	if _, err := pool.Exec(ctx, `
 CREATE TABLE IF NOT EXISTS sudo_sessions (
     tsid             TEXT PRIMARY KEY,
     session_id       TEXT NOT NULL,
@@ -144,7 +169,7 @@ CREATE TABLE IF NOT EXISTS sudo_sessions (
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
--- schema migration: add network_outage column to existing deployments
+-- migration v2: add network_outage to existing deployments
 ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS network_outage BOOLEAN DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS sudo_risk_cache (
@@ -177,9 +202,18 @@ CREATE TABLE IF NOT EXISTS sudo_access_log (
     replay_url TEXT,
     viewed_at  TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS sudo_access_log_viewer   ON sudo_access_log(viewer);
+CREATE INDEX IF NOT EXISTS sudo_access_log_viewer    ON sudo_access_log(viewer);
 CREATE INDEX IF NOT EXISTS sudo_access_log_viewed_at ON sudo_access_log(viewed_at DESC);
-`)
+
+CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
+`); err != nil {
+		return err
+	}
+
+	// Record current schema version (replace any existing row).
+	_, err := pool.Exec(ctx,
+		`DELETE FROM sudo_schema_version; INSERT INTO sudo_schema_version (version) VALUES ($1)`,
+		currentSchemaVersion)
 	return err
 }
 

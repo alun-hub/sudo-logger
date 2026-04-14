@@ -133,9 +133,15 @@ func ReadHeader(r io.Reader) (msgType uint8, payloadLen uint32, err error) {
 	return
 }
 
-// maxPayloadSize is the largest payload we will allocate.
+// maxPayloadSize is the largest payload we will allocate for a single chunk.
 // A single tty chunk is at most a few KB; 1 MB is generous.
 const maxPayloadSize = uint32(1 * 1024 * 1024) // 1 MB
+
+// MaxSessionStartPayload is the per-type size limit for SESSION_START messages.
+// SESSION_START carries JSON metadata only — 64 KB is generous.
+// Callers must check this before calling ReadPayload to prevent a malicious
+// (mTLS-authenticated) shipper from triggering a 1 MB allocation per connection.
+const MaxSessionStartPayload = uint32(64 * 1024) // 64 KB
 
 // ReadPayload reads exactly payloadLen bytes from r.
 // Returns an error if payloadLen exceeds maxPayloadSize to prevent

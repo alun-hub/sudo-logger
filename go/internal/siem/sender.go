@@ -236,7 +236,7 @@ func truncate(s string, n int) string {
 //   - CA only   → custom root CA, no client cert (one-way TLS).
 //   - CA+Cert+Key → custom root CA + client certificate (mTLS).
 func buildTLSConfig(c TLSCfg) (*tls.Config, error) {
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	cfg := &tls.Config{MinVersion: tls.VersionTLS13}
 
 	if c.CA != "" {
 		pem, err := os.ReadFile(c.CA)

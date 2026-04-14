@@ -61,6 +61,8 @@ var (
 		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
 
 	// Storage backend flags.
+	// NOTE: these flags are intentionally duplicated in cmd/replay-server/main.go.
+	// If you change a default or description here, update that file too.
 	flagStorage    = flag.String("storage", "local", "Storage backend: local|distributed")
 	flagS3Bucket   = flag.String("s3-bucket", "", "S3 bucket name (distributed storage)")
 	flagS3Region   = flag.String("s3-region", "us-east-1", "S3 region (distributed storage)")
@@ -249,6 +251,13 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			return
 		}
 
+		// SESSION_START is JSON metadata — apply a tighter size limit to prevent
+		// a malicious (mTLS-authenticated) shipper from triggering a 1 MB allocation.
+		if msgType == protocol.MsgSessionStart && plen > protocol.MaxSessionStartPayload {
+			log.Printf("SECURITY: SESSION_START payload too large from %s: %d bytes (max %d) — dropping connection",
+				remote, plen, protocol.MaxSessionStartPayload)
+			return
+		}
 		payload, err := protocol.ReadPayload(r, plen)
 		if err != nil {
 			log.Printf("read payload from %s: %v", remote, err)
