@@ -154,6 +154,9 @@ Defined in `go/internal/protocol/protocol.go` (Go) and inline in `plugin/plugin.
 | `0x0a` | `HEARTBEAT_ACK` | server→shipper | empty |
 | `0x0b` | `SERVER_READY` | server→shipper | empty — session accepted |
 | `0x0c` | `SESSION_DENIED` | server→shipper, shipper→plugin | string block message — policy denial |
+| `0x0d` | `FREEZE_TIMEOUT` | shipper→plugin | empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
+| `0x0e` | `SESSION_ABANDON` | shipper→server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session `freeze_timeout` |
+| `0x0f` | `SESSION_FREEZING` | shipper→server (new conn) | UTF-8 session_id — session is being frozen due to network loss |
 
 CHUNK stream types: `0x00` stdin, `0x01` stdout, `0x02` stderr, `0x03` tty-in, `0x04` tty-out.
 

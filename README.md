@@ -88,6 +88,8 @@ Ctrl+C.
 
 ## Architecture
 
+> For full technical details — session lifecycle, wire protocol, cgroup isolation, and storage internals — see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ### C plugin (`plugin/plugin.c`)
 
 A sudo I/O plugin loaded via `/etc/sudo.conf`. Implements the `sudo_plugin.h`
@@ -282,7 +284,7 @@ migrate-sessions \
 ### Build dependencies
 - `gcc`
 - `sudo-devel` (for `sudo_plugin.h`)
-- `golang` 1.18+
+- Go 1.25+
 - `rpm-build` (for RPM packaging)
 
 ---
@@ -793,13 +795,6 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 | `-logdir dir` | `/var/log/sudoreplay` | Session log directory |
 | `-rules file` | `/etc/sudo-logger/risk-rules.yaml` | Risk scoring rules |
 | `-siem-config file` | `/etc/sudo-logger/siem.yaml` | SIEM forwarding config |
-
-**How it works:**
-
-The plugin captures the full `argv` array and terminal dimensions (rows/cols) in every
-`SESSION_START` message.  The shipper forwards this verbatim to the server,
-which stores it in the `session.cast` header — the same field that
-the web interface reads as the session command.
 
 ---
 
@@ -1619,7 +1614,7 @@ kubectl create secret generic sudo-logger-tls \
   --from-file=ca.crt=/path/to/pki/ca/ca.crt \
   --from-file=server.crt=/path/to/pki/server/server.crt \
   --from-file=server.key=/path/to/pki/server/server.key \
-  --from-file=hmac.key=/path/to/pki/hmac.key
+  --from-file=ack-sign.key=/etc/sudo-logger/ack-sign.key
 
 kubectl create secret generic sudo-logger-distributed \
   --namespace sudo-logger \
@@ -1639,7 +1634,7 @@ kubectl create secret generic sudo-logger-distributed \
     - -cert=/etc/sudo-logger/server.crt
     - -key=/etc/sudo-logger/server.key
     - -ca=/etc/sudo-logger/ca.crt
-    - -signkey=/etc/sudo-logger/hmac.key
+    - -signkey=/etc/sudo-logger/ack-sign.key
     - -storage=distributed
     - -s3-bucket=sudo-logs
     - -s3-endpoint=https://minio.internal:9000
