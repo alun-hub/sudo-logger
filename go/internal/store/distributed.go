@@ -211,9 +211,12 @@ CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
 	}
 
 	// Record current schema version (replace any existing row).
-	_, err := pool.Exec(ctx,
-		`DELETE FROM sudo_schema_version; INSERT INTO sudo_schema_version (version) VALUES ($1)`,
-		currentSchemaVersion)
+	// Two separate statements: pgx's extended protocol rejects parameters
+	// in multi-statement strings.
+	if _, err := pool.Exec(ctx, `DELETE FROM sudo_schema_version`); err != nil {
+		return err
+	}
+	_, err := pool.Exec(ctx, `INSERT INTO sudo_schema_version (version) VALUES ($1)`, currentSchemaVersion)
 	return err
 }
 
