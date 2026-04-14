@@ -131,8 +131,18 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		ctx := context.WithValue(r.Context(), ctxViewer, user)
 		next.ServeHTTP(lrw, r.WithContext(ctx))
 		log.Printf("access user=%s addr=%s %s %s %d",
-			user, r.RemoteAddr, r.Method, r.URL.Path, lrw.status)
+			sanitizeForLog(user), r.RemoteAddr, r.Method, r.URL.Path, lrw.status)
 	})
+}
+
+// sanitizeForLog replaces ASCII control characters with '_' to prevent log injection.
+func sanitizeForLog(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return '_'
+		}
+		return r
+	}, s)
 }
 
 // htpasswdStore holds bcrypt-hashed credentials loaded from an htpasswd file.

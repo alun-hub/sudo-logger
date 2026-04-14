@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +114,12 @@ func getHTTPSClient(c TLSCfg) (*http.Client, error) {
 //   - "Authorization: Splunk <token>"  when the URL contains /services/collector
 //   - "Authorization: Bearer <token>"  otherwise
 func sendHTTPS(cfg Config, e Event, body []byte, contentType string) error {
+	// Validate URL to prevent SSRF via config manipulation.
+	u, parseErr := url.Parse(cfg.HTTPS.URL)
+	if parseErr != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("HTTPS URL must be a valid https:// address, got %q", cfg.HTTPS.URL)
+	}
+
 	client, err := getHTTPSClient(cfg.HTTPS.TLS)
 	if err != nil {
 		return fmt.Errorf("build TLS: %w", err)
@@ -239,13 +246,17 @@ func buildTLSConfig(c TLSCfg) (*tls.Config, error) {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS13}
 
 	if c.CA != "" {
-		pem, err := os.ReadFile(c.CA)
+		caPath := filepath.Clean(c.CA)
+		if !filepath.IsAbs(caPath) {
+			return nil, fmt.Errorf("CA path must be absolute: %q", c.CA)
+		}
+		pem, err := os.ReadFile(caPath)
 		if err != nil {
-			return nil, fmt.Errorf("read CA %s: %w", c.CA, err)
+			return nil, fmt.Errorf("read CA %s: %w", caPath, err)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("parse CA cert from %s", c.CA)
+			return nil, fmt.Errorf("parse CA cert from %s", caPath)
 		}
 		cfg.RootCAs = pool
 	}
@@ -254,7 +265,12 @@ func buildTLSConfig(c TLSCfg) (*tls.Config, error) {
 		if c.Cert == "" || c.Key == "" {
 			return nil, fmt.Errorf("both cert and key must be specified together")
 		}
-		cert, err := tls.LoadX509KeyPair(c.Cert, c.Key)
+		certPath := filepath.Clean(c.Cert)
+		keyPath := filepath.Clean(c.Key)
+		if !filepath.IsAbs(certPath) || !filepath.IsAbs(keyPath) {
+			return nil, fmt.Errorf("cert and key paths must be absolute")
+		}
+		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
 			return nil, fmt.Errorf("load client cert/key: %w", err)
 		}
