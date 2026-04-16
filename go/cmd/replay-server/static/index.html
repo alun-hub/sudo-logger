@@ -247,8 +247,8 @@
       text-align: center; flex-shrink: 0; font-family: var(--font); }
     .scrubber-wrap { flex: 1; display: flex; align-items: center; }
     input[type=range] { -webkit-appearance: none; appearance: none; width: 100%;
-      height: 3px; background: var(--border-mid); border-radius: 2px;
-      outline: none; cursor: pointer; }
+      height: 3px; border-radius: 2px; outline: none; cursor: pointer;
+      background: linear-gradient(to right, var(--green) 0%, var(--green) var(--scrubber-fill,0%), var(--border-mid) var(--scrubber-fill,0%), var(--border-mid) 100%); }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
       width: 13px; height: 13px; background: var(--green); border-radius: 50%;
       cursor: pointer; box-shadow: 0 0 6px var(--green-glow); }
@@ -539,6 +539,21 @@
     .btn-upload:hover { background: var(--card-hover); color: var(--text); }
     .btn-upload.ok  { color: var(--green); border-color: var(--green); }
     .btn-upload.err { color: var(--red);   border-color: var(--red); }
+
+    /* ── Focus & keyboard navigation ────────────────────────────────────────── */
+    :focus { outline: none; }
+    :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 3px; }
+    input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+
+    /* ── Reduced motion ─────────────────────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      .sc-live::before { animation: none; opacity: 1; }
+      .spinner { animation: none; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
+
+    /* ── Icon buttons ───────────────────────────────────────────────────────── */
+    .btn-play svg, .btn-icon svg, .theme-btn svg, .date-clear svg, .modal-close svg { pointer-events: none; }
   </style>
 </head>
 <body>
@@ -560,7 +575,10 @@
       <span class="user-name" id="user-name"></span>
       <a href="/oauth2/sign_out" class="logout-btn" id="logout-btn">Sign out</a>
     </div>
-    <button class="theme-btn" id="theme-toggle" title="Toggle light / dark mode">☀</button>
+    <button class="theme-btn" id="theme-toggle" title="Toggle light / dark mode" aria-label="Toggle light / dark mode">
+      <svg id="theme-icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      <svg id="theme-icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
   </header>
 
   <aside class="sidebar">
@@ -578,7 +596,7 @@
       <input type="date" id="date-from" class="date-input" title="From date">
       <span class="date-sep">→</span>
       <input type="date" id="date-to" class="date-input" title="To date">
-      <button class="date-clear" id="date-clear" title="Clear date filter">✕</button>
+      <button class="date-clear" id="date-clear" title="Clear date filter" aria-label="Clear date filter"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg></button>
     </div>
     <div class="session-list" id="session-list">
       <div class="loading-row"><div class="spinner"></div> Loading sessions…</div>
@@ -592,8 +610,11 @@
     </div>
     <div class="terminal-wrap"><div id="terminal"></div></div>
     <div class="controls">
-      <button class="btn-play" id="btn-play" disabled title="Play / Pause (Space)">▶</button>
-      <button class="btn-icon"  id="btn-restart" disabled title="Restart (R)">↺</button>
+      <button class="btn-play" id="btn-play" disabled title="Play / Pause (Space)" aria-label="Play">
+        <svg id="icon-play" width="12" height="14" viewBox="0 0 12 14" fill="currentColor" aria-hidden="true"><path d="M0 0 L12 7 L0 14 Z"/></svg>
+        <svg id="icon-pause" width="11" height="14" viewBox="0 0 11 14" fill="currentColor" aria-hidden="true" style="display:none"><rect x="0" y="0" width="4" height="14" rx="1"/><rect x="7" y="0" width="4" height="14" rx="1"/></svg>
+      </button>
+      <button class="btn-icon"  id="btn-restart" disabled title="Restart (R)" aria-label="Restart"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
       <span class="time-cur" id="time-current">0:00</span>
       <div class="scrubber-wrap">
         <input type="range" id="scrubber" min="0" max="10000" value="0" disabled>
@@ -618,7 +639,7 @@
       <input type="date" id="report-from" class="date-input" title="From date">
       <label>To</label>
       <input type="date" id="report-to" class="date-input" title="To date">
-      <button class="date-clear" id="report-clear" title="Clear date filter">✕</button>
+      <button class="date-clear" id="report-clear" title="Clear date filter" aria-label="Clear date filter"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg></button>
     </div>
     <div class="rc-period" id="report-period"></div>
     <div class="report-cards" id="report-cards"></div>
@@ -1545,7 +1566,7 @@ function play() {
   player.playing = true;
   player.startWallMs   = performance.now();
   player.startEventSec = currentEventSec();
-  elBtnPlay.textContent = '⏸';
+  setPlayIcon(true);
   scheduleNext();
   startRaf();
 }
@@ -1554,7 +1575,7 @@ function pause() {
   if (!player.playing) return;
   player.startEventSec = elapsedSec();
   stopPlayer();
-  elBtnPlay.textContent = '▶';
+  setPlayIcon(false);
   updateProgress();
   updateURL();
 }
@@ -1576,7 +1597,7 @@ function scheduleNext() {
   if (!player.playing || player.currentIndex >= events.length) {
     if (player.currentIndex >= events.length) {
       player.startEventSec = totalDuration;
-      stopPlayer(); elBtnPlay.textContent = '▶'; updateProgress(); updateURL();
+      stopPlayer(); setPlayIcon(false); updateProgress(); updateURL();
     }
     return;
   }
@@ -1597,10 +1618,29 @@ function startRaf() {
   player.rafId = requestAnimationFrame(tick);
 }
 
+const elIconPlay  = document.getElementById('icon-play');
+const elIconPause = document.getElementById('icon-pause');
+const elThemeSun  = document.getElementById('theme-icon-sun');
+const elThemeMoon = document.getElementById('theme-icon-moon');
+
+function setPlayIcon(playing) {
+  elIconPlay.style.display  = playing ? 'none' : '';
+  elIconPause.style.display = playing ? '' : 'none';
+  elBtnPlay.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+}
+
+function setScrubberFill(pct) {
+  elScrubber.style.setProperty('--scrubber-fill', pct.toFixed(2) + '%');
+}
+
 function updateProgress() {
   const t = Math.min(Math.max(elapsedSec(), 0), totalDuration);
   elTimeCurrent.textContent = fmt(t);
-  if (totalDuration > 0) elScrubber.value = Math.round(t / totalDuration * 10000);
+  if (totalDuration > 0) {
+    const pct = t / totalDuration * 100;
+    elScrubber.value = Math.round(pct * 100);
+    setScrubberFill(pct);
+  }
 }
 
 function seekTo(targetSec) {
@@ -1616,9 +1656,13 @@ function seekTo(targetSec) {
   player.startEventSec = targetSec;
   player.startWallMs   = performance.now();
   elTimeCurrent.textContent = fmt(targetSec);
-  if (totalDuration > 0) elScrubber.value = Math.round(targetSec / totalDuration * 10000);
+  if (totalDuration > 0) {
+    const pct = targetSec / totalDuration * 100;
+    elScrubber.value = Math.round(pct * 100);
+    setScrubberFill(pct);
+  }
   updateURL();
-  if (wasPlaying) { player.playing = true; elBtnPlay.textContent = '⏸'; scheduleNext(); startRaf(); }
+  if (wasPlaying) { player.playing = true; setPlayIcon(true); scheduleNext(); startRaf(); }
 }
 
 // ── Controls ──────────────────────────────────────────────────────────────────
@@ -1681,8 +1725,10 @@ elAutoplayToggle.addEventListener('change', () => {
   const btn = document.getElementById('theme-toggle');
   const apply = theme => {
     document.documentElement.dataset.theme = theme;
-    btn.textContent = theme === 'light' ? '🌙' : '☀';
+    elThemeSun.style.display  = theme === 'light' ? 'none' : '';
+    elThemeMoon.style.display = theme === 'light' ? '' : 'none';
     btn.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+    btn.setAttribute('aria-label', btn.title);
     term.options.theme = termThemes[theme];
   };
   apply(localStorage.getItem('sudo-replay-theme') === 'light' ? 'light' : 'dark');

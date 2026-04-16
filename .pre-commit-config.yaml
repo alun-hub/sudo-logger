@@ -29,6 +29,13 @@ repos:
         pass_filenames: false
         files: \.go$
 
+      - id: go-test
+        name: go test
+        language: system
+        entry: bash -c 'cd go && export PATH=/usr/lib/golang/bin:$PATH GOROOT=/usr/lib/golang && go test -count=1 $(go list ./... | grep -v ebpf-recorder)'
+        pass_filenames: false
+        files: \.go$
+
   # --- C plugin: cppcheck + flawfinder ---
   - repo: local
     hooks:
