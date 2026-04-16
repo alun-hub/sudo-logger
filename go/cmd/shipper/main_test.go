@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"net"
 	"os"
 	"testing"
 
@@ -249,6 +252,102 @@ func TestValidCgroupName(t *testing.T) {
 		if validCgroupName.MatchString(s) {
 			t.Errorf("expected %q to be invalid", s)
 		}
+	}
+}
+
+// ── isSudoConn ────────────────────────────────────────────────────────────────
+
+// isSudoConn requires a real Unix socket and root credentials to test fully;
+// those paths are covered by the system test. Here we verify the defensive
+// branch: a non-UnixConn must be rejected without panic.
+
+func TestIsSudoConnNonUnix(t *testing.T) {
+	// net.TCPConn is not a *net.UnixConn — must return false.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	done := make(chan net.Conn, 1)
+	go func() {
+		c, _ := ln.Accept()
+		done <- c
+	}()
+
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	server := <-done
+	defer server.Close()
+
+	if isSudoConn(server) {
+		t.Error("isSudoConn returned true for a TCP connection")
+	}
+}
+
+// ── loadEd25519PubKey ─────────────────────────────────────────────────────────
+
+func writeEd25519PubKeyPEM(t *testing.T, pub ed25519.PublicKey) string {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "ed25519-pub-*.pem")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	pem.Encode(f, &pem.Block{Type: "PUBLIC KEY", Bytes: der}) //nolint:errcheck
+	f.Close()
+	return f.Name()
+}
+
+func TestLoadEd25519PubKeyValid(t *testing.T) {
+	pub, _, err := generateTestKeyPair(t)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	path := writeEd25519PubKeyPEM(t, pub)
+	got, err := loadEd25519PubKey(path)
+	if err != nil {
+		t.Fatalf("loadEd25519PubKey: %v", err)
+	}
+	if !got.Equal(pub) {
+		t.Error("loaded public key does not match original")
+	}
+}
+
+func TestLoadEd25519PubKeyMissingFile(t *testing.T) {
+	_, err := loadEd25519PubKey(t.TempDir() + "/nonexistent.pem")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestLoadEd25519PubKeyNoPEM(t *testing.T) {
+	f, _ := os.CreateTemp(t.TempDir(), "bad-*.pem")
+	f.WriteString("not pem\n") //nolint:errcheck
+	f.Close()
+	_, err := loadEd25519PubKey(f.Name())
+	if err == nil {
+		t.Error("expected error for non-PEM file")
+	}
+}
+
+func TestLoadEd25519PubKeyWrongKeyType(t *testing.T) {
+	// Write an ECDSA public key — not ed25519.
+	ecPriv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKIXPublicKey(&ecPriv.PublicKey)
+	f, _ := os.CreateTemp(t.TempDir(), "ecdsa-pub-*.pem")
+	pem.Encode(f, &pem.Block{Type: "PUBLIC KEY", Bytes: der}) //nolint:errcheck
+	f.Close()
+	_, err := loadEd25519PubKey(f.Name())
+	if err == nil {
+		t.Error("expected error for non-ed25519 public key")
 	}
 }
 

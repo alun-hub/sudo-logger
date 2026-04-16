@@ -1429,7 +1429,10 @@ func validateTLSPaths(label string, c siem.TLSCfg) error {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("%s TLS path %q must be absolute", label, p)
 		}
-		if strings.Contains(filepath.Clean(p), "..") {
+		// Check the raw path before cleaning — filepath.Clean resolves traversal
+		// components (e.g. /a/b/../../etc/passwd → /etc/passwd), which would
+		// silently accept the traversal attempt.
+		if strings.Contains(p, "..") {
 			return fmt.Errorf("%s TLS path %q must not contain '..'", label, p)
 		}
 	}

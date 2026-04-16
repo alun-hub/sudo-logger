@@ -14,6 +14,175 @@ import (
 	"sudo-logger/internal/store"
 )
 
+// ── GetBlockedPolicy / SaveBlockedPolicy ──────────────────────────────────────
+
+func TestLocalStoreGetBlockedPolicyEmpty(t *testing.T) {
+	s, _ := newLocalStore(t)
+	defer s.Close()
+
+	ctx := context.Background()
+	p, err := s.GetBlockedPolicy(ctx)
+	if err != nil {
+		t.Fatalf("GetBlockedPolicy: %v", err)
+	}
+	if len(p.Users) != 0 {
+		t.Errorf("expected empty policy, got %d users", len(p.Users))
+	}
+}
+
+func TestLocalStoreSaveAndGetBlockedPolicy(t *testing.T) {
+	tmpDir := t.TempDir()
+	blockedPath := filepath.Join(tmpDir, "blocked-users.yaml")
+
+	s, err := store.New(store.Config{
+		Backend:          "local",
+		LogDir:           tmpDir,
+		BlockedUsersPath: blockedPath,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer s.Close()
+
+	ls := s.(*store.LocalStore)
+	ctx := context.Background()
+
+	policy := store.BlockedPolicy{
+		BlockMessage: "Access denied",
+		Users: []store.BlockedUserEntry{
+			{Username: "mallory", Hosts: []string{}, Reason: "bad actor"},
+			{Username: "attacker", Hosts: []string{"host1", "host2"}, Reason: "suspicious"},
+		},
+	}
+	if err := ls.SaveBlockedPolicy(ctx, policy); err != nil {
+		t.Fatalf("SaveBlockedPolicy: %v", err)
+	}
+
+	// File must exist on disk.
+	if _, err := os.Stat(blockedPath); err != nil {
+		t.Fatalf("blocked-users.yaml not written: %v", err)
+	}
+
+	// In-memory state is NOT updated synchronously by SaveBlockedPolicy;
+	// reload it by creating a new store pointing at the same file.
+	s2, err := store.New(store.Config{
+		Backend:          "local",
+		LogDir:           tmpDir,
+		BlockedUsersPath: blockedPath,
+	})
+	if err != nil {
+		t.Fatalf("New (reload): %v", err)
+	}
+	defer s2.Close()
+
+	ls2 := s2.(*store.LocalStore)
+	p, err := ls2.GetBlockedPolicy(ctx)
+	if err != nil {
+		t.Fatalf("GetBlockedPolicy (reload): %v", err)
+	}
+	if p.BlockMessage != "Access denied" {
+		t.Errorf("BlockMessage: got %q, want %q", p.BlockMessage, "Access denied")
+	}
+	if len(p.Users) != 2 {
+		t.Fatalf("Users: got %d, want 2", len(p.Users))
+	}
+
+	byName := make(map[string]store.BlockedUserEntry)
+	for _, u := range p.Users {
+		byName[u.Username] = u
+	}
+
+	if _, ok := byName["mallory"]; !ok {
+		t.Error("mallory missing from reloaded policy")
+	}
+	if u := byName["attacker"]; len(u.Hosts) != 2 {
+		t.Errorf("attacker hosts: got %v, want [host1 host2]", u.Hosts)
+	}
+}
+
+// ── WatchSessions ─────────────────────────────────────────────────────────────
+
+// TestLocalStoreWatchSessionsACTIVERemoval verifies that removing an ACTIVE
+// marker file causes WatchSessions to send the session TSID on the channel.
+func TestLocalStoreWatchSessionsACTIVERemoval(t *testing.T) {
+	s, dir := newLocalStore(t)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 4)
+	go s.WatchSessions(ctx, ch)
+
+	// Give fsnotify time to set up watches before we write files.
+	time.Sleep(50 * time.Millisecond)
+
+	start := time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)
+	tsid := seedSession(t, dir, "watchuser", "watchhost", start)
+	sessDir := filepath.Join(dir, tsid)
+
+	// Write then remove the ACTIVE marker — this is what MarkActive/MarkDone do.
+	activePath := filepath.Join(sessDir, "ACTIVE")
+	if err := os.WriteFile(activePath, []byte{}, 0o640); err != nil {
+		t.Fatalf("create ACTIVE: %v", err)
+	}
+	// Give the watcher time to notice the CREATE and add the subdirectory.
+	time.Sleep(100 * time.Millisecond)
+	if err := os.Remove(activePath); err != nil {
+		t.Fatalf("remove ACTIVE: %v", err)
+	}
+
+	select {
+	case got := <-ch:
+		if got != tsid {
+			t.Errorf("WatchSessions: got TSID %q, want %q", got, tsid)
+		}
+	case <-ctx.Done():
+		t.Fatal("timeout: WatchSessions did not send TSID after ACTIVE removal")
+	}
+}
+
+// TestLocalStoreWatchSessionsINCOMPLETE verifies that creating an INCOMPLETE
+// marker also triggers a notification.
+func TestLocalStoreWatchSessionsINCOMPLETE(t *testing.T) {
+	s, dir := newLocalStore(t)
+	defer s.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch := make(chan string, 4)
+	go s.WatchSessions(ctx, ch)
+
+	time.Sleep(50 * time.Millisecond)
+
+	start := time.Date(2026, 4, 15, 12, 1, 0, 0, time.UTC)
+	tsid := seedSession(t, dir, "watchuser2", "watchhost2", start)
+	sessDir := filepath.Join(dir, tsid)
+
+	// Write ACTIVE first so the watcher adds the subdirectory.
+	activePath := filepath.Join(sessDir, "ACTIVE")
+	if err := os.WriteFile(activePath, []byte{}, 0o640); err != nil {
+		t.Fatalf("create ACTIVE: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Now create INCOMPLETE.
+	incompletePath := filepath.Join(sessDir, "INCOMPLETE")
+	if err := os.WriteFile(incompletePath, []byte{}, 0o640); err != nil {
+		t.Fatalf("create INCOMPLETE: %v", err)
+	}
+
+	select {
+	case got := <-ch:
+		if got != tsid {
+			t.Errorf("WatchSessions INCOMPLETE: got TSID %q, want %q", got, tsid)
+		}
+	case <-ctx.Done():
+		t.Fatal("timeout: WatchSessions did not send TSID after INCOMPLETE creation")
+	}
+}
+
 // testMeta returns a SessionMeta suitable for test sessions.
 func testMeta(user, host string) iolog.SessionMeta {
 	return iolog.SessionMeta{

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,6 +169,57 @@ func TestCommandWithNewline(t *testing.T) {
 	var hdr map[string]any
 	if err := json.Unmarshal([]byte(firstLine), &hdr); err != nil {
 		t.Errorf("header with newline-containing command is invalid JSON: %v", err)
+	}
+}
+
+// TestConcurrentWrites verifies that WriteOutput is safe for concurrent use.
+func TestConcurrentWrites(t *testing.T) {
+	w, dir := newTestWriter(t)
+	defer w.Close()
+
+	const goroutines = 20
+	const writes = 50
+
+	var wg sync.WaitGroup
+	for i := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			ts := time.Now().UnixNano()
+			for range writes {
+				if err := w.WriteOutput([]byte("data"), ts); err != nil {
+					t.Errorf("goroutine %d WriteOutput: %v", id, err)
+					return
+				}
+				ts++
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Verify file exists and has at least header + all events.
+	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
+	if err != nil {
+		t.Fatalf("read cast after concurrent writes: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	want := 1 + goroutines*writes // header + events
+	if len(lines) < want {
+		t.Errorf("got %d lines, want at least %d", len(lines), want)
+	}
+}
+
+// TestCloseSync verifies that Close (which calls Sync) returns no error,
+// confirming the fsync-before-close behaviour added in B4.
+func TestCloseSync(t *testing.T) {
+	w, _ := newTestWriter(t)
+	ts := time.Now().UnixNano()
+	for range 100 {
+		w.WriteOutput([]byte("x"), ts) //nolint:errcheck
+		ts++
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("Close (with Sync): %v", err)
 	}
 }
 
