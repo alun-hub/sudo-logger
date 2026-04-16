@@ -25,3 +25,13 @@ bin/
 # PKI files — certificates and private keys must never be committed
 pki/
 .gitnexus
+
+# Local planning and tooling
+AGENTS.md
+JIT-TODO.md
+TODO.md
+*.swp
+.claude/
+package-lock.json
+ui-ux-pro-max-skill/
+go/migrate-sessions
