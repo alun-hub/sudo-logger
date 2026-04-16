@@ -1,9 +1,24 @@
-## Kodsäkerhet
-Kör alltid `pre-commit run --all-files` efter att du genererat eller ändrat kod.
-Åtgärda alla HIGH/CRITICAL-fynd från Trivy och Semgrep innan du committar.
-#Dokumentation
-Dokumentera alltid på engelska
-Efter funktionsändringar uppdatera README
+## Project
+sudo-logger records and audits sudo sessions via sudo's built-in I/O plugin API.
+- **plugin/** — C plugin loaded by sudo, streams session data to the shipper
+- **go/cmd/shipper/** — local agent that buffers and forwards data to the server
+- **go/cmd/server/** — central log server that receives sessions
+- **go/cmd/replay-server/** — web UI for searching and replaying sessions
+
+Install: `plugin.so` → `/usr/libexec/sudo/` + `Plugin` line in `/etc/sudo.conf`
+Build: `make -C go` | Test: `go test ./...` from `go/`
+
+## Security sensitivity
+Handles audit logs and sudo's I/O stream. Never change TLS handling, auth logic,
+or file permissions without considering the impact on audit integrity.
+
+## Code security
+Always run `pre-commit run --all-files` after generating or modifying code.
+Fix all HIGH/CRITICAL findings from Trivy before committing.
+
+## Documentation
+Always document in English.
+Update README after feature changes.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
@@ -93,16 +108,5 @@ npx gitnexus analyze --embeddings
 To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
 
 > Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
