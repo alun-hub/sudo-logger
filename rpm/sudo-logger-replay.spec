@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.18.1
+Version:        1.18.2
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,6 +68,11 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.18.2-1
+- feat: GET /api/session/frames — returns JSON list of screen frame metadata
+- feat: GET /api/session/frame?tsid=…&n=N — serves individual JPEG frame
+  with immutable cache headers
+
 * Tue Apr 14 2026 sudo-logger 1.18.1-1
 - fix: command_base_any, command, and content are now ORed in matchesRule;
   previously command_base_any was a hard AND prerequisite, so a rule with

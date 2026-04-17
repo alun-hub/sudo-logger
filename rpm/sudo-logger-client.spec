@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.15.5
+Version:        1.16.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -36,9 +36,10 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
     -o sudo_logger_plugin.so \
     plugin.c -lpthread
 
-# Build the shipper daemon
+# Build the shipper daemon and Wayland proxy
 cd ../go
 /usr/lib/golang/bin/go build -mod=vendor -o sudo-shipper ./cmd/shipper
+/usr/lib/golang/bin/go build -mod=vendor -o wayland-proxy ./cmd/wayland-proxy
 
 %install
 # Plugin
@@ -48,6 +49,11 @@ install -D -m 0755 plugin/sudo_logger_plugin.so \
 # Shipper binary
 install -D -m 0755 go/sudo-shipper \
     %{buildroot}%{_bindir}/sudo-shipper
+
+# Wayland proxy binary (used by shipper for GUI screen capture)
+install -d -m 0755 %{buildroot}%{_libexecdir}/sudo-logger
+install -D -m 0755 go/wayland-proxy \
+    %{buildroot}%{_libexecdir}/sudo-logger/wayland-proxy
 
 # Systemd service
 install -D -m 0644 sudo-shipper.service \
@@ -112,6 +118,8 @@ fi
 %files
 %{_libexecdir}/sudo/sudo_logger_plugin.so
 %{_bindir}/sudo-shipper
+%dir %{_libexecdir}/sudo-logger
+%{_libexecdir}/sudo-logger/wayland-proxy
 %{_unitdir}/sudo-shipper.service
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
@@ -120,6 +128,15 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.16.0-1
+- feat: Wayland proxy screen capture for GUI sudo sessions (no pty)
+  - new wayland-proxy binary intercepts wl_surface_commit, captures SHM
+    pixel data, JPEG-encodes frames at up to 2 fps, streams to shipper
+  - plugin sends WAYLAND_DISPLAY + XDG_RUNTIME_DIR in SESSION_START;
+    patches user_env[] with proxy socket path from SESSION_READY body
+  - shipper spawns wayland-proxy for GUI sessions and forwards frames
+    as STREAM_SCREEN (0x05) chunks; zero extra client packages required
+
 * Tue Apr 14 2026 sudo-logger 1.15.5-1
 - security: raise SIEM client TLS minimum version from 1.2 to 1.3
 - security: server rejects SESSION_START payloads exceeding 64 KB

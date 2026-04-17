@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.17.1
+Version:        1.17.2
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,10 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.2-1
+- feat: store STREAM_SCREEN (0x05) chunks as JPEG frames via ScreenFrameWriter
+  interface; frames written to <session-dir>/frames/NNN.jpg + index.ndjson
+
 * Tue Apr 14 2026 sudo-logger 1.17.1-1
 - fix(distributed): WatchSessions retries advisory lock every 30 s instead of
   blocking until shutdown; fixes SIEM events never firing after a K8s rolling
