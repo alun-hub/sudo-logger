@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -232,7 +233,20 @@ func (d *DistributedStore) s3FrameKey(tsid string, n int) string {
 	return fmt.Sprintf("%s%s/frames/%08d.jpg", d.cfg.S3Prefix, tsid, n)
 }
 
+// HasFrames implements ScreenFrameStore — cheap HeadObject on frame 0.
+func (d *DistributedStore) HasFrames(ctx context.Context, tsid string) (bool, error) {
+	_, err := d.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(d.cfg.S3Bucket),
+		Key:    aws.String(d.s3FrameKey(tsid, 0)),
+	})
+	if err != nil {
+		return false, nil // not found or any error → no frames
+	}
+	return true, nil
+}
+
 // ListFrames lists screen frame metadata stored in S3 for tsid.
+// Timestamps are read from the x-amz-meta-ts object metadata set by WriteScreenFrame.
 func (d *DistributedStore) ListFrames(ctx context.Context, tsid string) ([]ScreenFrameInfo, error) {
 	prefix := fmt.Sprintf("%s%s/frames/", d.cfg.S3Prefix, tsid)
 	var frames []ScreenFrameInfo
@@ -247,8 +261,19 @@ func (d *DistributedStore) ListFrames(ctx context.Context, tsid string) ([]Scree
 			return nil, fmt.Errorf("list frames: %w", err)
 		}
 		for _, obj := range page.Contents {
+			// Fetch per-object metadata to retrieve the capture timestamp.
+			var ts int64
+			if head, herr := d.s3.HeadObject(ctx, &s3.HeadObjectInput{
+				Bucket: aws.String(d.cfg.S3Bucket),
+				Key:    obj.Key,
+			}); herr == nil {
+				if tsStr, ok := head.Metadata["ts"]; ok {
+					ts, _ = strconv.ParseInt(tsStr, 10, 64)
+				}
+			}
 			frames = append(frames, ScreenFrameInfo{
 				Index: idx,
+				Ts:    ts,
 				Size:  int(aws.ToInt64(obj.Size)),
 			})
 			idx++
@@ -811,7 +836,7 @@ func (dw *distributedWriter) TSID() string { return dw.tsid }
 
 // WriteScreenFrame uploads a single JPEG frame to S3.
 // The frame index is tracked atomically so concurrent calls are safe.
-func (dw *distributedWriter) WriteScreenFrame(data []byte, _ int64) error {
+func (dw *distributedWriter) WriteScreenFrame(data []byte, ts int64) error {
 	n := int(atomic.AddInt32(&dw.frameCount, 1)) - 1
 	key := dw.d.s3FrameKey(dw.tsid, n)
 	size := int64(len(data))
@@ -821,6 +846,7 @@ func (dw *distributedWriter) WriteScreenFrame(data []byte, _ int64) error {
 		Body:          bytes.NewReader(data),
 		ContentLength: aws.Int64(size),
 		ContentType:   aws.String("image/jpeg"),
+		Metadata:      map[string]string{"ts": strconv.FormatInt(ts, 10)},
 	})
 	if err != nil {
 		log.Printf("store/distributed: write frame %d for %s: %v", n, dw.tsid, err)

@@ -192,6 +192,10 @@ type ScreenFrameInfo struct {
 // ScreenFrameStore is an optional capability of SessionStore implementations
 // that can store and retrieve screen frames.
 type ScreenFrameStore interface {
+	// HasFrames reports whether any screen frames have been stored for tsid.
+	// Implementations should make this check cheap (single Stat / HeadObject).
+	HasFrames(ctx context.Context, tsid string) (bool, error)
+
 	// ListFrames returns metadata for all screen frames in the session tsid.
 	ListFrames(ctx context.Context, tsid string) ([]ScreenFrameInfo, error)
 

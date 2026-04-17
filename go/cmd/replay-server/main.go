@@ -258,6 +258,7 @@ type SessionInfo struct {
 	RiskScore       int      `json:"risk_score"`
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
 	RiskReasons     []string `json:"risk_reasons,omitempty"`
+	HasFrames       bool     `json:"has_frames,omitempty"` // true for GUI sessions with screen capture
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -429,11 +430,17 @@ func (c *sessionCache) rebuild(ctx context.Context) ([]SessionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	sfs, hasSFS := sessionStore.(store.ScreenFrameStore)
 	sessions := make([]SessionInfo, 0, len(records))
 	for _, rec := range records {
 		info := recordToInfo(rec)
 		info.RiskScore, info.RiskReasons = scoreSession(&info)
 		info.RiskLevel = store.RiskLevel(info.RiskScore)
+		if hasSFS && rec.TSID != "" {
+			if has, _ := sfs.HasFrames(ctx, rec.TSID); has {
+				info.HasFrames = true
+			}
+		}
 		sessions = append(sessions, info)
 	}
 

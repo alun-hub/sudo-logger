@@ -555,6 +555,16 @@ func (lw *localWriter) WriteScreenFrame(data []byte, ts int64) error {
 
 // ── ScreenFrameStore implementation ──────────────────────────────────────────
 
+// HasFrames implements ScreenFrameStore.
+func (ls *LocalStore) HasFrames(_ context.Context, tsid string) (bool, error) {
+	idxPath := filepath.Join(ls.cfg.LogDir, filepath.FromSlash(tsid), "frames", "index.ndjson")
+	_, err := os.Stat(idxPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // ListFrames implements ScreenFrameStore.
 func (ls *LocalStore) ListFrames(_ context.Context, tsid string) ([]ScreenFrameInfo, error) {
 	framesDir := filepath.Join(ls.cfg.LogDir, filepath.FromSlash(tsid), "frames")
