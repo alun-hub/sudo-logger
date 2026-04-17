@@ -36,7 +36,7 @@ allow sudo_shipper_t self:fifo_file rw_fifo_file_perms;
 allow sudo_shipper_t self:unix_stream_socket create_stream_socket_perms;
 allow sudo_shipper_t self:tcp_socket create_stream_socket_perms;
 allow sudo_shipper_t self:process { fork sigchld sigkill sigstop signull signal };
-allow sudo_shipper_t self:capability { kill net_bind_service sys_admin sys_ptrace };
+allow sudo_shipper_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid };
 
 # Manage the Unix socket and PID file in /run/sudo-logger/
 manage_dirs_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
@@ -90,7 +90,7 @@ allow sudo_shipper_t wayland_proxy_exec_t:file { read open execute execute_no_tr
 # Connect to Wayland compositor socket in /run/user/<uid>/
 # user_tmp_t covers /run/user/<uid>/ on Fedora with systemd-logind
 require { type user_tmp_t; }
-allow sudo_shipper_t user_tmp_t:dir search;
+allow sudo_shipper_t user_tmp_t:dir { search getattr };
 allow sudo_shipper_t user_tmp_t:sock_file { read write };
 allow sudo_shipper_t self:unix_stream_socket { connectto };
 

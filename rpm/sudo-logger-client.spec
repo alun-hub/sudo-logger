@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.16.5
+Version:        1.16.6
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.16.6-1
+- fix(selinux): add setuid/setgid capability and user_tmp_t getattr so
+  shipper can drop privileges to the invoking user when spawning wayland-proxy
+
 * Thu Apr 17 2026 sudo-logger 1.16.5-1
 - fix: resolve UID/GID from XDG_RUNTIME_DIR path instead of os/user.Lookup
   (NSS not available in systemd service environment)
