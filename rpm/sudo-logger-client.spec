@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.16.3
+Version:        1.16.4
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.16.4-1
+- fix: run wayland-proxy as invoking user (not root) so it can connect
+  to the compositor socket in /run/user/<uid>/; proxy socket moved to
+  /run/user/<uid>/sudo-wayland-<sessionid>.sock
+
 * Thu Apr 17 2026 sudo-logger 1.16.3-1
 - fix: install /etc/sudoers.d/sudo-logger-wayland with env_keep for
   WAYLAND_DISPLAY and XDG_RUNTIME_DIR; sudo env_reset stripped these
