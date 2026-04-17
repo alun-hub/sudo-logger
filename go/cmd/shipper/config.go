@@ -67,7 +67,7 @@ func loadConfig(path string) (shipperConfig, error) {
 		}
 
 		switch k {
-		case "server":
+		case "server", "LOGSERVER": // LOGSERVER: legacy key from EnvironmentFile era
 			cfg.Server = v
 		case "socket":
 			cfg.Socket = v
