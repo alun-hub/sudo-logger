@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.1
+Version:        1.17.2
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.2-1
+- fix(selinux): allow sudo_shipper_t to connectto unconfined_t unix sockets
+  (compositor kwin/mutter runs as unconfined_t; denial was suppressed by dontaudit)
+- fix(wayland): kill lingering wayland-proxy when session ends via deferred killProxy
+
 * Thu Apr 17 2026 sudo-logger 1.17.1-1
 - fix(wayland): SetUnlinkOnClose(false) before ln.Close() so the socket
   file stays on disk for gvim to connect; proxy goroutine removes it on exit

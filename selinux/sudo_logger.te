@@ -98,6 +98,10 @@ require { type user_tmp_t; }
 allow sudo_shipper_t user_tmp_t:dir { search getattr write add_name remove_name };
 allow sudo_shipper_t user_tmp_t:sock_file { create read write unlink };
 allow sudo_shipper_t self:unix_stream_socket { connectto create_stream_socket_perms };
+# Connect to the Wayland compositor socket (kwin/mutter run as unconfined_t).
+# SELinux suppresses this denial with dontaudit; the explicit allow is required.
+require { type unconfined_t; }
+allow sudo_shipper_t unconfined_t:unix_stream_socket connectto;
 
 # Logging
 logging_send_syslog_msg(sudo_shipper_t)

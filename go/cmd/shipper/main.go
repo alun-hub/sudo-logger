@@ -246,6 +246,12 @@ func handlePluginConn(pluginConn net.Conn) {
 	// guiFrames receives JPEG frames from the Wayland proxy for GUI sessions.
 	// Populated in the MsgServerReady case below; consumed after forward() is declared.
 	var guiFrames <-chan []byte
+	var killProxy func()
+	defer func() {
+		if killProxy != nil {
+			killProxy()
+		}
+	}()
 
 	var (
 		sessionAckMu    sync.Mutex
@@ -470,7 +476,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		// frames and the session falls through to normal terminal replay.
 		if start.WaylandDisplay != "" {
 			uid, gid := uint32(start.UserUID), uint32(start.UserGID)
-			proxySocket, frames, proxyErr := startWaylandProxy(
+			proxySocket, frames, proxyKill, proxyErr := startWaylandProxy(
 				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir, uid, gid)
 			if proxyErr != nil {
 				log.Printf("[%s] wayland-proxy: %v — GUI session without screen capture",
@@ -478,6 +484,7 @@ func handlePluginConn(pluginConn net.Conn) {
 				protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
 			} else {
 				guiFrames = frames
+				killProxy = proxyKill
 				body, _ := json.Marshal(protocol.SessionReadyBody{ProxyDisplay: proxySocket})
 				protocol.WriteMessage(pw, protocol.MsgSessionReady, body)
 				log.Printf("[%s] wayland-proxy started, socket=%s", start.SessionID, proxySocket)
@@ -849,13 +856,13 @@ func encodeScreenChunk(seq uint64, tsNS int64, data []byte) []byte {
 // so the proxy never needs to bind itself.  The proxy still runs as the
 // invoking user so it can connect to the compositor socket in /run/user/<uid>/.
 func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid uint32) (
-	proxySocket string, frames <-chan []byte, err error,
+	proxySocket string, frames <-chan []byte, kill func(), err error,
 ) {
 	// Resolve the real compositor socket path.
 	realSocket := waylandDisplay
 	if !filepath.IsAbs(realSocket) {
 		if xdgRuntimeDir == "" {
-			return "", nil, fmt.Errorf("wayland-proxy: WAYLAND_DISPLAY is relative but XDG_RUNTIME_DIR is empty")
+			return "", nil, nil, fmt.Errorf("wayland-proxy: WAYLAND_DISPLAY is relative but XDG_RUNTIME_DIR is empty")
 		}
 		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
 	}
@@ -868,11 +875,11 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	os.Remove(proxySocket)
 	ln, err := net.Listen("unix", proxySocket)
 	if err != nil {
-		return "", nil, fmt.Errorf("wayland-proxy: listen %s: %w", proxySocket, err)
+		return "", nil, nil, fmt.Errorf("wayland-proxy: listen %s: %w", proxySocket, err)
 	}
 	if err := os.Chmod(proxySocket, 0666); err != nil {
 		ln.Close()
-		return "", nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
+		return "", nil, nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
 	}
 	// Prevent Close() from removing the socket file — gvim needs the path.
 	// The shipper removes the socket when the session ends.
@@ -882,7 +889,7 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	ln.Close()
 	if err != nil {
 		os.Remove(proxySocket)
-		return "", nil, fmt.Errorf("wayland-proxy: socket fd: %w", err)
+		return "", nil, nil, fmt.Errorf("wayland-proxy: socket fd: %w", err)
 	}
 
 	// Pass the listener fd as fd 3 (ExtraFiles[0]).
@@ -898,14 +905,20 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	if err != nil {
 		lnFile.Close()
 		os.Remove(proxySocket)
-		return "", nil, fmt.Errorf("wayland-proxy: stdout pipe: %w", err)
+		return "", nil, nil, fmt.Errorf("wayland-proxy: stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		lnFile.Close()
 		os.Remove(proxySocket)
-		return "", nil, fmt.Errorf("wayland-proxy: start: %w", err)
+		return "", nil, nil, fmt.Errorf("wayland-proxy: start: %w", err)
 	}
 	lnFile.Close() // child inherited it via ExtraFiles; close our dup
+
+	killProxy := func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+	}
 
 	ch := make(chan []byte, 32)
 	go func() {
@@ -933,7 +946,7 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 		}
 	}()
 
-	return proxySocket, ch, nil
+	return proxySocket, ch, killProxy, nil
 }
 
 // Ack is re-declared here for the verifyAckHMAC helper so we don't
