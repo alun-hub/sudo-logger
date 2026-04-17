@@ -874,6 +874,9 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 		ln.Close()
 		return "", nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
 	}
+	// Prevent Close() from removing the socket file — gvim needs the path.
+	// The shipper removes the socket when the session ends.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	// File() dups the fd; close the net.Listener (our original) immediately.
 	lnFile, err := ln.(*net.UnixListener).File()
 	ln.Close()
@@ -907,6 +910,7 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	ch := make(chan []byte, 32)
 	go func() {
 		defer close(ch)
+		defer os.Remove(proxySocket)
 		defer cmd.Wait()
 		var sizeBuf [4]byte
 		for {
