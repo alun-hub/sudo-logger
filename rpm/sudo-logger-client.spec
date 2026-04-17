@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.9
+Version:        1.17.10
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -136,6 +136,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.10-1
+- fix(selinux): grant sudo_shipper_t dac_override and dac_read_search
+  capabilities so wayland-proxy can bind a socket in /run/user/<uid>/
+  (mode 0700, owned by the logged-in user)
+
 * Thu Apr 17 2026 sudo-logger 1.17.9-1
 - fix(config): accept legacy LOGSERVER key as alias for server so
   existing shipper.conf files (%%config noreplace) keep working
