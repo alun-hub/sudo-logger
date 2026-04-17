@@ -9,14 +9,7 @@ Wants=network-online.target
 RefuseManualStop=yes
 
 [Service]
-EnvironmentFile=/etc/sudo-logger/shipper.conf
-ExecStart=/usr/bin/sudo-shipper \
-    -server   ${LOGSERVER} \
-    -socket   /run/sudo-logger/plugin.sock \
-    -cert     /etc/sudo-logger/client.crt \
-    -key      /etc/sudo-logger/client.key \
-    -ca       /etc/sudo-logger/ca.crt \
-    -verifykey /etc/sudo-logger/ack-verify.key
+ExecStart=/usr/bin/sudo-shipper
 
 RuntimeDirectory=sudo-logger
 RuntimeDirectoryMode=0750

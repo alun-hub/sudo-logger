@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.7
+Version:        1.17.8
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -136,6 +136,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.8-1
+- feat(shipper): replace CLI flags with key=value config file
+  (shipper.conf); ExecStart is now just /usr/bin/sudo-shipper
+- feat(shipper): add wayland = true/false config option to disable
+  Wayland screen capture without rebuilding
+
 * Thu Apr 17 2026 sudo-logger 1.17.7-1
 - fix(service): remove ProtectHome — it makes /run/user inaccessible even with
   ReadWritePaths=/run/user, breaking the wayland-proxy compositor connection

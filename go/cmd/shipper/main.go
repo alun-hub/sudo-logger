@@ -58,16 +58,10 @@ func writeTTYFreezeMsg(ttyPath string) {
 }
 
 var (
-	flagServer  = flag.String("server", "logserver:9876", "Remote log server address")
-	flagSocket  = flag.String("socket", "/run/sudo-logger/plugin.sock", "Unix socket path")
-	flagCert    = flag.String("cert", "/etc/sudo-logger/client.crt", "Client TLS certificate")
-	flagKey     = flag.String("key", "/etc/sudo-logger/client.key", "Client TLS key")
-	flagCA      = flag.String("ca", "/etc/sudo-logger/ca.crt", "CA certificate")
-	flagVerifyKey     = flag.String("verifykey", "/etc/sudo-logger/ack-verify.key", "ed25519 public key for ACK verification (PEM)")
-	flagFreezeTimeout = flag.Duration("freeze-timeout", 3*time.Minute, "Terminate a frozen session after this duration of server unreachability (0 = never)")
-	flagDebug         = flag.Bool("debug", false, "Enable verbose debug logging")
-	flagProxyBin      = flag.String("proxy-bin", "/usr/libexec/sudo-logger/wayland-proxy", "Path to the wayland-proxy binary")
+	flagConfig = flag.String("config", "/etc/sudo-logger/shipper.conf", "Path to configuration file")
 )
+
+var cfg shipperConfig
 
 // debugLog is a no-op by default; replaced with log.Printf when -debug is set.
 var debugLog = func(format string, args ...any) {}
@@ -125,12 +119,18 @@ func cleanupAllCgs() {
 
 func main() {
 	flag.Parse()
-	if *flagDebug {
+
+	var err error
+	cfg, err = loadConfig(*flagConfig)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+
+	if cfg.Debug {
 		debugLog = log.Printf
 	}
 
-	var err error
-	verifyKey, err = loadEd25519PubKey(*flagVerifyKey)
+	verifyKey, err = loadEd25519PubKey(cfg.VerifyKey)
 	if err != nil {
 		log.Fatalf("load verify key: %v", err)
 	}
@@ -141,7 +141,7 @@ func main() {
 	}
 
 	// Remove stale socket from previous run
-	if err := os.Remove(*flagSocket); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(cfg.Socket); err != nil && !os.IsNotExist(err) {
 		log.Printf("remove stale socket: %v", err)
 	}
 
@@ -149,14 +149,14 @@ func main() {
 		log.Fatalf("mkdir /run/sudo-logger: %v", err)
 	}
 
-	ln, err := net.Listen("unix", *flagSocket)
+	ln, err := net.Listen("unix", cfg.Socket)
 	if err != nil {
-		log.Fatalf("listen unix %s: %v", *flagSocket, err)
+		log.Fatalf("listen unix %s: %v", cfg.Socket, err)
 	}
 	defer ln.Close()
 
 	// Only root (sudo process) may connect
-	if err := os.Chmod(*flagSocket, 0600); err != nil {
+	if err := os.Chmod(cfg.Socket, 0600); err != nil {
 		log.Fatalf("chmod socket: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	log.Printf("sudo-shipper listening on %s, forwarding to %s", *flagSocket, *flagServer)
+	log.Printf("sudo-shipper listening on %s, forwarding to %s", cfg.Socket, cfg.Server)
 
 	for {
 		conn, err := ln.Accept()
@@ -233,7 +233,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	defer func() {
 		unregisterCg(cg)
 		if cg.hasPids() || cg.hasEscapedRunning() {
-			go lingerCgroup(cg, *flagServer, tlsCfg)
+			go lingerCgroup(cg, cfg.Server, tlsCfg)
 		} else {
 			cg.stopTracking()
 			cg.remove()
@@ -291,7 +291,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	}
 
 	// ── Step 4: connect to remote log server ──────────────────────────────
-	tcpAddr, err := net.ResolveTCPAddr("tcp", *flagServer)
+	tcpAddr, err := net.ResolveTCPAddr("tcp", cfg.Server)
 	if err != nil {
 		log.Printf("resolve server addr: %v", err)
 		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(err.Error()))
@@ -315,7 +315,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	tlsClientCfg := tlsCfg.Clone()
 	if tlsClientCfg.ServerName == "" {
 		tlsClientCfg.ServerName = tcpAddr.IP.String()
-		if host, _, splitErr := net.SplitHostPort(*flagServer); splitErr == nil {
+		if host, _, splitErr := net.SplitHostPort(cfg.Server); splitErr == nil {
 			tlsClientCfg.ServerName = host
 		}
 	}
@@ -344,7 +344,7 @@ func handlePluginConn(pluginConn net.Conn) {
 			// Write freeze banner directly to the TTY so it appears immediately
 			// even when sudo is stopped by job control (SIGTSTP propagation).
 			go writeTTYFreezeMsg(start.TtyPath)
-			go reportSessionFreezing(*flagServer, tlsCfg, start.SessionID)
+			go reportSessionFreezing(cfg.Server, tlsCfg, start.SessionID)
 		}
 	}
 
@@ -370,7 +370,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	// -freeze-timeout, unfreeze the cgroup and close the plugin connection so
 	// the plugin kills sudo cleanly instead of hanging forever.
 	// Disabled when -freeze-timeout=0.
-	if *flagFreezeTimeout > 0 {
+	if cfg.FreezeTimeout > 0 {
 		go func() {
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
@@ -382,12 +382,12 @@ func handlePluginConn(pluginConn net.Conn) {
 				if since.IsZero() {
 					continue // not frozen
 				}
-				if time.Since(since) < *flagFreezeTimeout {
+				if time.Since(since) < cfg.FreezeTimeout {
 					continue // frozen but within allowed window
 				}
 
 				log.Printf("[%s] server unreachable for >%v — terminating frozen session",
-					start.SessionID, *flagFreezeTimeout)
+					start.SessionID, cfg.FreezeTimeout)
 				cg.unfreeze() // let signals reach bash before sudo is killed
 				// Notify the plugin with a specific message so it can show a
 				// human-readable banner instead of the generic "shipper lost".
@@ -400,7 +400,7 @@ func handlePluginConn(pluginConn net.Conn) {
 				pluginConn.Close()
 				// Tell the server why this session ended so the replay UI can
 				// distinguish a freeze-timeout from a shipper kill.
-				go reportSessionAbandon(*flagServer, tlsCfg, start.SessionID)
+				go reportSessionAbandon(cfg.Server, tlsCfg, start.SessionID)
 				return
 			}
 		}()
@@ -474,7 +474,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		// and a Wayland display).  The proxy captures only surfaces that the
 		// sudo'd command actually creates; terminal-only commands produce no
 		// frames and the session falls through to normal terminal replay.
-		if start.WaylandDisplay != "" {
+		if start.WaylandDisplay != "" && cfg.Wayland {
 			uid, gid := uint32(start.UserUID), uint32(start.UserGID)
 			proxySocket, frames, proxyKill, proxyErr := startWaylandProxy(
 				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir, uid, gid)
@@ -828,12 +828,12 @@ func loadEd25519PubKey(path string) (ed25519.PublicKey, error) {
 }
 
 func buildTLSConfig() (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(*flagCert, *flagKey)
+	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
 		return nil, fmt.Errorf("load client cert: %w", err)
 	}
 
-	caPEM, err := os.ReadFile(*flagCA)
+	caPEM, err := os.ReadFile(cfg.CA)
 	if err != nil {
 		return nil, fmt.Errorf("read CA cert: %w", err)
 	}
@@ -924,7 +924,7 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	}
 
 	// Pass the listener fd as fd 3 (ExtraFiles[0]).
-	cmd := exec.Command(*flagProxyBin, "--real", realSocket, "--fd", "3")
+	cmd := exec.Command(cfg.ProxyBin, "--real", realSocket, "--fd", "3")
 	cmd.Stderr = os.Stderr
 	cmd.ExtraFiles = []*os.File{lnFile}
 	// Run proxy as the invoking user so it can connect to the compositor socket.
