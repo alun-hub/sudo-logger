@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.2
+Version:        1.17.3
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.3-1
+- fix(service): ProtectHome=read-only + ReadWritePaths=/run/user so the
+  wayland-proxy child can connect() to the compositor socket in /run/user/<uid>/
+  (ProtectHome=yes made /run/user inaccessible in the service mount namespace,
+  causing EACCES on connect() despite correct DAC ownership)
+
 * Thu Apr 17 2026 sudo-logger 1.17.2-1
 - fix(selinux): allow sudo_shipper_t to connectto unconfined_t unix sockets
   (compositor kwin/mutter runs as unconfined_t; denial was suppressed by dontaudit)
