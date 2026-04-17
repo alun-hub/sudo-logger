@@ -96,7 +96,7 @@ allow sudo_shipper_t wayland_proxy_exec_t:file { read open execute execute_no_tr
 #   - remove its socket on exit (remove_name on dir, unlink on sock_file)
 require { type user_tmp_t; }
 allow sudo_shipper_t user_tmp_t:dir { search getattr write add_name remove_name };
-allow sudo_shipper_t user_tmp_t:sock_file { create read write unlink };
+allow sudo_shipper_t user_tmp_t:sock_file { create read write unlink setattr };
 allow sudo_shipper_t self:unix_stream_socket { connectto create_stream_socket_perms };
 # Connect to the Wayland compositor socket (kwin/mutter run as unconfined_t).
 # SELinux suppresses this denial with dontaudit; the explicit allow is required.

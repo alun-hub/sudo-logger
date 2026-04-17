@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.10
+Version:        1.17.11
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -9,12 +9,14 @@ Source0:        sudo-logger-%{version}.tar.gz
 BuildRequires:  gcc
 BuildRequires:  sudo-devel
 BuildRequires:  golang
+BuildRequires:  selinux-policy-devel
 
 # Go binaries via gccgo have non-standard debug info
 %global debug_package %{nil}
 
 Requires:       sudo >= 1.9
 Requires:       systemd
+Requires:       selinux-policy
 
 %description
 Sudo I/O plugin (sudo_logger_plugin.so) and local shipper daemon
@@ -40,6 +42,10 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
 cd ../go
 /usr/lib/golang/bin/go build -mod=vendor -o sudo-shipper ./cmd/shipper
 /usr/lib/golang/bin/go build -mod=vendor -o wayland-proxy ./cmd/wayland-proxy
+
+# Build the SELinux policy module
+cd ../selinux
+make -f /usr/share/selinux/devel/Makefile sudo_logger.pp
 
 %install
 # Plugin
@@ -70,6 +76,10 @@ install -D -m 0640 shipper.conf \
 install -D -m 0440 sudo-logger-wayland.sudoers \
     %{buildroot}%{_sysconfdir}/sudoers.d/sudo-logger-wayland
 
+# SELinux policy module
+install -D -m 0644 selinux/sudo_logger.pp \
+    %{buildroot}%{_datadir}/selinux/packages/sudo_logger.pp
+
 # Man pages
 install -D -m 0644 man/sudo-shipper.8 \
     %{buildroot}%{_mandir}/man8/sudo-shipper.8
@@ -89,6 +99,8 @@ chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 if ! grep -q 'Plugin sudo_logger_plugin sudo_logger_plugin.so' /etc/sudo.conf 2>/dev/null; then
     echo 'Plugin sudo_logger_plugin sudo_logger_plugin.so' >> /etc/sudo.conf
 fi
+# Load SELinux policy module
+semodule -i %{_datadir}/selinux/packages/sudo_logger.pp 2>/dev/null || true
 %systemd_post sudo-shipper.service
 
 %posttrans
@@ -97,6 +109,11 @@ fi
 chattr +i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
 chattr +i %{_bindir}/sudo-shipper                         2>/dev/null || true
 chattr +i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
+# Relabel installed files with correct SELinux contexts
+restorecon -R %{_bindir}/sudo-shipper \
+              %{_libexecdir}/sudo/sudo_logger_plugin.so \
+              %{_libexecdir}/sudo-logger/wayland-proxy \
+              %{_sysconfdir}/sudo-logger 2>/dev/null || true
 
 %preun
 # Remove immutable flag so RPM can delete the files on uninstall.
@@ -104,6 +121,10 @@ chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
 chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
 chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 %systemd_preun sudo-shipper.service
+# Remove SELinux policy module on full uninstall (not on upgrade)
+if [ $1 -eq 0 ]; then
+    semodule -r sudo_logger 2>/dev/null || true
+fi
 # Remove plugin line from sudo.conf on uninstall
 if [ $1 -eq 0 ]; then
     sed -i '/Plugin sudo_logger_plugin sudo_logger_plugin\.so/d' /etc/sudo.conf
@@ -132,10 +153,17 @@ fi
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 %config(noreplace) %attr(0440, root, root) %{_sysconfdir}/sudoers.d/sudo-logger-wayland
+%{_datadir}/selinux/packages/sudo_logger.pp
 %{_mandir}/man8/sudo-shipper.8*
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri Apr 18 2026 sudo-logger 1.17.11-1
+- feat(selinux): include SELinux policy module in RPM; semodule -i runs
+  in %%post, restorecon in %%posttrans, semodule -r on full uninstall
+- fix(selinux): allow sudo_shipper_t sock_file setattr (needed for chmod
+  of proxy socket after bind in /run/user/<uid>/)
+
 * Thu Apr 17 2026 sudo-logger 1.17.10-1
 - fix(selinux): grant sudo_shipper_t dac_override and dac_read_search
   capabilities so wayland-proxy can bind a socket in /run/user/<uid>/
