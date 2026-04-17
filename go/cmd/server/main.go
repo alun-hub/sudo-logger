@@ -332,6 +332,12 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				if err := sess.writer.WriteInput(chunk.Data, chunk.Timestamp); err != nil {
 					log.Printf("[%s] write input: %v", sess.id, err)
 				}
+			case protocol.StreamScreen:
+				if sfw, ok := sess.writer.(store.ScreenFrameWriter); ok {
+					if err := sfw.WriteScreenFrame(chunk.Data, chunk.Timestamp); err != nil {
+						log.Printf("[%s] write screen frame: %v", sess.id, err)
+					}
+				}
 			}
 
 			sess.lastSeq = chunk.Seq

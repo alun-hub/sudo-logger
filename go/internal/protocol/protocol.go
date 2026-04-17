@@ -28,6 +28,7 @@
 //	0x02  STREAM_STDERR   standard error
 //	0x03  STREAM_TTYIN    terminal input  (iolog EventTtyIn)
 //	0x04  STREAM_TTYOUT   terminal output (iolog EventTtyOut)
+//	0x05  STREAM_SCREEN   JPEG frame from Wayland proxy (GUI sessions)
 package protocol
 
 import (
@@ -55,11 +56,12 @@ const (
 	MsgSessionAbandon  = uint8(0x0e) // shipper→server (new conn): freeze-timeout fired; payload = session_id UTF-8
 	MsgSessionFreezing = uint8(0x0f) // shipper→server (new conn): session frozen due to network loss; payload = session_id UTF-8
 
-	StreamStdin  = uint8(0x00)
-	StreamStdout = uint8(0x01)
-	StreamStderr = uint8(0x02)
-	StreamTtyIn  = uint8(0x03)
-	StreamTtyOut = uint8(0x04)
+	StreamStdin   = uint8(0x00)
+	StreamStdout  = uint8(0x01)
+	StreamStderr  = uint8(0x02)
+	StreamTtyIn   = uint8(0x03)
+	StreamTtyOut  = uint8(0x04)
+	StreamScreen  = uint8(0x05) // JPEG frame from Wayland proxy
 )
 
 // SessionStart is the JSON-encoded SESSION_START payload.
@@ -81,6 +83,15 @@ type SessionStart struct {
 	Rows            int    `json:"rows,omitempty"`             // terminal height from command_info[lines=]
 	Cols            int    `json:"cols,omitempty"`             // terminal width from command_info[cols=]
 	TtyPath         string `json:"tty_path,omitempty"`         // controlling terminal device, e.g. /dev/pts/3; empty for non-tty sessions
+	WaylandDisplay  string `json:"wayland_display,omitempty"`  // $WAYLAND_DISPLAY from the invoking user's env; empty when not set
+	XdgRuntimeDir   string `json:"xdg_runtime_dir,omitempty"`  // $XDG_RUNTIME_DIR from the invoking user's env
+}
+
+// SessionReadyBody is the optional JSON payload in a SESSION_READY message.
+// When the shipper starts a Wayland proxy for a GUI session it populates
+// ProxyDisplay so the plugin can patch WAYLAND_DISPLAY before exec.
+type SessionReadyBody struct {
+	ProxyDisplay string `json:"proxy_display,omitempty"` // path to proxy Wayland socket
 }
 
 // Chunk is a decoded CHUNK message.

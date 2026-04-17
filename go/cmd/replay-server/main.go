@@ -647,6 +647,8 @@ func main() {
 	})
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
+	mux.HandleFunc("/api/session/frames", handleSessionFrames)
+	mux.HandleFunc("/api/session/frame", handleSessionFrame)
 	mux.HandleFunc("/api/access-log", handleAccessLog)
 	mux.HandleFunc("/metrics", handleMetrics)
 	mux.HandleFunc("/api/report", handleReport)
@@ -888,6 +890,69 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(events); err != nil {
 		log.Printf("encode session events: %v", err)
 	}
+}
+
+// handleSessionFrames returns a JSON list of screen frame metadata for a GUI session.
+// GET /api/session/frames?tsid=<tsid>
+func handleSessionFrames(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tsid := r.URL.Query().Get("tsid")
+	if tsid == "" {
+		http.Error(w, "missing tsid", http.StatusBadRequest)
+		return
+	}
+	if err := validateTSID(tsid); err != nil {
+		http.Error(w, "invalid tsid", http.StatusBadRequest)
+		return
+	}
+	sfs, ok := sessionStore.(store.ScreenFrameStore)
+	if !ok {
+		http.Error(w, "screen frames not supported by storage backend", http.StatusNotImplemented)
+		return
+	}
+	frames, err := sfs.ListFrames(r.Context(), tsid)
+	if err != nil {
+		http.Error(w, "frames not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(frames)
+}
+
+// handleSessionFrame serves one JPEG screen frame.
+// GET /api/session/frame?tsid=<tsid>&n=<index>
+func handleSessionFrame(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tsid := r.URL.Query().Get("tsid")
+	n, err := strconv.Atoi(r.URL.Query().Get("n"))
+	if err != nil || n < 0 {
+		http.Error(w, "invalid frame index", http.StatusBadRequest)
+		return
+	}
+	if err := validateTSID(tsid); err != nil {
+		http.Error(w, "invalid tsid", http.StatusBadRequest)
+		return
+	}
+	sfs, ok := sessionStore.(store.ScreenFrameStore)
+	if !ok {
+		http.Error(w, "not supported", http.StatusNotImplemented)
+		return
+	}
+	rc, err := sfs.OpenFrame(r.Context(), tsid, "", n)
+	if err != nil {
+		http.Error(w, "frame not found", http.StatusNotFound)
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
+	io.Copy(w, rc)
 }
 
 // handleAccessLog returns the view audit log as JSON, newest entries first.

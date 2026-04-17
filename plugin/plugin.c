@@ -636,7 +636,7 @@ static int plugin_open(unsigned int        version,
                        const char        **errstr)
 {
     (void)version; (void)conversation;
-    (void)user_env; (void)plugin_options;
+    (void)plugin_options;
 
     g_printf  = sudo_plugin_printf;
     g_seq     = 0;
@@ -702,13 +702,29 @@ static int plugin_open(unsigned int        version,
     if (flen > 0 && flags[flen - 1] == ',')
         flags[flen - 1] = '\0';
 
+    /* ── Extract Wayland env vars from user_env[] for GUI session detection ── */
+    const char *wayland_display  = "";
+    const char *xdg_runtime_dir  = "";
+    if (user_env) {
+        for (int i = 0; user_env[i] != NULL; i++) {
+            if      (strncmp(user_env[i], "WAYLAND_DISPLAY=", 16) == 0)
+                wayland_display = user_env[i] + 16;
+            else if (strncmp(user_env[i], "XDG_RUNTIME_DIR=", 16) == 0)
+                xdg_runtime_dir = user_env[i] + 16;
+        }
+    }
+
     /* JSON-escape fields that may contain backslashes, quotes, or spaces */
     char resolved_j[512];
     char cwd_j[512];
     char runas_user_j[128];
+    char wayland_j[256];
+    char xdgruntime_j[256];
     json_escape_into(resolved_j,   sizeof(resolved_j),   raw_resolved);
     json_escape_into(cwd_j,        sizeof(cwd_j),        raw_cwd);
     json_escape_into(runas_user_j, sizeof(runas_user_j), runas_user);
+    json_escape_into(wayland_j,    sizeof(wayland_j),    wayland_display);
+    json_escape_into(xdgruntime_j, sizeof(xdgruntime_j), xdg_runtime_dir);
 
     char cmd[256];
     if (argc > 0)
@@ -752,6 +768,7 @@ static int plugin_open(unsigned int        version,
         "\"cwd\":\"%s\",\"flags\":\"%s\","
         "\"rows\":%d,\"cols\":%d,"
         "\"tty_path\":\"%s\","
+        "\"wayland_display\":\"%s\",\"xdg_runtime_dir\":\"%s\","
         "\"ts\":%lld,\"pid\":%d}",
         g_session_id, user, host, cmd,
         resolved_j, runas_user_j,
@@ -759,6 +776,7 @@ static int plugin_open(unsigned int        version,
         cwd_j, flags,
         term_rows, term_cols,
         g_tty_path,
+        wayland_j, xdgruntime_j,
         (long long)now_sec(), (int)getpid());
 
     /* snprintf returns the number of bytes that *would* have been written,
@@ -827,6 +845,64 @@ static int plugin_open(unsigned int        version,
     if (hdr[0] != MSG_SESSION_READY) {
         *errstr = "sudo-logger: unexpected response from shipper";
         return -1;
+    }
+
+    /* SESSION_READY may carry a JSON body: {"proxy_display":"<path>"}.
+     * If present, patch WAYLAND_DISPLAY in user_env[] so the command
+     * connects to the recording proxy instead of the real compositor.
+     * rebuild_env() runs after plugin_open() returns and reads user_env[],
+     * so this modification is picked up before the command is exec'd. */
+    {
+        uint32_t rlen;
+        memcpy(&rlen, hdr + 1, 4);
+        rlen = be32toh(rlen);
+        if (rlen > 0 && rlen < 512 && user_env) {
+            char rbuf[512] = {0};
+            if (read_exact(g_shipper_fd, rbuf, rlen) == 0) {
+                /* Minimal JSON parse: find "proxy_display":"<value>" */
+                const char *key = "\"proxy_display\":\"";
+                char *kp = strstr(rbuf, key);
+                if (kp) {
+                    kp += strlen(key);
+                    char *end = strchr(kp, '"');
+                    if (end && end > kp) {
+                        size_t vlen = (size_t)(end - kp);
+                        /* Build "WAYLAND_DISPLAY=<proxy_path>" in a heap buffer.
+                         * Intentional leak: this process exec()s immediately
+                         * after plugin_open() returns. */
+                        char *entry = malloc(16 + vlen + 1);
+                        if (entry) {
+                            memcpy(entry, "WAYLAND_DISPLAY=", 16);
+                            memcpy(entry + 16, kp, vlen);
+                            entry[16 + vlen] = '\0';
+
+                            /* Cast away const to patch the array.
+                             * user_env[] is heap-allocated by sudo; rebuild_env()
+                             * iterates this array after open() returns. */
+                            char **menv = (char **)user_env;
+                            int found = 0;
+                            for (int i = 0; menv[i]; i++) {
+                                if (strncmp(menv[i], "WAYLAND_DISPLAY=", 16) == 0) {
+                                    menv[i] = entry;
+                                    found = 1;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                /* WAYLAND_DISPLAY absent from env (env_reset stripped it).
+                                 * setenv() works when !env_reset is configured. */
+                                char tmp[256] = {0};
+                                if (vlen < sizeof(tmp)) {
+                                    memcpy(tmp, kp, vlen);
+                                    setenv("WAYLAND_DISPLAY", tmp, 1);
+                                }
+                                free(entry);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     g_last_ack_query = now_sec();

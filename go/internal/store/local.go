@@ -517,6 +517,80 @@ func (lw *localWriter) TSID() string {
 	return filepath.ToSlash(rel)
 }
 
+// WriteScreenFrame implements ScreenFrameWriter.
+// Frames are stored as <session-dir>/frames/<index>.jpg where index is
+// the monotonically increasing frame number (zero-padded to 8 digits).
+// A companion index file <session-dir>/frames/index.ndjson records timestamps.
+func (lw *localWriter) WriteScreenFrame(data []byte, ts int64) error {
+	framesDir := filepath.Join(lw.w.Dir(), "frames")
+	if err := os.MkdirAll(framesDir, 0o750); err != nil {
+		return fmt.Errorf("frames dir: %w", err)
+	}
+
+	// Determine next frame index by counting existing .jpg files.
+	entries, _ := os.ReadDir(framesDir)
+	idx := 0
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".jpg") {
+			idx++
+		}
+	}
+
+	jpgPath := filepath.Join(framesDir, fmt.Sprintf("%08d.jpg", idx))
+	if err := os.WriteFile(jpgPath, data, 0o640); err != nil {
+		return fmt.Errorf("write frame: %w", err)
+	}
+
+	// Append to index.ndjson: one JSON object per line.
+	idxPath := filepath.Join(framesDir, "index.ndjson")
+	f, err := os.OpenFile(idxPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		return fmt.Errorf("open frame index: %w", err)
+	}
+	defer f.Close()
+	line, _ := json.Marshal(map[string]any{"i": idx, "ts": ts, "sz": len(data)})
+	_, err = f.Write(append(line, '\n'))
+	return err
+}
+
+// ── ScreenFrameStore implementation ──────────────────────────────────────────
+
+// ListFrames implements ScreenFrameStore.
+func (ls *LocalStore) ListFrames(_ context.Context, tsid string) ([]ScreenFrameInfo, error) {
+	framesDir := filepath.Join(ls.cfg.LogDir, filepath.FromSlash(tsid), "frames")
+	idxPath := filepath.Join(framesDir, "index.ndjson")
+	f, err := os.Open(idxPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var frames []ScreenFrameInfo
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var m struct {
+			I  int   `json:"i"`
+			Ts int64 `json:"ts"`
+			Sz int   `json:"sz"`
+		}
+		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
+			continue
+		}
+		frames = append(frames, ScreenFrameInfo{Index: m.I, Ts: m.Ts, Size: m.Sz})
+	}
+	return frames, sc.Err()
+}
+
+// OpenFrame implements ScreenFrameStore.
+func (ls *LocalStore) OpenFrame(_ context.Context, tsid, _ string, n int) (io.ReadCloser, error) {
+	p := filepath.Join(ls.cfg.LogDir, filepath.FromSlash(tsid),
+		"frames", fmt.Sprintf("%08d.jpg", n))
+	return os.Open(p)
+}
+
 // ── Filesystem helpers (extracted from replay-server/main.go) ─────────────────
 
 // scanAllSessions walks the two-level logDir/<user>/<session> hierarchy and

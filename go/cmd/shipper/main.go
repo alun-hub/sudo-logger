@@ -13,13 +13,18 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"sync"
 	"syscall"
@@ -61,6 +66,7 @@ var (
 	flagVerifyKey     = flag.String("verifykey", "/etc/sudo-logger/ack-verify.key", "ed25519 public key for ACK verification (PEM)")
 	flagFreezeTimeout = flag.Duration("freeze-timeout", 3*time.Minute, "Terminate a frozen session after this duration of server unreachability (0 = never)")
 	flagDebug         = flag.Bool("debug", false, "Enable verbose debug logging")
+	flagProxyBin      = flag.String("proxy-bin", "/usr/libexec/sudo-logger/wayland-proxy", "Path to the wayland-proxy binary")
 )
 
 // debugLog is a no-op by default; replaced with log.Printf when -debug is set.
@@ -236,6 +242,10 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	// ── Step 3: per-session ACK tracking ──────────────────────────────────
 	const ackLagLimit = int64(2 * time.Second)
+
+	// guiFrames receives JPEG frames from the Wayland proxy for GUI sessions.
+	// Populated in the MsgServerReady case below; consumed after forward() is declared.
+	var guiFrames <-chan []byte
 
 	var (
 		sessionAckMu    sync.Mutex
@@ -451,8 +461,26 @@ func handlePluginConn(pluginConn net.Conn) {
 		return
 	case protocol.MsgServerReady:
 		_, _ = protocol.ReadPayload(sr0, hsPlen)
-		// Sudo is now cleared to fork the child — which inherits the cgroup.
-		protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
+
+		// For GUI sessions (no tty, but has WAYLAND_DISPLAY): start the
+		// Wayland proxy so it's ready before sudo exec's the command.
+		// proxyFrames is read after forward() is declared below.
+		if start.TtyPath == "" && start.WaylandDisplay != "" {
+			proxySocket, frames, proxyErr := startWaylandProxy(
+				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir)
+			if proxyErr != nil {
+				log.Printf("[%s] wayland-proxy: %v — GUI session without screen capture",
+					start.SessionID, proxyErr)
+				protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
+			} else {
+				guiFrames = frames
+				body, _ := json.Marshal(protocol.SessionReadyBody{ProxyDisplay: proxySocket})
+				protocol.WriteMessage(pw, protocol.MsgSessionReady, body)
+				log.Printf("[%s] wayland-proxy started, socket=%s", start.SessionID, proxySocket)
+			}
+		} else {
+			protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
+		}
 	default:
 		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
 		markDead()
@@ -557,6 +585,18 @@ func handlePluginConn(pluginConn net.Conn) {
 			}
 			sessionAckMu.Unlock()
 		}
+	}
+
+	// ── Step 6c: forward Wayland proxy frames to server ──────────────────
+	if guiFrames != nil {
+		go func() {
+			var screenSeq uint64
+			for frame := range guiFrames {
+				screenSeq++
+				chunk := encodeScreenChunk(screenSeq, time.Now().UnixNano(), frame)
+				forward(protocol.MsgChunk, chunk)
+			}
+		}()
 	}
 
 	// ── Step 7: main loop — SESSION_START already handled above ───────────
@@ -778,6 +818,75 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// encodeScreenChunk builds a CHUNK payload with STREAM_SCREEN.
+// Layout: [8 seq][8 ts_ns][1 stream=0x05][4 datalen][data]
+func encodeScreenChunk(seq uint64, tsNS int64, data []byte) []byte {
+	buf := make([]byte, 21+len(data))
+	binary.BigEndian.PutUint64(buf[0:], seq)
+	binary.BigEndian.PutUint64(buf[8:], uint64(tsNS))
+	buf[16] = protocol.StreamScreen
+	binary.BigEndian.PutUint32(buf[17:], uint32(len(data)))
+	copy(buf[21:], data)
+	return buf
+}
+
+// startWaylandProxy starts the wayland-proxy subprocess for a GUI session.
+// It returns the proxy socket path and a channel that receives JPEG frame
+// bytes as they are produced. The channel is closed when the proxy exits.
+// The caller must send the proxy socket path back to the plugin via SESSION_READY.
+func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string) (
+	proxySocket string, frames <-chan []byte, err error,
+) {
+	// Resolve the real compositor socket path.
+	realSocket := waylandDisplay
+	if !filepath.IsAbs(realSocket) {
+		if xdgRuntimeDir == "" {
+			return "", nil, fmt.Errorf("wayland-proxy: WAYLAND_DISPLAY is relative but XDG_RUNTIME_DIR is empty")
+		}
+		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
+	}
+
+	proxySocket = filepath.Join("/run/sudo-logger", "wayland-"+sessionID+".sock")
+
+	cmd := exec.Command(*flagProxyBin, "--real", realSocket, "--socket", proxySocket)
+	cmd.Stderr = os.Stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", nil, fmt.Errorf("wayland-proxy: stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", nil, fmt.Errorf("wayland-proxy: start: %w", err)
+	}
+
+	ch := make(chan []byte, 32)
+	go func() {
+		defer close(ch)
+		defer cmd.Wait()
+		var sizeBuf [4]byte
+		for {
+			if _, err := io.ReadFull(stdout, sizeBuf[:]); err != nil {
+				return
+			}
+			size := binary.BigEndian.Uint32(sizeBuf[:])
+			if size == 0 || size > 10*1024*1024 { // sanity: max 10 MB per frame
+				return
+			}
+			frame := make([]byte, size)
+			if _, err := io.ReadFull(stdout, frame); err != nil {
+				return
+			}
+			select {
+			case ch <- frame:
+			default:
+				// Drop frame if shipper is behind — prefer liveness over completeness.
+			}
+		}
+	}()
+
+	return proxySocket, ch, nil
 }
 
 // Ack is re-declared here for the verifyAckHMAC helper so we don't
