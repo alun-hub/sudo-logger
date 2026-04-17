@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.3
+Version:        1.17.4
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.4-1
+- fix(wayland): create proxy socket in /run/user/<uid>/ (user_tmp_t) instead of
+  /run/sudo-logger/ (sudo_shipper_var_run_t); SELinux silently denies unconfined_t
+  from connecting to sudo_shipper_var_run_t sockets, causing gvim to fall back to
+  X11 and bypass the proxy entirely
+
 * Thu Apr 17 2026 sudo-logger 1.17.3-1
 - fix(service): ProtectHome=read-only + ReadWritePaths=/run/user so the
   wayland-proxy child can connect() to the compositor socket in /run/user/<uid>/

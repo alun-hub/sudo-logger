@@ -867,9 +867,15 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
 	}
 
-	// Create the proxy socket in the shipper's own run directory which is
-	// always writable (ReadWritePaths=/run/sudo-logger in the service unit).
-	proxySocket = filepath.Join("/run/sudo-logger", "wayland-"+sessionID+".sock")
+	// Create the proxy socket in /run/user/<uid>/ so that the sudo'd command
+	// (running as unconfined_t) can connect to it. A socket in /run/sudo-logger/
+	// has SELinux type sudo_shipper_var_run_t; unconfined_t is silently denied
+	// connectto on that type and the GUI app falls back to X11. /run/user/<uid>/
+	// has type user_tmp_t which unconfined_t can freely connect to.
+	// The shipper can write here because ReadWritePaths=/run/user is set in the
+	// service unit (ProtectHome=read-only overrides /run/user but ReadWritePaths
+	// restores write access).
+	proxySocket = filepath.Join(xdgRuntimeDir, "sudo-wayland-"+sessionID+".sock")
 
 	// Create the listening socket as root before spawning the proxy.
 	os.Remove(proxySocket)
