@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.16.1
+Version:        1.16.2
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -128,6 +128,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.16.2-1
+- fix(plugin): read WAYLAND_DISPLAY and XDG_RUNTIME_DIR from
+  /proc/self/environ instead of user_env[]; sudo env_reset strips
+  WAYLAND_DISPLAY before the I/O plugin open() callback sees user_env[]
+
 * Thu Apr 17 2026 sudo-logger 1.16.1-1
 - fix: start wayland-proxy whenever WAYLAND_DISPLAY is set, not only when
   tty_path is empty; "sudo gvim" from a terminal was never captured because
