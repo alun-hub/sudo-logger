@@ -702,17 +702,40 @@ static int plugin_open(unsigned int        version,
     if (flen > 0 && flags[flen - 1] == ',')
         flags[flen - 1] = '\0';
 
-    /* ── Extract Wayland env vars from user_env[] for GUI session detection ── */
-    const char *wayland_display  = "";
-    const char *xdg_runtime_dir  = "";
-    if (user_env) {
-        for (int i = 0; user_env[i] != NULL; i++) {
-            if      (strncmp(user_env[i], "WAYLAND_DISPLAY=", 16) == 0)
-                wayland_display = user_env[i] + 16;
-            else if (strncmp(user_env[i], "XDG_RUNTIME_DIR=", 16) == 0)
-                xdg_runtime_dir = user_env[i] + 16;
+    /* ── Extract Wayland env vars for GUI session detection ─────────────────
+     * sudo's env_reset strips WAYLAND_DISPLAY before user_env[] is passed to
+     * the I/O plugin.  Read /proc/self/environ instead — it holds the sudo
+     * process's own environment (inherited from the invoking shell) before
+     * any env_reset processing.
+     * Buffers are static so the pointers remain valid for the lifetime of the
+     * snprintf call below.  Kept as empty strings on any read error.        */
+    static char proc_wayland[256];
+    static char proc_xdgdir[256];
+    proc_wayland[0] = '\0';
+    proc_xdgdir[0]  = '\0';
+
+    int penv_fd = open("/proc/self/environ", O_RDONLY | O_CLOEXEC);
+    if (penv_fd >= 0) {
+        /* /proc/self/environ is NUL-delimited name=value pairs.
+         * Read up to 64 KB — more than enough for a typical environment. */
+        char envbuf[65536];
+        ssize_t envlen = read(penv_fd, envbuf, sizeof(envbuf) - 1);
+        close(penv_fd);
+        if (envlen > 0) {
+            envbuf[envlen] = '\0';
+            const char *p = envbuf;
+            while (p < envbuf + envlen) {
+                size_t len = strlen(p);
+                if (strncmp(p, "WAYLAND_DISPLAY=", 16) == 0)
+                    snprintf(proc_wayland, sizeof(proc_wayland), "%s", p + 16);
+                else if (strncmp(p, "XDG_RUNTIME_DIR=", 16) == 0)
+                    snprintf(proc_xdgdir,  sizeof(proc_xdgdir),  "%s", p + 16);
+                p += len + 1;
+            }
         }
     }
+    const char *wayland_display = proc_wayland;
+    const char *xdg_runtime_dir = proc_xdgdir;
 
     /* JSON-escape fields that may contain backslashes, quotes, or spaces */
     char resolved_j[512];
