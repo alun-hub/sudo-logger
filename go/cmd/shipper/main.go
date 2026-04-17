@@ -462,10 +462,12 @@ func handlePluginConn(pluginConn net.Conn) {
 	case protocol.MsgServerReady:
 		_, _ = protocol.ReadPayload(sr0, hsPlen)
 
-		// For GUI sessions (no tty, but has WAYLAND_DISPLAY): start the
-		// Wayland proxy so it's ready before sudo exec's the command.
-		// proxyFrames is read after forward() is declared below.
-		if start.TtyPath == "" && start.WaylandDisplay != "" {
+		// Start Wayland proxy whenever WAYLAND_DISPLAY is set — even when a
+		// tty is present (e.g. "sudo gvim" from a terminal has both a pty
+		// and a Wayland display).  The proxy captures only surfaces that the
+		// sudo'd command actually creates; terminal-only commands produce no
+		// frames and the session falls through to normal terminal replay.
+		if start.WaylandDisplay != "" {
 			proxySocket, frames, proxyErr := startWaylandProxy(
 				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir)
 			if proxyErr != nil {
