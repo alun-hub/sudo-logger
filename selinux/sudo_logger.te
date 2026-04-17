@@ -22,6 +22,10 @@ files_config_file(sudo_shipper_etc_t)
 type sudo_logger_plugin_t;
 files_type(sudo_logger_plugin_t)
 
+## The wayland-proxy helper executed by sudo-shipper
+type wayland_proxy_exec_t;
+files_type(wayland_proxy_exec_t)
+
 ########################################
 #
 # sudo_shipper_t local policy
@@ -77,6 +81,18 @@ allow sudo_shipper_t domain:process { getpgid };
 # Send signals (including SIGSTOP/SIGCONT) to session processes.
 # sigcont is not a separate SELinux permission — it is covered by signal.
 allow sudo_shipper_t domain:process { signal sigstop };
+
+# Execute wayland-proxy without domain transition — runs as sudo_shipper_t.
+# wayland-proxy needs to connect to the user's Wayland socket (/run/user/<uid>/)
+# and create the proxy socket in /run/sudo-logger/.
+allow sudo_shipper_t wayland_proxy_exec_t:file { read open execute execute_no_trans map getattr };
+
+# Connect to Wayland compositor socket in /run/user/<uid>/
+# user_tmp_t covers /run/user/<uid>/ on Fedora with systemd-logind
+require { type user_tmp_t; }
+allow sudo_shipper_t user_tmp_t:dir search;
+allow sudo_shipper_t user_tmp_t:sock_file { read write };
+allow sudo_shipper_t self:unix_stream_socket { connectto };
 
 # Logging
 logging_send_syslog_msg(sudo_shipper_t)

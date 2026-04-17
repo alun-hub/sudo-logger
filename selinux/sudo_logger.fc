@@ -19,3 +19,6 @@
 
 # Configuration and key material  (/etc/sudo-logger/)
 /etc/sudo-logger(/.*)?                  gen_context(system_u:object_r:sudo_shipper_etc_t,s0)
+
+# wayland-proxy helper binary
+/usr/libexec/sudo-logger/wayland-proxy  --  gen_context(system_u:object_r:wayland_proxy_exec_t,s0)
