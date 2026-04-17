@@ -22,6 +22,7 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Server installation](#2-server-installation)
   - [Client installation](#3-client-installation)
 - [Configuration](#configuration)
+  - [Wayland screen capture](#wayland-screen-capture)
   - [Distributed storage (S3 + PostgreSQL)](#distributed-storage-s3--postgresql)
 - [Web replay interface](#web-replay-interface)
   - [Authentication](#authentication)
@@ -122,12 +123,19 @@ sudo session:
   remains alive as long as the OS retransmission timeout has not expired
   (typically several minutes on Linux with default settings)
 - Terminates frozen sessions that have been unreachable for longer than
-  `-freeze-timeout` (default 5 min) — sends `FREEZE_TIMEOUT` to the plugin,
+  `freeze_timeout` (default 3 min) — sends `FREEZE_TIMEOUT` to the plugin,
   which unfreezes the cgroup and prints a human-readable banner before
   killing the session
 - Creates a per-session cgroup subtree to freeze all child processes
 - Tracks processes that escape to foreign cgroups (moved by GNOME/systemd)
   and freezes them via SIGSTOP when safe (see [Freeze mechanism](#freeze-mechanism))
+- Spawns a `wayland-proxy` subprocess for GUI sessions (when `WAYLAND_DISPLAY`
+  is set); the proxy intercepts `wl_surface_commit` to capture JPEG frames
+  without any compositor patches (see [Wayland screen capture](#wayland-screen-capture))
+- Enters linger mode after `sudo` exits if GUI processes remain in the session
+  cgroup — holds the server connection open until all GUI processes exit, then
+  sends SESSION_END
+- Reads all settings from `/etc/sudo-logger/shipper.conf` (key = value format)
 
 ### Go log server (`go/cmd/server/`)
 
@@ -204,13 +212,14 @@ migrate-sessions \
 ## Features
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
+- **Wayland screen capture**: GUI programs started with `sudo` on a Wayland desktop are screen-recorded via a transparent compositor proxy — no compositor patches required. The replay interface shows an image slideshow for GUI sessions.
 - Active session terminated if shipper is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the shipper was killed mid-recording
 - SELinux policy for `sudo-shipper` (enforcing mode, ships in the `selinux/` directory)
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
 - Freeze within ~1 s of network loss; automatic recovery when network returns
-- Frozen sessions automatically terminated after configurable timeout (default 5 min) with a human-readable error banner — prevents permanent hangs when the TCP connection dies
+- Frozen sessions automatically terminated after configurable timeout (default 3 min) with a human-readable error banner — prevents permanent hangs when the TCP connection dies
 - Terminal sessions (bash, zsh, …) frozen via `cgroup.freeze` — no job control triggered
 - GUI programs with own process group (gvim, okular, …) frozen via direct SIGSTOP/SIGCONT
 - cgroup namespace isolation (`CLONE_NEWCGROUP`) prevents child processes from escaping the freeze cgroup, even with `CAP_SYS_ADMIN`
@@ -386,7 +395,7 @@ chmod 600 /etc/sudo-logger/client.key
 
 # Set the log server address
 vim /etc/sudo-logger/shipper.conf
-# Change: LOGSERVER=logserver.example.com:9876
+# Change: server = logserver.example.com:9876
 
 # Start service
 systemctl enable --now sudo-shipper
@@ -411,42 +420,54 @@ On uninstall (`dnf remove`), this line is automatically removed.
 
 ### Client: `/etc/sudo-logger/shipper.conf`
 
-```bash
-# Address of the remote log server
-LOGSERVER=logserver.example.com:9876
+All shipper settings live in a single `key = value` config file. Lines
+starting with `#` are comments. All keys are optional — the defaults below
+match a standard RPM installation.
+
+```ini
+# Address of the remote log server (required — change this).
+server = logserver.example.com:9876
+
+# TLS mutual authentication — paths to PEM-encoded files.
+# Defaults match the paths installed by the RPM.
+#cert          = /etc/sudo-logger/client.crt
+#key           = /etc/sudo-logger/client.key
+#ca            = /etc/sudo-logger/ca.crt
+#verify_key    = /etc/sudo-logger/ack-verify.key
+
+# Unix socket the sudo plugin connects to.
+#socket        = /run/sudo-logger/plugin.sock
+
+# Wayland screen capture via wayland-proxy.
+# Set to false to disable recording of GUI sessions entirely.
+#wayland       = true
+
+# Path to the wayland-proxy helper binary.
+#proxy_bin     = /usr/libexec/sudo-logger/wayland-proxy
+
+# How long to keep a session frozen when the log server is unreachable
+# before abandoning it. Use Go duration syntax (e.g. 3m, 90s, 0 = never).
+#freeze_timeout = 3m
+
+# Verbose debug logging to syslog/journal.
+#debug         = false
 ```
 
-All other shipper parameters (certificate paths, socket path) are set in
-the systemd unit file `/usr/lib/systemd/system/sudo-shipper.service`.
-To override, create a drop-in:
+After editing, restart the shipper:
 
 ```bash
-systemctl edit sudo-shipper
+sudo systemctl kill -s SIGTERM sudo-shipper.service
 ```
 
 #### Verbose debug logging
 
 By default, `sudo-shipper` only logs errors and key events (session start,
-freeze/unfreeze). Detailed cgroup operational messages (pid moved, escaped,
-frozen state changes, removed) are suppressed to keep journald output clean.
-
-To enable verbose logging for troubleshooting, add `-debug` to the service:
-
-```ini
-# /etc/systemd/system/sudo-shipper.service.d/override.conf
-[Service]
-ExecStart=
-ExecStart=/usr/bin/sudo-shipper -debug \
-    -server ... -socket ... -cert ... -key ... -ca ... -verifykey ...
-```
-
-Or temporarily on the command line:
+freeze/unfreeze). To enable verbose logging, set `debug = true` in
+`shipper.conf` and restart the shipper. Then watch the full output:
 
 ```bash
-sudo-shipper -debug -server logserver:9876 ...
+journalctl -u sudo-shipper -f
 ```
-
-Then watch the full output with `journalctl -u sudo-shipper -f`.
 
 ### Server: `/etc/sudo-logger/server.conf`
 
@@ -548,41 +569,56 @@ After import, rules are served from the database and changes via the Settings UI
 | `ackLagLimit` | `2s` | Unacknowledged chunk age before reporting dead to plugin |
 | `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
 
-### Shipper command-line flags (relevant to freeze behaviour)
+### Shipper config keys (relevant to freeze and Wayland behaviour)
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-freeze-timeout` | `5m` | Terminate a frozen session after this duration of server unreachability. Prevents permanent hangs when the TCP connection dies. Set to `0` to disable (not recommended). |
+All of these go in `/etc/sudo-logger/shipper.conf`:
 
-### Blocking GUI applications (sudoers)
+| Key | Default | Description |
+|-----|---------|-------------|
+| `freeze_timeout` | `3m` | Terminate a frozen session after this duration of server unreachability. Prevents permanent hangs when the TCP connection dies. Set to `0` to disable (not recommended). |
+| `wayland` | `true` | Enable Wayland screen capture for GUI sessions. Set to `false` to disable. |
+| `proxy_bin` | `/usr/libexec/sudo-logger/wayland-proxy` | Path to the wayland-proxy helper binary. |
 
-Graphical applications started via `sudo` (e.g. `sudo gvim`, `sudo nautilus`)
-cannot be meaningfully audited: they produce no terminal I/O, so the session
-recording is empty. If the log server becomes unreachable, the GUI window
-freezes silently with no indication to the user, and the only recovery is
-`kill -9` from another terminal.
+### Wayland screen capture
 
-To prevent this, remove the `DISPLAY` variable from all sudo sessions. Without
-`DISPLAY`, GUI programs fail immediately with *"cannot open display"* instead of
-hanging, while all terminal-based commands continue to work normally.
+GUI programs started with `sudo` on a Wayland desktop produce no terminal I/O
+and therefore no xterm.js replay. sudo-logger handles this by spawning a
+transparent Wayland proxy between the sudo'd application and the compositor.
+The proxy intercepts `wl_surface_commit` calls and JPEG-encodes each frame;
+the replay interface shows these as an image slideshow.
 
-Add the following to `/etc/sudoers` (use `visudo`):
+**Requirements:**
+- A running Wayland compositor (KDE, GNOME, …)
+- `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` preserved through sudo — add to
+  `/etc/sudoers` (use `visudo`):
+
+```
+Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR"
+```
+
+This is included in the sudoers snippet installed by the client RPM
+(`/etc/sudoers.d/sudo-logger-wayland`).
+
+**Disable Wayland capture** (e.g. on headless or X11-only machines):
+
+```ini
+# /etc/sudo-logger/shipper.conf
+wayland = false
+```
+
+When `wayland = false`, GUI sessions are still logged (start/end times,
+command name, cgroup freeze) but no screen frames are captured.
+
+#### Blocking X11 GUI applications (legacy / X11 deployments)
+
+On systems without Wayland or when Wayland capture is disabled, graphical
+applications produce empty session recordings. To prevent unrecorded GUI
+sessions entirely, remove `DISPLAY` from all sudo sessions so GUI programs
+fail immediately with *"cannot open display"*:
 
 ```
 Defaults env_delete += DISPLAY
 ```
-
-To restrict this to specific users or hosts only:
-
-```
-Defaults:alice  env_delete += DISPLAY
-Defaults@webservers  env_delete += DISPLAY
-```
-
-> **Why this matters for auditability:** a user who can launch a graphical
-> file manager as root bypasses the session log entirely — there are no
-> keystrokes or terminal output to record. Removing `DISPLAY` ensures that
-> all privileged actions go through a terminal and are captured in full.
 
 ---
 
