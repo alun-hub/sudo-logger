@@ -87,12 +87,17 @@ allow sudo_shipper_t domain:process { signal sigstop };
 # and create the proxy socket in /run/sudo-logger/.
 allow sudo_shipper_t wayland_proxy_exec_t:file { read open execute execute_no_trans map getattr };
 
-# Connect to Wayland compositor socket in /run/user/<uid>/
+# Wayland proxy socket operations in /run/user/<uid>/
 # user_tmp_t covers /run/user/<uid>/ on Fedora with systemd-logind
+# The proxy (running as the invoking user under sudo_shipper_t) must:
+#   - search/stat the directory to locate the compositor socket
+#   - create its own proxy socket (write + add_name on dir, create on sock_file)
+#   - connect to the compositor socket (connectto + sock_file read/write)
+#   - remove its socket on exit (remove_name on dir, unlink on sock_file)
 require { type user_tmp_t; }
-allow sudo_shipper_t user_tmp_t:dir { search getattr };
-allow sudo_shipper_t user_tmp_t:sock_file { read write };
-allow sudo_shipper_t self:unix_stream_socket { connectto };
+allow sudo_shipper_t user_tmp_t:dir { search getattr write add_name remove_name };
+allow sudo_shipper_t user_tmp_t:sock_file { create read write unlink };
+allow sudo_shipper_t self:unix_stream_socket { connectto create_stream_socket_perms };
 
 # Logging
 logging_send_syslog_msg(sudo_shipper_t)

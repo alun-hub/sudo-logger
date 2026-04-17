@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.16.8
+Version:        1.16.9
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.16.9-1
+- fix(selinux): allow proxy to bind/unlink its socket in /run/user/<uid>/
+  (user_tmp_t:dir write+add_name+remove_name, sock_file create+unlink)
+
 * Thu Apr 17 2026 sudo-logger 1.16.8-1
 - fix: pass user_uid/user_gid from plugin via SESSION_START; shipper uses
   them directly — no /etc/passwd read, works with SSSD/LDAP
