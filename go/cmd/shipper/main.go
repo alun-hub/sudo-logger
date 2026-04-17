@@ -24,8 +24,10 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -425,9 +427,10 @@ func handlePluginConn(pluginConn net.Conn) {
 	// accepted (MsgServerReady) so that block-policy denials reach the plugin
 	// before sudo forks the child process.
 	serverBuf := bufio.NewWriter(serverConn)
-	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v",
+	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v wayland=%q xdg=%q",
 		start.SessionID, start.User, start.Host, start.Pid,
-		truncate(start.Command, 60), cg != nil)
+		truncate(start.Command, 60), cg != nil,
+		start.WaylandDisplay, start.XdgRuntimeDir)
 	if err := protocol.WriteMessage(serverBuf, protocol.MsgSessionStart, startPayload); err != nil {
 		log.Printf("[%s] forward SESSION_START: %v", start.SessionID, err)
 		markDead()
@@ -468,8 +471,9 @@ func handlePluginConn(pluginConn net.Conn) {
 		// sudo'd command actually creates; terminal-only commands produce no
 		// frames and the session falls through to normal terminal replay.
 		if start.WaylandDisplay != "" {
+			uid, gid := resolveUserIDs(start.User)
 			proxySocket, frames, proxyErr := startWaylandProxy(
-				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir)
+				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir, uid, gid)
 			if proxyErr != nil {
 				log.Printf("[%s] wayland-proxy: %v — GUI session without screen capture",
 					start.SessionID, proxyErr)
@@ -815,6 +819,19 @@ func buildTLSConfig() (*tls.Config, error) {
 	}, nil
 }
 
+// resolveUserIDs looks up the UID and GID for username.
+// Falls back to (65534, 65534) — nobody — on any error.
+func resolveUserIDs(username string) (uid, gid uint32) {
+	u, err := user.Lookup(username)
+	if err != nil {
+		log.Printf("resolveUserIDs(%q): %v — using nobody", username, err)
+		return 65534, 65534
+	}
+	uid64, _ := strconv.ParseUint(u.Uid, 10, 32)
+	gid64, _ := strconv.ParseUint(u.Gid, 10, 32)
+	return uint32(uid64), uint32(gid64)
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -838,7 +855,12 @@ func encodeScreenChunk(seq uint64, tsNS int64, data []byte) []byte {
 // It returns the proxy socket path and a channel that receives JPEG frame
 // bytes as they are produced. The channel is closed when the proxy exits.
 // The caller must send the proxy socket path back to the plugin via SESSION_READY.
-func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string) (
+//
+// The proxy process is started as the invoking user (uid/gid) so it can
+// connect to the Wayland compositor socket in /run/user/<uid>/.
+// The proxy socket is placed in the user's XDG_RUNTIME_DIR so the user
+// can create it and gvim (running as root) can connect to it.
+func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid uint32) (
 	proxySocket string, frames <-chan []byte, err error,
 ) {
 	// Resolve the real compositor socket path.
@@ -850,10 +872,20 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string) (
 		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
 	}
 
-	proxySocket = filepath.Join("/run/sudo-logger", "wayland-"+sessionID+".sock")
+	// Place the proxy socket in the user's runtime dir so the user-owned
+	// proxy process can create it.  Root (gvim) can still connect because
+	// root bypasses DAC on socket files.
+	if xdgRuntimeDir == "" {
+		xdgRuntimeDir = fmt.Sprintf("/run/user/%d", uid)
+	}
+	proxySocket = filepath.Join(xdgRuntimeDir, "sudo-wayland-"+sessionID+".sock")
 
 	cmd := exec.Command(*flagProxyBin, "--real", realSocket, "--socket", proxySocket)
 	cmd.Stderr = os.Stderr
+	// Run proxy as the invoking user so it can access the compositor socket.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{Uid: uid, Gid: gid},
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
