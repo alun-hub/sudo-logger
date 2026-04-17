@@ -611,14 +611,16 @@ func handlePluginConn(pluginConn net.Conn) {
 	}
 
 	// ── Step 7: main loop — SESSION_START already handled above ───────────
+	var savedSessionEnd []byte
+loop:
 	for {
 		msgType, plen, err := protocol.ReadHeader(pr)
 		if err != nil {
-			return
+			break loop
 		}
 		payload, err := protocol.ReadPayload(pr, plen)
 		if err != nil {
-			return
+			break loop
 		}
 
 		switch msgType {
@@ -630,28 +632,51 @@ func handlePluginConn(pluginConn net.Conn) {
 			pluginWriteMu.Unlock()
 			if err != nil {
 				log.Printf("write ack response: %v", err)
-				return
+				break loop
 			}
 
 		case protocol.MsgChunk:
 			forward(protocol.MsgChunk, payload)
 
 		case protocol.MsgSessionEnd:
-			forward(protocol.MsgSessionEnd, payload)
-			// Mark the connection as intentionally closed before closing the
-			// socket.  The heartbeat goroutine may still fire once after this
-			// and call markDead() — setting serverConnAlive=false here ensures
-			// firstFreeze is false so no spurious SESSION_FREEZING is sent.
-			sessionAckMu.Lock()
-			serverConnAlive = false
-			sessionAckMu.Unlock()
-			serverConn.Close()
-			return
+			savedSessionEnd = payload
+			break loop
 
 		default:
 			log.Printf("unknown message type 0x%02x len=%d — ignoring", msgType, plen)
 		}
 	}
+
+	// ── Step 8: linger if GUI processes remain ────────────────────────────
+	//
+	// If the sudo process (the plugin client) has exited but the cgroup still
+	// has running processes, we enter linger mode. We keep the server
+	// connection open and continue to forward Wayland proxy frames until the
+	// cgroup is empty.
+	if cg.hasPids() || cg.hasEscapedRunning() {
+		log.Printf("[%s] sudo exited but GUI processes remain; entering linger mode", start.SessionID)
+		const pollInterval = 1 * time.Second
+		for cg.hasPids() || cg.hasEscapedRunning() {
+			time.Sleep(pollInterval)
+			// Heartbeat goroutine is still running and will call markDead()
+			// (freezing the cgroup) if the server becomes unreachable.
+		}
+		log.Printf("[%s] all GUI processes exited; finishing session", start.SessionID)
+	}
+
+	// ── Step 9: final cleanup ─────────────────────────────────────────────
+	if savedSessionEnd != nil {
+		forward(protocol.MsgSessionEnd, savedSessionEnd)
+	}
+
+	// Mark the connection as intentionally closed before closing the
+	// socket.  The heartbeat goroutine may still fire once after this
+	// and call markDead() — setting serverConnAlive=false here ensures
+	// firstFreeze is false so no spurious SESSION_FREEZING is sent.
+	sessionAckMu.Lock()
+	serverConnAlive = false
+	sessionAckMu.Unlock()
+	serverConn.Close()
 }
 
 // lingerCgroup keeps a session cgroup alive after the sudo process exits so

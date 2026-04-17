@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.4
+Version:        1.17.5
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,17 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.5-1
+- fix(wayland-proxy): readMsg now reads exact bytes into message buffer,
+  fixing protocol desync that caused proxy to fall out of sync with compositor
+- fix(wayland-proxy): add sync.Mutex to proxyState to prevent concurrent map
+  writes between client and server forwarding goroutines
+- fix(wayland-proxy): close local FD copies after parseClientMsg to prevent
+  file descriptor leak
+- fix(shipper): linger mode — keep server connection alive until all GUI
+  processes in session cgroup exit after sudo itself has returned
+- fix(plugin): correct inverted if-condition in WAYLAND_DISPLAY patch syslog
+
 * Thu Apr 17 2026 sudo-logger 1.17.4-1
 - fix(wayland): create proxy socket in /run/user/<uid>/ (user_tmp_t) instead of
   /run/sudo-logger/ (sudo_shipper_var_run_t); SELinux silently denies unconfined_t

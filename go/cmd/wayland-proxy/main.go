@@ -22,12 +22,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"flag"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"log"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -104,6 +106,8 @@ type bufInfo struct {
 }
 
 type proxyState struct {
+	mu sync.Mutex
+
 	objects  map[uint32]objectKind
 	pools    map[uint32]*shmPool
 	buffers  map[uint32]*bufInfo
@@ -228,6 +232,9 @@ func (p *proxyState) captureCommit(surfaceID uint32, out *os.File) {
 // msg is the full message bytes (header + args). fds are any FDs received
 // along with this message via SCM_RIGHTS.
 func (p *proxyState) parseClientMsg(msg []byte, fds []int, out *os.File) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if len(msg) < waylandHdrSize {
 		return
 	}
@@ -290,7 +297,6 @@ func (p *proxyState) parseClientMsg(msg []byte, fds []int, out *os.File) {
 		// mmap the SHM pool
 		data, err := syscall.Mmap(fd, 0, int(size),
 			syscall.PROT_READ, syscall.MAP_SHARED)
-		syscall.Close(fd) // no longer need the fd after mmap
 		if err != nil {
 			log.Printf("mmap shm pool: %v", err)
 			return
@@ -374,6 +380,9 @@ func (p *proxyState) parseClientMsg(msg []byte, fds []int, out *os.File) {
 
 // parseServerMsg handles server→client events we need to track.
 func (p *proxyState) parseServerMsg(msg []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if len(msg) < waylandHdrSize {
 		return
 	}
@@ -439,16 +448,14 @@ func readMsg(conn *net.UnixConn) (msg []byte, fds []int, err error) {
 		// More bytes may come in subsequent reads (TCP-style framing).
 		off := 0
 		for off < len(rest) {
-			extra := make([]byte, 512)
 			extraOOB := make([]byte, 512)
-			nr, noobn, _, _, rerr := conn.ReadMsgUnix(extra, extraOOB)
+			nr, noobn, _, _, rerr := conn.ReadMsgUnix(rest[off:], extraOOB)
 			if rerr != nil {
 				return nil, fds, rerr
 			}
 			if noobn > 0 {
 				fds = append(fds, parseFDs(extraOOB[:noobn])...)
 			}
-			copy(rest[off:], extra[:nr])
 			off += nr
 		}
 	}
@@ -515,6 +522,11 @@ func forwardClientToServer(
 		}
 
 		state.parseClientMsg(msg, localFDs, out)
+
+		// Close local FDs now that parseClientMsg is done with them.
+		for _, fd := range localFDs {
+			syscall.Close(fd)
+		}
 
 		if err := writeMsg(server, msg, remoteFDs); err != nil {
 			for _, fd := range remoteFDs {
@@ -591,7 +603,11 @@ func main() {
 		defer os.Remove(*flagSocket)
 	}
 
-	log.Printf("wayland-proxy: listening on %s → %s", *flagSocket, *flagReal)
+	socketDesc := *flagSocket
+	if socketDesc == "" {
+		socketDesc = fmt.Sprintf("fd:%d", *flagFD)
+	}
+	log.Printf("wayland-proxy: listening on %s → %s", socketDesc, *flagReal)
 
 	// Accept exactly one client connection.
 	clientConn, err := ln.Accept()
@@ -599,6 +615,7 @@ func main() {
 		log.Fatalf("accept: %v", err)
 	}
 	ln.Close()
+	log.Printf("wayland-proxy: client connected")
 
 	// Connect to the real compositor.
 	serverConn, err := net.Dial("unix", *flagReal)

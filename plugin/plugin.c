@@ -919,9 +919,16 @@ static int plugin_open(unsigned int        version,
                                     break;
                                 }
                             }
-                            if (!found) {
+                            if (found) {
+                                syslog(LOG_DEBUG,
+                                    "sudo-logger: patched WAYLAND_DISPLAY → %s",
+                                    entry);
+                            } else {
                                 /* WAYLAND_DISPLAY absent from env (env_reset stripped it).
                                  * setenv() works when !env_reset is configured. */
+                                syslog(LOG_WARNING,
+                                    "sudo-logger: WAYLAND_DISPLAY not in user_env[], "
+                                    "falling back to setenv(%s)", entry);
                                 char tmp[256] = {0};
                                 if (vlen < sizeof(tmp)) {
                                     memcpy(tmp, kp, vlen);
