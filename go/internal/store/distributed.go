@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -223,6 +225,48 @@ CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
 // s3Key converts a TSID to an S3 object key.
 func (d *DistributedStore) s3Key(tsid string) string {
 	return d.cfg.S3Prefix + tsid + "/session.cast"
+}
+
+// s3FrameKey returns the S3 key for screen frame n of tsid.
+func (d *DistributedStore) s3FrameKey(tsid string, n int) string {
+	return fmt.Sprintf("%s%s/frames/%08d.jpg", d.cfg.S3Prefix, tsid, n)
+}
+
+// ListFrames lists screen frame metadata stored in S3 for tsid.
+func (d *DistributedStore) ListFrames(ctx context.Context, tsid string) ([]ScreenFrameInfo, error) {
+	prefix := fmt.Sprintf("%s%s/frames/", d.cfg.S3Prefix, tsid)
+	var frames []ScreenFrameInfo
+	paginator := s3.NewListObjectsV2Paginator(d.s3, &s3.ListObjectsV2Input{
+		Bucket: aws.String(d.cfg.S3Bucket),
+		Prefix: aws.String(prefix),
+	})
+	idx := 0
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list frames: %w", err)
+		}
+		for _, obj := range page.Contents {
+			frames = append(frames, ScreenFrameInfo{
+				Index: idx,
+				Size:  int(aws.ToInt64(obj.Size)),
+			})
+			idx++
+		}
+	}
+	return frames, nil
+}
+
+// OpenFrame returns a ReadCloser for screen frame n of tsid, fetched from S3.
+func (d *DistributedStore) OpenFrame(ctx context.Context, tsid, _ string, n int) (io.ReadCloser, error) {
+	out, err := d.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(d.cfg.S3Bucket),
+		Key:    aws.String(d.s3FrameKey(tsid, n)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get frame %d: %w", n, err)
+	}
+	return out.Body, nil
 }
 
 // bufferPath returns the local write-buffer path for a TSID.
@@ -705,10 +749,11 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
 // ── distributedWriter ─────────────────────────────────────────────────────────
 
 type distributedWriter struct {
-	w         *iolog.Writer
-	tsid      string
-	d         *DistributedStore
-	startTime time.Time
+	w          *iolog.Writer
+	tsid       string
+	d          *DistributedStore
+	startTime  time.Time
+	frameCount int32 // atomically incremented per WriteScreenFrame call
 }
 
 func (dw *distributedWriter) WriteOutput(data []byte, ts int64) error {
@@ -763,6 +808,25 @@ func (dw *distributedWriter) Close() error {
 }
 
 func (dw *distributedWriter) TSID() string { return dw.tsid }
+
+// WriteScreenFrame uploads a single JPEG frame to S3.
+// The frame index is tracked atomically so concurrent calls are safe.
+func (dw *distributedWriter) WriteScreenFrame(data []byte, _ int64) error {
+	n := int(atomic.AddInt32(&dw.frameCount, 1)) - 1
+	key := dw.d.s3FrameKey(dw.tsid, n)
+	size := int64(len(data))
+	_, err := dw.d.s3.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket:        aws.String(dw.d.cfg.S3Bucket),
+		Key:           aws.String(key),
+		Body:          bytes.NewReader(data),
+		ContentLength: aws.Int64(size),
+		ContentType:   aws.String("image/jpeg"),
+	})
+	if err != nil {
+		log.Printf("store/distributed: write frame %d for %s: %v", n, dw.tsid, err)
+	}
+	return err
+}
 
 // uploadToS3 uploads the local buffer file to S3 with up to 3 retries.
 // Acquires s3UploadSem to bound the number of concurrent uploads.
