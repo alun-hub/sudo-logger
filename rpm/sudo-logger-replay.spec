@@ -127,7 +127,7 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 - feat: session-view audit log — GET /api/access-log with ?viewer= and ?limit=
 - feat: structured journalctl line per session view with direct replay URL
 
-* Mon Apr 06 2026 sudo-logger 1.13.0-1
+* Sat Apr 05 2026 sudo-logger 1.13.0-1
 - feat: SIEM forwarding moved to replay server using fsnotify (Alt 2)
   - watches for ACTIVE marker removal; sends event after session fully closed
   - risk_score and risk_reasons included in JSON/CEF/OCSF SIEM events
