@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.6
+Version:        1.17.7
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -136,6 +136,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.7-1
+- fix(service): remove ProtectHome — it makes /run/user inaccessible even with
+  ReadWritePaths=/run/user, breaking the wayland-proxy compositor connection
+
 * Thu Apr 17 2026 sudo-logger 1.17.6-1
 - fix(spec): add wayland-proxy to chattr -i/%posttrans/+i/%preun scriptlets
 

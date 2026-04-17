@@ -32,7 +32,9 @@ User=root
 # The SELinux policy for sudo_shipper_t provides confinement instead.
 SELinuxContext=system_u:system_r:sudo_shipper_t:s0-s0:c0.c1023
 ProtectSystem=strict
-ProtectHome=read-only
+# ProtectHome is omitted: wayland-proxy spawns in /run/user/<uid>/ which
+# ProtectHome=yes or =read-only makes inaccessible/read-only in the service
+# mount namespace. SELinux policy (sudo_shipper_t) provides confinement instead.
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
@@ -43,10 +45,6 @@ ProtectKernelModules=yes
 LockPersonality=yes
 RestrictNamespaces=yes
 RestrictSUIDSGID=yes
-# /run/sudo-logger: shipper writes its Unix socket and PID file here.
-# /run/user: wayland-proxy subprocess (uid=1000) must connect to the
-# compositor socket at /run/user/<uid>/wayland-N. ProtectHome=read-only
-# makes /run/user read-only; this entry overrides that restriction.
 ReadWritePaths=/run/sudo-logger /run/user
 # Delegate=yes grants this service ownership of its cgroup subtree so it
 # can create per-session sub-cgroups and freeze them when the log server
