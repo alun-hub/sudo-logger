@@ -556,25 +556,40 @@ func forwardServerToClient(
 
 func main() {
 	flagReal   := flag.String("real", "", "Path to the real Wayland compositor socket")
-	flagSocket := flag.String("socket", "", "Path for our proxy socket")
+	flagSocket := flag.String("socket", "", "Path for our proxy socket (create and bind)")
+	flagFD     := flag.Int("fd", 0, "Already-listening socket fd passed by the shipper")
 	flag.Parse()
 
-	if *flagReal == "" || *flagSocket == "" {
-		log.Fatal("--real and --socket are required")
+	if *flagReal == "" {
+		log.Fatal("--real is required")
+	}
+	if *flagFD == 0 && *flagSocket == "" {
+		log.Fatal("one of --fd or --socket is required")
 	}
 
-	// Remove stale proxy socket.
-	os.Remove(*flagSocket)
+	log.Printf("wayland-proxy uid=%d gid=%d", os.Getuid(), os.Getgid())
 
-	ln, err := net.Listen("unix", *flagSocket)
-	if err != nil {
-		log.Fatalf("listen %s: %v", *flagSocket, err)
+	var ln net.Listener
+	var err error
+	if *flagFD > 0 {
+		// Socket was created and is already listening; shipper passed the fd.
+		f := os.NewFile(uintptr(*flagFD), "proxy-socket")
+		ln, err = net.FileListener(f)
+		f.Close()
+		if err != nil {
+			log.Fatalf("FileListener fd=%d: %v", *flagFD, err)
+		}
+	} else {
+		os.Remove(*flagSocket)
+		ln, err = net.Listen("unix", *flagSocket)
+		if err != nil {
+			log.Fatalf("listen %s: %v", *flagSocket, err)
+		}
+		if err := os.Chmod(*flagSocket, 0700); err != nil {
+			log.Fatalf("chmod proxy socket: %v", err)
+		}
+		defer os.Remove(*flagSocket)
 	}
-	// Only the user who owns the socket should connect.
-	if err := os.Chmod(*flagSocket, 0700); err != nil {
-		log.Fatalf("chmod proxy socket: %v", err)
-	}
-	defer os.Remove(*flagSocket)
 
 	log.Printf("wayland-proxy: listening on %s → %s", *flagSocket, *flagReal)
 

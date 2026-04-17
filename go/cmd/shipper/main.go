@@ -842,10 +842,12 @@ func encodeScreenChunk(seq uint64, tsNS int64, data []byte) []byte {
 // bytes as they are produced. The channel is closed when the proxy exits.
 // The caller must send the proxy socket path back to the plugin via SESSION_READY.
 //
-// The proxy process is started as the invoking user (uid/gid) so it can
-// connect to the Wayland compositor socket in /run/user/<uid>/.
-// The proxy socket is placed in the user's XDG_RUNTIME_DIR so the user
-// can create it and gvim (running as root) can connect to it.
+// The shipper (root) creates the listening socket in /run/sudo-logger/ so it
+// lands in the service's writable namespace (ProtectSystem=strict makes
+// /run/user/<uid>/ read-only for child processes even when they run as the
+// user).  The open listener fd is handed to the proxy via ExtraFiles (fd 3)
+// so the proxy never needs to bind itself.  The proxy still runs as the
+// invoking user so it can connect to the compositor socket in /run/user/<uid>/.
 func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid uint32) (
 	proxySocket string, frames <-chan []byte, err error,
 ) {
@@ -858,28 +860,49 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
 	}
 
-	// Place the proxy socket in the user's runtime dir so the user-owned
-	// proxy process can create it.  Root (gvim) can still connect because
-	// root bypasses DAC on socket files.
-	if xdgRuntimeDir == "" {
-		xdgRuntimeDir = fmt.Sprintf("/run/user/%d", uid)
-	}
-	proxySocket = filepath.Join(xdgRuntimeDir, "sudo-wayland-"+sessionID+".sock")
+	// Create the proxy socket in the shipper's own run directory which is
+	// always writable (ReadWritePaths=/run/sudo-logger in the service unit).
+	proxySocket = filepath.Join("/run/sudo-logger", "wayland-"+sessionID+".sock")
 
-	cmd := exec.Command(*flagProxyBin, "--real", realSocket, "--socket", proxySocket)
+	// Create the listening socket as root before spawning the proxy.
+	os.Remove(proxySocket)
+	ln, err := net.Listen("unix", proxySocket)
+	if err != nil {
+		return "", nil, fmt.Errorf("wayland-proxy: listen %s: %w", proxySocket, err)
+	}
+	if err := os.Chmod(proxySocket, 0666); err != nil {
+		ln.Close()
+		return "", nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
+	}
+	// File() dups the fd; close the net.Listener (our original) immediately.
+	lnFile, err := ln.(*net.UnixListener).File()
+	ln.Close()
+	if err != nil {
+		os.Remove(proxySocket)
+		return "", nil, fmt.Errorf("wayland-proxy: socket fd: %w", err)
+	}
+
+	// Pass the listener fd as fd 3 (ExtraFiles[0]).
+	cmd := exec.Command(*flagProxyBin, "--real", realSocket, "--fd", "3")
 	cmd.Stderr = os.Stderr
-	// Run proxy as the invoking user so it can access the compositor socket.
+	cmd.ExtraFiles = []*os.File{lnFile}
+	// Run proxy as the invoking user so it can connect to the compositor socket.
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: uid, Gid: gid},
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		lnFile.Close()
+		os.Remove(proxySocket)
 		return "", nil, fmt.Errorf("wayland-proxy: stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		lnFile.Close()
+		os.Remove(proxySocket)
 		return "", nil, fmt.Errorf("wayland-proxy: start: %w", err)
 	}
+	lnFile.Close() // child inherited it via ExtraFiles; close our dup
 
 	ch := make(chan []byte, 32)
 	go func() {

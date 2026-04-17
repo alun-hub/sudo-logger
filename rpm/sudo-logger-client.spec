@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.16.9
+Version:        1.17.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -133,6 +133,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.0-1
+- fix(wayland): shipper creates proxy socket in /run/sudo-logger/ (always
+  writable) and passes the fd to wayland-proxy via ExtraFiles; proxy no
+  longer needs to bind in /run/user/<uid>/ which is read-only for child
+  processes due to ProtectSystem=strict in the service unit
+
 * Thu Apr 17 2026 sudo-logger 1.16.9-1
 - fix(selinux): allow proxy to bind/unlink its socket in /run/user/<uid>/
   (user_tmp_t:dir write+add_name+remove_name, sock_file create+unlink)
