@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.16.2
+Version:        1.16.3
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -66,6 +66,10 @@ install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
 install -D -m 0640 shipper.conf \
     %{buildroot}%{_sysconfdir}/sudo-logger/shipper.conf
 
+# Sudoers drop-in: preserve WAYLAND_DISPLAY so the proxy reaches GUI commands
+install -D -m 0440 sudo-logger-wayland.sudoers \
+    %{buildroot}%{_sysconfdir}/sudoers.d/sudo-logger-wayland
+
 # Man pages
 install -D -m 0644 man/sudo-shipper.8 \
     %{buildroot}%{_mandir}/man8/sudo-shipper.8
@@ -124,10 +128,16 @@ fi
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
+%config(noreplace) %attr(0440, root, root) %{_sysconfdir}/sudoers.d/sudo-logger-wayland
 %{_mandir}/man8/sudo-shipper.8*
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.16.3-1
+- fix: install /etc/sudoers.d/sudo-logger-wayland with env_keep for
+  WAYLAND_DISPLAY and XDG_RUNTIME_DIR; sudo env_reset stripped these
+  variables so the wayland-proxy socket was never passed to GUI commands
+
 * Thu Apr 17 2026 sudo-logger 1.16.2-1
 - fix(plugin): read WAYLAND_DISPLAY and XDG_RUNTIME_DIR from
   /proc/self/environ instead of user_env[]; sudo env_reset strips

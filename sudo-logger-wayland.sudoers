@@ -1,0 +1,4 @@
+# sudo-logger: preserve Wayland environment variables so the wayland-proxy
+# can intercept GUI applications launched with sudo.
+# Installed by sudo-logger-client; safe to remove if screen capture is not needed.
+Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR"
