@@ -35,3 +35,5 @@ TODO.md
 package-lock.json
 ui-ux-pro-max-skill/
 go/migrate-sessions
+selinux/*.pp
+selinux/tmp/
