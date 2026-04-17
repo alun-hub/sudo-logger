@@ -26,7 +26,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -470,7 +469,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		// sudo'd command actually creates; terminal-only commands produce no
 		// frames and the session falls through to normal terminal replay.
 		if start.WaylandDisplay != "" {
-			uid, gid := resolveUserIDsFromRuntime(start.XdgRuntimeDir)
+			uid, gid := uint32(start.UserUID), uint32(start.UserGID)
 			proxySocket, frames, proxyErr := startWaylandProxy(
 				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir, uid, gid)
 			if proxyErr != nil {
@@ -818,24 +817,6 @@ func buildTLSConfig() (*tls.Config, error) {
 	}, nil
 }
 
-// resolveUserIDsFromRuntime extracts UID from an XDG_RUNTIME_DIR path like
-// /run/user/1000, then stats the directory to get the actual GID.
-// Falls back to (65534, 65534) — nobody — on any error.
-func resolveUserIDsFromRuntime(xdgRuntimeDir string) (uid, gid uint32) {
-	base := filepath.Base(xdgRuntimeDir)
-	uid64, err := strconv.ParseUint(base, 10, 32)
-	if err != nil {
-		log.Printf("resolveUserIDsFromRuntime(%q): bad path — using nobody", xdgRuntimeDir)
-		return 65534, 65534
-	}
-	info, err := os.Stat(xdgRuntimeDir)
-	if err != nil {
-		log.Printf("resolveUserIDsFromRuntime(%q): stat: %v — uid=%d gid=uid", xdgRuntimeDir, err, uid64)
-		return uint32(uid64), uint32(uid64)
-	}
-	st := info.Sys().(*syscall.Stat_t)
-	return uint32(uid64), st.Gid
-}
 
 func truncate(s string, n int) string {
 	if len(s) <= n {

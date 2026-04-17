@@ -85,6 +85,8 @@ type SessionStart struct {
 	TtyPath         string `json:"tty_path,omitempty"`         // controlling terminal device, e.g. /dev/pts/3; empty for non-tty sessions
 	WaylandDisplay  string `json:"wayland_display,omitempty"`  // $WAYLAND_DISPLAY from the invoking user's env; empty when not set
 	XdgRuntimeDir   string `json:"xdg_runtime_dir,omitempty"`  // $XDG_RUNTIME_DIR from the invoking user's env
+	UserUID         int    `json:"user_uid,omitempty"`         // invoking user's UID from user_info[]
+	UserGID         int    `json:"user_gid,omitempty"`         // invoking user's primary GID from user_info[]
 }
 
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.

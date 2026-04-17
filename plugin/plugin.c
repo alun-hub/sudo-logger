@@ -654,6 +654,8 @@ static int plugin_open(unsigned int        version,
     const char *user    = "unknown";
     const char *host    = "unknown";
     const char *raw_cwd = "/";   /* user_info[cwd] = the invoking user's cwd */
+    int user_uid = -1;
+    int user_gid = -1;
     for (int i = 0; user_info[i] != NULL; i++) {
         if      (strncmp(user_info[i], "user=", 5) == 0)
             user = user_info[i] + 5;
@@ -661,6 +663,10 @@ static int plugin_open(unsigned int        version,
             host = user_info[i] + 5;
         else if (strncmp(user_info[i], "cwd=",  4) == 0)
             raw_cwd = user_info[i] + 4;
+        else if (strncmp(user_info[i], "uid=",  4) == 0)
+            user_uid = (int)strtol(user_info[i] + 4, NULL, 10);
+        else if (strncmp(user_info[i], "gid=",  4) == 0)
+            user_gid = (int)strtol(user_info[i] + 4, NULL, 10);
     }
 
     /* ── Extract metadata from command_info[] ─────────────────────────── */
@@ -792,6 +798,7 @@ static int plugin_open(unsigned int        version,
         "\"rows\":%d,\"cols\":%d,"
         "\"tty_path\":\"%s\","
         "\"wayland_display\":\"%s\",\"xdg_runtime_dir\":\"%s\","
+        "\"user_uid\":%d,\"user_gid\":%d,"
         "\"ts\":%lld,\"pid\":%d}",
         g_session_id, user, host, cmd,
         resolved_j, runas_user_j,
@@ -800,6 +807,7 @@ static int plugin_open(unsigned int        version,
         term_rows, term_cols,
         g_tty_path,
         wayland_j, xdgruntime_j,
+        user_uid, user_gid,
         (long long)now_sec(), (int)getpid());
 
     /* snprintf returns the number of bytes that *would* have been written,
