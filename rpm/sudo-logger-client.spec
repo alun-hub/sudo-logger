@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.5
+Version:        1.17.6
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -80,8 +80,9 @@ install -D -m 0644 man/sudo_logger_plugin.8 \
 # Remove immutable flag from our binaries before RPM writes new files.
 # This is needed for upgrades — on first install the files don't exist yet
 # so the commands silently fail (|| true).
-chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so 2>/dev/null || true
-chattr -i %{_bindir}/sudo-shipper                   2>/dev/null || true
+chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
+chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
+chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 
 %post
 # Add plugin line to sudo.conf if not already present
@@ -93,13 +94,15 @@ fi
 %posttrans
 # Make plugin binary and shipper immutable so they cannot be silently replaced
 # or removed without first running chattr -i (which requires root intent).
-chattr +i %{_libexecdir}/sudo/sudo_logger_plugin.so 2>/dev/null || true
-chattr +i %{_bindir}/sudo-shipper                   2>/dev/null || true
+chattr +i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
+chattr +i %{_bindir}/sudo-shipper                         2>/dev/null || true
+chattr +i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 
 %preun
 # Remove immutable flag so RPM can delete the files on uninstall.
-chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so 2>/dev/null || true
-chattr -i %{_bindir}/sudo-shipper                   2>/dev/null || true
+chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
+chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
+chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 %systemd_preun sudo-shipper.service
 # Remove plugin line from sudo.conf on uninstall
 if [ $1 -eq 0 ]; then
@@ -133,6 +136,9 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 17 2026 sudo-logger 1.17.6-1
+- fix(spec): add wayland-proxy to chattr -i/%posttrans/+i/%preun scriptlets
+
 * Thu Apr 17 2026 sudo-logger 1.17.5-1
 - fix(wayland-proxy): readMsg now reads exact bytes into message buffer,
   fixing protocol desync that caused proxy to fall out of sync with compositor
