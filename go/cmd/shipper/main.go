@@ -924,7 +924,11 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	}
 
 	// Pass the listener fd as fd 3 (ExtraFiles[0]).
-	cmd := exec.Command(cfg.ProxyBin, "--real", realSocket, "--fd", "3")
+	cmd := exec.Command(cfg.ProxyBin,
+		"--real", realSocket,
+		"--fd", "3",
+		"--period", fmt.Sprintf("%d", cfg.ProxyPeriod),
+	)
 	cmd.Stderr = os.Stderr
 	cmd.ExtraFiles = []*os.File{lnFile}
 	// Run proxy as the invoking user so it can connect to the compositor socket.

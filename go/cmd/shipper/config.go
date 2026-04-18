@@ -16,6 +16,7 @@ type shipperConfig struct {
 	CA            string
 	VerifyKey     string
 	ProxyBin      string
+	ProxyPeriod   int
 	FreezeTimeout time.Duration
 	Debug         bool
 	Wayland       bool
@@ -30,6 +31,7 @@ func defaultConfig() shipperConfig {
 		CA:            "/etc/sudo-logger/ca.crt",
 		VerifyKey:     "/etc/sudo-logger/ack-verify.key",
 		ProxyBin:      "/usr/libexec/sudo-logger/wayland-proxy",
+		ProxyPeriod:   300,
 		FreezeTimeout: 3 * time.Minute,
 		Debug:         false,
 		Wayland:       true,
@@ -81,6 +83,12 @@ func loadConfig(path string) (shipperConfig, error) {
 			cfg.VerifyKey = v
 		case "proxy_bin":
 			cfg.ProxyBin = v
+		case "proxy_period":
+			var val int
+			if _, err := fmt.Sscanf(v, "%d", &val); err != nil {
+				return cfg, fmt.Errorf("%s:%d: proxy_period: %w", path, lineNum, err)
+			}
+			cfg.ProxyPeriod = val
 		case "freeze_timeout":
 			d, err := time.ParseDuration(v)
 			if err != nil {

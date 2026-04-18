@@ -131,7 +131,7 @@ func newProxyState() *proxyState {
 		buffers:     make(map[uint32]*bufInfo),
 		attached:    make(map[uint32]uint32),
 		globalNames: make(map[uint32]string),
-		minPeriod:   500 * time.Millisecond,
+		minPeriod:   300 * time.Millisecond,
 	}
 }
 
@@ -140,8 +140,19 @@ func newProxyState() *proxyState {
 func readUint32(b []byte) uint32 { return binary.LittleEndian.Uint32(b) }
 func readInt32(b []byte) int32   { return int32(binary.LittleEndian.Uint32(b)) }
 
+// forceCapture captures the current state of all surfaces immediately,
+// ignoring the rate-limit timer. Used for the final frame before exit.
+func (p *proxyState) forceCapture(out *os.File) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Capture all known surfaces that have a buffer attached.
+	for surfaceID := range p.attached {
+		p.doCapture(surfaceID, out, true)
+	}
+}
+
 // readString parses a Wayland string: uint32 len (including NUL), bytes, padding.
-// Returns the string and the number of bytes consumed.
 func readString(b []byte) (string, int) {
 	if len(b) < 4 {
 		return "", 0
@@ -163,6 +174,12 @@ func pad4(n int) int { return (n + 3) &^ 3 }
 // ── frame capture ─────────────────────────────────────────────────────────────
 
 func (p *proxyState) captureCommit(surfaceID uint32, out *os.File) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.doCapture(surfaceID, out, false)
+}
+
+func (p *proxyState) doCapture(surfaceID uint32, out *os.File, force bool) {
 	bufID, ok := p.attached[surfaceID]
 	if !ok {
 		return
@@ -177,7 +194,7 @@ func (p *proxyState) captureCommit(surfaceID uint32, out *os.File) {
 	}
 
 	now := time.Now()
-	if now.Sub(p.lastFrame) < p.minPeriod {
+	if !force && now.Sub(p.lastFrame) < p.minPeriod {
 		return
 	}
 
@@ -194,7 +211,7 @@ func (p *proxyState) captureCommit(surfaceID uint32, out *os.File) {
 		return
 	}
 	needed := offset + stride*h
-	if needed > len(pool.data) {
+	if pool.data == nil || needed > len(pool.data) {
 		return
 	}
 
@@ -570,6 +587,7 @@ func main() {
 	flagReal   := flag.String("real", "", "Path to the real Wayland compositor socket")
 	flagSocket := flag.String("socket", "", "Path for our proxy socket (create and bind)")
 	flagFD     := flag.Int("fd", 0, "Already-listening socket fd passed by the shipper")
+	flagPeriod := flag.Int("period", 300, "Screen capture period in milliseconds")
 	flag.Parse()
 
 	if *flagReal == "" {
@@ -580,6 +598,11 @@ func main() {
 	}
 
 	log.Printf("wayland-proxy uid=%d gid=%d", os.Getuid(), os.Getgid())
+
+	state := newProxyState()
+	if *flagPeriod > 0 {
+		state.minPeriod = time.Duration(*flagPeriod) * time.Millisecond
+	}
 
 	var ln net.Listener
 	var err error
@@ -626,7 +649,6 @@ func main() {
 	clientUnix := clientConn.(*net.UnixConn)
 	serverUnix := serverConn.(*net.UnixConn)
 
-	state := newProxyState()
 	out := os.Stdout
 
 	done := make(chan struct{})
@@ -634,6 +656,10 @@ func main() {
 	go forwardServerToClient(serverUnix, clientUnix, state)
 
 	<-done
+
+	// Capture the final frame before exiting.
+	state.forceCapture(out)
+
 	serverUnix.Close()
 	clientUnix.Close()
 

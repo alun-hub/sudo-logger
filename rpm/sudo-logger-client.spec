@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.12
+Version:        1.17.13
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri Apr 18 2026 sudo-logger 1.17.13-1
+- feat(wayland-proxy): force capture on client disconnect to record last frame
+- feat(wayland-proxy): lower default capture interval 500ms→300ms
+- feat(shipper/config): add proxy_period key to shipper.conf; passed to
+  wayland-proxy as --period flag
+
 * Fri Apr 18 2026 sudo-logger 1.17.12-1
 - fix(selinux): allow sudo_shipper_t to map/read/write user_tmp_t files
   (memfd SHM pools from gdk-wayland) and access dri_device_t for DMA-buf
