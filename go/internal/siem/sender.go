@@ -256,10 +256,25 @@ func buildTLSConfig(c TLSCfg) (*tls.Config, error) {
 		if !filepath.IsAbs(clean) {
 			return fmt.Errorf("path must be absolute: %q", p)
 		}
-		// Block common sensitive paths
-		base := strings.ToLower(filepath.Base(clean))
-		if strings.HasPrefix(clean, "/etc/shadow") || strings.HasPrefix(clean, "/etc/passwd") || base == "id_rsa" || base == "id_ed25519" {
-			return fmt.Errorf("prohibited path: %q", clean)
+
+		// Allow only specific safe root directories for TLS certificate material.
+		safeRoots := []string{
+			"/etc/sudo-logger",
+			"/etc/ssl/certs",
+			"/etc/pki/tls/certs",
+			"/usr/local/share/ca-certificates",
+		}
+
+		isSafe := false
+		for _, root := range safeRoots {
+			if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) {
+				isSafe = true
+				break
+			}
+		}
+
+		if !isSafe {
+			return fmt.Errorf("prohibited path: %q (must be under a permitted directory like /etc/sudo-logger or system cert stores)", clean)
 		}
 		return nil
 	}
