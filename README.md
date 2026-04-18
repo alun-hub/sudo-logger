@@ -23,6 +23,7 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Client installation](#3-client-installation)
 - [Configuration](#configuration)
   - [Wayland screen capture](#wayland-screen-capture)
+  - [Secret redaction](#secret-redaction)
   - [Distributed storage (S3 + PostgreSQL)](#distributed-storage-s3--postgresql)
 - [Web replay interface](#web-replay-interface)
   - [Authentication](#authentication)
@@ -213,6 +214,7 @@ migrate-sessions \
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
 - **Wayland screen capture**: GUI programs started with `sudo` on a Wayland desktop are screen-recorded via a transparent compositor proxy — no compositor patches required. The replay interface shows an image slideshow for GUI sessions.
+- **Automatic secret redaction**: the shipper masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `shipper.conf`.
 - Active session terminated if shipper is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the shipper was killed mid-recording
 - SELinux policy for `sudo-shipper` (enforcing mode, ships in the `selinux/` directory)
@@ -500,6 +502,39 @@ ExecStart=/usr/bin/sudo-logserver \
 | `-strict-cert-host` | off | Reject sessions where the `host` field in SESSION_START does not match the CN or DNS SANs of the client's TLS certificate. Recommended when each machine has its own certificate; leave off for shared-certificate setups. |
 | `-health-listen addr` | *(disabled)* | Start a plain HTTP listener on `addr` (e.g. `:9877`) that serves `/healthz` (always 200) and `/metrics` (Prometheus text format). Disabled by default; enable in Kubernetes to replace the TCP socket liveness probe. |
 
+### Secret redaction
+
+The shipper automatically redacts secrets from terminal streams (stdin, stdout, tty in/out) **before** they are sent to the log server. Redaction happens locally — sensitive data never leaves the machine in cleartext.
+
+**Built-in patterns** (always active):
+
+| Pattern | Examples |
+|---------|---------|
+| Key/value assignments | `api_key=abc123`, `AWS_SECRET_ACCESS_KEY=...`, `"token": "..."` |
+| Bearer tokens | `Authorization: Bearer eyJ...`, `Bearer <JWT>` |
+| URL passwords | `postgres://user:hunter2@host/db`, `redis://:pass@host` | <!-- pragma: allowlist secret -->
+| AWS access keys | `AKIA...` (20-char key IDs) |
+| GitHub PATs | `ghp_...`, `gho_...`, `ghs_...` |
+| Stripe keys | `sk_live_...` |
+| Vault tokens | `hvs....` |
+| GCP API keys | `AIza...` |
+| JWT tokens | `eyJhbGciOi...` (three-part dot-separated) |
+| Password prompts | Interactive prompts ending in `password:`, `secret:`, `token:`, etc. |
+
+The matched secret value is replaced with `***`; surrounding context (key names, separators) is preserved for readability.
+
+**Adding custom patterns** in `/etc/sudo-logger/shipper.conf`:
+
+```ini
+# Redact 32-char hex tokens
+mask_pattern = [0-9a-f]{32}
+
+# Redact company-internal secret prefix
+mask_pattern = (?i)acme-token-[a-z0-9]{16}
+```
+
+Each `mask_pattern` line adds one additional Go-compatible regex. The entire match is replaced with `***`. Patterns are also applied to the `command` field in session metadata, preventing secrets passed as CLI arguments from appearing in the replay header.
+
 ### Distributed storage (S3 + PostgreSQL)
 
 Pass `--storage=distributed` plus the flags below to both `sudo-logserver` and
@@ -569,7 +604,7 @@ After import, rules are served from the database and changes via the Settings UI
 | `ackLagLimit` | `2s` | Unacknowledged chunk age before reporting dead to plugin |
 | `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
 
-### Shipper config keys (relevant to freeze and Wayland behaviour)
+### Shipper config keys
 
 All of these go in `/etc/sudo-logger/shipper.conf`:
 
@@ -578,6 +613,8 @@ All of these go in `/etc/sudo-logger/shipper.conf`:
 | `freeze_timeout` | `3m` | Terminate a frozen session after this duration of server unreachability. Prevents permanent hangs when the TCP connection dies. Set to `0` to disable (not recommended). |
 | `wayland` | `true` | Enable Wayland screen capture for GUI sessions. Set to `false` to disable. |
 | `proxy_bin` | `/usr/libexec/sudo-logger/wayland-proxy` | Path to the wayland-proxy helper binary. |
+| `proxy_period` | `300` | Capture interval for Wayland frames in milliseconds. Lower values give smoother replay at the cost of more storage. |
+| `mask_pattern` | — | Additional regex pattern to redact from terminal streams. Can be repeated for multiple patterns. See [Secret redaction](#secret-redaction). |
 
 ### Wayland screen capture
 

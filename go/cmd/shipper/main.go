@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
 )
 
@@ -247,6 +248,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	// Populated in the MsgServerReady case below; consumed after forward() is declared.
 	var guiFrames <-chan []byte
 	var killProxy func()
+	redactor := iolog.NewRedactor(cfg.MaskPatterns)
 	defer func() {
 		if killProxy != nil {
 			killProxy()
@@ -431,6 +433,12 @@ func handlePluginConn(pluginConn net.Conn) {
 	// accepted (MsgServerReady) so that block-policy denials reach the plugin
 	// before sudo forks the child process.
 	serverBuf := bufio.NewWriter(serverConn)
+
+	// Redact the command metadata before sending to server.
+	start.Command = redactor.RedactString(start.Command)
+	start.ResolvedCommand = redactor.RedactString(start.ResolvedCommand)
+	startPayload, _ = json.Marshal(start)
+
 	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v wayland=%q xdg=%q",
 		start.SessionID, start.User, start.Host, start.Pid,
 		truncate(start.Command, 60), cg != nil,
@@ -636,6 +644,11 @@ loop:
 			}
 
 		case protocol.MsgChunk:
+			chunk, err := protocol.ParseChunk(payload)
+			if err == nil && (chunk.Stream <= protocol.StreamTtyOut) {
+				chunk.Data = redactor.Redact(chunk.Data, chunk.Stream)
+				payload = protocol.EncodeChunk(chunk.Seq, chunk.Timestamp, chunk.Stream, chunk.Data)
+			}
 			forward(protocol.MsgChunk, payload)
 
 		case protocol.MsgSessionEnd:

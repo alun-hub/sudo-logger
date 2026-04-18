@@ -200,6 +200,19 @@ func ParseChunk(payload []byte) (*Chunk, error) {
 	return c, nil
 }
 
+// EncodeChunk encodes a CHUNK payload.
+// Layout: [8 seq][8 ts_ns][1 stream][4 datalen][data]
+func EncodeChunk(seq uint64, ts int64, stream uint8, data []byte) []byte {
+	dlen := uint32(len(data))
+	payload := make([]byte, 21+dlen)
+	binary.BigEndian.PutUint64(payload[0:8], seq)
+	binary.BigEndian.PutUint64(payload[8:16], uint64(ts))
+	payload[16] = stream
+	binary.BigEndian.PutUint32(payload[17:21], dlen)
+	copy(payload[21:], data)
+	return payload
+}
+
 // ParseSessionEnd decodes a SESSION_END payload.
 // Layout: [8 final_seq][4 exit_code]
 func ParseSessionEnd(payload []byte) (*SessionEnd, error) {

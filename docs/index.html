@@ -2012,6 +2012,7 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if shipper killed (&lt;150 ms)</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt;30 s propagation</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens, URL passwords masked before leaving the machine</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
@@ -2021,8 +2022,48 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 14: DISTRIBUTED STORAGE ░░ -->
+  <!-- ░░ SLIDE 14: SECRET REDACTION ░░ -->
   <div class="slide" id="s14">
+    <div class="s-features" style="max-width:900px">
+      <h2>SECRET<br>REDACTION</h2>
+      <div class="sub">▸ Sensitive data masked locally — never reaches the log server</div>
+
+      <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:32px;font-size:13px">
+
+        <div style="border-left:2px solid var(--green-dim);padding-left:16px">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">BUILT-IN PATTERNS</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> AWS / GCP / GitHub / Stripe / Vault keys</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> JWT tokens (<code style="font-size:10px">eyJhbGciOi…</code>)</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Bearer &amp; Authorization headers</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> URL passwords (<code style="font-size:10px">user:pass@host</code>)</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Key=value assignments (<code style="font-size:10px">api_key=…</code>)</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Interactive password prompts</div>
+        </div>
+
+        <div style="border-left:2px solid var(--amber);padding-left:16px">
+          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">CONFIGURABLE</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Custom regex via <code style="font-size:10px">mask_pattern</code> in shipper.conf</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Command arguments redacted in session metadata</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Surgical replacement — key names preserved, only value masked</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Applied to stdin, stdout, tty in/out streams</div>
+        </div>
+
+      </div>
+
+      <div style="margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:12px 16px;text-align:left;max-width:760px">
+        <span style="color:var(--green-dim)"># Before redaction (stdin)</span><br>
+        <span style="color:var(--text)">export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY</span><br>
+        <span style="color:var(--green-dim)"># After redaction (stored in log)</span><br>
+        <span style="color:var(--text)">export AWS_SECRET_ACCESS_KEY=<span style="color:var(--amber)">***</span></span><br><br>
+        <span style="color:var(--green-dim)"># shipper.conf — add custom patterns</span><br>
+        <span style="color:var(--text)">mask_pattern = [0-9a-f]{32}</span><br>
+        <span style="color:var(--text)">mask_pattern = (?i)acme-token-[a-z0-9]{16}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 15: DISTRIBUTED STORAGE ░░ -->
+  <div class="slide" id="s15">
     <div class="s-features" style="max-width:900px">
       <h2>DISTRIBUTED<br>STORAGE</h2>
       <div class="sub">▸ S3 · PostgreSQL · horizontal scaling · Kubernetes</div>
@@ -2065,7 +2106,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 15;
+  const N = 16;
   let cur = 0, busy = false;
 
   /* cursor */

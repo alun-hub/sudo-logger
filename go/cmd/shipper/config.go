@@ -17,6 +17,7 @@ type shipperConfig struct {
 	VerifyKey     string
 	ProxyBin      string
 	ProxyPeriod   int
+	MaskPatterns  []string
 	FreezeTimeout time.Duration
 	Debug         bool
 	Wayland       bool
@@ -32,6 +33,7 @@ func defaultConfig() shipperConfig {
 		VerifyKey:     "/etc/sudo-logger/ack-verify.key",
 		ProxyBin:      "/usr/libexec/sudo-logger/wayland-proxy",
 		ProxyPeriod:   300,
+		MaskPatterns:  []string{},
 		FreezeTimeout: 3 * time.Minute,
 		Debug:         false,
 		Wayland:       true,
@@ -89,6 +91,8 @@ func loadConfig(path string) (shipperConfig, error) {
 				return cfg, fmt.Errorf("%s:%d: proxy_period: %w", path, lineNum, err)
 			}
 			cfg.ProxyPeriod = val
+		case "mask_pattern":
+			cfg.MaskPatterns = append(cfg.MaskPatterns, v)
 		case "freeze_timeout":
 			d, err := time.ParseDuration(v)
 			if err != nil {

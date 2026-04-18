@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.14
+Version:        1.17.15
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri Apr 18 2026 sudo-logger 1.17.15-1
+- feat(redaction): automatic secret masking in terminal streams and
+  session metadata; built-in patterns for AWS/GCP/GitHub/JWT/Bearer;
+  custom patterns via mask_pattern in shipper.conf
+- docs: document secret redaction in README and slide deck (new slide)
+- docs: document proxy_period config key
+
 * Fri Apr 18 2026 sudo-logger 1.17.14-1
 - fix(wayland-proxy): remove double lock in captureCommit (deadlock bug)
 
