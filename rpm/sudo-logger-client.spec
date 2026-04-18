@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.13
+Version:        1.17.14
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,9 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri Apr 18 2026 sudo-logger 1.17.14-1
+- fix(wayland-proxy): remove double lock in captureCommit (deadlock bug)
+
 * Fri Apr 18 2026 sudo-logger 1.17.13-1
 - feat(wayland-proxy): force capture on client disconnect to record last frame
 - feat(wayland-proxy): lower default capture interval 500ms→300ms

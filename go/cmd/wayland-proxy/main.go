@@ -174,8 +174,6 @@ func pad4(n int) int { return (n + 3) &^ 3 }
 // ── frame capture ─────────────────────────────────────────────────────────────
 
 func (p *proxyState) captureCommit(surfaceID uint32, out *os.File) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.doCapture(surfaceID, out, false)
 }
 
