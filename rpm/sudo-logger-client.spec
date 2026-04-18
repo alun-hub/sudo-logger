@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.15
+Version:        1.17.16
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,55 +158,60 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
-* Fri Apr 18 2026 sudo-logger 1.17.15-1
+* Sat Apr 18 2026 alun <alun@alun.se> - 1.17.16-1
+- Implement high-precision surgical secret masking for TTY and command metadata
+- Optimize masking performance with fast-path trigger regex
+- Fix Wayland proxy deadlock and implement final frame capture
+- Add configurable proxy_period to shipper.conf
+* Sat Apr 18 2026 sudo-logger 1.17.15-1
 - feat(redaction): automatic secret masking in terminal streams and
   session metadata; built-in patterns for AWS/GCP/GitHub/JWT/Bearer;
   custom patterns via mask_pattern in shipper.conf
 - docs: document secret redaction in README and slide deck (new slide)
 - docs: document proxy_period config key
 
-* Fri Apr 18 2026 sudo-logger 1.17.14-1
+* Sat Apr 18 2026 sudo-logger 1.17.14-1
 - fix(wayland-proxy): remove double lock in captureCommit (deadlock bug)
 
-* Fri Apr 18 2026 sudo-logger 1.17.13-1
+* Sat Apr 18 2026 sudo-logger 1.17.13-1
 - feat(wayland-proxy): force capture on client disconnect to record last frame
 - feat(wayland-proxy): lower default capture interval 500ms→300ms
 - feat(shipper/config): add proxy_period key to shipper.conf; passed to
   wayland-proxy as --period flag
 
-* Fri Apr 18 2026 sudo-logger 1.17.12-1
+* Sat Apr 18 2026 sudo-logger 1.17.12-1
 - fix(selinux): allow sudo_shipper_t to map/read/write user_tmp_t files
   (memfd SHM pools from gdk-wayland) and access dri_device_t for DMA-buf
 
-* Fri Apr 18 2026 sudo-logger 1.17.11-1
+* Sat Apr 18 2026 sudo-logger 1.17.11-1
 - feat(selinux): include SELinux policy module in RPM; semodule -i runs
   in %%post, restorecon in %%posttrans, semodule -r on full uninstall
 - fix(selinux): allow sudo_shipper_t sock_file setattr (needed for chmod
   of proxy socket after bind in /run/user/<uid>/)
 
-* Thu Apr 17 2026 sudo-logger 1.17.10-1
+* Fri Apr 17 2026 sudo-logger 1.17.10-1
 - fix(selinux): grant sudo_shipper_t dac_override and dac_read_search
   capabilities so wayland-proxy can bind a socket in /run/user/<uid>/
   (mode 0700, owned by the logged-in user)
 
-* Thu Apr 17 2026 sudo-logger 1.17.9-1
+* Fri Apr 17 2026 sudo-logger 1.17.9-1
 - fix(config): accept legacy LOGSERVER key as alias for server so
   existing shipper.conf files (%%config noreplace) keep working
 
-* Thu Apr 17 2026 sudo-logger 1.17.8-1
+* Fri Apr 17 2026 sudo-logger 1.17.8-1
 - feat(shipper): replace CLI flags with key=value config file
   (shipper.conf); ExecStart is now just /usr/bin/sudo-shipper
 - feat(shipper): add wayland = true/false config option to disable
   Wayland screen capture without rebuilding
 
-* Thu Apr 17 2026 sudo-logger 1.17.7-1
+* Fri Apr 17 2026 sudo-logger 1.17.7-1
 - fix(service): remove ProtectHome — it makes /run/user inaccessible even with
   ReadWritePaths=/run/user, breaking the wayland-proxy compositor connection
 
-* Thu Apr 17 2026 sudo-logger 1.17.6-1
+* Fri Apr 17 2026 sudo-logger 1.17.6-1
 - fix(spec): add wayland-proxy to chattr -i/%posttrans/+i/%preun scriptlets
 
-* Thu Apr 17 2026 sudo-logger 1.17.5-1
+* Fri Apr 17 2026 sudo-logger 1.17.5-1
 - fix(wayland-proxy): readMsg now reads exact bytes into message buffer,
   fixing protocol desync that caused proxy to fall out of sync with compositor
 - fix(wayland-proxy): add sync.Mutex to proxyState to prevent concurrent map
@@ -217,70 +222,70 @@ fi
   processes in session cgroup exit after sudo itself has returned
 - fix(plugin): correct inverted if-condition in WAYLAND_DISPLAY patch syslog
 
-* Thu Apr 17 2026 sudo-logger 1.17.4-1
+* Fri Apr 17 2026 sudo-logger 1.17.4-1
 - fix(wayland): create proxy socket in /run/user/<uid>/ (user_tmp_t) instead of
   /run/sudo-logger/ (sudo_shipper_var_run_t); SELinux silently denies unconfined_t
   from connecting to sudo_shipper_var_run_t sockets, causing gvim to fall back to
   X11 and bypass the proxy entirely
 
-* Thu Apr 17 2026 sudo-logger 1.17.3-1
+* Fri Apr 17 2026 sudo-logger 1.17.3-1
 - fix(service): ProtectHome=read-only + ReadWritePaths=/run/user so the
   wayland-proxy child can connect() to the compositor socket in /run/user/<uid>/
   (ProtectHome=yes made /run/user inaccessible in the service mount namespace,
   causing EACCES on connect() despite correct DAC ownership)
 
-* Thu Apr 17 2026 sudo-logger 1.17.2-1
+* Fri Apr 17 2026 sudo-logger 1.17.2-1
 - fix(selinux): allow sudo_shipper_t to connectto unconfined_t unix sockets
   (compositor kwin/mutter runs as unconfined_t; denial was suppressed by dontaudit)
 - fix(wayland): kill lingering wayland-proxy when session ends via deferred killProxy
 
-* Thu Apr 17 2026 sudo-logger 1.17.1-1
+* Fri Apr 17 2026 sudo-logger 1.17.1-1
 - fix(wayland): SetUnlinkOnClose(false) before ln.Close() so the socket
   file stays on disk for gvim to connect; proxy goroutine removes it on exit
 
-* Thu Apr 17 2026 sudo-logger 1.17.0-1
+* Fri Apr 17 2026 sudo-logger 1.17.0-1
 - fix(wayland): shipper creates proxy socket in /run/sudo-logger/ (always
   writable) and passes the fd to wayland-proxy via ExtraFiles; proxy no
   longer needs to bind in /run/user/<uid>/ which is read-only for child
   processes due to ProtectSystem=strict in the service unit
 
-* Thu Apr 17 2026 sudo-logger 1.16.9-1
+* Fri Apr 17 2026 sudo-logger 1.16.9-1
 - fix(selinux): allow proxy to bind/unlink its socket in /run/user/<uid>/
   (user_tmp_t:dir write+add_name+remove_name, sock_file create+unlink)
 
-* Thu Apr 17 2026 sudo-logger 1.16.8-1
+* Fri Apr 17 2026 sudo-logger 1.16.8-1
 - fix: pass user_uid/user_gid from plugin via SESSION_START; shipper uses
   them directly — no /etc/passwd read, works with SSSD/LDAP
 
-* Thu Apr 17 2026 sudo-logger 1.16.6-1
+* Fri Apr 17 2026 sudo-logger 1.16.6-1
 - fix(selinux): add setuid/setgid capability and user_tmp_t getattr so
   shipper can drop privileges to the invoking user when spawning wayland-proxy
 
-* Thu Apr 17 2026 sudo-logger 1.16.5-1
+* Fri Apr 17 2026 sudo-logger 1.16.5-1
 - fix: resolve UID/GID from XDG_RUNTIME_DIR path instead of os/user.Lookup
   (NSS not available in systemd service environment)
 
-* Thu Apr 17 2026 sudo-logger 1.16.4-1
+* Fri Apr 17 2026 sudo-logger 1.16.4-1
 - fix: run wayland-proxy as invoking user (not root) so it can connect
   to the compositor socket in /run/user/<uid>/; proxy socket moved to
   /run/user/<uid>/sudo-wayland-<sessionid>.sock
 
-* Thu Apr 17 2026 sudo-logger 1.16.3-1
+* Fri Apr 17 2026 sudo-logger 1.16.3-1
 - fix: install /etc/sudoers.d/sudo-logger-wayland with env_keep for
   WAYLAND_DISPLAY and XDG_RUNTIME_DIR; sudo env_reset stripped these
   variables so the wayland-proxy socket was never passed to GUI commands
 
-* Thu Apr 17 2026 sudo-logger 1.16.2-1
+* Fri Apr 17 2026 sudo-logger 1.16.2-1
 - fix(plugin): read WAYLAND_DISPLAY and XDG_RUNTIME_DIR from
   /proc/self/environ instead of user_env[]; sudo env_reset strips
   WAYLAND_DISPLAY before the I/O plugin open() callback sees user_env[]
 
-* Thu Apr 17 2026 sudo-logger 1.16.1-1
+* Fri Apr 17 2026 sudo-logger 1.16.1-1
 - fix: start wayland-proxy whenever WAYLAND_DISPLAY is set, not only when
   tty_path is empty; "sudo gvim" from a terminal was never captured because
   it has both a pty and WAYLAND_DISPLAY set
 
-* Thu Apr 17 2026 sudo-logger 1.16.0-1
+* Fri Apr 17 2026 sudo-logger 1.16.0-1
 - feat: Wayland proxy screen capture for GUI sudo sessions (no pty)
   - new wayland-proxy binary intercepts wl_surface_commit, captures SHM
     pixel data, JPEG-encodes frames at up to 2 fps, streams to shipper
@@ -299,7 +304,7 @@ fi
   when version already matches (no client-side effect)
 - refactor: deduplicated riskLevel, reportSessionMsg, WatchSessions goto
 
-* Mon Apr 14 2026 sudo-logger 1.15.4-1
+* Tue Apr 14 2026 sudo-logger 1.15.4-1
 - fix: cgroup child-process tracker polls every 50 ms instead of 10 ms,
   reducing CPU overhead during frozen sessions
 - fix: lingerCgroup reachability check is now a plain TCP dial instead of a
