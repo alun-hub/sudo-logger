@@ -97,11 +97,18 @@ allow sudo_shipper_t wayland_proxy_exec_t:file { read open execute execute_no_tr
 require { type user_tmp_t; }
 allow sudo_shipper_t user_tmp_t:dir { search getattr write add_name remove_name };
 allow sudo_shipper_t user_tmp_t:sock_file { create read write unlink setattr };
+# wayland-proxy mmaps SHM pool memfds passed by the client (memfd:gdk-wayland,
+# memfd:wayland-cursor); these land as user_tmp_t file objects.
+allow sudo_shipper_t user_tmp_t:file { map read open getattr write };
 allow sudo_shipper_t self:unix_stream_socket { connectto create_stream_socket_perms };
+
 # Connect to the Wayland compositor socket (kwin/mutter run as unconfined_t).
 # SELinux suppresses this denial with dontaudit; the explicit allow is required.
-require { type unconfined_t; }
+require { type unconfined_t; type dri_device_t; }
 allow sudo_shipper_t unconfined_t:unix_stream_socket connectto;
+
+# Allow access to graphics hardware (DRI) for DMA-buf and hardware acceleration support.
+allow sudo_shipper_t dri_device_t:chr_file { read write open getattr ioctl };
 
 # Logging
 logging_send_syslog_msg(sudo_shipper_t)

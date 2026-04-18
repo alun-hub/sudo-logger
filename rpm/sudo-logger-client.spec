@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.11
+Version:        1.17.12
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri Apr 18 2026 sudo-logger 1.17.12-1
+- fix(selinux): allow sudo_shipper_t to map/read/write user_tmp_t files
+  (memfd SHM pools from gdk-wayland) and access dri_device_t for DMA-buf
+
 * Fri Apr 18 2026 sudo-logger 1.17.11-1
 - feat(selinux): include SELinux policy module in RPM; semodule -i runs
   in %%post, restorecon in %%posttrans, semodule -r on full uninstall
