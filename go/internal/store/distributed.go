@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -89,6 +90,7 @@ func newDistributedStore(cfg Config) (*DistributedStore, error) {
 		s3:     s3Client,
 		stopCh: make(chan struct{}),
 	}
+	go d.runCleanupWorker(context.Background())
 	return d, nil
 }
 
@@ -131,7 +133,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	1 — initial schema (sudo_sessions, sudo_risk_cache, sudo_blocked_users, sudo_config, sudo_access_log)
 //	2 — added network_outage column to sudo_sessions
 //	3 — added sudo_schema_version table; schema version tracking
-const currentSchemaVersion = 3
+//	4 — added FOREIGN KEY ON DELETE CASCADE to sudo_access_log
+const currentSchemaVersion = 4
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -200,11 +203,23 @@ CREATE TABLE IF NOT EXISTS sudo_config (
 
 CREATE TABLE IF NOT EXISTS sudo_access_log (
     id         BIGSERIAL PRIMARY KEY,
-    tsid       TEXT NOT NULL,
+    tsid       TEXT NOT NULL REFERENCES sudo_sessions(tsid) ON DELETE CASCADE,
     viewer     TEXT NOT NULL,
     replay_url TEXT,
     viewed_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- migration v4: add cascading delete to existing access log table
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'sudo_access_log') THEN
+        -- Only add if not already present (check constraint name)
+        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'sudo_access_log_tsid_fkey') THEN
+            ALTER TABLE sudo_access_log ADD CONSTRAINT sudo_access_log_tsid_fkey FOREIGN KEY (tsid) REFERENCES sudo_sessions(tsid) ON DELETE CASCADE;
+        END IF;
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS sudo_access_log_viewer    ON sudo_access_log(viewer);
 CREATE INDEX IF NOT EXISTS sudo_access_log_viewed_at ON sudo_access_log(viewed_at DESC);
 
@@ -470,6 +485,138 @@ LIMIT 1`,
 		return false, "", nil // no match
 	}
 	return true, reason, nil
+}
+
+// runCleanupWorker periodically deletes old sessions based on the configured
+// retention policy. It runs once a day.
+func (d *DistributedStore) runCleanupWorker(ctx context.Context) {
+	// 0x434c4e50 = "CLNP" in ASCII
+	const cleanupLockID int64 = 0x434c4e50
+
+	// Initial delay to let the system settle on startup.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(1 * time.Minute):
+		d.doCleanup(ctx, cleanupLockID)
+	}
+
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.doCleanup(ctx, cleanupLockID)
+		}
+	}
+}
+
+func (d *DistributedStore) doCleanup(ctx context.Context, lockID int64) {
+	// Try to acquire the session-level advisory lock. Only one replica performs cleanup.
+	var locked bool
+	if err := d.db.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&locked); err != nil {
+		log.Printf("store/distributed: cleanup: advisory lock: %v", err)
+		return
+	}
+	if !locked {
+		return
+	}
+	// Note: PostgreSQL session-level advisory locks are held for the lifetime
+	// of the connection. We use pg_advisory_unlock explicitly so other replicas
+	// could potentially run sooner if this pod restarts.
+	defer func() {
+		_, _ = d.db.Exec(ctx, "SELECT pg_advisory_unlock($1)", lockID)
+	}()
+
+	// Fetch retention policy from config.
+	cfgStr, err := d.GetConfig(ctx, "retention_policy")
+	if err != nil || cfgStr == "" {
+		return
+	}
+	var policy RetentionPolicy
+	if err := json.Unmarshal([]byte(cfgStr), &policy); err != nil {
+		log.Printf("store/distributed: cleanup: parse policy: %v", err)
+		return
+	}
+	if !policy.Enabled || policy.Days <= 0 {
+		return
+	}
+
+	threshold := time.Now().AddDate(0, 0, -policy.Days).Unix()
+
+	// Find expired sessions that are not in progress.
+	rows, err := d.db.Query(ctx,
+		"SELECT tsid FROM sudo_sessions WHERE start_time < $1 AND in_progress = FALSE",
+		threshold)
+	if err != nil {
+		log.Printf("store/distributed: cleanup: query expired: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var tsids []string
+	for rows.Next() {
+		var tsid string
+		if err := rows.Scan(&tsid); err == nil {
+			tsids = append(tsids, tsid)
+		}
+	}
+	rows.Close()
+
+	if len(tsids) == 0 {
+		return
+	}
+
+	log.Printf("store/distributed: cleanup: removing %d expired session(s) (older than %d days)", len(tsids), policy.Days)
+
+	for _, tsid := range tsids {
+		// 1. Delete all S3 objects for this session.
+		d.deleteS3Session(ctx, tsid)
+
+		// 2. Delete the session row. Cascades to risk_cache and access_log.
+		if _, err := d.db.Exec(ctx, "DELETE FROM sudo_sessions WHERE tsid = $1", tsid); err != nil {
+			log.Printf("store/distributed: cleanup: delete row %s: %v", tsid, err)
+		}
+	}
+	log.Printf("store/distributed: cleanup: finished removing %d session(s)", len(tsids))
+}
+
+func (d *DistributedStore) deleteS3Session(ctx context.Context, tsid string) {
+	prefix := d.cfg.S3Prefix + tsid + "/"
+	paginator := s3.NewListObjectsV2Paginator(d.s3, &s3.ListObjectsV2Input{
+		Bucket: aws.String(d.cfg.S3Bucket),
+		Prefix: aws.String(prefix),
+	})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			log.Printf("store/distributed: cleanup: list objects for %s: %v", tsid, err)
+			return
+		}
+		if len(page.Contents) == 0 {
+			continue
+		}
+
+		var objects []s3types.ObjectIdentifier
+		for _, obj := range page.Contents {
+			objects = append(objects, s3types.ObjectIdentifier{Key: obj.Key})
+		}
+
+		_, err = d.s3.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(d.cfg.S3Bucket),
+			Delete: &s3types.Delete{
+				Objects: objects,
+				Quiet:   aws.Bool(true),
+			},
+		})
+		if err != nil {
+			log.Printf("store/distributed: cleanup: delete objects for %s: %v", tsid, err)
+		}
+	}
 }
 
 // WatchSessions implements SessionStore.

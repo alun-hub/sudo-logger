@@ -233,6 +233,12 @@ type RiskCache struct {
 	Reasons   []string
 }
 
+// RetentionPolicy defines how long sessions are kept before being deleted.
+type RetentionPolicy struct {
+	Enabled bool `json:"enabled"`
+	Days    int  `json:"days"`
+}
+
 // Config carries all backend-specific configuration parsed from CLI flags.
 // Fields that are not relevant to the selected backend are ignored.
 type Config struct {
@@ -256,6 +262,10 @@ type Config struct {
 	// RiskRulesPath is the path to risk-rules.yaml (LocalStore only).
 	// Default: /etc/sudo-logger/risk-rules.yaml
 	RiskRulesPath string
+
+	// RetentionPath is the path to retention.json (LocalStore only).
+	// Default: /etc/sudo-logger/retention.json
+	RetentionPath string
 
 	// ── DistributedStore fields ──────────────────────────────────────────────
 

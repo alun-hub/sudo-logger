@@ -696,6 +696,16 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	mux.HandleFunc("/api/retention", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetRetention(w, r)
+		case http.MethodPut:
+			handlePutRetention(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/api/hosts", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1462,6 +1472,37 @@ func handlePutRules(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
 		log.Printf("encode rules response: %v", err)
 	}
+}
+
+// ── Retention API ──────────────────────────────────────────────────────────────
+
+func handleGetRetention(w http.ResponseWriter, r *http.Request) {
+	cfgStr, err := sessionStore.GetConfig(r.Context(), "retention_policy")
+	if err != nil {
+		http.Error(w, "read failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var policy store.RetentionPolicy
+	if cfgStr != "" {
+		_ = json.Unmarshal([]byte(cfgStr), &policy)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(policy)
+}
+
+func handlePutRetention(w http.ResponseWriter, r *http.Request) {
+	var policy store.RetentionPolicy
+	if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	data, _ := json.Marshal(policy)
+	if err := sessionStore.SetConfig(r.Context(), "retention_policy", string(data)); err != nil {
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 // ── SIEM config API ───────────────────────────────────────────────────────────

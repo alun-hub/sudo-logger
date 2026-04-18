@@ -798,6 +798,32 @@
         <span id="siem-path" style="font-size:11px;color:var(--text-dim)"></span>
       </div>
     </div>
+
+    <!-- ── Data Retention ────────────────────────────────────────────────────── -->
+    <div class="siem-section">
+      <div class="siem-heading">
+        Data Retention
+        <span class="settings-status" id="retention-status" style="display:none"></span>
+      </div>
+      <div class="siem-form">
+        <label>Auto-cleanup</label>
+        <input type="checkbox" id="retention-enabled">
+
+        <label>Retention period</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="retention-days" class="form-input" style="width:80px" min="1" placeholder="90">
+          <span style="font-size:13px;color:var(--text-sub)">days</span>
+        </div>
+
+        <p class="siem-note">
+          When enabled, sessions older than the retention period are permanently deleted from both the database and storage (S3/local).
+          The cleanup process runs once every 24 hours.
+        </p>
+      </div>
+      <div class="siem-footer">
+        <button class="btn-primary" id="btn-save-retention">Save retention policy</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── Help tab ──────────────────────────────────────────────────────────── -->
@@ -2176,7 +2202,7 @@ function switchTab(tab) {
   document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
   document.querySelectorAll('.report-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
   if (tab === 'summary' || tab === 'anomalies') fetchReport();
-  if (tab === 'settings') { fetchRules(); fetchSiemConfig(); }
+  if (tab === 'settings') { fetchRules(); fetchSiemConfig(); fetchRetentionConfig(); }
   if (tab === 'blocked') fetchBlockedUsers();
 }
 
@@ -2497,6 +2523,53 @@ function showSiemStatus(msg, isErr) {
 }
 
 document.getElementById('btn-save-siem').addEventListener('click', saveSiemConfig);
+
+// ── Data Retention ────────────────────────────────────────────────────────────
+
+async function fetchRetentionConfig() {
+  try {
+    const res = await fetch('/api/retention');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const policy = await res.json();
+    document.getElementById('retention-enabled').checked = !!policy.enabled;
+    document.getElementById('retention-days').value = policy.days || 90;
+  } catch (err) {
+    showRetentionStatus('Load failed: ' + err.message, true);
+  }
+}
+
+async function saveRetentionConfig() {
+  const policy = {
+    enabled: document.getElementById('retention-enabled').checked,
+    days: parseInt(document.getElementById('retention-days').value, 10) || 90,
+  };
+  const btn = document.getElementById('btn-save-retention');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/retention', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(policy),
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    showRetentionStatus('Saved', false);
+  } catch (err) {
+    showRetentionStatus('Save failed: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showRetentionStatus(msg, isErr) {
+  const s = document.getElementById('retention-status');
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  clearTimeout(s._t);
+  s._t = setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
+
+document.getElementById('btn-save-retention').addEventListener('click', saveRetentionConfig);
 
 // uploadCert opens a file picker for the cert/key field identified by fieldId,
 // uploads the chosen file to /api/siem-cert, and populates the path field on success.
