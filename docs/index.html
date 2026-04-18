@@ -1993,37 +1993,8 @@ body::after {
   </div>
 
   <!-- ░░ SLIDE 13: DEPLOY ░░ -->
+  <!-- ░░ SLIDE 13: SECRET REDACTION ░░ -->
   <div class="slide" id="s13">
-    <div class="s-features">
-      <h2>READY TO<br>DEPLOY</h2>
-      <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
-
-      <div class="feat-grid">
-        <div class="feat"><span class="arr">→</span> Full I/O replay — browser-based, pixel-accurate</div>
-        <div class="feat"><span class="arr">→</span> Real-time streaming, zero local buffering</div>
-        <div class="feat"><span class="arr">→</span> Freeze within ~1 s of network loss</div>
-        <div class="feat"><span class="arr">→</span> Automatic recovery when network returns</div>
-        <div class="feat"><span class="arr">→</span> GUI app freeze via SIGSTOP (pgid-aware)</div>
-        <div class="feat"><span class="arr">→</span> RPM packages with systemd integration</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Risk scoring — YAML rules, 0–100 per session</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> SIEM forwarding — JSON/CEF/OCSF · HTTPS · Syslog</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Summary / Anomalies / Settings tabs</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if shipper killed (&lt;150 ms)</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt;30 s propagation</div>
-        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
-        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens, URL passwords masked before leaving the machine</div>
-        <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
-      </div>
-
-      <a class="gh-link" href="https://github.com/alun-hub/sudo-logger" target="_blank">
-        github.com/alun-hub/sudo-logger
-      </a>
-    </div>
-  </div>
-
-  <!-- ░░ SLIDE 14: SECRET REDACTION ░░ -->
-  <div class="slide" id="s14">
     <div class="s-features" style="max-width:900px">
       <h2>SECRET<br>REDACTION</h2>
       <div class="sub">▸ Sensitive data masked locally — never reaches the log server</div>
@@ -2062,8 +2033,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 15: DISTRIBUTED STORAGE ░░ -->
-  <div class="slide" id="s15">
+  <!-- ░░ SLIDE 14: DISTRIBUTED STORAGE ░░ -->
+  <div class="slide" id="s14">
     <div class="s-features" style="max-width:900px">
       <h2>DISTRIBUTED<br>STORAGE</h2>
       <div class="sub">▸ S3 · PostgreSQL · horizontal scaling · Kubernetes</div>
@@ -2102,11 +2073,83 @@ body::after {
     </div>
   </div>
 
+  <!-- ░░ SLIDE 15: WAYLAND SCREEN CAPTURE ░░ -->
+  <div class="slide" id="s15">
+    <div class="s-features" style="max-width:900px">
+      <h2>WAYLAND<br>SCREEN CAPTURE</h2>
+      <div class="sub">▸ GUI sudo sessions recorded without compositor patches</div>
+
+      <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:32px;font-size:13px">
+
+        <div style="border-left:2px solid var(--green-dim);padding-left:16px">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">HOW IT WORKS</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> <code style="font-size:10px">wayland-proxy</code> sits between app and compositor</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Intercepts <code style="font-size:10px">wl_surface.commit</code> — reads SHM pixel data</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> JPEG-encodes frames at ≤ 300 ms intervals</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Streams frames to shipper via stdout pipe</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Shipper forwards as <code style="font-size:10px">STREAM_SCREEN</code> chunks</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Replay shows image slideshow instead of xterm.js</div>
+        </div>
+
+        <div style="border-left:2px solid var(--amber);padding-left:16px">
+          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PROPERTIES</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Works on KDE and GNOME Wayland — no patches</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Linger mode — holds session open until GUI exits</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Force-captures last frame on client disconnect</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Configurable interval via <code style="font-size:10px">proxy_period</code></div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Disable with <code style="font-size:10px">wayland = false</code> in shipper.conf</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> SELinux policy covers all proxy socket operations</div>
+        </div>
+
+      </div>
+
+      <div style="margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:12px 16px;text-align:left;max-width:760px">
+        <span style="color:var(--green-dim)"># sudo gvim → shipper log</span><br>
+        <span style="color:var(--text)">wayland-proxy started, socket=/run/user/1000/sudo-wayland-…sock</span><br>
+        <span style="color:var(--text)">sudo-logger: patched WAYLAND_DISPLAY → …sock</span><br>
+        <span style="color:var(--text)">wayland-proxy: client connected</span><br>
+        <span style="color:var(--text)">sudo exited but GUI processes remain; entering linger mode</span><br>
+        <span style="color:var(--text)">all GUI processes exited; finishing session</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 16: READY TO DEPLOY ░░ -->
+  <div class="slide" id="s16">
+    <div class="s-features">
+      <h2>READY TO<br>DEPLOY</h2>
+      <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
+
+      <div class="feat-grid">
+        <div class="feat"><span class="arr">→</span> Full I/O replay — browser-based, pixel-accurate</div>
+        <div class="feat"><span class="arr">→</span> Real-time streaming, zero local buffering</div>
+        <div class="feat"><span class="arr">→</span> Freeze within ~1 s of network loss</div>
+        <div class="feat"><span class="arr">→</span> Automatic recovery when network returns</div>
+        <div class="feat"><span class="arr">→</span> GUI app freeze via SIGSTOP (pgid-aware)</div>
+        <div class="feat"><span class="arr">→</span> RPM packages with systemd integration</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Risk scoring — YAML rules, 0–100 per session</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> SIEM forwarding — JSON/CEF/OCSF · HTTPS · Syslog</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Summary / Anomalies / Settings tabs</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if shipper killed (&lt;150 ms)</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt;30 s propagation</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Wayland screen capture — GUI sessions recorded, image slideshow replay</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
+        <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
+      </div>
+
+      <a class="gh-link" href="https://github.com/alun-hub/sudo-logger" target="_blank">
+        github.com/alun-hub/sudo-logger
+      </a>
+    </div>
+  </div>
+
 </div><!-- /slides -->
 
 <script>
 (function () {
-  const N = 16;
+  const N = 17;
   let cur = 0, busy = false;
 
   /* cursor */
