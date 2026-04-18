@@ -115,9 +115,15 @@ func getHTTPSClient(c TLSCfg) (*http.Client, error) {
 //   - "Authorization: Bearer <token>"  otherwise
 func sendHTTPS(cfg Config, e Event, body []byte, contentType string) error {
 	// Validate URL to prevent SSRF via config manipulation.
-	u, parseErr := url.Parse(cfg.HTTPS.URL)
-	if parseErr != nil || u.Scheme != "https" || u.Host == "" {
+	u, err := url.Parse(cfg.HTTPS.URL)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return fmt.Errorf("HTTPS URL must be a valid https:// address, got %q", cfg.HTTPS.URL)
+	}
+
+	// Block common cloud metadata and loopback to mitigate SSRF
+	host := strings.ToLower(u.Hostname())
+	if host == "169.254.169.254" || host == "metadata.google.internal" || host == "instance-data" {
+		return fmt.Errorf("prohibited destination host: %s", host)
 	}
 
 	client, err := getHTTPSClient(cfg.HTTPS.TLS)
@@ -125,7 +131,7 @@ func sendHTTPS(cfg Config, e Event, body []byte, contentType string) error {
 		return fmt.Errorf("build TLS: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, cfg.HTTPS.URL, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
@@ -245,18 +251,30 @@ func truncate(s string, n int) string {
 func buildTLSConfig(c TLSCfg) (*tls.Config, error) {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS13}
 
-	if c.CA != "" {
-		caPath := filepath.Clean(c.CA)
-		if !filepath.IsAbs(caPath) {
-			return nil, fmt.Errorf("CA path must be absolute: %q", c.CA)
+	validatePath := func(p string) error {
+		clean := filepath.Clean(p)
+		if !filepath.IsAbs(clean) {
+			return fmt.Errorf("path must be absolute: %q", p)
 		}
-		pem, err := os.ReadFile(caPath)
+		// Block common sensitive paths
+		base := strings.ToLower(filepath.Base(clean))
+		if strings.HasPrefix(clean, "/etc/shadow") || strings.HasPrefix(clean, "/etc/passwd") || base == "id_rsa" || base == "id_ed25519" {
+			return fmt.Errorf("prohibited path: %q", clean)
+		}
+		return nil
+	}
+
+	if c.CA != "" {
+		if err := validatePath(c.CA); err != nil {
+			return nil, err
+		}
+		pem, err := os.ReadFile(filepath.Clean(c.CA))
 		if err != nil {
-			return nil, fmt.Errorf("read CA %s: %w", caPath, err)
+			return nil, fmt.Errorf("read CA %s: %w", c.CA, err)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
-			return nil, fmt.Errorf("parse CA cert from %s", caPath)
+			return nil, fmt.Errorf("parse CA cert from %s", c.CA)
 		}
 		cfg.RootCAs = pool
 	}
@@ -265,14 +283,15 @@ func buildTLSConfig(c TLSCfg) (*tls.Config, error) {
 		if c.Cert == "" || c.Key == "" {
 			return nil, fmt.Errorf("both cert and key must be specified together")
 		}
-		certPath := filepath.Clean(c.Cert)
-		keyPath := filepath.Clean(c.Key)
-		if !filepath.IsAbs(certPath) || !filepath.IsAbs(keyPath) {
-			return nil, fmt.Errorf("cert and key paths must be absolute")
+		if err := validatePath(c.Cert); err != nil {
+			return nil, err
 		}
-		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+		if err := validatePath(c.Key); err != nil {
+			return nil, err
+		}
+		cert, err := tls.LoadX509KeyPair(filepath.Clean(c.Cert), filepath.Clean(c.Key))
 		if err != nil {
-			return nil, fmt.Errorf("load client cert/key: %w", err)
+			return nil, fmt.Errorf("load keypair: %w", err)
 		}
 		cfg.Certificates = []tls.Certificate{cert}
 	}

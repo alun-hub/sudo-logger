@@ -56,7 +56,7 @@ func NewRedactor(patterns []string) *Redactor {
 
 	// 5. Large Blocks & URLs
 	r.addPattern(`(?s)(-----BEGIN [A-Z ]+-----)(.+?)(-----END [A-Z ]+-----)`, 2)
-	r.addPattern(`(https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/)([a-zA-Z0-9]{12,})`, 2)
+	r.addPattern(`\b(https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/)([a-zA-Z0-9]{12,})\b`, 2)
 
 	// 6. Financial
 	r.addPattern(`\b([A-Z]{2}[0-9]{2}(?:\s?[0-9A-Z]{4}){3,})\b`, 1)
