@@ -37,3 +37,5 @@ ui-ux-pro-max-skill/
 go/migrate-sessions
 selinux/*.pp
 selinux/tmp/
+gemini-changes
+go/wayland-proxy
