@@ -184,9 +184,9 @@ type SessionRecord struct {
 
 // ScreenFrameInfo describes one stored screen frame.
 type ScreenFrameInfo struct {
-	Index int     // zero-based frame index
-	Ts    int64   // capture timestamp, nanoseconds since epoch
-	Size  int     // JPEG size in bytes
+	Index int   `json:"index"` // zero-based frame index
+	Ts    int64 `json:"ts"`    // capture timestamp, nanoseconds since epoch
+	Size  int   `json:"size"`  // JPEG size in bytes
 }
 
 // ScreenFrameStore is an optional capability of SessionStore implementations
