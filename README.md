@@ -504,24 +504,26 @@ ExecStart=/usr/bin/sudo-logserver \
 
 ### Secret redaction
 
-The shipper automatically redacts secrets from terminal streams (stdin, stdout, tty in/out) **before** they are sent to the log server. Redaction happens locally — sensitive data never leaves the machine in cleartext.
+The shipper automatically redacts secrets from terminal streams (stdin, stdout, tty in/out) **before** they are sent to the log server. Redaction happens locally using a "Surgical Redactor" architecture that masks only the sensitive value while preserving key names and separators (e.g. `api_key=****************`) for context.
 
 **Built-in patterns** (always active):
 
 | Pattern | Examples |
 |---------|---------|
-| Key/value assignments | `api_key=abc123`, `AWS_SECRET_ACCESS_KEY=...`, `"token": "..."` |
-| Bearer tokens | `Authorization: Bearer eyJ...`, `Bearer <JWT>` |
-| URL passwords | `postgres://user:hunter2@host/db`, `redis://:pass@host` | <!-- pragma: allowlist secret -->
-| AWS access keys | `AKIA...` (20-char key IDs) |
-| GitHub PATs | `ghp_...`, `gho_...`, `ghs_...` |
-| Stripe keys | `sk_live_...` |
-| Vault tokens | `hvs....` |
-| GCP API keys | `AIza...` |
-| JWT tokens | `eyJhbGciOi...` (three-part dot-separated) |
+| Key/value assignments | `api_key=abc123`, `AWS_SECRET_ACCESS_KEY: ...`, `"token": "*"` |
+| Bearer tokens | `Authorization: Bearer eyJ...`, `Bearer <token>` |
+| URL/CLI passwords | `postgres://user:hunter2@host/db`, `curl -u admin:pass` | <!-- pragma: allowlist secret -->
+| PEM Private Keys | `-----BEGIN RSA PRIVATE KEY-----` (full block masking) | <!-- pragma: allowlist secret --> |
+| Cloud Credentials | AWS (`AKIA...`), GCP API Keys (`AIza...`), Azure Storage Keys |
+| Developer Tokens | GitHub PATs (`ghp_...`), Stripe keys, Vault tokens, Slack webhooks |
+| JWT tokens | `eyJhbGciOi...` (full three-part dot-separated tokens) |
+| Financial Data | IBAN numbers and BIC/SWIFT codes |
 | Password prompts | Interactive prompts ending in `password:`, `secret:`, `token:`, etc. |
 
-The matched secret value is replaced with `***`; surrounding context (key names, separators) is preserved for readability.
+**Precision & Context:**
+- **Surgical Masking:** Only the secret is hidden. Separators like `=`, `:`, and `*` are preserved.
+- **Metadata Protection:** Patterns are automatically applied to the `command` and `resolved_command` fields in session metadata, preventing secrets passed as CLI arguments from appearing in the replay header.
+- **Standalone Tokens:** For high-entropy tokens found outside assignments (e.g. a random AWS ID in a log), the first 4 characters are revealed (e.g. `AKIA****`) to allow administrators to distinguish between different keys.
 
 **Adding custom patterns** in `/etc/sudo-logger/shipper.conf`:
 
