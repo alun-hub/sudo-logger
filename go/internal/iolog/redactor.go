@@ -64,7 +64,7 @@ func NewRedactor(patterns []string) *Redactor {
 
 	// Compile a combined trigger regex for fast path
 	// This matches any of our known keywords or token prefixes
-	triggerPatterns := `(?i)\b(` + keys + `|Bearer|Authorization|ghp_|sk_live_|hvs\.|AIza|eyJhbGciOi|-----BEGIN|IBAN|BIC|SWIFT)\b|AKIA[0-9A-Z]{16}`
+	triggerPatterns := `(?i)\b(` + keys + `|Bearer|Authorization|ghp_|sk_live_|hvs\.|AIza|eyJhbGciOi|-----BEGIN|IBAN|BIC|SWIFT)\b|\bAKIA[0-9A-Z]{16}\b`
 	r.triggerRegex = regexp.MustCompile(triggerPatterns)
 
 	return r

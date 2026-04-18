@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -120,9 +121,14 @@ func sendHTTPS(cfg Config, e Event, body []byte, contentType string) error {
 		return fmt.Errorf("HTTPS URL must be a valid https:// address, got %q", cfg.HTTPS.URL)
 	}
 
-	// Block common cloud metadata and loopback to mitigate SSRF
+	// Block common cloud metadata and loopback to mitigate SSRF.
+	// We allow 127.0.0.1/localhost only during unit tests.
 	host := strings.ToLower(u.Hostname())
-	if host == "169.254.169.254" || host == "metadata.google.internal" || host == "instance-data" {
+	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+	isMetadata := host == "169.254.169.254" || strings.Contains(host, "metadata.google.internal") ||
+		strings.Contains(host, "instance-data")
+
+	if isMetadata || (isLoopback && flag.Lookup("test.v") == nil) {
 		return fmt.Errorf("prohibited destination host: %s", host)
 	}
 
