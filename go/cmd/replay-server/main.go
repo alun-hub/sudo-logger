@@ -729,6 +729,7 @@ func main() {
 			logoutURL = "/oauth2/sign_out"
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// user is used in JSON output which is already quoted and escaped by fmt.Fprintf %q
 		fmt.Fprintf(w, `{"user":%q,"logoutUrl":%q}`, user, logoutURL)
 	})
 
@@ -881,7 +882,7 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	viewer := viewerFromContext(r)
 	recordView(r, tsid, replayURL)
-	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", viewer, r.RemoteAddr, tsid, replayURL)
+	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", sanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
 
 	rawEvents, err := sessionStore.ReadEvents(r.Context(), tsid)
 	if err != nil {
