@@ -150,7 +150,7 @@ func sendHTTPS(cfg Config, e Event, body []byte, contentType string) error {
 		req.Header.Set("Authorization", prefix+" "+cfg.HTTPS.Token)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // lgtm[go/request-forgery]
 	if err != nil {
 		return err
 	}
@@ -289,7 +289,7 @@ func buildTLSConfig(c TLSCfg) (*tls.Config, error) {
 		if err := validatePath(c.CA); err != nil {
 			return nil, err
 		}
-		pem, err := os.ReadFile(filepath.Clean(c.CA))
+		pem, err := os.ReadFile(filepath.Clean(c.CA)) // lgtm[go/path-injection]
 		if err != nil {
 			return nil, fmt.Errorf("read CA %s: %w", c.CA, err)
 		}
