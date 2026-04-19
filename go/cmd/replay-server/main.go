@@ -130,7 +130,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		ctx := context.WithValue(r.Context(), ctxViewer, user)
 		next.ServeHTTP(lrw, r.WithContext(ctx))
-		log.Printf("access identity=%s addr=%s method=%s path=%s status=%d", // lgtm[go/clear-text-logging]
+		log.Printf("access identity=%s addr=%s method=%s path=%s status=%d",
 			sanitizeForLog(user), r.RemoteAddr, r.Method, sanitizeForLog(r.URL.Path), lrw.status)
 	})
 }
