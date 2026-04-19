@@ -92,8 +92,10 @@ type SessionStart struct {
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.
 // When the shipper starts a Wayland proxy for a GUI session it populates
 // ProxyDisplay so the plugin can patch WAYLAND_DISPLAY before exec.
+// Disclaimer, if non-empty, is printed to the user's terminal before sudo proceeds.
 type SessionReadyBody struct {
 	ProxyDisplay string `json:"proxy_display,omitempty"` // path to proxy Wayland socket
+	Disclaimer   string `json:"disclaimer,omitempty"`    // optional notice shown at session start
 }
 
 // Chunk is a decoded CHUNK message.

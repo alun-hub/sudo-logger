@@ -878,22 +878,44 @@ static int plugin_open(unsigned int        version,
         return -1;
     }
 
-    /* SESSION_READY may carry a JSON body: {"proxy_display":"<path>"}.
-     * If present, patch WAYLAND_DISPLAY in user_env[] so the command
-     * connects to the recording proxy instead of the real compositor.
+    /* SESSION_READY may carry a JSON body with optional fields:
+     *   "proxy_display" — Wayland proxy socket path; plugin patches WAYLAND_DISPLAY.
+     *   "disclaimer"    — operator notice printed to the terminal before sudo proceeds.
      * rebuild_env() runs after plugin_open() returns and reads user_env[],
-     * so this modification is picked up before the command is exec'd. */
+     * so the WAYLAND_DISPLAY modification is picked up before the command is exec'd. */
     {
         uint32_t rlen;
         memcpy(&rlen, hdr + 1, 4);
         rlen = be32toh(rlen);
-        if (rlen > 0 && rlen < 512 && user_env) {
-            char rbuf[512] = {0};
+        if (rlen > 0 && rlen < 4096) {
+            char rbuf[4096] = {0};
             if (read_exact(g_shipper_fd, rbuf, rlen) == 0) {
+                /* Print disclaimer before the session begins. */
+                const char *dkey = "\"disclaimer\":\"";
+                char *dp = strstr(rbuf, dkey);
+                if (dp) {
+                    dp += strlen(dkey);
+                    char *dend = strchr(dp, '"');
+                    if (dend && dend > dp) {
+                        size_t dlen = (size_t)(dend - dp);
+                        if (g_tty_fd >= 0) {
+                            write(g_tty_fd, dp, dlen);
+                            write(g_tty_fd, "\r\n", 2);
+                        } else {
+                            /* Fallback: use sudo's own output channel. */
+                            char tmp[4096] = {0};
+                            if (dlen < sizeof(tmp) - 1) {
+                                memcpy(tmp, dp, dlen);
+                                g_printf(SUDO_CONV_INFO_MSG, "%s\n", tmp);
+                            }
+                        }
+                    }
+                }
+
                 /* Minimal JSON parse: find "proxy_display":"<value>" */
                 const char *key = "\"proxy_display\":\"";
                 char *kp = strstr(rbuf, key);
-                if (kp) {
+                if (kp && user_env) {
                     kp += strlen(key);
                     char *end = strchr(kp, '"');
                     if (end && end > kp) {

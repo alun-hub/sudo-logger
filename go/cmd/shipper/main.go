@@ -489,16 +489,15 @@ func handlePluginConn(pluginConn net.Conn) {
 			if proxyErr != nil {
 				log.Printf("[%s] wayland-proxy: %v — GUI session without screen capture",
 					start.SessionID, proxyErr)
-				protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
+				protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody("", cfg.Disclaimer))
 			} else {
 				guiFrames = frames
 				killProxy = proxyKill
-				body, _ := json.Marshal(protocol.SessionReadyBody{ProxyDisplay: proxySocket})
-				protocol.WriteMessage(pw, protocol.MsgSessionReady, body)
+				protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(proxySocket, cfg.Disclaimer))
 				log.Printf("[%s] wayland-proxy started, socket=%s", start.SessionID, proxySocket)
 			}
 		} else {
-			protocol.WriteMessage(pw, protocol.MsgSessionReady, nil)
+			protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody("", cfg.Disclaimer))
 		}
 	default:
 		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
@@ -729,6 +728,16 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 			cg.freeze()
 		}
 	}
+}
+
+// sessionReadyBody encodes a SESSION_READY JSON payload. Returns nil when both
+// fields are empty so the plugin receives a zero-length body (backward compat).
+func sessionReadyBody(proxyDisplay, disclaimer string) []byte {
+	if proxyDisplay == "" && disclaimer == "" {
+		return nil
+	}
+	body, _ := json.Marshal(protocol.SessionReadyBody{ProxyDisplay: proxyDisplay, Disclaimer: disclaimer})
+	return body
 }
 
 // reportSessionAbandon opens a fresh TLS connection to the server and sends a

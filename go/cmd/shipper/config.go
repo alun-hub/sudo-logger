@@ -19,6 +19,7 @@ type shipperConfig struct {
 	ProxyPeriod   int
 	MaskPatterns  []string
 	FreezeTimeout time.Duration
+	Disclaimer    string
 	Debug         bool
 	Wayland       bool
 }
@@ -103,6 +104,8 @@ func loadConfig(path string) (shipperConfig, error) {
 			cfg.Debug = v == "true" || v == "1" || v == "yes"
 		case "wayland":
 			cfg.Wayland = v != "false" && v != "0" && v != "no"
+		case "disclaimer":
+			cfg.Disclaimer = v
 		default:
 			return cfg, fmt.Errorf("%s:%d: unknown key %q", path, lineNum, k)
 		}
