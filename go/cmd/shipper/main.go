@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -730,11 +731,37 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 	}
 }
 
+// ansiColors maps disclaimer_color names to ANSI SGR codes (open + reset).
+var ansiColors = map[string][2]string{
+	"red":         {"\033[91m", "\033[0m"},
+	"green":       {"\033[92m", "\033[0m"},
+	"blue":        {"\033[94m", "\033[0m"},
+	"orange":      {"\033[33m", "\033[0m"},
+	"bold_red":    {"\033[1;91m", "\033[0m"},
+	"bold_green":  {"\033[1;92m", "\033[0m"},
+	"bold_blue":   {"\033[1;94m", "\033[0m"},
+	"bold_orange": {"\033[1;33m", "\033[0m"},
+}
+
+// applyColor wraps text with ANSI codes for the given color name and converts
+// newlines to CRLF for correct terminal display.
+func applyColor(text, color string) string {
+	// Newlines must be CRLF for raw tty writes.
+	text = strings.ReplaceAll(text, "\n", "\r\n")
+	if codes, ok := ansiColors[color]; ok {
+		return codes[0] + text + codes[1]
+	}
+	return text
+}
+
 // sessionReadyBody encodes a SESSION_READY JSON payload. Returns nil when both
 // fields are empty so the plugin receives a zero-length body (backward compat).
 func sessionReadyBody(proxyDisplay, disclaimer string) []byte {
 	if proxyDisplay == "" && disclaimer == "" {
 		return nil
+	}
+	if disclaimer != "" {
+		disclaimer = applyColor(disclaimer, cfg.DisclaimerColor)
 	}
 	body, _ := json.Marshal(protocol.SessionReadyBody{ProxyDisplay: proxyDisplay, Disclaimer: disclaimer})
 	return body

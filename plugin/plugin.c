@@ -568,6 +568,72 @@ static void json_escape_into(char *buf, size_t bufsz, const char *src)
 }
 
 /*
+ * json_str_end — returns a pointer to the closing '"' of a JSON string value,
+ * correctly skipping over backslash-escaped characters (including \").
+ * p must point to the first character AFTER the opening '"'.
+ * Returns NULL if no unescaped '"' is found before the NUL terminator.
+ */
+static const char *json_str_end(const char *p)
+{
+    while (*p) {
+        if (*p == '\\') { p += (*p != '\0') ? 2 : 1; continue; }
+        if (*p == '"')  { return p; }
+        p++;
+    }
+    return NULL;
+}
+
+/*
+ * json_unescape_into — decodes a JSON string value (between the outer quotes)
+ * into dst, handling \n \r \t \\ \" and \uXXXX (BMP, emitted as UTF-8).
+ * Returns the number of bytes written (not including the NUL terminator).
+ * dst must have room for at least srclen+1 bytes.
+ */
+static size_t json_unescape_into(char *dst, size_t dstsz,
+                                 const char *src, size_t srclen)
+{
+    size_t out = 0;
+    for (size_t i = 0; i < srclen && out + 1 < dstsz; i++) {
+        if (src[i] != '\\') { dst[out++] = src[i]; continue; }
+        if (++i >= srclen)  break;
+        switch (src[i]) {
+        case 'n':  dst[out++] = '\n'; break;
+        case 'r':  dst[out++] = '\r'; break;
+        case 't':  dst[out++] = '\t'; break;
+        case '\\': dst[out++] = '\\'; break;
+        case '"':  dst[out++] = '"';  break;
+        case 'u':
+            if (i + 4 < srclen) {
+                unsigned int cp = 0;
+                const char *hex = src + i + 1;
+                for (int k = 0; k < 4; k++) {
+                    cp <<= 4;
+                    char h = hex[k];
+                    if      (h >= '0' && h <= '9') cp |= (unsigned)(h - '0');
+                    else if (h >= 'a' && h <= 'f') cp |= (unsigned)(h - 'a' + 10);
+                    else if (h >= 'A' && h <= 'F') cp |= (unsigned)(h - 'A' + 10);
+                }
+                i += 4;
+                if (cp < 0x80) {
+                    dst[out++] = (char)cp;
+                } else if (cp < 0x800 && out + 2 < dstsz) {
+                    dst[out++] = (char)(0xC0 | (cp >> 6));
+                    dst[out++] = (char)(0x80 | (cp & 0x3F));
+                } else if (out + 3 < dstsz) {
+                    dst[out++] = (char)(0xE0 | (cp >> 12));
+                    dst[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    dst[out++] = (char)(0x80 | (cp & 0x3F));
+                }
+            }
+            break;
+        default: dst[out++] = src[i]; break;
+        }
+    }
+    dst[out] = '\0';
+    return out;
+}
+
+/*
  * build_cmdline_json — writes a JSON-safe, space-joined argv string into buf.
  *
  * Characters that are illegal inside a JSON string (backslash, double-quote,
@@ -890,48 +956,46 @@ static int plugin_open(unsigned int        version,
         if (rlen > 0 && rlen < 4096) {
             char rbuf[4096] = {0};
             if (read_exact(g_shipper_fd, rbuf, rlen) == 0) {
-                /* Print disclaimer before the session begins. */
+                /* Print disclaimer before the session begins.
+                 * The shipper embeds ANSI colour codes and CRLF sequences;
+                 * json_unescape_into decodes JSON escapes to raw bytes. */
                 const char *dkey = "\"disclaimer\":\"";
                 char *dp = strstr(rbuf, dkey);
                 if (dp) {
                     dp += strlen(dkey);
-                    char *dend = strchr(dp, '"');
+                    const char *dend = json_str_end(dp);
                     if (dend && dend > dp) {
-                        size_t dlen = (size_t)(dend - dp);
+                        char decoded[4096] = {0};
+                        size_t dlen = json_unescape_into(decoded, sizeof(decoded),
+                                                         dp, (size_t)(dend - dp));
                         if (g_tty_fd >= 0) {
-                            write(g_tty_fd, dp, dlen);
+                            write(g_tty_fd, decoded, dlen);
                             write(g_tty_fd, "\r\n", 2);
                         } else {
-                            /* Fallback: use sudo's own output channel. */
-                            char tmp[4096] = {0};
-                            if (dlen < sizeof(tmp) - 1) {
-                                memcpy(tmp, dp, dlen);
-                                g_printf(SUDO_CONV_INFO_MSG, "%s\n", tmp);
-                            }
+                            g_printf(SUDO_CONV_INFO_MSG, "%s\n", decoded);
                         }
                     }
                 }
 
-                /* Minimal JSON parse: find "proxy_display":"<value>" */
+                /* Parse "proxy_display":"<value>" to patch WAYLAND_DISPLAY. */
                 const char *key = "\"proxy_display\":\"";
                 char *kp = strstr(rbuf, key);
                 if (kp && user_env) {
                     kp += strlen(key);
-                    char *end = strchr(kp, '"');
+                    const char *end = json_str_end(kp);
                     if (end && end > kp) {
-                        size_t vlen = (size_t)(end - kp);
-                        /* Build "WAYLAND_DISPLAY=<proxy_path>" in a heap buffer.
+                        char proxy[512] = {0};
+                        size_t vlen = json_unescape_into(proxy, sizeof(proxy),
+                                                         kp, (size_t)(end - kp));
+                        /* Build "WAYLAND_DISPLAY=<value>" in a heap buffer.
                          * Intentional leak: this process exec()s immediately
                          * after plugin_open() returns. */
                         char *entry = malloc(16 + vlen + 1);
                         if (entry) {
                             memcpy(entry, "WAYLAND_DISPLAY=", 16);
-                            memcpy(entry + 16, kp, vlen);
+                            memcpy(entry + 16, proxy, vlen);
                             entry[16 + vlen] = '\0';
 
-                            /* Cast away const to patch the array.
-                             * user_env[] is heap-allocated by sudo; rebuild_env()
-                             * iterates this array after open() returns. */
                             char **menv = (char **)user_env;
                             int found = 0;
                             for (int i = 0; menv[i]; i++) {
@@ -943,19 +1007,13 @@ static int plugin_open(unsigned int        version,
                             }
                             if (found) {
                                 syslog(LOG_DEBUG,
-                                    "sudo-logger: patched WAYLAND_DISPLAY → %s",
+                                    "sudo-logger: patched WAYLAND_DISPLAY -> %s",
                                     entry);
                             } else {
-                                /* WAYLAND_DISPLAY absent from env (env_reset stripped it).
-                                 * setenv() works when !env_reset is configured. */
                                 syslog(LOG_WARNING,
                                     "sudo-logger: WAYLAND_DISPLAY not in user_env[], "
                                     "falling back to setenv(%s)", entry);
-                                char tmp[256] = {0};
-                                if (vlen < sizeof(tmp)) {
-                                    memcpy(tmp, kp, vlen);
-                                    setenv("WAYLAND_DISPLAY", tmp, 1);
-                                }
+                                setenv("WAYLAND_DISPLAY", proxy, 1);
                                 free(entry);
                             }
                         }

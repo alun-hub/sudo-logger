@@ -17,11 +17,12 @@ type shipperConfig struct {
 	VerifyKey     string
 	ProxyBin      string
 	ProxyPeriod   int
-	MaskPatterns  []string
-	FreezeTimeout time.Duration
-	Disclaimer    string
-	Debug         bool
-	Wayland       bool
+	MaskPatterns     []string
+	FreezeTimeout    time.Duration
+	Disclaimer       string // raw text after escape expansion (\n → newline, \t → tab)
+	DisclaimerColor  string // red, green, blue, orange, bold_red, bold_green, bold_blue, bold_orange
+	Debug            bool
+	Wayland          bool
 }
 
 func defaultConfig() shipperConfig {
@@ -105,10 +106,21 @@ func loadConfig(path string) (shipperConfig, error) {
 		case "wayland":
 			cfg.Wayland = v != "false" && v != "0" && v != "no"
 		case "disclaimer":
-			cfg.Disclaimer = v
+			cfg.Disclaimer = expandEscapes(v)
+		case "disclaimer_color":
+			cfg.DisclaimerColor = v
 		default:
 			return cfg, fmt.Errorf("%s:%d: unknown key %q", path, lineNum, k)
 		}
 	}
 	return cfg, sc.Err()
+}
+
+// expandEscapes replaces literal \n and \t sequences in config values with
+// the corresponding control characters, matching shell-like expectation for
+// multiline and tabbed disclaimer text.
+func expandEscapes(s string) string {
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	s = strings.ReplaceAll(s, `\t`, "\t")
+	return s
 }
