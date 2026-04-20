@@ -64,10 +64,12 @@ func writeTTYFreezeMsg(ttyPath string) {
 // inactivity.  Any keypress resets the idle timer and cancels the countdown.
 func writeTTYIdleWarnMsg(ttyPath string, remaining time.Duration) {
 	if ttyPath == "" || !validTTYPath.MatchString(ttyPath) {
+		log.Printf("idle warn: skipping tty write (path %q not valid)", ttyPath)
 		return
 	}
 	f, err := os.OpenFile(ttyPath, os.O_WRONLY, 0)
 	if err != nil {
+		log.Printf("idle warn: open %s: %v", ttyPath, err)
 		return
 	}
 	defer f.Close()
@@ -477,7 +479,10 @@ func handlePluginConn(pluginConn net.Conn) {
 				}
 
 				if !warned && since >= cfg.IdleTimeout-warnBefore {
-					go writeTTYIdleWarnMsg(start.TtyPath, cfg.IdleTimeout-since)
+					remaining := cfg.IdleTimeout - since
+					log.Printf("[%s] idle for %v — warning user (%v remaining, tty=%s)",
+						start.SessionID, since.Round(time.Second), remaining.Round(time.Second), start.TtyPath)
+					writeTTYIdleWarnMsg(start.TtyPath, remaining)
 					warned = true
 				} else if warned && since < cfg.IdleTimeout-warnBefore {
 					// User pressed a key — reset warning so it fires again if
