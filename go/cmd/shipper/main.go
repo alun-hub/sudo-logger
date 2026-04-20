@@ -44,6 +44,26 @@ const freezeMsgTTY = "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable —
 // validTTYPath restricts tty_path to known safe device paths.
 var validTTYPath = regexp.MustCompile(`^/dev/(pts/\d{1,6}|tty[a-zA-Z0-9]{0,10})$`)
 
+// resolveTTYPath resolves /dev/tty to the concrete PTY path.
+// /dev/tty is process-relative; a daemon with no controlling terminal gets
+// ENXIO when opening it.  We find the real device by reading the symlinks
+// of the sudo process's stdio fds in /proc.
+func resolveTTYPath(ttyPath string, sudoPID int) string {
+	if ttyPath != "/dev/tty" {
+		return ttyPath
+	}
+	for _, fd := range []int{0, 1, 2} {
+		link, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", sudoPID, fd))
+		if err != nil {
+			continue
+		}
+		if validTTYPath.MatchString(link) {
+			return link
+		}
+	}
+	return ttyPath
+}
+
 // writeTTYFreezeMsg writes the freeze banner directly to the session's
 // controlling terminal.  Called in a goroutine at markDead() time so the
 // message appears immediately even when sudo is stopped by job control.
@@ -367,6 +387,10 @@ func handlePluginConn(pluginConn net.Conn) {
 		return
 	}
 
+	// Resolve /dev/tty to the concrete PTY path; the shipper is a daemon
+	// with no controlling terminal and cannot open the process-relative alias.
+	ttyPath := resolveTTYPath(start.TtyPath, start.Pid)
+
 	markDead := func() {
 		sessionAckMu.Lock()
 		firstFreeze := serverConnAlive && frozenSince.IsZero()
@@ -383,7 +407,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		if firstFreeze {
 			// Write freeze banner directly to the TTY so it appears immediately
 			// even when sudo is stopped by job control (SIGTSTP propagation).
-			go writeTTYFreezeMsg(start.TtyPath)
+			go writeTTYFreezeMsg(ttyPath)
 			go reportSessionFreezing(cfg.Server, tlsCfg, start.SessionID)
 		}
 	}
@@ -470,7 +494,7 @@ func handlePluginConn(pluginConn net.Conn) {
 				if since >= cfg.IdleTimeout {
 					log.Printf("[%s] no input for %v — terminating idle session (pid %d)",
 						start.SessionID, since.Round(time.Second), start.Pid)
-					go writeTTYIdleMsg(start.TtyPath, cfg.IdleTimeout)
+					go writeTTYIdleMsg(ttyPath, cfg.IdleTimeout)
 					time.Sleep(200 * time.Millisecond)
 					syscall.Kill(start.Pid, syscall.SIGHUP)
 					time.Sleep(1 * time.Second)
@@ -481,8 +505,8 @@ func handlePluginConn(pluginConn net.Conn) {
 				if !warned && since >= cfg.IdleTimeout-warnBefore {
 					remaining := cfg.IdleTimeout - since
 					log.Printf("[%s] idle for %v — warning user (%v remaining, tty=%s)",
-						start.SessionID, since.Round(time.Second), remaining.Round(time.Second), start.TtyPath)
-					writeTTYIdleWarnMsg(start.TtyPath, remaining)
+						start.SessionID, since.Round(time.Second), remaining.Round(time.Second), ttyPath)
+					writeTTYIdleWarnMsg(ttyPath, remaining)
 					warned = true
 				} else if warned && since < cfg.IdleTimeout-warnBefore {
 					// User pressed a key — reset warning so it fires again if
@@ -524,10 +548,10 @@ func handlePluginConn(pluginConn net.Conn) {
 	start.ResolvedCommand = redactor.RedactString(start.ResolvedCommand)
 	startPayload, _ = json.Marshal(start)
 
-	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v wayland=%q xdg=%q",
+	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v wayland=%q xdg=%q tty=%s",
 		start.SessionID, start.User, start.Host, start.Pid,
 		truncate(start.Command, 60), cg != nil,
-		start.WaylandDisplay, start.XdgRuntimeDir)
+		start.WaylandDisplay, start.XdgRuntimeDir, ttyPath)
 	if err := protocol.WriteMessage(serverBuf, protocol.MsgSessionStart, startPayload); err != nil {
 		log.Printf("[%s] forward SESSION_START: %v", start.SessionID, err)
 		markDead()
