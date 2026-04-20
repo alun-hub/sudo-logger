@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.0.1)
+policy_module(sudo_logger, 1.0.2)
 
 ########################################
 #
@@ -78,6 +78,12 @@ allow sudo_shipper_t domain:file { read open getattr };
 # /dev/tty is process-relative; the shipper reads these symlinks to find the
 # concrete device (e.g. /dev/pts/3) for writing idle-timeout banners.
 allow sudo_shipper_t domain:lnk_file { read getattr };
+
+# Write to user PTY devices for session banner messages (freeze, idle warning,
+# idle termination).  The shipper writes directly to the terminal so banners
+# appear immediately, even when the sudo process is stopped by job control.
+require { type user_devpts_t; }
+allow sudo_shipper_t user_devpts_t:chr_file { open write getattr };
 # getpgid: used by cgroup tracker to check if a process has its own process
 # group (pgid == pid) before deciding whether SIGSTOP is safe to send.
 allow sudo_shipper_t domain:process { getpgid };
