@@ -60,6 +60,23 @@ func writeTTYFreezeMsg(ttyPath string) {
 	_, _ = f.WriteString(freezeMsgTTY)
 }
 
+// writeTTYIdleWarnMsg warns the user that the session will close soon due to
+// inactivity.  Any keypress resets the idle timer and cancels the countdown.
+func writeTTYIdleWarnMsg(ttyPath string, remaining time.Duration) {
+	if ttyPath == "" || !validTTYPath.MatchString(ttyPath) {
+		return
+	}
+	f, err := os.OpenFile(ttyPath, os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	msg := fmt.Sprintf(
+		"\r\n\033[33;1m[ SUDO-LOGGER: session will close in %v due to inactivity — press any key to continue ]\033[0m\r\n",
+		remaining.Round(time.Second))
+	_, _ = f.WriteString(msg)
+}
+
 // writeTTYIdleMsg writes an idle-timeout banner to the session's controlling
 // terminal so the user sees why the session is being terminated.
 func writeTTYIdleMsg(ttyPath string, timeout time.Duration) {
@@ -435,22 +452,38 @@ func handlePluginConn(pluginConn net.Conn) {
 	var lastInputNs atomic.Int64
 	lastInputNs.Store(time.Now().UnixNano())
 	if cfg.IdleTimeout > 0 {
+		// Warn this long before closing; capped at half the timeout so short
+		// timeouts still get a visible warning.
+		warnBefore := 60 * time.Second
+		if warnBefore > cfg.IdleTimeout/2 {
+			warnBefore = cfg.IdleTimeout / 2
+		}
 		go func() {
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
+			warned := false
 			for range ticker.C {
 				since := time.Since(time.Unix(0, lastInputNs.Load()))
-				if since < cfg.IdleTimeout {
-					continue
+
+				if since >= cfg.IdleTimeout {
+					log.Printf("[%s] no input for %v — terminating idle session (pid %d)",
+						start.SessionID, since.Round(time.Second), start.Pid)
+					go writeTTYIdleMsg(start.TtyPath, cfg.IdleTimeout)
+					time.Sleep(200 * time.Millisecond)
+					syscall.Kill(start.Pid, syscall.SIGHUP)
+					time.Sleep(1 * time.Second)
+					pluginConn.Close()
+					return
 				}
-				log.Printf("[%s] no input for %v — terminating idle session (pid %d)",
-					start.SessionID, since.Round(time.Second), start.Pid)
-				go writeTTYIdleMsg(start.TtyPath, cfg.IdleTimeout)
-				time.Sleep(200 * time.Millisecond) // let the banner reach the TTY
-				syscall.Kill(start.Pid, syscall.SIGHUP)
-				time.Sleep(1 * time.Second) // grace period for clean SESSION_END
-				pluginConn.Close()
-				return
+
+				if !warned && since >= cfg.IdleTimeout-warnBefore {
+					go writeTTYIdleWarnMsg(start.TtyPath, cfg.IdleTimeout-since)
+					warned = true
+				} else if warned && since < cfg.IdleTimeout-warnBefore {
+					// User pressed a key — reset warning so it fires again if
+					// the session goes idle once more.
+					warned = false
+				}
 			}
 		}()
 	}
