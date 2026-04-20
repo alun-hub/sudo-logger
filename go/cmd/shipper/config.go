@@ -19,6 +19,7 @@ type shipperConfig struct {
 	ProxyPeriod   int
 	MaskPatterns     []string
 	FreezeTimeout    time.Duration
+	IdleTimeout      time.Duration
 	Disclaimer       string // raw text after escape expansion (\n → newline, \t → tab)
 	DisclaimerColor  string // red, green, blue, orange, bold_red, bold_green, bold_blue, bold_orange
 	Debug            bool
@@ -101,6 +102,12 @@ func loadConfig(path string) (shipperConfig, error) {
 				return cfg, fmt.Errorf("%s:%d: freeze_timeout: %w", path, lineNum, err)
 			}
 			cfg.FreezeTimeout = d
+		case "idle_timeout":
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				return cfg, fmt.Errorf("%s:%d: idle_timeout: %w", path, lineNum, err)
+			}
+			cfg.IdleTimeout = d
 		case "debug":
 			cfg.Debug = v == "true" || v == "1" || v == "yes"
 		case "wayland":

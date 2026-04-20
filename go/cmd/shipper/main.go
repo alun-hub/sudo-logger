@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -57,6 +58,23 @@ func writeTTYFreezeMsg(ttyPath string) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(freezeMsgTTY)
+}
+
+// writeTTYIdleMsg writes an idle-timeout banner to the session's controlling
+// terminal so the user sees why the session is being terminated.
+func writeTTYIdleMsg(ttyPath string, timeout time.Duration) {
+	if ttyPath == "" || !validTTYPath.MatchString(ttyPath) {
+		return
+	}
+	f, err := os.OpenFile(ttyPath, os.O_WRONLY, 0)
+	if err != nil {
+		log.Printf("idle banner: open %s: %v", ttyPath, err)
+		return
+	}
+	defer f.Close()
+	msg := fmt.Sprintf("\r\n\033[43;30;1m[ SUDO-LOGGER: session terminated after %v of inactivity ]\033[0m\r\n",
+		timeout.Round(time.Second))
+	_, _ = f.WriteString(msg)
 }
 
 var (
@@ -409,6 +427,34 @@ func handlePluginConn(pluginConn net.Conn) {
 		}()
 	}
 
+	// ── Idle-timeout watchdog ─────────────────────────────────────────────
+	// Terminates the session with SIGHUP if no user input (stdin/ttyin) has
+	// arrived for longer than idle_timeout.  Disabled when idle_timeout=0.
+	// lastInputNs holds the UnixNano timestamp of the most recent input chunk;
+	// initialised to now so a freshly started session never immediately fires.
+	var lastInputNs atomic.Int64
+	lastInputNs.Store(time.Now().UnixNano())
+	if cfg.IdleTimeout > 0 {
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				since := time.Since(time.Unix(0, lastInputNs.Load()))
+				if since < cfg.IdleTimeout {
+					continue
+				}
+				log.Printf("[%s] no input for %v — terminating idle session (pid %d)",
+					start.SessionID, since.Round(time.Second), start.Pid)
+				go writeTTYIdleMsg(start.TtyPath, cfg.IdleTimeout)
+				time.Sleep(200 * time.Millisecond) // let the banner reach the TTY
+				syscall.Kill(start.Pid, syscall.SIGHUP)
+				time.Sleep(1 * time.Second) // grace period for clean SESSION_END
+				pluginConn.Close()
+				return
+			}
+		}()
+	}
+
 	// serverWriteMu serialises writes to serverBuf from the main loop and
 	// the heartbeat goroutine so that frames are not interleaved.
 	var serverWriteMu sync.Mutex
@@ -648,6 +694,9 @@ loop:
 			if err == nil && (chunk.Stream <= protocol.StreamTtyOut) {
 				chunk.Data = redactor.Redact(chunk.Data, chunk.Stream)
 				payload = protocol.EncodeChunk(chunk.Seq, chunk.Timestamp, chunk.Stream, chunk.Data)
+			}
+			if err == nil && (chunk.Stream == protocol.StreamStdin || chunk.Stream == protocol.StreamTtyIn) {
+				lastInputNs.Store(time.Now().UnixNano())
 			}
 			forward(protocol.MsgChunk, payload)
 
