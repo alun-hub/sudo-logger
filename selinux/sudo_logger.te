@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.0.0)
+policy_module(sudo_logger, 1.0.1)
 
 ########################################
 #
@@ -74,6 +74,10 @@ allow sudo_shipper_t cgroup_t:file { create };
 # allow search and getattr on any domain's /proc/<pid> directory.
 allow sudo_shipper_t domain:dir { search getattr };
 allow sudo_shipper_t domain:file { read open getattr };
+# Read /proc/<pid>/fd/* symlinks to resolve the actual PTY device path.
+# /dev/tty is process-relative; the shipper reads these symlinks to find the
+# concrete device (e.g. /dev/pts/3) for writing idle-timeout banners.
+allow sudo_shipper_t domain:lnk_file { read getattr };
 # getpgid: used by cgroup tracker to check if a process has its own process
 # group (pgid == pid) before deciding whether SIGSTOP is safe to send.
 allow sudo_shipper_t domain:process { getpgid };
