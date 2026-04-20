@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.18.2
+Version:        1.19.0
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,6 +68,17 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Sun Apr 20 2026 sudo-logger 1.19.0-1
+- feat(replay): screen capture slideshow player for GUI sessions — frame
+  navigator with prev/next buttons, keyboard shortcuts, and timestamp display
+- feat: automated session retention cleanup via Replay GUI — configurable
+  maximum age; DELETE /api/sessions/cleanup with dry-run support
+- security: sanitize user identity in session view logs (VULN-003); escape
+  user/host values before writing to journal to prevent log injection
+- security: harden SSRF protection in siem webhook handler; fix missing
+  regex anchors on host allow-list (v2)
+- security: remediate CodeQL scanning alerts (SSRF, Path Traversal, Regex)
+
 * Thu Apr 17 2026 sudo-logger 1.18.2-1
 - feat: GET /api/session/frames — returns JSON list of screen frame metadata
 - feat: GET /api/session/frame?tsid=…&n=N — serves individual JPEG frame

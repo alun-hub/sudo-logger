@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.17.2
+Version:        1.18.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,16 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sun Apr 20 2026 sudo-logger 1.18.0-1
+- feat(distributed): ScreenFrameWriter/ScreenFrameStore for S3 — stores JPEG
+  frames in s3://<bucket>/<prefix>/sessions/<id>/frames/ with index.ndjson
+- fix(store): add JSON tags to ScreenFrameInfo struct so frame index
+  serialises correctly when storage backend is distributed
+- security: implement strict allow-list for TLS certificate paths (VULN-002);
+  reject paths outside /etc/sudo-logger/ before opening PEM files
+- security: harden SSRF protection in siem webhook sender; fix missing regex
+  anchors on host allow-list (v2)
+
 * Thu Apr 17 2026 sudo-logger 1.17.2-1
 - feat: store STREAM_SCREEN (0x05) chunks as JPEG frames via ScreenFrameWriter
   interface; frames written to <session-dir>/frames/NNN.jpg + index.ndjson
