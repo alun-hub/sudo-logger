@@ -85,6 +85,20 @@ to never terminate frozen sessions automatically.
 Default:
 .BR 3m .
 .TP
+.BI \-idle-timeout " duration"
+Terminate a session that has received no user input (stdin or ttyin stream)
+for this duration.
+When the timeout fires, a banner is written to the controlling terminal,
+.B SIGHUP
+is sent to the sudo process, and the plugin socket is closed one second later
+to ensure termination even if the process ignores
+.BR SIGHUP .
+Set to
+.B 0
+to disable idle termination entirely.
+Default:
+.BR 0 .
+.TP
 .B \-debug
 Enable verbose debug logging.
 By default only errors and key events (session start, freeze/unfreeze) are

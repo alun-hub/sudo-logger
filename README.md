@@ -451,6 +451,11 @@ server = logserver.example.com:9876
 # before abandoning it. Use Go duration syntax (e.g. 3m, 90s, 0 = never).
 #freeze_timeout = 3m
 
+# Terminate a session that has received no user input for this long.
+# Useful for cleaning up sessions where the user has walked away.
+# Use Go duration syntax (e.g. 30m, 2h). Set to 0 to disable (default).
+#idle_timeout   = 0
+
 # Verbose debug logging to syslog/journal.
 #debug         = false
 ```
@@ -613,6 +618,7 @@ All of these go in `/etc/sudo-logger/shipper.conf`:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `freeze_timeout` | `3m` | Terminate a frozen session after this duration of server unreachability. Prevents permanent hangs when the TCP connection dies. Set to `0` to disable (not recommended). |
+| `idle_timeout` | `0` | Terminate a session that has received no user input (stdin/ttyin) for this duration. Sends SIGHUP to the sudo process and closes the session. Set to `0` to disable. Use Go duration syntax, e.g. `30m`, `2h`. |
 | `wayland` | `true` | Enable Wayland screen capture for GUI sessions. Set to `false` to disable. |
 | `proxy_bin` | `/usr/libexec/sudo-logger/wayland-proxy` | Path to the wayland-proxy helper binary. |
 | `proxy_period` | `300` | Capture interval for Wayland frames in milliseconds. Lower values give smoother replay at the cost of more storage. |
