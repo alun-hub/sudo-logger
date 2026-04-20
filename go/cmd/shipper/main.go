@@ -111,7 +111,7 @@ func writeTTYIdleMsg(ttyPath string, timeout time.Duration) {
 		return
 	}
 	defer f.Close()
-	msg := fmt.Sprintf("\r\n\033[43;30;1m[ SUDO-LOGGER: session terminated after %v of inactivity ]\033[0m\r\n",
+	msg := fmt.Sprintf("\r\n\033[33;1m[ SUDO-LOGGER: session terminated after %v of inactivity ]\033[0m\r\n",
 		timeout.Round(time.Second))
 	_, _ = f.WriteString(msg)
 }
