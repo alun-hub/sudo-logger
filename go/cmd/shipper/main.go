@@ -251,6 +251,12 @@ func main() {
 func handlePluginConn(pluginConn net.Conn) {
 	defer pluginConn.Close()
 
+	// done is closed when the session ends (normal or error).
+	// All per-session watchdog goroutines select on done so they stop
+	// immediately and never fire after the session has finished.
+	done := make(chan struct{})
+	defer close(done)
+
 	pr := bufio.NewReader(pluginConn)
 	pw := bufio.NewWriter(pluginConn)
 
@@ -438,7 +444,13 @@ func handlePluginConn(pluginConn net.Conn) {
 		go func() {
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
-			for range ticker.C {
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+				}
+
 				sessionAckMu.Lock()
 				since := frozenSince
 				sessionAckMu.Unlock()
@@ -488,7 +500,13 @@ func handlePluginConn(pluginConn net.Conn) {
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
 			warned := false
-			for range ticker.C {
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+				}
+
 				since := time.Since(time.Unix(0, lastInputNs.Load()))
 
 				if since >= cfg.IdleTimeout {
