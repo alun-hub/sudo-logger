@@ -505,8 +505,7 @@ static void *monitor_thread_fn(void *arg)
                 sigemptyset(&block);
                 sigaddset(&block, SIGTTOU);
                 pthread_sigmask(SIG_BLOCK, &block, &old);
-                if (tcsetpgrp(g_tty_fd, our_pgrp) == 0)
-                    write(g_tty_fd, FREEZE_MSG, sizeof(FREEZE_MSG) - 1);
+                tcsetpgrp(g_tty_fd, our_pgrp);
                 pthread_sigmask(SIG_SETMASK, &old, NULL);
             }
         }
