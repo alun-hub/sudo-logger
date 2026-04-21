@@ -336,12 +336,16 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	updateAck := func(ts int64, seq uint64) {
 		sessionAckMu.Lock()
-		serverConnAlive = true // connection recovered
 		sessionAckSeq = seq
 		ackDebtStartNs = 0
-		frozenSince = time.Time{} // reset — server is reachable again
 		sessionAckMu.Unlock()
-		cg.unfreeze() // nil-safe; no-op when not frozen
+		// Do NOT unfreeze or reset serverConnAlive/frozenSince here.
+		// A delayed ACK (TCP retransmit of a packet sent before the server
+		// went down) must not flip the session back to alive; that would
+		// cause a spurious cgroup unfreeze, reset was_frozen in the plugin
+		// monitor, and produce a duplicate freeze banner.  markAlive()
+		// (called by the heartbeat goroutine after 2 consecutive windows)
+		// is the sole authority for declaring the session alive again.
 	}
 
 	readAck := func() (int64, uint64) {

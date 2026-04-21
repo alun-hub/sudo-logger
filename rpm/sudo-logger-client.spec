@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.21
+Version:        1.17.22
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue Apr 21 2026 sudo-logger 1.17.22-1
+- fix: remove unfreeze logic from updateAck — delayed TCP ACKs (retransmits
+  in-flight when the server went down) no longer reset serverConnAlive or
+  frozenSince; only markAlive (2 consecutive heartbeat windows) can unfreeze;
+  eliminates spurious second freeze banner and brief cgroup unfreeze
+
 * Tue Apr 21 2026 sudo-logger 1.17.21-1
 - fix: require 2 consecutive heartbeat windows before declaring server alive
   again; prevents a single delayed HeartbeatAck from triggering a spurious
