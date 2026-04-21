@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.23
+Version:        1.17.24
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue Apr 21 2026 sudo-logger 1.17.24-1
+- fix(plugin): remove FREEZE_MSG write from !fresh && !was_frozen path in
+  monitor_thread_fn; shipper already writes the banner via writeTTYFreezeMsg
+  at markDead() time — plugin write was redundant and caused a duplicate
+  banner on the first fg after freeze; was_frozen tracking kept for UNFREEZE_MSG
+
 * Tue Apr 21 2026 sudo-logger 1.17.23-1
 - fix(plugin): remove redundant FREEZE_MSG write from terminal-reclaim code;
   the shipper already wrote the banner at markDead() time — terminal-reclaim
