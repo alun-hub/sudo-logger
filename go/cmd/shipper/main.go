@@ -668,7 +668,8 @@ func handlePluginConn(pluginConn net.Conn) {
 				updateAck(time.Now().UnixNano(), ack.Seq)
 			case protocol.MsgHeartbeatAck:
 				touchServerMsg()
-				markAlive()
+				// markAlive is handled by the heartbeat goroutine after 2
+				// consecutive successes to avoid flapping on delayed packets.
 			}
 		}
 	}()
@@ -676,12 +677,18 @@ func handlePluginConn(pluginConn net.Conn) {
 	// ── Step 6b: heartbeat goroutine ──────────────────────────────────────
 	// Sends MsgHeartbeat every 400 ms.
 	//   • No reply in 800 ms → markDead() (freeze), but keep pinging.
-	//   • Reply arrives after dead period → markAlive() (unfreeze).
+	//   • 2 consecutive windows with a response → markAlive() (unfreeze).
 	//   • Write fails → TCP truly dead, exit goroutine.
+	//
+	// Recovery requires 2 consecutive successes (not just one) so that a
+	// single delayed HeartbeatAck in flight when the server went down cannot
+	// briefly flip state back to alive, which would cause a spurious second
+	// freeze banner and a brief cgroup unfreeze visible to the user via fg.
 	const hbInterval = 400 * time.Millisecond
 	go func() {
 		ticker := time.NewTicker(hbInterval)
 		defer ticker.Stop()
+		consecutiveOK := 0
 		for range ticker.C {
 			serverWriteMu.Lock()
 			serverConn.SetWriteDeadline(time.Now().Add(hbInterval))
@@ -700,8 +707,15 @@ func handlePluginConn(pluginConn net.Conn) {
 			lastServerMsgMu.Unlock()
 			if age > 2*hbInterval {
 				// No response from server — freeze, but keep pinging.
-				// Recovery happens in the ACK reader via markAlive().
+				consecutiveOK = 0
 				markDead()
+			} else {
+				consecutiveOK++
+				if consecutiveOK >= 2 {
+					// Two consecutive windows with a server response — server
+					// is genuinely back.  markAlive is idempotent when already alive.
+					markAlive()
+				}
 			}
 		}
 	}()

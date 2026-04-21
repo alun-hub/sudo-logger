@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.20
+Version:        1.17.21
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue Apr 21 2026 sudo-logger 1.17.21-1
+- fix: require 2 consecutive heartbeat windows before declaring server alive
+  again; prevents a single delayed HeartbeatAck from triggering a spurious
+  second freeze banner and brief cgroup unfreeze visible as an extra fg cycle
+
 * Sat Apr 18 2026 alun <alun@alun.se> - 1.17.16-1
 - Implement high-precision surgical secret masking for TTY and command metadata
 - Optimize masking performance with fast-path trigger regex
