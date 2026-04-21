@@ -429,11 +429,19 @@ func handlePluginConn(pluginConn net.Conn) {
 		wasAlive := serverConnAlive
 		serverConnAlive = true
 		ackDebtStartNs = 0 // heartbeat proves server is alive; reset ACK debt
-		frozenSince = time.Time{}
 		sessionAckMu.Unlock()
 		if !wasAlive {
 			cg.unfreeze()
 		}
+	}
+
+	// resetFrozenStatus clears the freeze timestamp so that the next network
+	// loss (e.g. an hour later) is treated as a fresh outage with a banner.
+	// Called only after the connection has been stable for >10 seconds.
+	resetFrozenStatus := func() {
+		sessionAckMu.Lock()
+		frozenSince = time.Time{}
+		sessionAckMu.Unlock()
 	}
 
 	// pluginWriteMu serialises writes to pw (plugin connection) so that the
@@ -726,6 +734,11 @@ func handlePluginConn(pluginConn net.Conn) {
 					// Two consecutive windows with a server response — server
 					// is genuinely back.  markAlive is idempotent when already alive.
 					markAlive()
+				}
+				if consecutiveOK >= 25 {
+					// Connection has been stable for >10 seconds (25 * 400ms).
+					// Safe to reset frozenSince so that future outages get a banner.
+					resetFrozenStatus()
 				}
 			}
 		}

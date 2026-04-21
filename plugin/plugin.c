@@ -434,6 +434,7 @@ static void *monitor_thread_fn(void *arg)
     (void)arg;
 
     int was_frozen = 0;
+    time_t last_reclaim = 0;
 
     while (!g_monitor_stop) {
         struct timespec ts = { .tv_sec = 0, .tv_nsec = 150000000L };
@@ -444,19 +445,7 @@ static void *monitor_thread_fn(void *arg)
 
         int fresh = ack_is_fresh_locked();
 
-        /* Shipper socket dropped — terminate the session immediately.
-         *
-         * In non-interactive mode (exec_nopty) sudo does not automatically
-         * forward SIGTERM to its children, so sending SIGTERM only to sudo
-         * leaves the child alive and blocks sudo in poll() waiting for the
-         * child's pipes to close.  Killing the entire process group ensures
-         * both sudo and its children terminate regardless of the exec mode:
-         *   - exec_nopty: sudo and children share the same PGID, so all
-         *     processes in the session are killed via the process group.
-         *   - exec_pty:   children run in their own PGID (new session), so
-         *     kill(-pgrp) only reaches sudo; the PTY hangup then delivers
-         *     SIGHUP to the child session as usual.
-         */
+        /* Shipper socket dropped — terminate the session immediately. */
         if (atomic_load(&g_shipper_dead)) {
             if (g_tty_fd >= 0) {
                 if (atomic_load(&g_freeze_timeout))
@@ -485,28 +474,31 @@ static void *monitor_thread_fn(void *arg)
          * the child's pgrp are queued but never delivered, leaving the user
          * completely trapped.
          *
-         * Fix: every 150 ms when frozen, check whether a child has become the
-         * terminal foreground.  If so, reclaim the terminal back to sudo's
-         * pgrp.  Block SIGTTOU in this thread only (pthread_sigmask is
-         * per-thread) so the tcsetpgrp() call does not stop the sudo process.
+         * Fix: check whether a child has become the terminal foreground.
+         * If so, reclaim the terminal back to sudo's pgrp.  Use a 5-second
+         * cooldown so we don't fight the user's "fg" command in a tight loop,
+         * which causes SIGTTOU and stops the bash process.
          */
         if (!fresh && g_tty_fd >= 0) {
-            pid_t fg_pgrp  = tcgetpgrp(g_tty_fd);
-            pid_t our_pgrp = getpgrp();
-            if (fg_pgrp > 0 && fg_pgrp != (pid_t)-1 && fg_pgrp != our_pgrp) {
-                sigset_t block, old;
-                sigemptyset(&block);
-                sigaddset(&block, SIGTTOU);
-                pthread_sigmask(SIG_BLOCK, &block, &old);
-                tcsetpgrp(g_tty_fd, our_pgrp);
-                pthread_sigmask(SIG_SETMASK, &old, NULL);
+            time_t now = now_sec();
+            if (now - last_reclaim >= 5) {
+                pid_t fg_pgrp  = tcgetpgrp(g_tty_fd);
+                pid_t our_pgrp = getpgrp();
+                if (fg_pgrp > 0 && fg_pgrp != (pid_t)-1 && fg_pgrp != our_pgrp) {
+                    sigset_t block, old;
+                    sigemptyset(&block);
+                    sigaddset(&block, SIGTTOU);
+                    pthread_sigmask(SIG_BLOCK, &block, &old);
+                    tcsetpgrp(g_tty_fd, our_pgrp);
+                    pthread_sigmask(SIG_SETMASK, &old, NULL);
+                    last_reclaim = now;
+                }
             }
         }
     }
 
     return NULL;
 }
-
 /*
  * Build and send a CHUNK message.
  * Payload: [8 seq BE][8 ts_ns BE][1 stream][4 datalen BE][data]
