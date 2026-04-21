@@ -255,7 +255,9 @@ func handlePluginConn(pluginConn net.Conn) {
 	// All per-session watchdog goroutines select on done so they stop
 	// immediately and never fire after the session has finished.
 	done := make(chan struct{})
-	defer close(done)
+	var closeOnce sync.Once
+	closeDone := func() { closeOnce.Do(func() { close(done) }) }
+	defer closeDone()
 
 	pr := bufio.NewReader(pluginConn)
 	pw := bufio.NewWriter(pluginConn)
@@ -693,7 +695,12 @@ func handlePluginConn(pluginConn net.Conn) {
 		ticker := time.NewTicker(hbInterval)
 		defer ticker.Stop()
 		consecutiveOK := 0
-		for range ticker.C {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
 			serverWriteMu.Lock()
 			serverConn.SetWriteDeadline(time.Now().Add(hbInterval))
 			werr := protocol.WriteMessage(serverBuf, protocol.MsgHeartbeat, nil)
@@ -829,10 +836,13 @@ loop:
 		forward(protocol.MsgSessionEnd, savedSessionEnd)
 	}
 
-	// Mark the connection as intentionally closed before closing the
-	// socket.  The heartbeat goroutine may still fire once after this
-	// and call markDead() — setting serverConnAlive=false here ensures
-	// firstFreeze is false so no spurious SESSION_FREEZING is sent.
+	// Stop all watchdog goroutines (including the heartbeat goroutine) before
+	// touching serverConnAlive.  Without this, markAlive() in the heartbeat
+	// goroutine can race with the serverConnAlive=false write below: if it wins
+	// the lock it sets serverConnAlive=true again, and the subsequent write
+	// failure on Close() causes markDead() to fire with firstFreeze=true,
+	// producing a spurious freeze banner after normal session exit.
+	closeDone()
 	sessionAckMu.Lock()
 	serverConnAlive = false
 	sessionAckMu.Unlock()

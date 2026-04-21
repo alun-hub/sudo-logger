@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.24
+Version:        1.17.25
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,14 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue Apr 21 2026 sudo-logger 1.17.25-1
+- fix(shipper): close done channel before serverConnAlive=false to prevent
+  race where heartbeat goroutine calls markAlive() between the two writes,
+  resetting serverConnAlive=true and triggering a spurious freeze banner
+  after normal session exit (freeze → unfreeze → exit sequence)
+- fix(shipper): add done-channel select to heartbeat goroutine so it exits
+  cleanly when the session ends, consistent with other watchdog goroutines
+
 * Tue Apr 21 2026 sudo-logger 1.17.24-1
 - fix(plugin): remove FREEZE_MSG write from !fresh && !was_frozen path in
   monitor_thread_fn; shipper already writes the banner via writeTTYFreezeMsg
