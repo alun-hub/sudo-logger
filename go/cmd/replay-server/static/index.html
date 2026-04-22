@@ -1721,7 +1721,12 @@ async function selectSession(tsid, initialSeek = 0) {
 }
 
 async function selectScreenSession(tsid, sess) {
-  elScreenImg.src = '';
+  elScreenImg.removeAttribute('src');
+  elScreenLoader.style.display = 'flex';
+  if (screenPopOut && !screenPopOut.closed) {
+    screenPopOut.postMessage({ type: 'frame', url: '', showLoader: true }, '*');
+  }
+
   try {
     const res = await fetch(`/api/session/frames?tsid=${encodeURIComponent(tsid)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
