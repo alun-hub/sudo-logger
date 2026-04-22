@@ -202,6 +202,12 @@
     /* ── Player ──────────────────────────────────────────────────────────────── */
     .player { grid-area: main; display: flex; flex-direction: column;
       background: var(--bg); overflow: hidden; min-width: 0; }
+    .player.split-view { flex-direction: row; flex-wrap: wrap; }
+    .player.split-view .info-bar { width: 100%; }
+    .player.split-view .controls { width: 100%; }
+    .player.split-view .terminal-wrap { flex: 0 0 35%; border-right: 1px solid var(--border); display: block !important; }
+    .player.split-view .screen-wrap { flex: 1; display: flex !important; }
+
     .info-bar { display: flex; flex-direction: column; justify-content: center;
       padding: 7px 16px; min-height: 40px;
       background: var(--surface); border-bottom: 1px solid var(--border);
@@ -1220,11 +1226,9 @@ const elScreenWrap = document.getElementById('screen-wrap');
 const elScreenImg  = document.getElementById('screen-img');
 
 // screenFrames: array of ScreenFrameInfo objects from /api/session/frames
-// screenTimer:  setInterval handle when playing
 // screenIdx:    current frame index (0-based)
 let screenFrames = [];
-let screenTimer  = null;
-let screenIdx    = 0;
+let screenIdx    = -1;
 
 function isScreenSession() { return screenFrames.length > 0; }
 
@@ -1236,59 +1240,48 @@ function showScreenPlayer() {
 function hideScreenPlayer() {
   elScreenWrap.classList.remove('active');
   document.querySelector('.terminal-wrap').style.display = '';
-  screenFrames = [];
-  stopScreenPlayer();
+  // Don't clear frames here so we can switch back
 }
 
-function stopScreenPlayer() {
-  if (screenTimer) { clearInterval(screenTimer); screenTimer = null; }
-}
+function syncScreenToTime(sec) {
+  if (!screenFrames.length) return;
+  // screenFrames[i].ts is absolute nanoseconds.
+  // We need to find the frame corresponding to sessStart + sec.
+  const targetTs = screenFrames[0].ts + (sec * 1e9);
 
-function screenFrameInterval() {
-  // Use inter-frame timestamps when available; fall back to 500 ms.
-  if (screenFrames.length >= 2 && screenFrames[screenIdx] && screenFrames[screenIdx + 1]) {
-    const dt = (screenFrames[screenIdx + 1].ts - screenFrames[screenIdx].ts) / 1e6; // ns → ms
-    return (dt > 50 && dt < 5000) ? dt : 500;
+  let idx = 0;
+  for (let i = 0; i < screenFrames.length; i++) {
+    if (screenFrames[i].ts <= targetTs) {
+      idx = i;
+    } else {
+      break;
+    }
   }
-  return 500;
+
+  if (idx !== screenIdx) {
+    screenIdx = idx;
+    elScreenImg.src = `/api/session/frame?tsid=${encodeURIComponent(currentTSID)}&n=${idx}`;
+  }
 }
 
 function renderScreenFrame(idx) {
   if (idx < 0 || idx >= screenFrames.length) return;
   screenIdx = idx;
   elScreenImg.src = `/api/session/frame?tsid=${encodeURIComponent(currentTSID)}&n=${idx}`;
-  // Sync scrubber
-  const pct = screenFrames.length > 1 ? idx / (screenFrames.length - 1) : 1;
-  elScrubber.value = Math.round(pct * 10000);
-  elScrubber.style.setProperty('--scrubber-fill', (pct * 100).toFixed(2) + '%');
+
   const totalSec = screenFrames.length > 0
     ? (screenFrames[screenFrames.length - 1].ts - screenFrames[0].ts) / 1e9
     : 0;
-  const curSec = screenFrames[idx] && screenFrames[0]
-    ? (screenFrames[idx].ts - screenFrames[0].ts) / 1e9 : 0;
-  elTimeCurrent.textContent = fmt(curSec);
-  elTimeTotal.textContent   = fmt(totalSec);
-}
+  const curSec = (screenFrames[idx].ts - screenFrames[0].ts) / 1e9;
 
-function playScreenPlayer() {
-  if (screenIdx >= screenFrames.length - 1) screenIdx = 0;
-  const advance = () => {
-    if (screenIdx >= screenFrames.length - 1) {
-      stopScreenPlayer();
-      setPlayIcon(false);
-      return;
-    }
-    renderScreenFrame(screenIdx + 1);
-    const next = screenFrameInterval();
-    screenTimer = setTimeout(advance, next);
-  };
-  screenTimer = setTimeout(advance, screenFrameInterval());
-  setPlayIcon(true);
-}
-
-function pauseScreenPlayer() {
-  stopScreenPlayer();
-  setPlayIcon(false);
+  // Update UI if we are in pure screen mode
+  if (!events.length) {
+    const pct = totalSec > 0 ? curSec / totalSec : 1;
+    elScrubber.value = Math.round(pct * 10000);
+    elScrubber.style.setProperty('--scrubber-fill', (pct * 100).toFixed(2) + '%');
+    elTimeCurrent.textContent = fmt(curSec);
+    elTimeTotal.textContent   = fmt(totalSec);
+  }
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -1540,8 +1533,9 @@ elLoadMore.addEventListener('click', () => {
 async function selectSession(tsid, initialSeek = 0) {
   if (tsid === currentTSID) return;
   stopPlayer();
-  stopScreenPlayer();
   currentTSID = tsid;
+  screenFrames = [];
+  screenIdx = -1;
 
   history.replaceState(null, '', '?tsid=' + encodeURIComponent(tsid));
 
@@ -1552,41 +1546,50 @@ async function selectSession(tsid, initialSeek = 0) {
   renderInfoBar(sess);
   setControlsEnabled(false);
 
+  // Reset player state
+  events = [];
+  totalDuration = sess ? sess.duration : 0;
+  term.reset();
+
+  const playerEl = document.querySelector('.player');
+  playerEl.classList.remove('split-view');
+
+  const termTask = selectTerminalSession(tsid, sess, initialSeek);
+
   if (sess && sess.has_frames) {
     await selectScreenSession(tsid, sess);
+    await termTask;
+    if (events.length > 0) {
+      // Both exist: use split view
+      playerEl.classList.add('split-view');
+      elScreenWrap.classList.add('active');
+      document.querySelector('.terminal-wrap').style.display = 'block';
+      fitAddon.fit();
+    } else {
+      showScreenPlayer();
+    }
   } else {
     hideScreenPlayer();
-    term.reset();
-    term.write('\x1b[2;37mLoading…\x1b[0m');
-    await selectTerminalSession(tsid, sess, initialSeek);
+    await termTask;
   }
 }
 
 async function selectScreenSession(tsid, sess) {
-  showScreenPlayer();
   elScreenImg.src = '';
-  term.reset();
-
   try {
     const res = await fetch(`/api/session/frames?tsid=${encodeURIComponent(tsid)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const frames = await res.json();
     if (currentTSID !== tsid) return;
     if (!frames || frames.length === 0) {
-      // No frames yet — session may still be recording
       elScreenImg.alt = 'No frames captured yet';
-      setControlsEnabled(false);
       return;
     }
     screenFrames = frames;
-    screenIdx = 0;
-    const totalSec = frames.length >= 2 && frames[0].ts && frames[frames.length-1].ts
-      ? (frames[frames.length-1].ts - frames[0].ts) / 1e9 : frames.length * 0.5;
-    elTimeTotal.textContent = fmt(totalSec);
-    elScrubber.max = 10000;
+    screenIdx = -1;
+    // Total duration is already set from session metadata or TTY
     setControlsEnabled(true);
-    renderScreenFrame(0);
-    if (autoplay) playScreenPlayer();
+    syncScreenToTime(0);
   } catch (err) {
     if (currentTSID !== tsid) return;
     elScreenImg.alt = `Failed to load frames: ${err.message}`;
@@ -1635,6 +1638,30 @@ function renderInfoBar(sess) {
   addItem(row1, 'host', sess.host, '', '');
   if (sess.runas) addItem(row1, 'runas', sess.runas, sess.runas !== 'root' ? 'blue' : 'dim', '');
   addItem(row1, 'cmd', sess.command, 'green', 'grow');
+
+  // Add view toggle if both TTY and Screen are available
+  if (sess.has_frames) {
+    const toggle = el('button', 'tab-btn active', '▣ screen');
+    toggle.id = 'view-toggle';
+    toggle.style.marginLeft = '10px';
+    toggle.style.padding = '2px 8px';
+    toggle.style.fontSize = '11px';
+    toggle.addEventListener('click', () => {
+      const isScreen = elScreenWrap.classList.contains('active');
+      if (isScreen) {
+        hideScreenPlayer();
+        toggle.textContent = 'tty';
+        toggle.classList.remove('active');
+        fitAddon.fit();
+      } else {
+        showScreenPlayer();
+        toggle.textContent = '▣ screen';
+        toggle.classList.add('active');
+      }
+    });
+    row1.appendChild(toggle);
+  }
+
   elInfoBar.appendChild(row1);
 
   // Info bar for sessions still being recorded
@@ -1799,6 +1826,7 @@ function updateProgress() {
     elScrubber.value = Math.round(pct * 100);
     setScrubberFill(pct);
   }
+  if (isScreenSession()) syncScreenToTime(t);
 }
 
 function seekTo(targetSec) {
@@ -1819,6 +1847,7 @@ function seekTo(targetSec) {
     elScrubber.value = Math.round(pct * 100);
     setScrubberFill(pct);
   }
+  if (isScreenSession()) syncScreenToTime(targetSec);
   updateURL();
   if (wasPlaying) { player.playing = true; setPlayIcon(true); scheduleNext(); startRaf(); }
 }
@@ -1826,59 +1855,33 @@ function seekTo(targetSec) {
 // ── Controls ──────────────────────────────────────────────────────────────────
 
 elBtnPlay.addEventListener('click', () => {
-  if (isScreenSession()) {
-    screenTimer ? pauseScreenPlayer() : playScreenPlayer();
-  } else {
-    player.playing ? pause() : play();
-  }
+  player.playing ? pause() : play();
 });
 
 elBtnRestart.addEventListener('click', () => {
-  if (isScreenSession()) {
-    stopScreenPlayer();
-    renderScreenFrame(0);
-    playScreenPlayer();
-  } else {
-    resetPlayer(); term.reset(); play();
-  }
+  resetPlayer(); term.reset(); play();
 });
 
 elScrubber.addEventListener('input', () => {
-  if (isScreenSession()) {
-    const idx = Math.round((elScrubber.value / 10000) * (screenFrames.length - 1));
-    stopScreenPlayer();
-    setPlayIcon(false);
-    renderScreenFrame(idx);
-  } else {
-    seekTo((elScrubber.value / 10000) * totalDuration);
-  }
+  seekTo((elScrubber.value / 10000) * totalDuration);
 });
 
 elSpeedSelect.addEventListener('change', () => {
-  if (!isScreenSession()) {
-    if (player.playing) {
-      player.startEventSec = elapsedSec();
-      player.startWallMs   = performance.now();
-    }
-    player.speed = parseFloat(elSpeedSelect.value);
-    localStorage.setItem('sudo-replay-speed', elSpeedSelect.value);
+  if (player.playing) {
+    player.startEventSec = elapsedSec();
+    player.startWallMs   = performance.now();
   }
+  player.speed = parseFloat(elSpeedSelect.value);
+  localStorage.setItem('sudo-replay-speed', elSpeedSelect.value);
 });
 
 document.addEventListener('keydown', e => {
   const _tag = e.target.tagName;
   if (_tag === 'INPUT' || _tag === 'TEXTAREA' || _tag === 'SELECT') return;
-  if (isScreenSession()) {
-    if (e.code === 'Space')      { e.preventDefault(); screenTimer ? pauseScreenPlayer() : playScreenPlayer(); }
-    if (e.code === 'ArrowLeft')  { e.preventDefault(); stopScreenPlayer(); setPlayIcon(false); renderScreenFrame(Math.max(0, screenIdx - 1)); }
-    if (e.code === 'ArrowRight') { e.preventDefault(); stopScreenPlayer(); setPlayIcon(false); renderScreenFrame(Math.min(screenFrames.length - 1, screenIdx + 1)); }
-    if (e.code === 'KeyR')       { e.preventDefault(); stopScreenPlayer(); renderScreenFrame(0); playScreenPlayer(); }
-  } else {
-    if (e.code === 'Space')      { e.preventDefault(); player.playing ? pause() : play(); }
-    if (e.code === 'ArrowLeft')  { e.preventDefault(); seekTo(Math.max(0, elapsedSec() - 5)); }
-    if (e.code === 'ArrowRight') { e.preventDefault(); seekTo(Math.min(totalDuration, elapsedSec() + 5)); }
-    if (e.code === 'KeyR' && !elBtnRestart.disabled) { e.preventDefault(); resetPlayer(); term.reset(); play(); }
-  }
+  if (e.code === 'Space')      { e.preventDefault(); player.playing ? pause() : play(); }
+  if (e.code === 'ArrowLeft')  { e.preventDefault(); seekTo(Math.max(0, elapsedSec() - 5)); }
+  if (e.code === 'ArrowRight') { e.preventDefault(); seekTo(Math.min(totalDuration, elapsedSec() + 5)); }
+  if (e.code === 'KeyR' && !elBtnRestart.disabled) { e.preventDefault(); resetPlayer(); term.reset(); play(); }
   if (e.code === 'Slash')      { e.preventDefault(); elSearch.focus(); elSearch.select(); }
 });
 
