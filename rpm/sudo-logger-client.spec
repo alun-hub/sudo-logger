@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.26
+Version:        1.17.27
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Wed Apr 22 2026 sudo-logger 1.17.27-1
+- security: fix critical path traversal in shipper via XDG_RUNTIME_DIR (VULN-001)
+- security: fix Denial of Service in plugin via JSON truncation (VULN-002)
+- security: fix path traversal in plugin cgroup management (VULN-003)
+
 * Tue Apr 21 2026 sudo-logger 1.17.26-1
 - fix(shipper): implement 10s stability period for recovery to prevent
   duplicate freeze banners during network flapping; frozenSince is only
