@@ -256,6 +256,7 @@
     @keyframes loader-blink { 50% { opacity: 0; } }
 
     .screen-empty { color: var(--text-dim); font-size: 13px; font-family: var(--font-ui); }
+
     /* ── Controls ────────────────────────────────────────────────────────────── */
     .controls { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
       background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
@@ -1365,7 +1366,7 @@ function openScreenPopOut() {
   doc.body.innerHTML = loaderHtml + '<img id="img" style="max-width:100%; max-height:100%; object-fit:contain; image-rendering:pixelated; z-index:2; position:relative; display:none;">';
 
   const script = doc.createElement('script');
-  script.textContent = \`
+  script.textContent = `
     window.addEventListener('message', (e) => {
       if (e.data.type === 'frame') {
         const img = document.getElementById('img');
@@ -1380,7 +1381,7 @@ function openScreenPopOut() {
         }
       }
     });
-  \`;
+  `;
   doc.head.appendChild(script);
 
   screenPopOut.addEventListener('unload', () => {
