@@ -1395,7 +1395,7 @@ function openScreenPopOut() {
 
   // Sync current state immediately
   if (screenIdx >= 0) {
-    const url = \`/api/session/frame?tsid=\${encodeURIComponent(currentTSID)}&n=\${screenIdx}\`;
+    const url = `/api/session/frame?tsid=${encodeURIComponent(currentTSID)}&n=${screenIdx}`;
     screenPopOut.postMessage({ type: 'frame', url: url, showLoader: false }, '*');
   } else {
     screenPopOut.postMessage({ type: 'frame', url: '', showLoader: true }, '*');
