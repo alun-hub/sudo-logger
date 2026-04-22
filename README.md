@@ -213,7 +213,7 @@ migrate-sessions \
 ## Features
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
-- **Wayland screen capture**: GUI programs started with `sudo` on a Wayland desktop are screen-recorded via a transparent compositor proxy — no compositor patches required. The replay interface shows an image slideshow for GUI sessions.
+- **Wayland screen capture**: GUI programs started with `sudo` on a Wayland desktop are screen-recorded via a transparent compositor proxy — no compositor patches required. The replay interface shows an image slideshow for GUI sessions. Multiple GUI applications can be recorded in sequence within the same session (e.g., run `konsole`, close it, then run `gvim`).
 - **Automatic secret redaction**: the shipper masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `shipper.conf`.
 - Active session terminated if shipper is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the shipper was killed mid-recording

@@ -638,42 +638,55 @@ func main() {
 	}
 	log.Printf("wayland-proxy: listening on %s → %s", socketDesc, *flagReal)
 
-	// Accept exactly one client connection.
-	clientConn, err := ln.Accept()
-	if err != nil {
-		log.Fatalf("accept: %v", err)
-	}
-	ln.Close()
-	log.Printf("wayland-proxy: client connected")
-
-	// Connect to the real compositor.
-	serverConn, err := net.Dial("unix", *flagReal)
-	if err != nil {
-		log.Fatalf("connect to compositor %s: %v", *flagReal, err)
-	}
-
-	clientUnix := clientConn.(*net.UnixConn)
-	serverUnix := serverConn.(*net.UnixConn)
-
 	out := os.Stdout
 
-	done := make(chan struct{})
-	go forwardClientToServer(clientUnix, serverUnix, state, out, done)
-	go forwardServerToClient(serverUnix, clientUnix, state)
-
-	<-done
-
-	// Capture the final frame before exiting.
-	state.forceCapture(out)
-
-	serverUnix.Close()
-	clientUnix.Close()
-
-	// Cleanup mmap'd pools.
-	for _, pool := range state.pools {
-		if pool.data != nil {
-			syscall.Munmap(pool.data)
+	for {
+		// Accept client connection.
+		clientConn, err := ln.Accept()
+		if err != nil {
+			log.Printf("accept: %v", err)
+			break
 		}
+		log.Printf("wayland-proxy: client connected")
+
+		// Connect to the real compositor.
+		serverConn, err := net.Dial("unix", *flagReal)
+		if err != nil {
+			log.Printf("connect to compositor %s: %v", *flagReal, err)
+			clientConn.Close()
+			continue
+		}
+
+		clientUnix := clientConn.(*net.UnixConn)
+		serverUnix := serverConn.(*net.UnixConn)
+
+		// Each connection needs its own state since object IDs are per-connection.
+		state := newProxyState()
+		if *flagPeriod > 0 {
+			state.minPeriod = time.Duration(*flagPeriod) * time.Millisecond
+		}
+
+		done := make(chan struct{})
+		go func() {
+			forwardClientToServer(clientUnix, serverUnix, state, out, done)
+		}()
+		go forwardServerToClient(serverUnix, clientUnix, state)
+
+		<-done
+
+		// Capture the final frame for this client before cleaning up.
+		state.forceCapture(out)
+
+		serverUnix.Close()
+		clientUnix.Close()
+
+		// Cleanup mmap'd pools for this connection.
+		for _, pool := range state.pools {
+			if pool.data != nil {
+				syscall.Munmap(pool.data)
+			}
+		}
+		log.Printf("wayland-proxy: client disconnected, waiting for next...")
 	}
 }
 
