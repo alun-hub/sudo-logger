@@ -32,7 +32,6 @@
 #include <signal.h>
 #include <sys/select.h>
 #include <sys/socket.h>
-#include <sys/uio.h>
 #include <sys/un.h>
 #include <termios.h>
 #include <time.h>
@@ -112,6 +111,25 @@ static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------- helpers ---------- */
 
+/*
+ * Write exactly n bytes to fd, retrying on EINTR and partial writes.
+ */
+static int write_all(int fd, const void *buf, size_t n)
+{
+    size_t sent = 0;
+    while (sent < n) {
+        ssize_t w = write(fd, (const char *)buf + sent, n - sent);
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EPIPE || errno == ECONNRESET)
+                atomic_store(&g_shipper_dead, 1);
+            return -1;
+        }
+        sent += (size_t)w;
+    }
+    return 0;
+}
+
 static int64_t now_ns(void)
 {
     struct timespec ts;
@@ -138,25 +156,10 @@ static int send_msg(int fd, uint8_t type, const void *payload, uint32_t plen)
     uint32_t be = htobe32(plen);
     memcpy(hdr + 1, &be, 4);
 
-    struct iovec iov[2];
-    iov[0].iov_base = hdr;
-    iov[0].iov_len  = 5;
-
-    if (plen > 0) {
-        iov[1].iov_base = (void *)payload;
-        iov[1].iov_len  = plen;
-        if (writev(fd, iov, 2) < 0) {
-            if (errno == EPIPE || errno == ECONNRESET)
-                atomic_store(&g_shipper_dead, 1);
-            return -1;
-        }
-        return 0;
-    }
-    if (write(fd, hdr, 5) < 0) {
-        if (errno == EPIPE || errno == ECONNRESET)
-            atomic_store(&g_shipper_dead, 1);
+    if (write_all(fd, hdr, 5) < 0)
         return -1;
-    }
+    if (plen > 0 && write_all(fd, payload, plen) < 0)
+        return -1;
     return 0;
 }
 
@@ -209,33 +212,36 @@ static void refresh_ack_cache(void)
         return;
 
     /*
-     * Poll for unsolicited messages from the shipper (e.g. MSG_FREEZE_TIMEOUT)
-     * before sending ACK_QUERY.  If data is already in the receive buffer we
-     * must drain it first; otherwise we would try to interpret a
-     * MSG_FREEZE_TIMEOUT header as an MSG_ACK_RESPONSE and misparse the stream.
+     * Drain all pending unsolicited messages from the shipper before sending
+     * ACK_QUERY.  Must loop until the socket has no more data; a single drain
+     * would leave subsequent messages in the buffer and cause the ACK_RESPONSE
+     * read below to misparse the stream.
      */
     {
         fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(g_shipper_fd, &rfds);
-        struct timeval tv = { .tv_sec = 0, .tv_usec = 0 }; /* non-blocking */
-        if (select(g_shipper_fd + 1, &rfds, NULL, NULL, &tv) > 0) {
+        struct timeval tv;
+        for (;;) {
+            FD_ZERO(&rfds);
+            FD_SET(g_shipper_fd, &rfds);
+            tv.tv_sec  = 0;
+            tv.tv_usec = 0;
+            if (select(g_shipper_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
+                break;
             uint8_t hdr[5];
-            if (read_exact(g_shipper_fd, hdr, 5) == 0) {
-                uint32_t plen;
-                memcpy(&plen, hdr + 1, 4);
-                plen = be32toh(plen);
-                if (hdr[0] == MSG_FREEZE_TIMEOUT)
-                    atomic_store(&g_freeze_timeout, 1);
-                /* Drain payload regardless of message type. */
-                for (uint32_t rem = plen; rem > 0; ) {
-                    uint8_t drain[64];
-                    uint32_t n = rem < (uint32_t)sizeof(drain)
-                                 ? rem : (uint32_t)sizeof(drain);
-                    if (read_exact(g_shipper_fd, drain, n) < 0)
-                        break;
-                    rem -= n;
-                }
+            if (read_exact(g_shipper_fd, hdr, 5) != 0)
+                return;
+            uint32_t plen;
+            memcpy(&plen, hdr + 1, 4);
+            plen = be32toh(plen);
+            if (hdr[0] == MSG_FREEZE_TIMEOUT)
+                atomic_store(&g_freeze_timeout, 1);
+            for (uint32_t rem = plen; rem > 0; ) {
+                uint8_t drain[64];
+                uint32_t n = rem < (uint32_t)sizeof(drain)
+                             ? rem : (uint32_t)sizeof(drain);
+                if (read_exact(g_shipper_fd, drain, n) < 0)
+                    return;
+                rem -= n;
             }
         }
     }
@@ -392,6 +398,11 @@ static void unfreeze_session_cgroup(void)
                      g_session_id) >= (int)sizeof(session_cg))
             return;
     }
+
+    /* Reject any path that escapes /sys/fs/cgroup/ — guards against a hostname
+     * or username that contains path separators or ".." components. */
+    if (strncmp(session_cg, "/sys/fs/cgroup/", 15) != 0)
+        return;
 
     char path[680];
     int fd;
@@ -560,7 +571,7 @@ static void json_escape_into(char *buf, size_t bufsz, const char *src)
 static const char *json_str_end(const char *p)
 {
     while (*p) {
-        if (*p == '\\') { p += (*p != '\0') ? 2 : 1; continue; }
+        if (*p == '\\') { p++; if (*p) p++; continue; }
         if (*p == '"')  { return p; }
         p++;
     }
@@ -799,11 +810,17 @@ static int plugin_open(unsigned int        version,
     char runas_user_j[128];
     char wayland_j[256];
     char xdgruntime_j[256];
+    char user_j[128];
+    char host_j[256];
+    char ttypath_j[128];
     json_escape_into(resolved_j,   sizeof(resolved_j),   raw_resolved);
     json_escape_into(cwd_j,        sizeof(cwd_j),        raw_cwd);
     json_escape_into(runas_user_j, sizeof(runas_user_j), runas_user);
     json_escape_into(wayland_j,    sizeof(wayland_j),    wayland_display);
     json_escape_into(xdgruntime_j, sizeof(xdgruntime_j), xdg_runtime_dir);
+    json_escape_into(user_j,       sizeof(user_j),       user);
+    json_escape_into(host_j,       sizeof(host_j),       host);
+    json_escape_into(ttypath_j,    sizeof(ttypath_j),    g_tty_path);
 
     char cmd[256];
     if (argc > 0)
@@ -823,6 +840,9 @@ static int plugin_open(unsigned int        version,
              "%s-%s-%d-%lld-%02x%02x%02x%02x",
              host, user, (int)getpid(), (long long)now_ns(),
              rnd[0], rnd[1], rnd[2], rnd[3]);
+
+    char session_id_j[640];
+    json_escape_into(session_id_j, sizeof(session_id_j), g_session_id);
 
     g_shipper_fd = connect_shipper();
     if (g_shipper_fd < 0) {
@@ -850,12 +870,12 @@ static int plugin_open(unsigned int        version,
         "\"wayland_display\":\"%s\",\"xdg_runtime_dir\":\"%s\","
         "\"user_uid\":%d,\"user_gid\":%d,"
         "\"ts\":%lld,\"pid\":%d}",
-        g_session_id, user, host, cmd,
+        session_id_j, user_j, host_j, cmd,
         resolved_j, runas_user_j,
         runas_uid, runas_gid,
         cwd_j, flags,
         term_rows, term_cols,
-        g_tty_path,
+        ttypath_j,
         wayland_j, xdgruntime_j,
         user_uid, user_gid,
         (long long)now_sec(), (int)getpid());
@@ -1058,7 +1078,7 @@ static void plugin_close(int exit_status, int error)
 
     /* Stop the background monitor thread before closing the shipper socket. */
     if (g_monitor_started) {
-        g_monitor_stop = 1;
+        atomic_store(&g_monitor_stop, 1);
         pthread_join(g_monitor_thread, NULL);
         g_monitor_started = 0;
     }
@@ -1083,10 +1103,12 @@ static void plugin_close(int exit_status, int error)
 /*
  * log_ttyin — called for every byte typed by the user (terminal → child).
  *
- * Always returns 1 (pass the input through to the child).  Freeze enforcement
- * is handled entirely by cgroup.freeze in sudo-shipper.  Returning 0 would
- * permanently disable this hook rather than drop a single byte, and caused
- * sudo to send SIGHUP to the session on the first keypress.
+ * Returns 1 (pass the input through) under normal operation; returns 0 only
+ * when the shipper connection has died to prevent further I/O logging.  Freeze
+ * enforcement is handled entirely by cgroup.freeze in sudo-shipper.  Returning
+ * 0 during a freeze would permanently disable this hook rather than drop a
+ * single byte, and caused sudo to send SIGHUP to the session on the first
+ * keypress.
  *
  * Input typed during a freeze is buffered in the pty; bash cannot process it
  * until the cgroup unfreezes.

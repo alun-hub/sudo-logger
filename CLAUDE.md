@@ -20,6 +20,19 @@ Fix all HIGH/CRITICAL findings from Trivy before committing.
 Always document in English.
 Update README after feature changes.
 
+Do not stop and ask for confirmation mid-task unless you
+have reached a genuine decision fork that requires user input.
+
+Before modifying any file, read it first and verify you
+understand the relevant data structures.
+
+Do not declare a task complete until you have verified
+the output against the original requirements.
+
+If you are about to use a version number, package name,
+or commit SHA, verify it with a tool rather than stating
+it from memory
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
