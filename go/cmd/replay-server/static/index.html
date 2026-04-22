@@ -1315,6 +1315,14 @@ function openScreenPopOut() {
   doc.body.style.overflow = 'hidden';
   doc.body.innerHTML = '<img id="img" style="max-width:100%; max-height:100%; object-fit:contain; image-rendering:pixelated;">';
 
+  const script = doc.createElement('script');
+  script.textContent = `
+    window.addEventListener('message', (e) => {
+      if (e.data.type === 'frame') document.getElementById('img').src = e.data.url;
+    });
+  `;
+  doc.head.appendChild(script);
+
   const img = doc.getElementById('img');
   if (elScreenImg.src) img.src = elScreenImg.src;
 
@@ -1327,16 +1335,12 @@ function openScreenPopOut() {
     }
   });
 
-  // Handle updates from main window
-  window.addEventListener('message', (e) => {
-    if (e.data.type === 'frame' && img) img.src = e.data.url;
-  });
-
   // Re-render current view to apply split-view logic
   const sess = allSessions.find(s => s.tsid === currentTSID);
   renderInfoBar(sess);
   showScreenPlayer();
 }
+
 function renderScreenFrame(idx) {
   if (idx < 0 || idx >= screenFrames.length) return;
   screenIdx = idx;
@@ -1673,9 +1677,17 @@ async function selectScreenSession(tsid, sess) {
 async function selectTerminalSession(tsid, sess, initialSeek) {
   try {
     const res = await fetch(`/api/session/events?tsid=${encodeURIComponent(tsid)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 404 && isScreenSession()) {
+        // Pure Wayland session, no TTY events. This is okay.
+        events = [];
+        setControlsEnabled(true);
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
     const data = await res.json();
-    if (currentTSID !== tsid) return; // another session was selected while fetching
+    if (currentTSID !== tsid) return;
     events = data;
     totalDuration = sess ? sess.duration
       : (events.length ? events[events.length-1].t : 0);
@@ -1688,8 +1700,13 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
     else if (autoplay) play();
   } catch (err) {
     if (currentTSID !== tsid) return;
+    if (isScreenSession()) {
+      events = [];
+      setControlsEnabled(true);
+      return;
+    }
     term.reset();
-    term.writeln(`\x1b[31mFailed to load: ${err.message}\x1b[0m`);
+    term.writeln(`\x1b[31mFailed to load terminal: ${err.message}\x1b[0m`);
   }
 }
 
@@ -1825,8 +1842,8 @@ function resetPlayer() {
 }
 
 function play() {
-  if (player.playing || !events.length) return;
-  if (player.currentIndex >= events.length) { resetPlayer(); term.reset(); }
+  if (player.playing || (!events.length && !isScreenSession())) return;
+  if (player.currentIndex >= events.length && !isScreenSession()) { resetPlayer(); term.reset(); }
   player.playing = true;
   player.startWallMs   = performance.now();
   player.startEventSec = currentEventSec();
@@ -1850,21 +1867,29 @@ function stopPlayer() {
   cancelAnimationFrame(player.rafId);
 }
 
-const currentEventSec = () =>
-  player.currentIndex >= events.length ? totalDuration : events[player.currentIndex].t;
+const currentEventSec = () => {
+  if (player.currentIndex < events.length) return events[player.currentIndex].t;
+  return elapsedSec();
+};
 
 const elapsedSec = () => player.playing
   ? player.startEventSec + (performance.now() - player.startWallMs) * player.speed / 1000
   : player.startEventSec;
 
 function scheduleNext() {
-  if (!player.playing || player.currentIndex >= events.length) {
-    if (player.currentIndex >= events.length) {
+  if (!player.playing) return;
+
+  if (player.currentIndex >= events.length) {
+    if (elapsedSec() >= totalDuration) {
       player.startEventSec = totalDuration;
       stopPlayer(); setPlayIcon(false); updateProgress(); updateURL();
+    } else {
+      // Still playing (likely Wayland-only or end of TTY but Wayland continues)
+      player.timeoutId = setTimeout(scheduleNext, 100);
     }
     return;
   }
+
   const delay = Math.max(0, (events[player.currentIndex].t - elapsedSec()) * 1000 / player.speed);
   player.timeoutId = setTimeout(() => {
     if (!player.playing) return;
