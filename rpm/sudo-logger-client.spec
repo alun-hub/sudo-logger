@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.30
+Version:        1.17.31
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Wed Apr 22 2026 sudo-logger 1.17.31-1
+- feat: support multiple sequential GUI applications in wayland-proxy
+- feat: implement split-view and synchronized playback in replay UI
+- feat: add pop-out window and animated loading screen for GUI sessions
+- fix: ensure loading screen resets on session switch
+
 * Wed Apr 22 2026 sudo-logger 1.17.30-1
 - security: fix path traversal via unvalidated WAYLAND_DISPLAY in shipper (VULN-004)
 - security: prevent resource exhaustion in wayland-proxy by limiting SHM pool size and image dimensions (VULN-005)
