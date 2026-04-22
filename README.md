@@ -1837,6 +1837,23 @@ ls /run/sudo-logger/plugin.sock
 - **`x509: certificate signed by unknown authority`**: CA cert mismatch
   between client and server.
 
+### `dbind-WARNING: AT-SPI: Error retrieving accessibility bus address`
+
+When running GUI applications (like `gvim`) with `sudo`, you may see warnings about `org.a11y.Bus` or `Permission denied` for the accessibility bus.
+
+**Why it happens:**
+GTK applications attempt to connect to the AT-SPI (Assistive Technology) bus for accessibility features. Under `sudo`, the root process lack access to the user's session D-Bus. Additionally, `sudo-logger` uses **cgroup namespace isolation** (`CLONE_NEWCGROUP`) to sandbox the session, which further restricts the process from spawning or reaching external bus helpers. This triggers a "Permission denied" error as GTK tries to fallback to spawning its own bus.
+
+**How to fix it:**
+These features are typically not required for root-owned GUI sessions. You can suppress the warnings by setting the following environment variables in your shell profile (`~/.bashrc`) or globally in `/etc/environment`:
+
+```bash
+export NO_AT_BRIDGE=1
+export NO_AT_SPI=1
+```
+
+The `sudo-logger` package automatically includes these variables in its `env_keep` list, so once they are set in your user environment, they will be passed through to the `sudo` session automatically.
+
 ### Terminal freezes and network has returned
 
 If the freeze banner is visible and the network is back, the session should

@@ -3,7 +3,7 @@
 # Installed by sudo-logger-client; safe to remove if screen capture is not needed.
 #
 # NO_AT_BRIDGE/SPI suppresses the AT-SPI accessibility warning from GTK apps
-# run under sudo.
-Defaults env_set += "NO_AT_BRIDGE=1"
-Defaults env_set += "NO_AT_SPI=1"
-Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR"
+# run under sudo.  To activate, add these to /etc/environment or your shell:
+#   NO_AT_BRIDGE=1
+#   NO_AT_SPI=1
+Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR NO_AT_BRIDGE NO_AT_SPI"
