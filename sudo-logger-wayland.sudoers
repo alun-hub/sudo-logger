@@ -2,8 +2,8 @@
 # can intercept GUI applications launched with sudo.
 # Installed by sudo-logger-client; safe to remove if screen capture is not needed.
 #
-# NO_AT_BRIDGE suppresses the AT-SPI accessibility warning from GTK apps run
-# under sudo.  To activate, add the following to /etc/environment or your
-# shell profile, then log out and back in:
-#   NO_AT_BRIDGE=1
-Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR NO_AT_BRIDGE"
+# NO_AT_BRIDGE/SPI suppresses the AT-SPI accessibility warning from GTK apps
+# run under sudo.
+Defaults env_set += "NO_AT_BRIDGE=1"
+Defaults env_set += "NO_AT_SPI=1"
+Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR"
