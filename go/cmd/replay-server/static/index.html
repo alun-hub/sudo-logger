@@ -234,10 +234,27 @@
 
     /* ── Screen capture player ───────────────────────────────────────────────── */
     .screen-wrap { flex: 1; min-height: 0; overflow: hidden; display: none;
-      align-items: center; justify-content: center; background: #0a0a0a; }
+      align-items: center; justify-content: center; background: #0d1117; position: relative; }
     .screen-wrap.active { display: flex; }
     #screen-img { max-width: 100%; max-height: 100%; object-fit: contain;
-      image-rendering: pixelated; }
+      image-rendering: pixelated; z-index: 2; position: relative; }
+    #screen-img[src=""], #screen-img:not([src]) { display: none; }
+
+    /* Loading screen styles */
+    .screen-loader { position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; z-index: 1; text-align: center; }
+    .loader-logo-wrapper { position: relative; width: 80px; height: 80px; margin-bottom: 20px;
+      animation: loader-float 3s ease-in-out infinite; }
+    .loader-logo-img { width: 100%; height: auto; filter: drop-shadow(0 0 10px rgba(46, 204, 113, 0.5));
+      animation: loader-pulse-glow 2s ease-in-out infinite; }
+    .loader-text { color: #2ecc71; font-size: 18px; font-weight: bold; letter-spacing: 1px;
+      font-family: var(--font); display: flex; align-items: center; }
+    .loader-status { color: #8b949e; font-size: 11px; margin-top: 8px; font-family: var(--font); opacity: 0.7; }
+    .loader-cursor { border-left: 6px solid #2ecc71; margin-left: 4px; animation: loader-blink 0.8s infinite; }
+    @keyframes loader-float { 0%, 100% { transform: translateY(-10px); } 50% { transform: translateY(10px); } }
+    @keyframes loader-pulse-glow { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+    @keyframes loader-blink { 50% { opacity: 0; } }
+
     .screen-empty { color: var(--text-dim); font-size: 13px; font-family: var(--font-ui); }
 
     /* ── Controls ────────────────────────────────────────────────────────────── */
@@ -626,6 +643,13 @@
     </div>
     <div class="terminal-wrap"><div id="terminal"></div></div>
     <div class="screen-wrap" id="screen-wrap">
+      <div class="screen-loader" id="screen-loader">
+        <div class="loader-logo-wrapper">
+          <img src="logo-icon-72.svg" alt="Logo" class="loader-logo-img">
+        </div>
+        <div class="loader-text">sudo-logger<span class="loader-cursor"></span></div>
+        <div class="loader-status">waiting for GUI activity...</div>
+      </div>
       <img id="screen-img" alt="Screen capture frame">
     </div>
     <div class="controls">
@@ -1222,8 +1246,9 @@ window.addEventListener('resize', () => fitAddon.fit());
 
 // ── Screen player ─────────────────────────────────────────────────────────────
 
-const elScreenWrap = document.getElementById('screen-wrap');
-const elScreenImg  = document.getElementById('screen-img');
+const elScreenWrap   = document.getElementById('screen-wrap');
+const elScreenImg    = document.getElementById('screen-img');
+const elScreenLoader = document.getElementById('screen-loader');
 
 // screenFrames: array of ScreenFrameInfo objects from /api/session/frames
 // screenIdx:    current frame index (0-based)
@@ -1244,7 +1269,9 @@ function showScreenPlayer() {
   } else {
     if (events.length > 0) {
       playerEl.classList.add('split-view');
+      document.querySelector('.terminal-wrap').style.display = 'block';
     } else {
+      playerEl.classList.remove('split-view');
       document.querySelector('.terminal-wrap').style.display = 'none';
     }
     elScreenWrap.classList.add('active');
@@ -1264,14 +1291,18 @@ function syncScreenToTime(sec) {
   // targetTs is the absolute time we want to show.
   const targetTs = sessStartNs + (sec * 1e9);
 
-  // If we haven't reached the first frame yet, hide the screen player
+  // If we haven't reached the first frame yet, show the loader and hide image
   if (targetTs < screenFrames[0].ts) {
-    if (elScreenWrap.classList.contains('active') && events.length > 0 && (!screenPopOut || screenPopOut.closed)) {
-       elScreenWrap.style.visibility = 'hidden';
+    screenIdx = -1;
+    elScreenImg.removeAttribute('src');
+    elScreenLoader.style.display = 'flex';
+    if (screenPopOut && !screenPopOut.closed) {
+      screenPopOut.postMessage({ type: 'frame', url: '', showLoader: true }, '*');
     }
     return;
   }
-  elScreenWrap.style.visibility = 'visible';
+
+  elScreenLoader.style.display = 'none';
 
   let idx = 0;
   for (let i = 0; i < screenFrames.length; i++) {
