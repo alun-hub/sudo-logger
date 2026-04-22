@@ -1109,9 +1109,12 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
 	}
 
-	// VULN-001 Fix: Validate untrusted inputs from the plugin.
+	// VULN-001 & VULN-004 Fix: Validate untrusted inputs from the plugin.
 	if !validSessionID.MatchString(sessionID) {
 		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid session ID")
+	}
+	if strings.Contains(waylandDisplay, "..") {
+		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid WAYLAND_DISPLAY")
 	}
 	if !filepath.IsAbs(xdgRuntimeDir) || strings.Contains(xdgRuntimeDir, "..") {
 		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid XDG_RUNTIME_DIR")

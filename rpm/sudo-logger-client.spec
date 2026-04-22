@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.29
+Version:        1.17.30
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Wed Apr 22 2026 sudo-logger 1.17.30-1
+- security: fix path traversal via unvalidated WAYLAND_DISPLAY in shipper (VULN-004)
+- security: prevent resource exhaustion in wayland-proxy by limiting SHM pool size and image dimensions (VULN-005)
+
 * Wed Apr 22 2026 sudo-logger 1.17.29-1
 - docs: document GTK AT-SPI accessibility warnings and how to suppress them
 - fix: remove invalid env_set from sudoers; use env_keep for NO_AT_SPI

@@ -205,7 +205,8 @@ func (p *proxyState) doCapture(surfaceID uint32, out *os.File, force bool) {
 	w := int(buf.width)
 	h := int(buf.height)
 
-	if offset < 0 || stride < 0 || w <= 0 || h <= 0 {
+	// VULN-005 Fix: Prevent excessive memory allocation (max 16384x16384 = ~1 GB image)
+	if offset < 0 || stride < 0 || w <= 0 || h <= 0 || w > 16384 || h > 16384 {
 		return
 	}
 	needed := offset + stride*h
@@ -309,6 +310,13 @@ func (p *proxyState) parseClientMsg(msg []byte, fds []int, out *os.File) {
 		newID := readUint32(args[0:4])
 		size := readInt32(args[4:8])
 		fd := fds[0]
+		// VULN-005 Fix: Prevent excessive memory mapping (max 1 GB pool)
+		if size <= 0 || size > 1024*1024*1024 {
+			for _, f := range fds {
+				syscall.Close(f)
+			}
+			return
+		}
 		// mmap the SHM pool
 		data, err := syscall.Mmap(fd, 0, int(size),
 			syscall.PROT_READ, syscall.MAP_SHARED)
