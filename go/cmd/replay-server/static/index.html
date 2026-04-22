@@ -1227,27 +1227,51 @@ const elScreenImg  = document.getElementById('screen-img');
 
 // screenFrames: array of ScreenFrameInfo objects from /api/session/frames
 // screenIdx:    current frame index (0-based)
+// screenPopOut: handle to the pop-out window
 let screenFrames = [];
 let screenIdx    = -1;
+let screenPopOut = null;
+let sessStartNs  = 0;
 
 function isScreenSession() { return screenFrames.length > 0; }
 
 function showScreenPlayer() {
-  document.querySelector('.terminal-wrap').style.display = 'none';
-  elScreenWrap.classList.add('active');
+  const playerEl = document.querySelector('.player');
+  if (screenPopOut && !screenPopOut.closed) {
+    playerEl.classList.remove('split-view');
+    elScreenWrap.classList.remove('active');
+    document.querySelector('.terminal-wrap').style.display = 'block';
+  } else {
+    if (events.length > 0) {
+      playerEl.classList.add('split-view');
+    } else {
+      document.querySelector('.terminal-wrap').style.display = 'none';
+    }
+    elScreenWrap.classList.add('active');
+  }
 }
 
 function hideScreenPlayer() {
   elScreenWrap.classList.remove('active');
+  document.querySelector('.player').classList.remove('split-view');
   document.querySelector('.terminal-wrap').style.display = '';
-  // Don't clear frames here so we can switch back
 }
 
 function syncScreenToTime(sec) {
   if (!screenFrames.length) return;
-  // screenFrames[i].ts is absolute nanoseconds.
-  // We need to find the frame corresponding to sessStart + sec.
-  const targetTs = screenFrames[0].ts + (sec * 1e9);
+
+  // sessStartNs is the absolute start of the sudo session.
+  // targetTs is the absolute time we want to show.
+  const targetTs = sessStartNs + (sec * 1e9);
+
+  // If we haven't reached the first frame yet, hide the screen player
+  if (targetTs < screenFrames[0].ts) {
+    if (elScreenWrap.classList.contains('active') && events.length > 0 && (!screenPopOut || screenPopOut.closed)) {
+       elScreenWrap.style.visibility = 'hidden';
+    }
+    return;
+  }
+  elScreenWrap.style.visibility = 'visible';
 
   let idx = 0;
   for (let i = 0; i < screenFrames.length; i++) {
@@ -1260,10 +1284,59 @@ function syncScreenToTime(sec) {
 
   if (idx !== screenIdx) {
     screenIdx = idx;
-    elScreenImg.src = `/api/session/frame?tsid=${encodeURIComponent(currentTSID)}&n=${idx}`;
+    const url = `/api/session/frame?tsid=${encodeURIComponent(currentTSID)}&n=${idx}`;
+    elScreenImg.src = url;
+    if (screenPopOut && !screenPopOut.closed) {
+      screenPopOut.postMessage({ type: 'frame', url: url }, '*');
+    }
   }
 }
 
+function openScreenPopOut() {
+  if (screenPopOut && !screenPopOut.closed) {
+    screenPopOut.focus();
+    return;
+  }
+  const w = 1024, h = 768;
+  const left = (window.screen.width / 2) - (w / 2);
+  const top = (window.screen.height / 2) - (h / 2);
+
+  screenPopOut = window.open('', 'sudo-replay-screen',
+    `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`);
+
+  const doc = screenPopOut.document;
+  doc.title = `sudo-replay: ${currentTSID}`;
+  doc.body.style.margin = '0';
+  doc.body.style.background = '#0a0a0a';
+  doc.body.style.display = 'flex';
+  doc.body.style.alignItems = 'center';
+  doc.body.style.justifyContent = 'center';
+  doc.body.style.height = '100vh';
+  doc.body.style.overflow = 'hidden';
+  doc.body.innerHTML = '<img id="img" style="max-width:100%; max-height:100%; object-fit:contain; image-rendering:pixelated;">';
+
+  const img = doc.getElementById('img');
+  if (elScreenImg.src) img.src = elScreenImg.src;
+
+  screenPopOut.addEventListener('unload', () => {
+    screenPopOut = null;
+    if (currentTSID) {
+      const sess = allSessions.find(s => s.tsid === currentTSID);
+      renderInfoBar(sess);
+      showScreenPlayer();
+    }
+  });
+
+  // Handle updates from main window
+  window.addEventListener('message', (e) => {
+    if (e.data.type === 'frame' && img) img.src = e.data.url;
+  });
+
+  // Re-render current view to apply split-view logic
+  const sess = allSessions.find(s => s.tsid === currentTSID);
+  renderInfoBar(sess);
+  showScreenPlayer();
+}
 function renderScreenFrame(idx) {
   if (idx < 0 || idx >= screenFrames.length) return;
   screenIdx = idx;
@@ -1543,6 +1616,7 @@ async function selectSession(tsid, initialSeek = 0) {
     c.classList.toggle('active', c.dataset.tsid === tsid));
 
   const sess = allSessions.find(s => s.tsid === tsid);
+  sessStartNs = sess ? sess.start_time * 1e9 : 0;
   renderInfoBar(sess);
   setControlsEnabled(false);
 
@@ -1639,27 +1713,32 @@ function renderInfoBar(sess) {
   if (sess.runas) addItem(row1, 'runas', sess.runas, sess.runas !== 'root' ? 'blue' : 'dim', '');
   addItem(row1, 'cmd', sess.command, 'green', 'grow');
 
-  // Add view toggle if both TTY and Screen are available
+  // Add view toggle / pop-out if both TTY and Screen are available
   if (sess.has_frames) {
-    const toggle = el('button', 'tab-btn active', '▣ screen');
-    toggle.id = 'view-toggle';
-    toggle.style.marginLeft = '10px';
-    toggle.style.padding = '2px 8px';
-    toggle.style.fontSize = '11px';
-    toggle.addEventListener('click', () => {
-      const isScreen = elScreenWrap.classList.contains('active');
-      if (isScreen) {
-        hideScreenPlayer();
-        toggle.textContent = 'tty';
-        toggle.classList.remove('active');
-        fitAddon.fit();
-      } else {
-        showScreenPlayer();
-        toggle.textContent = '▣ screen';
-        toggle.classList.add('active');
-      }
-    });
-    row1.appendChild(toggle);
+    const btnGroup = el('div', 'info-item');
+    btnGroup.style.marginLeft = '10px';
+    btnGroup.style.gap = '4px';
+    btnGroup.style.display = 'flex';
+
+    if (!screenPopOut || screenPopOut.closed) {
+      const popBtn = el('button', 'btn-icon', '');
+      popBtn.title = 'Pop-out screen viewer';
+      popBtn.style.width = '24px'; popBtn.style.height = '24px'; popBtn.style.fontSize = '12px';
+      popBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>';
+      popBtn.onclick = openScreenPopOut;
+      btnGroup.appendChild(popBtn);
+    } else {
+      const popBtn = el('button', 'btn-icon', '');
+      popBtn.title = 'Screen is popped out';
+      popBtn.style.width = '24px'; popBtn.style.height = '24px'; popBtn.style.fontSize = '12px';
+      popBtn.style.color = 'var(--green)';
+      popBtn.style.borderColor = 'var(--green)';
+      popBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>';
+      popBtn.onclick = () => screenPopOut.focus();
+      btnGroup.appendChild(popBtn);
+    }
+
+    row1.appendChild(btnGroup);
   }
 
   elInfoBar.appendChild(row1);
