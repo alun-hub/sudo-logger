@@ -256,7 +256,6 @@
     @keyframes loader-blink { 50% { opacity: 0; } }
 
     .screen-empty { color: var(--text-dim); font-size: 13px; font-family: var(--font-ui); }
-
     /* ── Controls ────────────────────────────────────────────────────────────── */
     .controls { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
       background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
@@ -1293,11 +1292,13 @@ function syncScreenToTime(sec) {
 
   // If we haven't reached the first frame yet, show the loader and hide image
   if (targetTs < screenFrames[0].ts) {
-    screenIdx = -1;
-    elScreenImg.removeAttribute('src');
-    elScreenLoader.style.display = 'flex';
-    if (screenPopOut && !screenPopOut.closed) {
-      screenPopOut.postMessage({ type: 'frame', url: '', showLoader: true }, '*');
+    if (screenIdx !== -1) {
+      screenIdx = -1;
+      elScreenImg.removeAttribute('src');
+      elScreenLoader.style.display = 'flex';
+      if (screenPopOut && !screenPopOut.closed) {
+        screenPopOut.postMessage({ type: 'frame', url: '', showLoader: true }, '*');
+      }
     }
     return;
   }
@@ -1318,7 +1319,7 @@ function syncScreenToTime(sec) {
     const url = `/api/session/frame?tsid=${encodeURIComponent(currentTSID)}&n=${idx}`;
     elScreenImg.src = url;
     if (screenPopOut && !screenPopOut.closed) {
-      screenPopOut.postMessage({ type: 'frame', url: url }, '*');
+      screenPopOut.postMessage({ type: 'frame', url: url, showLoader: false }, '*');
     }
   }
 }
@@ -1338,24 +1339,49 @@ function openScreenPopOut() {
   const doc = screenPopOut.document;
   doc.title = `sudo-replay: ${currentTSID}`;
   doc.body.style.margin = '0';
-  doc.body.style.background = '#0a0a0a';
+  doc.body.style.background = '#0d1117';
   doc.body.style.display = 'flex';
   doc.body.style.alignItems = 'center';
   doc.body.style.justifyContent = 'center';
   doc.body.style.height = '100vh';
   doc.body.style.overflow = 'hidden';
-  doc.body.innerHTML = '<img id="img" style="max-width:100%; max-height:100%; object-fit:contain; image-rendering:pixelated;">';
+  doc.body.style.position = 'relative';
+
+  // Create loading screen in pop-out
+  const loaderHtml = `
+    <div id="loader" style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; z-index:1;">
+      <div style="position:relative; width:120px; height:120px; margin-bottom:30px; animation:float 3s ease-in-out infinite;">
+        <img src="logo-icon-72.svg" style="width:100%; height:auto; filter:drop-shadow(0 0 15px rgba(46, 204, 113,0.6)); animation:pulse 2s ease-in-out infinite;">
+      </div>
+      <div style="color:#2ecc71; font-size:24px; font-weight:bold; letter-spacing:2px; font-family:monospace;">sudo-logger<span style="border-left:8px solid #2ecc71; margin-left:5px; animation:blink 0.8s infinite;"></span></div>
+      <div style="color:#8b949e; font-size:14px; margin-top:10px; font-family:monospace;">Loading video stream...</div>
+    </div>
+    <style>
+      @keyframes float { 0%, 100% { transform:translateY(-15px); } 50% { transform:translateY(15px); } }
+      @keyframes pulse { 0%, 100% { opacity:0.8; } 50% { opacity:1; } }
+      @keyframes blink { 50% { opacity:0; } }
+    </style>
+  `;
+  doc.body.innerHTML = loaderHtml + '<img id="img" style="max-width:100%; max-height:100%; object-fit:contain; image-rendering:pixelated; z-index:2; position:relative; display:none;">';
 
   const script = doc.createElement('script');
-  script.textContent = `
+  script.textContent = \`
     window.addEventListener('message', (e) => {
-      if (e.data.type === 'frame') document.getElementById('img').src = e.data.url;
+      if (e.data.type === 'frame') {
+        const img = document.getElementById('img');
+        const loader = document.getElementById('loader');
+        if (e.data.showLoader || !e.data.url) {
+          img.style.display = 'none';
+          loader.style.display = 'flex';
+        } else {
+          img.src = e.data.url;
+          img.style.display = 'block';
+          loader.style.display = 'none';
+        }
+      }
     });
-  `;
+  \`;
   doc.head.appendChild(script);
-
-  const img = doc.getElementById('img');
-  if (elScreenImg.src) img.src = elScreenImg.src;
 
   screenPopOut.addEventListener('unload', () => {
     screenPopOut = null;
@@ -1363,13 +1389,23 @@ function openScreenPopOut() {
       const sess = allSessions.find(s => s.tsid === currentTSID);
       renderInfoBar(sess);
       showScreenPlayer();
+      fitAddon.fit();
     }
   });
 
-  // Re-render current view to apply split-view logic
+  // Sync current state immediately
+  if (screenIdx >= 0) {
+    const url = \`/api/session/frame?tsid=\${encodeURIComponent(currentTSID)}&n=\${screenIdx}\`;
+    screenPopOut.postMessage({ type: 'frame', url: url, showLoader: false }, '*');
+  } else {
+    screenPopOut.postMessage({ type: 'frame', url: '', showLoader: true }, '*');
+  }
+
+  // Re-render main view to apply full-width TTY logic
   const sess = allSessions.find(s => s.tsid === currentTSID);
   renderInfoBar(sess);
   showScreenPlayer();
+  setTimeout(() => fitAddon.fit(), 50);
 }
 
 function renderScreenFrame(idx) {
