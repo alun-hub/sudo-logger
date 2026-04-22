@@ -401,7 +401,7 @@ static void unfreeze_session_cgroup(void)
 
     /* Reject any path that escapes /sys/fs/cgroup/ — guards against a hostname
      * or username that contains path separators or ".." components. */
-    if (strncmp(session_cg, "/sys/fs/cgroup/", 15) != 0)
+    if (strncmp(session_cg, "/sys/fs/cgroup/", 15) != 0 || strstr(session_cg, ".."))
         return;
 
     char path[680];
@@ -858,7 +858,7 @@ static int plugin_open(unsigned int        version,
     setsockopt(g_shipper_fd, SOL_SOCKET, SO_RCVTIMEO,
                &rcv_timeout, sizeof(rcv_timeout));
 
-    char payload[2048];
+    char payload[8192];
     int plen = snprintf(payload, sizeof(payload),
         "{\"session_id\":\"%s\",\"user\":\"%s\",\"host\":\"%s\","
         "\"command\":\"%s\","

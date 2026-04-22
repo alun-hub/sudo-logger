@@ -15,10 +15,17 @@ or file permissions without considering the impact on audit integrity.
 ## Code security
 Always run `pre-commit run --all-files` after generating or modifying code.
 Fix all HIGH/CRITICAL findings from Trivy before committing.
+Run `/security-review` before significant releases or when changes
+touch TLS, auth, file permissions, or the wire protocol.
 
 ## Documentation
 Always document in English.
 Update README after feature changes.
+
+## Memory
+Before starting work on a new task or unfamiliar area, call
+mempalace_search to check for relevant prior context (decisions,
+past bugs, architectural choices). The stop hook handles saving.
 
 Do not stop and ask for confirmation mid-task unless you
 have reached a genuine decision fork that requires user input.
@@ -39,6 +46,8 @@ it from memory
 This project is indexed by GitNexus as **sudo-logger** (930 symbols, 1978 relationships, 78 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> **Note:** GitNexus indexes Go code. For `plugin/plugin.c` (C), use Read + clangd-lsp for
+> navigation instead of `gitnexus_impact` — the C symbols are not meaningfully indexed.
 
 ## Always Do
 

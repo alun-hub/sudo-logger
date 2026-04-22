@@ -268,7 +268,12 @@ func handlePluginConn(pluginConn net.Conn) {
 	// the child.  Fork inherits cgroup membership, so the child and all its
 	// descendants — including GUI programs that later detach and re-parent
 	// to init/systemd — remain in the cgroup and can be frozen atomically.
+	//
+	// 30-second deadline prevents a rogue root connection from leaking this
+	// goroutine indefinitely if the client connects but never sends data.
+	pluginConn.SetReadDeadline(time.Now().Add(30 * time.Second))
 	msgType, plen, err := protocol.ReadHeader(pr)
+	pluginConn.SetReadDeadline(time.Time{})
 	if err != nil {
 		log.Printf("read first message: %v", err)
 		return
@@ -1088,17 +1093,10 @@ func encodeScreenChunk(seq uint64, tsNS int64, data []byte) []byte {
 	return buf
 }
 
+// validSessionID restricts session IDs to safe characters.
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
+
 // startWaylandProxy starts the wayland-proxy subprocess for a GUI session.
-// It returns the proxy socket path and a channel that receives JPEG frame
-// bytes as they are produced. The channel is closed when the proxy exits.
-// The caller must send the proxy socket path back to the plugin via SESSION_READY.
-//
-// The shipper (root) creates the listening socket in /run/sudo-logger/ so it
-// lands in the service's writable namespace (ProtectSystem=strict makes
-// /run/user/<uid>/ read-only for child processes even when they run as the
-// user).  The open listener fd is handed to the proxy via ExtraFiles (fd 3)
-// so the proxy never needs to bind itself.  The proxy still runs as the
-// invoking user so it can connect to the compositor socket in /run/user/<uid>/.
 func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid uint32) (
 	proxySocket string, frames <-chan []byte, kill func(), err error,
 ) {
@@ -1109,6 +1107,29 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 			return "", nil, nil, fmt.Errorf("wayland-proxy: WAYLAND_DISPLAY is relative but XDG_RUNTIME_DIR is empty")
 		}
 		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
+	}
+
+	// VULN-001 Fix: Validate untrusted inputs from the plugin.
+	if !validSessionID.MatchString(sessionID) {
+		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid session ID")
+	}
+	if !filepath.IsAbs(xdgRuntimeDir) || strings.Contains(xdgRuntimeDir, "..") {
+		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid XDG_RUNTIME_DIR")
+	}
+
+	// Verify that the target directory is owned by the user (or root).
+	// This prevents the user from pointing to a directory they don't own
+	// to cause the shipper (root) to create files there.
+	info, err := os.Stat(xdgRuntimeDir)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("wayland-proxy: cannot stat XDG_RUNTIME_DIR: %w", err)
+	}
+	if !info.IsDir() {
+		return "", nil, nil, fmt.Errorf("wayland-proxy: XDG_RUNTIME_DIR is not a directory")
+	}
+	stat := info.Sys().(*syscall.Stat_t)
+	if stat.Uid != uid && stat.Uid != 0 {
+		return "", nil, nil, fmt.Errorf("wayland-proxy: XDG_RUNTIME_DIR is not owned by the user (uid=%d)", uid)
 	}
 
 	// Create the proxy socket in /run/user/<uid>/ so that the sudo'd command
