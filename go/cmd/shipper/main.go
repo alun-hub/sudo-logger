@@ -1151,10 +1151,19 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("wayland-proxy: listen %s: %w", proxySocket, err)
 	}
-	if err := os.Chmod(proxySocket, 0666); err != nil {
-		ln.Close()
-		return "", nil, nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
+
+	// Securely set permissions on the socket file. By using Chmod on the
+	// file descriptor (File().Chmod), we avoid following symlinks that
+	// an attacker might have placed at proxySocket in the meantime.
+	if f, err := ln.(*net.UnixListener).File(); err == nil {
+		if err := f.Chmod(0666); err != nil {
+			f.Close()
+			ln.Close()
+			return "", nil, nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
+		}
+		f.Close()
 	}
+
 	// Prevent Close() from removing the socket file — gvim needs the path.
 	// The shipper removes the socket when the session ends.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)

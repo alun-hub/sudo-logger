@@ -291,33 +291,39 @@ func (cg *cgroupSession) trackDescendants() {
 					}
 					continue
 				}
-				// Non-shell process (GUI app such as gvim, helper, etc.).
-				// If it has its own process group (pgid == pid, set by setsid)
-				// it is safe to SIGSTOP just this PID without touching bash.
-				// If it shares a process group with bash, skip: signalling the
-				// group would trigger job control.
 				pgid, pgidErr := syscall.Getpgid(pid)
-				if pgidErr == nil && pgid == pid {
-					// Own process group — safe to signal only this PID.
-					cg.escapedMu.Lock()
-					if _, already := cg.escaped[pid]; !already {
-						cg.escaped[pid] = true
-						debugLog("cgroup %s: pid %d escaped (own pgid), frozen via SIGSTOP",
-							cg.cgName, pid)
-						cg.mu.Lock()
-						isFrozen := cg.frozen
-						cg.mu.Unlock()
-						if isFrozen {
-							syscall.Kill(pid, syscall.SIGSTOP)
-						}
+				hasTTY := hasControllingTTY(pid)
+
+				// If it has a TTY, we MUST reclaim it into the cgroup instead of
+				// using SIGSTOP, to avoid triggering job control in the shell.
+				if hasTTY || (pgidErr == nil && pgid != pid) {
+					if err := os.WriteFile(
+						filepath.Join(cg.path, "cgroup.procs"),
+						[]byte(strconv.Itoa(pid)+"\n"),
+						0644,
+					); err == nil {
+						debugLog("cgroup %s: pid %d escaped, reclaimed into session cgroup (hasTTY=%v)",
+						cg.cgName, pid, hasTTY)
+						continue
 					}
-					cg.escapedMu.Unlock()
-				} else {
-					// Shares process group with bash — skip to avoid job control.
-					delete(seen, pid)
-					debugLog("cgroup %s: pid %d escaped (shared pgid), dropped from tracking",
-						cg.cgName, pid)
 				}
+
+				// Only SIGSTOP processes without a TTY that are their own PGID leaders (GUI apps).
+				shouldSIGSTOP := (pgidErr == nil && pgid == pid)
+
+				cg.escapedMu.Lock()
+				if _, already := cg.escaped[pid]; !already {
+					cg.escaped[pid] = shouldSIGSTOP
+					debugLog("cgroup %s: pid %d escaped, tracked (sigstop=%v)",
+						cg.cgName, pid, shouldSIGSTOP)
+					cg.mu.Lock()
+					isFrozen := cg.frozen
+					cg.mu.Unlock()
+					if isFrozen && shouldSIGSTOP {
+						syscall.Kill(pid, syscall.SIGSTOP)
+					}
+				}
+				cg.escapedMu.Unlock()
 			}
 		}
 	}

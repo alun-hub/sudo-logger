@@ -158,6 +158,7 @@ func readString(b []byte) (string, int) {
 		return "", 0
 	}
 	strLen := int(readUint32(b))
+	if strLen < 0 || strLen > 4096 { return "", 0 }
 	if strLen == 0 {
 		return "", 4
 	}
@@ -205,8 +206,8 @@ func (p *proxyState) doCapture(surfaceID uint32, out *os.File, force bool) {
 	w := int(buf.width)
 	h := int(buf.height)
 
-	// VULN-005 Fix: Prevent excessive memory allocation (max 16384x16384 = ~1 GB image)
-	if offset < 0 || stride < 0 || w <= 0 || h <= 0 || w > 16384 || h > 16384 {
+	// VULN-005 & VULN-006 Fix: Prevent excessive memory allocation (max 16384x16384 = ~1 GB image)
+	if offset < 0 || stride < w*4 || w <= 0 || h <= 0 || w > 16384 || h > 16384 {
 		return
 	}
 	needed := offset + stride*h

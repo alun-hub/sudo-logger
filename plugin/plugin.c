@@ -553,8 +553,13 @@ static void json_escape_into(char *buf, size_t bufsz, const char *src)
             buf[pos++] = '\\';
             buf[pos++] = (char)c;
         } else if (c < 0x20) {
-            if (pos + 6 < bufsz)
-                pos += (size_t)snprintf(buf + pos, bufsz - pos, "\\u%04x", c);
+            if (pos + 6 < bufsz) {
+                int n = snprintf(buf + pos, bufsz - pos, "\\u%04x", c);
+                if (n > 0 && (size_t)n < bufsz - pos)
+                    pos += (size_t)n;
+                else
+                    break; /* Truncated or error */
+            }
         } else {
             buf[pos++] = (char)c;
         }
@@ -882,12 +887,12 @@ static int plugin_open(unsigned int        version,
 
     /* snprintf returns the number of bytes that *would* have been written,
      * which may exceed sizeof(payload) if the input was truncated.
-     * Cap to the actual number of bytes written to avoid over-reading the
-     * stack buffer in send_msg/writev. */
+     * Use the actual length written (capped by sizeof(payload)-1) to avoid
+     * over-reading the stack buffer in send_msg/writev. */
     if (plen < 0)
         plen = 0;
     else if (plen >= (int)sizeof(payload))
-        plen = (int)sizeof(payload) - 1;
+        plen = (int)strlen(payload);
 
     send_msg(g_shipper_fd, MSG_SESSION_START, payload, (uint32_t)plen);
 
