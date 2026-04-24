@@ -8,6 +8,10 @@ sudo-logger records and audits sudo sessions via sudo's built-in I/O plugin API.
 Install: `plugin.so` → `/usr/libexec/sudo/` + `Plugin` line in `/etc/sudo.conf`
 Build: `make -C go` | Test: `go test ./...` from `go/`
 
+## Reliability & Validation
+- Verify file integrity: `./scripts/verify-integrity.sh <file>`
+- AI Mandates: See `.gemini_reliability.md`
+
 ## Security sensitivity
 Handles audit logs and sudo's I/O stream. Never change TLS handling, auth logic,
 or file permissions without considering the impact on audit integrity.
