@@ -63,17 +63,17 @@ var (
 	// Storage backend flags.
 	// NOTE: these flags are intentionally duplicated in cmd/replay-server/main.go.
 	// If you change a default or description here, update that file too.
-	flagStorage    = flag.String("storage", "local", "Storage backend: local|distributed")
-	flagS3Bucket   = flag.String("s3-bucket", "", "S3 bucket name (distributed storage)")
-	flagS3Region   = flag.String("s3-region", "us-east-1", "S3 region (distributed storage)")
-	flagS3Prefix   = flag.String("s3-prefix", "sessions/", "S3 key prefix (distributed storage)")
-	flagS3Endpoint = flag.String("s3-endpoint", "", "S3-compatible endpoint URL, e.g. https://minio.internal:9000")
-	flagS3PathStyle = flag.Bool("s3-path-style", false, "Use path-style S3 URLs (required for MinIO/StorageGRID)")
-	flagS3AccessKey = flag.String("s3-access-key", "", "Static S3 access key (leave empty to use IAM/env)")
-	flagS3SecretKey = flag.String("s3-secret-key", "", "Static S3 secret key (leave empty to use IAM/env)")
-	flagDBURL      = flag.String("db-url", "", "PostgreSQL DSN (distributed storage)")
-	flagBufferDir      = flag.String("buffer-dir", "/var/lib/sudo-logger/buffer", "Local write-buffer dir for S3 uploads")
-	flagHealthListen   = flag.String("health-listen", "", "Plain HTTP address for /healthz and /metrics (e.g. :9877); disabled when empty")
+	flagStorage      = flag.String("storage", "local", "Storage backend: local|distributed")
+	flagS3Bucket     = flag.String("s3-bucket", "", "S3 bucket name (distributed storage)")
+	flagS3Region     = flag.String("s3-region", "us-east-1", "S3 region (distributed storage)")
+	flagS3Prefix     = flag.String("s3-prefix", "sessions/", "S3 key prefix (distributed storage)")
+	flagS3Endpoint   = flag.String("s3-endpoint", "", "S3-compatible endpoint URL, e.g. https://minio.internal:9000")
+	flagS3PathStyle  = flag.Bool("s3-path-style", false, "Use path-style S3 URLs (required for MinIO/StorageGRID)")
+	flagS3AccessKey  = flag.String("s3-access-key", "", "Static S3 access key (leave empty to use IAM/env)")
+	flagS3SecretKey  = flag.String("s3-secret-key", "", "Static S3 secret key (leave empty to use IAM/env)")
+	flagDBURL        = flag.String("db-url", "", "PostgreSQL DSN (distributed storage)")
+	flagBufferDir    = flag.String("buffer-dir", "/var/lib/sudo-logger/buffer", "Local write-buffer dir for S3 uploads")
+	flagHealthListen = flag.String("health-listen", "", "Plain HTTP address for /healthz and /metrics (e.g. :9877); disabled when empty")
 )
 
 type server struct {
