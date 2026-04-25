@@ -119,7 +119,7 @@ sudo session:
 - Receives and ed25519-verifies ACKs from the server
 - Tracks ACK state per session; responds instantly to plugin ACK queries
 - Sends a HEARTBEAT to the server every 400 ms; declares the connection
-  dead if no HEARTBEAT_ACK arrives within 800 ms (~1 s freeze latency)
+  dead if no HEARTBEAT_ACK arrives within 2000 ms (~2 s freeze latency)
 - Recovers automatically when the network returns; the TCP connection
   remains alive as long as the OS retransmission timeout has not expired
   (typically several minutes on Linux with default settings)
@@ -242,7 +242,7 @@ migrate-sessions \
   the network returns, as long as the OS retransmission timeout has not
   expired. On Linux with default settings this is typically several minutes.
   If the connection is truly gone (OS gave up), automatic recovery is no
-  longer possible. The freeze-timeout watchdog (default 5 min) handles this
+  longer possible. The freeze-timeout watchdog (default 3 min) handles this
   case: it terminates the frozen session, unfreezes the cgroup, and prints
   a human-readable error banner so the user knows why the session ended.
   Without this, a dead TCP connection would cause a permanent freeze that
@@ -352,7 +352,7 @@ The ACK signing key pair is generated automatically on the server when the
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.10.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.18.1-1.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -386,7 +386,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.11.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.17.35-1.fc43.x86_64.rpm
 
 # Install certificates and ACK verify key
 cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
@@ -610,8 +610,8 @@ After import, rules are served from the database and changes via the Settings UI
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `ackLagLimit` | `2s` | Unacknowledged chunk age before reporting dead to plugin |
-| `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
+| `ackLagLimit` | `5s` | Unacknowledged chunk age before reporting dead to plugin |
+| `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 5 missed replies (2000 ms) |
 
 ### Shipper config keys
 
@@ -679,7 +679,7 @@ terminal player for recorded sessions.  It reads asciinema v2 session recordings
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.11.0-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.18.2-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -1337,7 +1337,7 @@ Plugin ◄──ACK_RESPONSE────── (ts=time.Now() if alive, ts=0 if 
 The shipper's `readAck()` returns:
 
 1. `(0, lastSeq)` if `serverConnAlive == false` — connection declared dead
-2. `(0, lastSeq)` if unACKed chunks exist and debt age > `ackLagLimit` (2 s)
+2. `(0, lastSeq)` if unACKed chunks exist and debt age > `ackLagLimit` (5 s)
 3. `(time.Now(), lastSeq)` otherwise — server is alive and responding
 
 Recovery: when a `HEARTBEAT_ACK` or `ACK` arrives after a dead period,
@@ -1403,7 +1403,7 @@ Shipper detects server dead (markDead())
 
 Watchdog goroutine (checks every 10 s)
     │
-    └─ time.Since(frozenSince) >= freeze-timeout (default 5 min)
+    └─ time.Since(frozenSince) >= freeze-timeout (default 3 min)
            │
            ├── cg.unfreeze()                 ← release cgroup freeze first
            ├── send FREEZE_TIMEOUT (0x0d) to plugin socket
@@ -1417,7 +1417,7 @@ and prints a different banner:
 [ SUDO-LOGGER: gave up waiting for log server — session terminated ]
 ```
 
-The `-freeze-timeout` flag (default `5m`) controls how long the shipper
+The `-freeze-timeout` flag (default `3m`) controls how long the shipper
 waits before giving up. Set to `0` to disable (not recommended — sessions
 may hang indefinitely if the log server is permanently unreachable).
 
@@ -1472,8 +1472,9 @@ before creating the tarball — `git archive` only includes committed files.
 # Set up rpmbuild tree (once)
 rpmdev-setuptree
 
-# Set the version (must match Version: in the spec files)
-VERSION=1.9.2
+# Set the version to match the Version: field in the target spec file
+# (each package is versioned independently — see rpm/*.spec)
+VERSION=1.17.35
 
 # 1. Commit your changes first, then create the source tarball from HEAD
 git archive --format=tar.gz --prefix=sudo-logger-${VERSION}/ HEAD \
@@ -1883,7 +1884,7 @@ journalctl -u sudo-logserver -n 50
 ### Freeze is too slow after network loss
 
 Ensure you are running client ≥ 1.3.0 and server ≥ 1.3.0. Earlier versions
-used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).
+used TCP keepalive only (~2 s latency). Current versions use heartbeats (~2 s).
 
 ---
 
