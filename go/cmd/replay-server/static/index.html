@@ -1751,10 +1751,15 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
   try {
     const res = await fetch(`/api/session/events?tsid=${encodeURIComponent(tsid)}`);
     if (!res.ok) {
-      if (res.status === 404 && isScreenSession()) {
+      if (res.status === 404 && (isScreenSession() || (sess && sess.has_frames))) {
         // Pure Wayland session, no TTY events. This is okay.
         events = [];
+        totalDuration = sess ? sess.duration : 0;
+        elTimeTotal.textContent = fmt(totalDuration);
         setControlsEnabled(true);
+        resetPlayer();
+        if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
+        else if (autoplay) play();
         return;
       }
       throw new Error(`HTTP ${res.status}`);
@@ -1773,9 +1778,14 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
     else if (autoplay) play();
   } catch (err) {
     if (currentTSID !== tsid) return;
-    if (isScreenSession()) {
+    if (isScreenSession() || (sess && sess.has_frames)) {
       events = [];
+      totalDuration = sess ? sess.duration : 0;
+      elTimeTotal.textContent = fmt(totalDuration);
       setControlsEnabled(true);
+      resetPlayer();
+      if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
+      else if (autoplay) play();
       return;
     }
     term.reset();
