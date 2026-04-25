@@ -263,8 +263,10 @@ func handlePluginConn(pluginConn net.Conn) {
 		msgType uint8
 		payload []byte
 	}
-	prioQueue := make(chan outMsg, 100)  // heartbeats, input
-	bulkQueue := make(chan outMsg, 1000) // tty output
+	prioQueue := make(chan outMsg, 100)
+	bulkQueue := make(chan outMsg, 1000)
+	var senderWg sync.WaitGroup
+	senderWg.Add(1)
 
 	pr := bufio.NewReader(pluginConn)
 	pw := bufio.NewWriter(pluginConn)
@@ -665,28 +667,37 @@ func handlePluginConn(pluginConn net.Conn) {
 	// De-couples terminal reading from network writing.  Always drains the
 	// priority queue (heartbeats, input) before sending bulk output chunks.
 	go func() {
+		defer senderWg.Done()
 		for {
 			var msg outMsg
+			var ok bool
 			select {
-			case <-done:
-				return
-			case msg = <-prioQueue:
-				// Priority: heartbeat or input.
+			case msg, ok = <-prioQueue:
 			default:
-				// Bulk: wait for either.
 				select {
-				case <-done:
-					return
-				case msg = <-prioQueue:
-				case msg = <-bulkQueue:
+				case msg, ok = <-prioQueue:
+				case msg, ok = <-bulkQueue:
 				}
+			}
+
+			if !ok {
+				// Both queues closed and drained.
+				return
 			}
 
 			serverWriteMu.Lock()
 			serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			werr := protocol.WriteMessageNoFlush(serverBuf, msg.msgType, msg.payload)
-			if werr == nil && (len(prioQueue) == 0 && len(bulkQueue) == 0) {
-				// Flush when queues are drained.
+
+			// Smart flush: flush priority messages (heartbeats, input, end)
+			// immediately. For bulk logs, flush when everything is drained.
+			isPrio := msg.msgType != protocol.MsgChunk
+			if !isPrio && len(msg.payload) > 16 {
+				stream := msg.payload[16]
+				isPrio = stream == protocol.StreamStdin || stream == protocol.StreamTtyIn
+			}
+
+			if werr == nil && (isPrio || (len(prioQueue) == 0 && len(bulkQueue) == 0)) {
 				serverBuf.Flush()
 			}
 			serverConn.SetWriteDeadline(time.Time{})
@@ -883,6 +894,15 @@ loop:
 			log.Printf("unknown message type 0x%02x len=%d — ignoring", msgType, plen)
 		}
 	}
+
+	// ── Step 7b: drain queues before entering linger mode ────────────────
+	//
+	// Signal the sender goroutine to finish processing all queued messages
+	// and wait for it to confirm. This ensures SESSION_END and any bulk logs
+	// are actually sent to the server before we freeze or exit.
+	close(bulkQueue)
+	close(prioQueue)
+	senderWg.Wait()
 
 	// ── Step 8: linger if GUI processes remain ────────────────────────────
 	//
