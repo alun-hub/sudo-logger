@@ -868,8 +868,6 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Record who viewed this session before streaming the response.
-	// Prefer the configured base URL (from SIEM config) so the logged link
-	// matches what operators expect, regardless of the request's Host header.
 	var replayURL string
 	if base := strings.TrimRight(siem.Get().ReplayURLBase, "/"); base != "" {
 		replayURL = base + "/?tsid=" + url.QueryEscape(tsid)
@@ -884,29 +882,78 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	recordView(r, tsid, replayURL)
 	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", sanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
 
-	rawEvents, err := sessionStore.ReadEvents(r.Context(), tsid)
+	rc, err := sessionStore.OpenCast(r.Context(), tsid)
 	if err != nil {
-		log.Printf("read events %s: %v", tsid, err)
+		log.Printf("open cast %s: %v", tsid, err)
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+	defer rc.Close()
 
-	// Convert store.RawEvent → PlaybackEvent (base64-encode data, map kind to type).
-	events := make([]PlaybackEvent, 0, len(rawEvents))
-	for _, e := range rawEvents {
+	// Set headers for streaming NDJSON
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	enc := json.NewEncoder(w)
+
+	scanner := bufio.NewScanner(rc)
+	// Allow for very long lines (e.g. large screen frames or terminal bursts)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+
+	// Skip header line
+	if !scanner.Scan() {
+		return
+	}
+
+	lineCount := 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 || line[0] != '[' {
+			continue
+		}
+
+		var raw [3]json.RawMessage
+		if err := json.Unmarshal(line, &raw); err != nil {
+			continue
+		}
+
+		var relTime float64
+		var kind string
+		var dataStr string
+		_ = json.Unmarshal(raw[0], &relTime)
+		_ = json.Unmarshal(raw[1], &kind)
+		_ = json.Unmarshal(raw[2], &dataStr)
+
 		evType := 4 // TtyOut
-		if e.Kind == "i" {
+		if kind == "i" {
 			evType = 3 // TtyIn
 		}
-		events = append(events, PlaybackEvent{
-			T:    e.T,
+
+		event := PlaybackEvent{
+			T:    relTime,
 			Type: evType,
-			Data: base64.StdEncoding.EncodeToString(e.Data),
-		})
+			Data: base64.StdEncoding.EncodeToString([]byte(dataStr)),
+		}
+
+		if err := enc.Encode(event); err != nil {
+			return
+		}
+
+		lineCount++
+		// Flush every 100 events to keep the connection alive and the proxy happy
+		if ok && lineCount%100 == 0 {
+			flusher.Flush()
+		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(events); err != nil {
-		log.Printf("encode session events: %v", err)
+	if ok {
+		flusher.Flush()
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("[%s] scan error during streaming: %v", tsid, err)
 	}
 }
 

@@ -1772,9 +1772,40 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
       }
       throw new Error(`HTTP ${res.status}`);
     }
-    const data = await res.json();
+
+    // Stream and parse NDJSON
+    events = [];
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (currentTSID !== tsid) return;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // last element is either empty or partial line
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          events.push(JSON.parse(line));
+        } catch (e) {
+          console.error("Parse error on NDJSON line:", e);
+        }
+      }
+
+      // If this is the first chunk of data, we can already enable the UI
+      if (events.length > 0 && !elBtnPlay.disabled === false) {
+        totalDuration = sess ? sess.duration : (events.length ? events[events.length - 1].t : 0);
+        elTimeTotal.textContent = fmt(totalDuration);
+        setControlsEnabled(true);
+      }
+    }
+
     if (currentTSID !== tsid) return;
-    events = data;
     totalDuration = sess ? sess.duration
       : (events.length ? events[events.length-1].t : 0);
     elTimeTotal.textContent = fmt(totalDuration);
