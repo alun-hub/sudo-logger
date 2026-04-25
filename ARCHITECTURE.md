@@ -111,7 +111,16 @@ SESSION_FREEZING is sent at t≈800 ms when the server is still likely reachable
 
 The replay server shows a distinct **⏱ network outage** badge for these sessions and suppresses the `incomplete_session` risk rule (+15 pts) — a network event is not a security incident.
 
-### 5. Shutdown
+### 5. High-Performance Data Pipeline (Release 12)
+
+To handle 500+ concurrent sessions and massive I/O bursts (e.g., `cat` of multi-gigabyte files), the system uses an asynchronous, non-blocking pipeline:
+
+- **Batch Disk Writer (Server)**: Instead of one system call per log chunk, the server collects up to 100 chunks in a memory queue and writes them as a single atomic batch to disk or the S3 buffer. This reduces I/O overhead by 99%.
+- **Non-Blocking Ingestion (Server)**: The server's main network loop never blocks on disk I/O. If the primary disk queue (50,000 slots) is full, the server spawns temporary overflow goroutines to hold the data, ensuring the main loop remains free to process Heartbeats and ACKs instantly.
+- **Thread-Safe Networking**: All network writes on the server are protected by a `netWriteMu` mutex, and the C plugin uses `g_send_mu`. This prevents interleaved bytes from different messages (e.g., an ACK and a Heartbeat) that would otherwise corrupt the protocol stream.
+- **Precise Deadlines (Shipper)**: Write deadlines are applied only to explicit `Flush()` calls. This prevents the TCP stream from being truncated mid-message by an automatic buffered write timeout.
+
+### 6. Shutdown
 
 ```
 plugin_close()

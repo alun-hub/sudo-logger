@@ -9,6 +9,9 @@ sudo\-shipper \- local daemon that bridges the sudo I/O plugin to the remote log
 [\fB\-key\fR \fIfile\fR]
 [\fB\-ca\fR \fIfile\fR]
 [\fB\-verifykey\fR \fIfile\fR]
+[\fB\-freeze\-timeout\fR \fIduration\fR]
+[\fB\-idle\-timeout\fR \fIduration\fR]
+[\fB\-wayland\fR \fIbool\fR]
 [\fB\-debug\fR]
 .SH DESCRIPTION
 .B sudo\-shipper
@@ -26,6 +29,13 @@ forwards
 and
 .B SESSION_END
 messages, and tracks the ACK state for that session.
+.PP
+The shipper uses a priority-based asynchronous delivery system. Critical
+control messages (heartbeats, termination signals) and user input are
+placed in a high-priority queue, while bulk terminal output is buffered
+in a larger bulk queue. This ensures that heartbeats and input are never
+starved by high-volume output bursts, preventing false-positive session
+freezes.
 .PP
 If the log server is unreachable when a new session arrives,
 .B sudo\-shipper
@@ -98,6 +108,11 @@ Set to
 to disable idle termination entirely.
 Default:
 .BR 0 .
+.TP
+.BI \-wayland " bool"
+Enable or disable Wayland screen capture for GUI sessions.
+Default:
+.BR true .
 .TP
 .B \-debug
 Enable verbose debug logging.

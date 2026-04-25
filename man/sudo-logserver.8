@@ -13,7 +13,10 @@ sudo\-logserver \- remote TLS server for sudo session recordings
 [\fB\-health\-listen\fR \fIaddr\fR]
 [\fB\-storage\fR \fIbackend\fR]
 [\fB\-s3\-bucket\fR \fIname\fR]
+[\fB\-s3\-endpoint\fR \fIurl\fR]
+[\fB\-s3\-path\-style\fR]
 [\fB\-db\-url\fR \fIDSN\fR]
+[\fB\-buffer\-dir\fR \fIdir\fR]
 .SH DESCRIPTION
 .B sudo\-logserver
 is a TLS server that receives sudo session recordings from one or more
@@ -37,6 +40,12 @@ file in asciinema v2 format.
 Sends an ed25519-signed ACK for every received chunk.
 The signature covers the session ID, sequence number, and timestamp,
 binding each ACK to the specific session.
+.PP
+The server uses a high-performance, non-blocking asynchronous pipeline to
+handle high-volume terminal output. Incoming log chunks are buffered in a
+memory queue and written to disk in batches of up to 100 chunks. This
+decoupling ensures that network ingestion and heartbeat processing are never
+blocked by disk I/O latency.
 .PP
 Sessions can be replayed with the web interface provided by
 .BR sudo\-replay\-server (8).

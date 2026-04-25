@@ -226,7 +226,8 @@ migrate-sessions \
 - GUI programs with own process group (gvim, okular, …) frozen via direct SIGSTOP/SIGCONT
 - cgroup namespace isolation (`CLONE_NEWCGROUP`) prevents child processes from escaping the freeze cgroup, even with `CAP_SYS_ADMIN`
 - Web replay interface with Basic Auth + TLS + trusted-user-header support (works standalone or behind Pomerium/oauth2-proxy/OpenShift ingress)
-- Scalable: designed for 50+ simultaneous sessions
+- **High Performance**: designed for 500+ simultaneous sessions using asynchronous Batch Disk I/O and non-blocking ingestion
+- **Industrial Stability**: zero-deadlock architecture protects heartbeats from disk I/O backpressure
 - RPM packages for Fedora/RHEL with proper systemd integration
 - Automatic sudo.conf configuration on client RPM install/uninstall
 - Minimal footprint: one small .so on the client + one Go daemon
@@ -286,6 +287,7 @@ migrate-sessions \
 - Linux (Fedora 43 / RHEL 9+ recommended)
 - Reachable on TCP port 9876 from all clients
 - `sudo-logger-server` RPM or equivalent
+- **Recommended**: SSD storage and `LimitNOFILE=65536` for 500+ concurrent sessions
 
 ### Client
 - Linux with sudo 1.9+
