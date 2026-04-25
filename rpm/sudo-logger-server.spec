@@ -100,6 +100,9 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Sat Apr 25 2026 sudo-logger 1.18.1-1
+- fix(server): non-blocking disk queue handoff and precise write deadlines to prevent heartbeat stalls under high I/O (Release 12)
+
 * Sun Apr 20 2026 sudo-logger 1.18.0-1
 - feat(distributed): ScreenFrameWriter/ScreenFrameStore for S3 — stores JPEG
   frames in s3://<bucket>/<prefix>/sessions/<id>/frames/ with index.ndjson
