@@ -43,3 +43,8 @@ go/wayland-proxy
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# Superpowers and AI security tools
+docs/superpowers/
+.gemini_security/
+.gemini_reliability.md

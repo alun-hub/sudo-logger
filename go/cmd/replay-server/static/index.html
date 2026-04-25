@@ -1260,8 +1260,7 @@ let sessStartNs  = 0;
 
 function isScreenSession() {
   if (screenFrames.length > 0) return true;
-  const s = allSessions.find(s => s.tsid === currentTSID);
-  return !!(s && s.has_frames);
+  return !!(currentSession && currentSession.has_frames);
 }
 
 function showScreenPlayer() {
@@ -1439,6 +1438,7 @@ let allSessions      = [];
 let events           = [];
 let totalDuration    = 0;
 let currentTSID      = null;
+let currentSession   = null;
 let autoplay         = true;
 let liveRefreshTimer = null;
 
@@ -1521,7 +1521,7 @@ function applyHighlight(container, text, q) {
 // ── Session list fetch ────────────────────────────────────────────────────────
 
 async function fetchSessions(reset = true) {
-  if (reset) { allSessions = []; fetchState.offset = 0; }
+  if (reset) fetchState.offset = 0;
 
   const p = new URLSearchParams({
     sort: fetchState.sort, order: fetchState.order,
@@ -1540,6 +1540,7 @@ async function fetchSessions(reset = true) {
     const data = await res.json();
     fetchState.total = data.total;
     allSessions = reset ? data.sessions : [...allSessions, ...data.sessions];
+    if (currentTSID) currentSession = allSessions.find(s => s.tsid === currentTSID);
 
     const shown = allSessions.length, total = fetchState.total;
     elSessionCount.textContent = shown < total
@@ -1683,6 +1684,7 @@ async function selectSession(tsid, initialSeek = 0) {
   if (tsid === currentTSID) return;
   stopPlayer();
   currentTSID = tsid;
+  currentSession = allSessions.find(s => s.tsid === tsid);
   screenFrames = [];
   screenIdx = -1;
 
@@ -1691,7 +1693,7 @@ async function selectSession(tsid, initialSeek = 0) {
   elSessionList.querySelectorAll('.session-card').forEach(c =>
     c.classList.toggle('active', c.dataset.tsid === tsid));
 
-  const sess = allSessions.find(s => s.tsid === tsid);
+  const sess = currentSession;
   sessStartNs = sess ? sess.start_time * 1e9 : 0;
   renderInfoBar(sess);
   setControlsEnabled(false);
@@ -1733,6 +1735,7 @@ async function selectScreenSession(tsid, sess) {
 
   try {
     const res = await fetch(`/api/session/frames?tsid=${encodeURIComponent(tsid)}`);
+    if (currentTSID !== tsid) return;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const frames = await res.json();
     if (currentTSID !== tsid) return;
@@ -1754,6 +1757,7 @@ async function selectScreenSession(tsid, sess) {
 async function selectTerminalSession(tsid, sess, initialSeek) {
   try {
     const res = await fetch(`/api/session/events?tsid=${encodeURIComponent(tsid)}`);
+    if (currentTSID !== tsid) return;
     if (!res.ok) {
       if (res.status === 404 && isScreenSession()) {
         // Pure Wayland session, no TTY events. This is okay.
