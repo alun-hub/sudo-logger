@@ -223,6 +223,15 @@ func main() {
 	log.Printf("sudo-logserver: shutdown complete")
 }
 
+func sanitizeForLog(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return '_'
+		}
+		return r
+	}, s)
+}
+
 func (srv *server) handleConn(conn *tls.Conn) {
 	defer conn.Close()
 
@@ -254,6 +263,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 	diskQueue := make(chan diskTask, 50000)
 	var diskWg sync.WaitGroup
 	diskWg.Add(1)
+
+	var overflowCount atomic.Int32
+	const maxOverflow = 1000
 
 	go func() {
 		defer diskWg.Done()
@@ -453,7 +465,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s tsid=%s",
 				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
-				sess.command, start.ResolvedCommand, sess.cwd, sess.writer.TSID())
+				sanitizeForLog(sess.command), sanitizeForLog(start.ResolvedCommand),
+				sanitizeForLog(sess.cwd), sess.writer.TSID())
 
 			netWriteMu.Lock()
 			err = protocol.WriteMessage(w, protocol.MsgServerReady, nil)
@@ -475,20 +488,26 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				return
 			}
 
-			// Non-blocking handoff to disk writer.
+			// Non-blocking handoff to disk writer if possible.
 			task := diskTask{msgType, payload}
 			select {
 			case diskQueue <- task:
+				// Fits in primary queue
 			default:
-				// The queue is completely full (disk is extremely slow).
-				// To prevent blocking the main read loop and starving heartbeats,
-				// we spawn a short-lived overflow goroutine.
-				log.Printf("[%s] WARNING: disk queue full, spawning overflow goroutine", sess.id)
-				diskWg.Add(1)
-				go func(t diskTask) {
-					defer diskWg.Done()
-					diskQueue <- t
-				}(task)
+				// Primary queue is full. Check if we can spawn an overflow goroutine.
+				if overflowCount.Load() < maxOverflow {
+					overflowCount.Add(1)
+					diskWg.Add(1)
+					go func(t diskTask) {
+						defer diskWg.Done()
+						defer overflowCount.Add(-1)
+						diskQueue <- t // This may block, but in a background thread
+					}(task)
+				} else {
+					// Hard limit reached (VULN-001 protection). Apply backpressure by blocking
+					// the main loop. This slows down the client via TCP flow control.
+					diskQueue <- task
+				}
 			}
 
 		case protocol.MsgHeartbeat:
