@@ -229,6 +229,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 	remote := conn.RemoteAddr().String()
 	r := bufio.NewReader(conn)
 	w := bufio.NewWriter(conn)
+	var netWriteMu sync.Mutex // Protects all writes to 'w'
 
 	var sess *session
 
@@ -337,18 +338,23 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 			if seq > 0 {
 				ackPayload := srv.buildACK(sid, seq)
-				if err := protocol.WriteMessage(w, protocol.MsgAck, ackPayload); err != nil {
+				netWriteMu.Lock()
+				err := protocol.WriteMessage(w, protocol.MsgAck, ackPayload)
+				netWriteMu.Unlock()
+				if err != nil {
 					log.Printf("[%s] write ack (async): %v", sid, err)
 					return
 				}
 			}
 			if hb {
-				if err := protocol.WriteMessage(w, protocol.MsgHeartbeatAck, nil); err != nil {
+				netWriteMu.Lock()
+				err := protocol.WriteMessage(w, protocol.MsgHeartbeatAck, nil)
+				netWriteMu.Unlock()
+				if err != nil {
 					log.Printf("[%s] write hb ack (async): %v", sid, err)
 					return
 				}
-			}
-		}
+			}		}
 	}()
 
 	var diskCloseOnce sync.Once
@@ -434,7 +440,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			if blocked, msg, _ := srv.sessionStore.IsBlocked(context.Background(), start.User, start.Host); blocked {
 				log.Printf("SECURITY: [%s] user=%s host=%s denied by block policy",
 					start.SessionID, start.User, start.Host)
+				netWriteMu.Lock()
 				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
+				netWriteMu.Unlock()
 				return
 			}
 
@@ -447,7 +455,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
 				sess.command, start.ResolvedCommand, sess.cwd, sess.writer.TSID())
 
-			if err := protocol.WriteMessage(w, protocol.MsgServerReady, nil); err != nil {
+			netWriteMu.Lock()
+			err = protocol.WriteMessage(w, protocol.MsgServerReady, nil)
+			netWriteMu.Unlock()
+			if err != nil {
 				log.Printf("[%s] write SERVER_READY: %v", start.SessionID, err)
 				srv.closeSession(sess)
 				sess = nil
