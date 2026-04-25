@@ -893,6 +893,7 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	// Set headers for streaming NDJSON
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable Nginx buffering
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Connection", "keep-alive")
 

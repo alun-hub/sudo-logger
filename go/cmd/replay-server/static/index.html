@@ -1778,6 +1778,7 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let initialized = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1797,24 +1798,41 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
         }
       }
 
-      // If this is the first chunk of data, we can already enable the UI
-      if (events.length > 0 && !elBtnPlay.disabled === false) {
-        totalDuration = sess ? sess.duration : (events.length ? events[events.length - 1].t : 0);
+      // PROGRESSIVE INITIALIZATION: Start playback as soon as we have a few events
+      if (!initialized && events.length > 5) {
+        initialized = true;
+        totalDuration = sess ? sess.duration : events[events.length-1].t;
         elTimeTotal.textContent = fmt(totalDuration);
+
+        term.reset();
+        fitAddon.fit();
         setControlsEnabled(true);
+        resetPlayer(); // Clears internal state but keeps our growing 'events' array
+
+        if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
+        else if (autoplay) play();
+      }
+
+      // Update duration progressively if it wasn't in the metadata
+      if (!sess && events.length > 0) {
+        totalDuration = events[events.length - 1].t;
+        elTimeTotal.textContent = fmt(totalDuration);
       }
     }
 
     if (currentTSID !== tsid) return;
-    totalDuration = sess ? sess.duration
-      : (events.length ? events[events.length-1].t : 0);
-    elTimeTotal.textContent = fmt(totalDuration);
-    term.reset();
-    fitAddon.fit();
-    setControlsEnabled(true);
-    resetPlayer();
-    if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
-    else if (autoplay) play();
+
+    // Final initialization if the session was too short to trigger the progressive path
+    if (!initialized) {
+        totalDuration = sess ? sess.duration : (events.length ? events[events.length-1].t : 0);
+        elTimeTotal.textContent = fmt(totalDuration);
+        term.reset();
+        fitAddon.fit();
+        setControlsEnabled(true);
+        resetPlayer();
+        if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
+        else if (autoplay) play();
+    }
   } catch (err) {
     if (currentTSID !== tsid) return;
     if (isScreenSession()) {
