@@ -12,16 +12,36 @@ services:
       - "-key=/etc/sudo-logger/server.key"
       - "-ca=/etc/sudo-logger/ca.crt"
       - "-signkey=/etc/sudo-logger/ack-sign.key"
+      - "-health-listen=:9877"
     volumes:
       - ./pki:/etc/sudo-logger:ro,Z
       - sudologs:/var/log/sudoreplay
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9877/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   replay-server:
     image: sudo-logger:latest
     container_name: sudo-replay-server
     depends_on:
-      - logserver
+      logserver:
+        condition: service_healthy
     ports:
       - "8080:8080"
     entrypoint: ["/usr/local/bin/sudo-replay-server"]
@@ -49,6 +69,24 @@ services:
       #   podman run --rm --entrypoint cat sudo-logger:latest \
       #       /etc/sudo-logger/risk-rules.yaml > config/risk-rules.yaml
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   sudologs:

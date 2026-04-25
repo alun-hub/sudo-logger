@@ -16,6 +16,8 @@ RUN CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /usr/local/bin/sudo-l
 # distroless/static-debian12:nonroot contains only minimal binaries,
 # certs, and a non-privileged user (UID 65532).
 FROM gcr.io/distroless/static-debian12:nonroot
+# wget from busybox enables docker-compose healthchecks inside distroless.
+COPY --from=busybox:stable /bin/wget /usr/local/bin/wget
 
 # Copy both server binaries to the runtime image.
 COPY --from=builder /usr/local/bin/sudo-logserver /usr/local/bin/sudo-logserver

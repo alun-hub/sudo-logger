@@ -1635,11 +1635,11 @@ podman-compose up -d
 | ✅ | Distroless base image (minimal attack surface) | Good |
 | ✅ | Runs as nonroot UID 65532 | Good |
 | ✅ | Named volume (no bind mount permission issues) | Good |
-| ⚠️ | Replay server mounts log volume read-write | Required for `risk.json` score-cache files; add `:ro` only if risk scoring is disabled |
+| ✅ | `no-new-privileges` + `cap_drop: ALL` on both services | Good |
+| ✅ | Resource limits (cpu/memory) on both services | Good |
+| ✅ | Healthcheck on both services; `depends_on` waits for logserver | logserver via `-health-listen=:9877`; replay via `/healthz` |
+| ⚠️ | Replay server mounts log volume read-write | Required for `risk.json` score-cache files |
 | ✅ | Replay server supports Basic Auth + TLS + trusted-user-header | See [Authentication](#authentication) |
-| ⚠️ | No `no-new-privileges` / `cap_drop: ALL` | Add to both services for defence in depth |
-| ⚠️ | No resource limits | Add `deploy.resources.limits` for memory/CPU |
-| ⚠️ | No healthcheck | `depends_on` does not wait for logserver to be ready |
 
 ---
 
