@@ -264,7 +264,9 @@ func handlePluginConn(pluginConn net.Conn) {
 		payload []byte
 	}
 	prioQueue := make(chan outMsg, 100)
-	bulkQueue := make(chan outMsg, 1000)
+	bulkQueue := make(chan outMsg, 10000) // Increased to 10,000 for massive I/O bursts
+
+	stopSender := make(chan struct{})
 	var senderWg sync.WaitGroup
 	senderWg.Add(1)
 
@@ -668,20 +670,49 @@ func handlePluginConn(pluginConn net.Conn) {
 	// priority queue (heartbeats, input) before sending bulk output chunks.
 	go func() {
 		defer senderWg.Done()
+
+		drainAndExit := func() {
+			serverWriteMu.Lock()
+			defer serverWriteMu.Unlock()
+			serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
+			// Drain priority queue
+			for len(prioQueue) > 0 {
+				m := <-prioQueue
+				protocol.WriteMessageNoFlush(serverBuf, m.msgType, m.payload)
+			}
+			// Drain bulk queue
+			for len(bulkQueue) > 0 {
+				m := <-bulkQueue
+				protocol.WriteMessageNoFlush(serverBuf, m.msgType, m.payload)
+			}
+			serverBuf.Flush()
+			serverConn.SetWriteDeadline(time.Time{})
+		}
+
 		for {
 			var msg outMsg
 			var ok bool
 			select {
+			case <-stopSender:
+				drainAndExit()
+				return
+			case <-done:
+				return
 			case msg, ok = <-prioQueue:
 			default:
 				select {
+				case <-stopSender:
+					drainAndExit()
+					return
+				case <-done:
+					return
 				case msg, ok = <-prioQueue:
 				case msg, ok = <-bulkQueue:
 				}
 			}
 
 			if !ok {
-				// Both queues closed and drained.
 				return
 			}
 
@@ -895,15 +926,6 @@ loop:
 		}
 	}
 
-	// ── Step 7b: drain queues before entering linger mode ────────────────
-	//
-	// Signal the sender goroutine to finish processing all queued messages
-	// and wait for it to confirm. This ensures SESSION_END and any bulk logs
-	// are actually sent to the server before we freeze or exit.
-	close(bulkQueue)
-	close(prioQueue)
-	senderWg.Wait()
-
 	// ── Step 8: linger if GUI processes remain ────────────────────────────
 	//
 	// If the sudo process (the plugin client) has exited but the cgroup still
@@ -921,17 +943,18 @@ loop:
 		log.Printf("[%s] all GUI processes exited; finishing session", start.SessionID)
 	}
 
-	// ── Step 9: final cleanup ─────────────────────────────────────────────
+	// ── Step 9: send SESSION_END ──────────────────────────────────────────
 	if savedSessionEnd != nil {
 		forward(protocol.MsgSessionEnd, savedSessionEnd)
 	}
 
+	// Gracefully stop the sender goroutine and wait for it to drain queues
+	// before we exit the function and close the connections.
+	close(stopSender)
+	senderWg.Wait()
+
 	// Stop all watchdog goroutines (including the heartbeat goroutine) before
-	// touching serverConnAlive.  Without this, markAlive() in the heartbeat
-	// goroutine can race with the serverConnAlive=false write below: if it wins
-	// the lock it sets serverConnAlive=true again, and the subsequent write
-	// failure on Close() causes markDead() to fire with firstFreeze=true,
-	// producing a spurious freeze banner after normal session exit.
+	// touching serverConnAlive.
 	closeDone()
 	sessionAckMu.Lock()
 	serverConnAlive = false

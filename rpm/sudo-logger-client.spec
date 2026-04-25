@@ -1,6 +1,6 @@
 Name:           sudo-logger-client
-Version:        1.17.32
-Release:        4%{?dist}
+Version:        1.17.33
+Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
 License:        MIT
