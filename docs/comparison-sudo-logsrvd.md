@@ -12,7 +12,7 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 | Centralise logs on a remote server | ✅ | ✅ |
 | TLS transport | ✅ | ✅ |
 | Mutual TLS (client certificate) | ✅ optional | ✅ mandatory |
-| Reject session if server unreachable at start | ✅ | ✅ |
+| Reject session if server unreachable at start | ⚠️ requires `ignore_log_errors=false` | ✅ always |
 | Restart / resume interrupted transfers | ✅ | ✅ (TCP retransmit) |
 | Session replay | ✅ CLI (`sudoreplay`) | ✅ Web UI + CLI |
 | RPM packages | ✅ (ships with sudo) | ✅ |
@@ -24,9 +24,11 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 
 ### 1. Network-loss enforcement
 
-`sudo-logsrvd` has no freeze mechanism. If the server becomes unreachable mid-session, the client continues running and sudo buffers I/O locally. The session may never reach the server if the shipper is killed or if the node crashes.
+`sudo-logsrvd` behavior on server loss depends on configuration. The `ignore_log_errors` sudoers flag is **on by default**, meaning sessions continue uninterrupted even if the server becomes unreachable. With `ignore_log_errors = false`, sudo terminates the session — but only when the next write to the server fails, which may take several seconds if the session is idle. There is no dedicated heartbeat: detection is write-failure-driven.
 
-`sudo-logger` freezes the running process within ~800 ms of losing server acknowledgements. The freeze is implemented via `cgroup.freeze=1` — not job-control signals — so it cannot be escaped with `fg`, `bg`, or `kill -CONT`. The user sees a freeze banner and can break out with Ctrl+C, but the session is then terminated. No unacknowledged I/O ever leaves the freeze window without being recorded.
+During the entire detection window the child process runs freely with no I/O restriction. Once termination is triggered, the session is killed immediately with no freeze phase.
+
+`sudo-logger` freezes the running process within ~800 ms of losing server acknowledgements, regardless of whether the session is active or idle. The freeze is implemented via `cgroup.freeze=1` — not job-control signals — so it cannot be escaped with `fg`, `bg`, or `kill -CONT`. The user sees a freeze banner and can break out with Ctrl+C, but the session is then terminated. No unacknowledged I/O can proceed during the freeze window.
 
 ### 2. Acknowledgement integrity
 
@@ -88,7 +90,9 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 
 | | sudo-logsrvd | sudo-logger |
 |--|:--:|:--:|
-| **Freeze on network loss** | ✗ | ✅ cgroup.freeze |
+| **Terminate session on network loss** | ⚠️ not default (`ignore_log_errors=true`) | ✅ always |
+| **Freeze (no I/O during detection window)** | ✗ | ✅ cgroup.freeze |
+| **Guaranteed detection time** | ✗ write-failure-driven | ✅ ≤800 ms heartbeat |
 | **cgroup namespace isolation** | ✗ | ✅ |
 | **ed25519-signed per-chunk ACKs** | ✗ | ✅ |
 | **Host field bound to TLS cert** | ✗ | ✅ |
