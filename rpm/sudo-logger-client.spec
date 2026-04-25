@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.35
+Version:        1.17.36
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -158,6 +158,9 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat Apr 25 2026 sudo-logger 1.17.36-1
+- fix(shipper): restore heartbeat dead-declaration to 2 missed (800 ms); Gemini had raised it to 5 missed (2000 ms) as a workaround for false freezes now resolved by plugin mutex fix
+
 * Sat Apr 25 2026 sudo-logger 1.17.35-1
 - fix(plugin): add mutex to prevent race between ship_chunk and refresh_ack_cache causing stream corruption and session freeze under high I/O
 
