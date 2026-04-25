@@ -250,45 +250,71 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		msgType uint8
 		payload []byte
 	}
-	diskQueue := make(chan diskTask, 10000)
+	diskQueue := make(chan diskTask, 50000)
 	var diskWg sync.WaitGroup
 	diskWg.Add(1)
 
 	go func() {
 		defer diskWg.Done()
-		for task := range diskQueue {
-			chunk, err := protocol.ParseChunk(task.payload)
-			if err != nil {
-				log.Printf("[%s] disk-writer parse chunk: %v", sessionID, err)
-				continue
+		for {
+			task, ok := <-diskQueue
+			if !ok {
+				return
 			}
 
-			// Perform actual disk/S3 I/O
-			if sess != nil {
-				switch chunk.Stream {
-				case protocol.StreamTtyOut, protocol.StreamStdout, protocol.StreamStderr:
-					if err := sess.writer.WriteOutput(chunk.Data, chunk.Timestamp); err != nil {
-						log.Printf("[%s] write output: %v", sessionID, err)
+			// Collect a batch of up to 100 available tasks to reduce I/O overhead
+			batch := []diskTask{task}
+			for i := 0; i < 99; i++ {
+				select {
+				case t, ok := <-diskQueue:
+					if !ok {
+						i = 100
+						break
 					}
-				case protocol.StreamTtyIn, protocol.StreamStdin:
-					if err := sess.writer.WriteInput(chunk.Data, chunk.Timestamp); err != nil {
-						log.Printf("[%s] write input: %v", sessionID, err)
-					}
-				case protocol.StreamScreen:
-					if sfw, ok := sess.writer.(store.ScreenFrameWriter); ok {
-						if err := sfw.WriteScreenFrame(chunk.Data, chunk.Timestamp); err != nil {
-							log.Printf("[%s] write screen frame: %v", sessionID, err)
+					batch = append(batch, t)
+				default:
+					i = 100 // No more immediately available
+				}
+			}
+
+			var lastSeq uint64
+			for _, t := range batch {
+				chunk, err := protocol.ParseChunk(t.payload)
+				if err != nil {
+					log.Printf("[%s] disk-writer parse chunk: %v", sessionID, err)
+					continue
+				}
+
+				// Perform actual disk/S3 I/O
+				if sess != nil {
+					switch chunk.Stream {
+					case protocol.StreamTtyOut, protocol.StreamStdout, protocol.StreamStderr:
+						if err := sess.writer.WriteOutput(chunk.Data, chunk.Timestamp); err != nil {
+							log.Printf("[%s] write output: %v", sessionID, err)
+						}
+					case protocol.StreamTtyIn, protocol.StreamStdin:
+						if err := sess.writer.WriteInput(chunk.Data, chunk.Timestamp); err != nil {
+							log.Printf("[%s] write input: %v", sessionID, err)
+						}
+					case protocol.StreamScreen:
+						if sfw, ok := sess.writer.(store.ScreenFrameWriter); ok {
+							if err := sfw.WriteScreenFrame(chunk.Data, chunk.Timestamp); err != nil {
+								log.Printf("[%s] write screen frame: %v", sessionID, err)
+							}
 						}
 					}
+					sess.lastSeq = chunk.Seq
+					lastSeq = chunk.Seq
 				}
-				sess.lastSeq = chunk.Seq
 			}
 
-			// ONLY NOW that data is on disk, we signal the ACK coalescer
-			sendMu.Lock()
-			pendingSeq = chunk.Seq
-			sendCond.Signal()
-			sendMu.Unlock()
+			// ONLY NOW that the batch is on disk, we signal the ACK coalescer
+			if lastSeq > 0 {
+				sendMu.Lock()
+				pendingSeq = lastSeq
+				sendCond.Signal()
+				sendMu.Unlock()
+			}
 		}
 	}()
 
@@ -325,10 +351,17 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		}
 	}()
 
+	var diskCloseOnce sync.Once
+	closeDisk := func() {
+		diskCloseOnce.Do(func() {
+			close(diskQueue)
+			diskWg.Wait()
+		})
+	}
+
 	defer func() {
 		// Signal and wait for disk writer to finish
-		close(diskQueue)
-		diskWg.Wait()
+		closeDisk()
 
 		sendMu.Lock()
 		senderClosed = true
@@ -340,6 +373,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 	for {
 		msgType, plen, err := protocol.ReadHeader(r)
 		if err != nil {
+			// CRITICAL: Stop the background writer and wait for all data to hit disk
+			// BEFORE we decide if the session was successful or not.
+			closeDisk()
+
 			if sess != nil {
 				if sess.freezeCandidate {
 					log.Printf("[%s] %s connection lost after SESSION_FREEZING — marking network outage",
@@ -439,6 +476,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			sendMu.Unlock()
 
 		case protocol.MsgSessionEnd:
+			// CRITICAL: Stop the background writer and wait for all data to hit disk
+			// BEFORE we mark the session as cleanly finished.
+			closeDisk()
+
 			end, err := protocol.ParseSessionEnd(payload)
 			if err != nil {
 				log.Printf("parse session_end: %v", err)
