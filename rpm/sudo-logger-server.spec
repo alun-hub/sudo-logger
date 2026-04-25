@@ -1,6 +1,6 @@
 Name:           sudo-logger-server
-Version:        1.18.0
-Release:        2%{?dist}
+Version:        1.18.1
+Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
 License:        MIT

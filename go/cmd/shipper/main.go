@@ -717,11 +717,10 @@ func handlePluginConn(pluginConn net.Conn) {
 			}
 
 			serverWriteMu.Lock()
-			serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			// No deadline during the buffered write, as an auto-flush here
+			// could otherwise cause a partial write and stream corruption if it times out.
 			werr := protocol.WriteMessageNoFlush(serverBuf, msg.msgType, msg.payload)
 
-			// Smart flush: flush priority messages (heartbeats, input, end)
-			// immediately. For bulk logs, flush when everything is drained.
 			isPrio := msg.msgType != protocol.MsgChunk
 			if !isPrio && len(msg.payload) > 16 {
 				stream := msg.payload[16]
@@ -729,9 +728,11 @@ func handlePluginConn(pluginConn net.Conn) {
 			}
 
 			if werr == nil && (isPrio || (len(prioQueue) == 0 && len(bulkQueue) == 0)) {
-				serverBuf.Flush()
+				// Apply deadline ONLY to the explicit flush.
+				serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				werr = serverBuf.Flush()
+				serverConn.SetWriteDeadline(time.Time{})
 			}
-			serverConn.SetWriteDeadline(time.Time{})
 			serverWriteMu.Unlock()
 
 			if werr != nil {

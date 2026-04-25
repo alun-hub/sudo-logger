@@ -476,9 +476,20 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 
 			// Non-blocking handoff to disk writer.
-			// We block if the queue is truly full to maintain consistency,
-			// but 10,000 slots should handle most practical bursts.
-			diskQueue <- diskTask{msgType, payload}
+			task := diskTask{msgType, payload}
+			select {
+			case diskQueue <- task:
+			default:
+				// The queue is completely full (disk is extremely slow).
+				// To prevent blocking the main read loop and starving heartbeats,
+				// we spawn a short-lived overflow goroutine.
+				log.Printf("[%s] WARNING: disk queue full, spawning overflow goroutine", sess.id)
+				diskWg.Add(1)
+				go func(t diskTask) {
+					defer diskWg.Done()
+					diskQueue <- t
+				}(task)
+			}
 
 		case protocol.MsgHeartbeat:
 			sendMu.Lock()
