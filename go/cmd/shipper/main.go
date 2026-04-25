@@ -613,8 +613,8 @@ func handlePluginConn(pluginConn net.Conn) {
 	// (user blocked by security policy).  A 10-second deadline is generous
 	// for an in-memory check without leaving the user stuck at the prompt.
 	serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	sr0 := bufio.NewReader(serverConn)
-	hsType, hsPlen, hsErr := protocol.ReadHeader(sr0)
+	sr := bufio.NewReader(serverConn)
+	hsType, hsPlen, hsErr := protocol.ReadHeader(sr)
 	serverConn.SetReadDeadline(time.Time{})
 
 	if hsErr != nil {
@@ -625,14 +625,14 @@ func handlePluginConn(pluginConn net.Conn) {
 	}
 	switch hsType {
 	case protocol.MsgSessionDenied:
-		denyPayload, _ := protocol.ReadPayload(sr0, hsPlen)
+		denyPayload, _ := protocol.ReadPayload(sr, hsPlen)
 		log.Printf("[%s] session denied by server policy for user=%s host=%s",
 			start.SessionID, start.User, start.Host)
 		protocol.WriteMessage(pw, protocol.MsgSessionDenied, denyPayload)
 		serverConn.Close()
 		return
 	case protocol.MsgServerReady:
-		_, _ = protocol.ReadPayload(sr0, hsPlen)
+		_, _ = protocol.ReadPayload(sr, hsPlen)
 
 		// Start Wayland proxy whenever WAYLAND_DISPLAY is set — even when a
 		// tty is present (e.g. "sudo gvim" from a terminal has both a pty
@@ -744,14 +744,13 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	// ── Step 6: read messages from server (ACKs + heartbeat replies) ──────
 	//
-	// sr0 is reused here (not a new bufio.Reader) to avoid silently dropping
+	// sr is reused here (not a new bufio.Reader) to avoid silently dropping
 	// any bytes that bufio may have buffered during the handshake read above.
 	go func() {
 		defer func() {
 			serverConn.Close()
 			markDead()
 		}()
-		sr := sr0
 		for {
 			msgType, plen, err := protocol.ReadHeader(sr)
 			if err != nil {
