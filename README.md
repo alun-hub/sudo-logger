@@ -119,7 +119,7 @@ sudo session:
 - Receives and ed25519-verifies ACKs from the server
 - Tracks ACK state per session; responds instantly to plugin ACK queries
 - Sends a HEARTBEAT to the server every 400 ms; declares the connection
-  dead if no HEARTBEAT_ACK arrives within 2000 ms (~2 s freeze latency)
+  dead if no HEARTBEAT_ACK arrives within 800 ms (~1 s freeze latency)
 - Recovers automatically when the network returns; the TCP connection
   remains alive as long as the OS retransmission timeout has not expired
   (typically several minutes on Linux with default settings)
@@ -611,7 +611,7 @@ After import, rules are served from the database and changes via the Settings UI
 | Constant | Default | Description |
 |----------|---------|-------------|
 | `ackLagLimit` | `5s` | Unacknowledged chunk age before reporting dead to plugin |
-| `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 5 missed replies (2000 ms) |
+| `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
 
 ### Shipper config keys
 
@@ -1884,7 +1884,7 @@ journalctl -u sudo-logserver -n 50
 ### Freeze is too slow after network loss
 
 Ensure you are running client ≥ 1.3.0 and server ≥ 1.3.0. Earlier versions
-used TCP keepalive only (~2 s latency). Current versions use heartbeats (~2 s).
+used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).
 
 ---
 

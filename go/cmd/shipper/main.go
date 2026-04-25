@@ -784,7 +784,7 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	// ── Step 6b: heartbeat goroutine ──────────────────────────────────────
 	// Sends MsgHeartbeat every 400 ms.
-	//   • No reply in 2000 ms (5 missed) → markDead() (freeze), but keep pinging.
+	//   • No reply in 800 ms (2 missed) → markDead() (freeze), but keep pinging.
 	//   • 2 consecutive windows with a response → markAlive() (unfreeze).
 	//   • Write fails → TCP truly dead, exit goroutine.
 	//
@@ -809,7 +809,7 @@ func handlePluginConn(pluginConn net.Conn) {
 			lastServerMsgMu.Lock()
 			age := time.Since(lastServerMsg)
 			lastServerMsgMu.Unlock()
-			if age > 5*hbInterval {
+			if age > 2*hbInterval {
 				// No response from server — freeze, but keep pinging.
 				consecutiveOK = 0
 				markDead()
