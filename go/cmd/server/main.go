@@ -244,6 +244,54 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		sessionID        string
 	)
 
+	// ── Async Disk Writer ────────────────────────────────────────────────
+	// Shock absorber for high I/O bursts. Decouples network from storage.
+	type diskTask struct {
+		msgType uint8
+		payload []byte
+	}
+	diskQueue := make(chan diskTask, 10000)
+	var diskWg sync.WaitGroup
+	diskWg.Add(1)
+
+	go func() {
+		defer diskWg.Done()
+		for task := range diskQueue {
+			chunk, err := protocol.ParseChunk(task.payload)
+			if err != nil {
+				log.Printf("[%s] disk-writer parse chunk: %v", sessionID, err)
+				continue
+			}
+
+			// Perform actual disk/S3 I/O
+			if sess != nil {
+				switch chunk.Stream {
+				case protocol.StreamTtyOut, protocol.StreamStdout, protocol.StreamStderr:
+					if err := sess.writer.WriteOutput(chunk.Data, chunk.Timestamp); err != nil {
+						log.Printf("[%s] write output: %v", sessionID, err)
+					}
+				case protocol.StreamTtyIn, protocol.StreamStdin:
+					if err := sess.writer.WriteInput(chunk.Data, chunk.Timestamp); err != nil {
+						log.Printf("[%s] write input: %v", sessionID, err)
+					}
+				case protocol.StreamScreen:
+					if sfw, ok := sess.writer.(store.ScreenFrameWriter); ok {
+						if err := sfw.WriteScreenFrame(chunk.Data, chunk.Timestamp); err != nil {
+							log.Printf("[%s] write screen frame: %v", sessionID, err)
+						}
+					}
+				}
+				sess.lastSeq = chunk.Seq
+			}
+
+			// ONLY NOW that data is on disk, we signal the ACK coalescer
+			sendMu.Lock()
+			pendingSeq = chunk.Seq
+			sendCond.Signal()
+			sendMu.Unlock()
+		}
+	}()
+
 	go func() {
 		for {
 			sendMu.Lock()
@@ -278,6 +326,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 	}()
 
 	defer func() {
+		// Signal and wait for disk writer to finish
+		close(diskQueue)
+		diskWg.Wait()
+
 		sendMu.Lock()
 		senderClosed = true
 		sendCond.Signal()
@@ -374,35 +426,11 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("chunk before session_start from %s", remote)
 				return
 			}
-			chunk, err := protocol.ParseChunk(payload)
-			if err != nil {
-				log.Printf("[%s] parse chunk: %v", sess.id, err)
-				return
-			}
 
-			switch chunk.Stream {
-			case protocol.StreamTtyOut, protocol.StreamStdout, protocol.StreamStderr:
-				if err := sess.writer.WriteOutput(chunk.Data, chunk.Timestamp); err != nil {
-					log.Printf("[%s] write output: %v", sess.id, err)
-				}
-			case protocol.StreamTtyIn, protocol.StreamStdin:
-				if err := sess.writer.WriteInput(chunk.Data, chunk.Timestamp); err != nil {
-					log.Printf("[%s] write input: %v", sess.id, err)
-				}
-			case protocol.StreamScreen:
-				if sfw, ok := sess.writer.(store.ScreenFrameWriter); ok {
-					if err := sfw.WriteScreenFrame(chunk.Data, chunk.Timestamp); err != nil {
-						log.Printf("[%s] write screen frame: %v", sess.id, err)
-					}
-				}
-			}
-
-			sess.lastSeq = chunk.Seq
-
-			sendMu.Lock()
-			pendingSeq = chunk.Seq
-			sendCond.Signal()
-			sendMu.Unlock()
+			// Non-blocking handoff to disk writer.
+			// We block if the queue is truly full to maintain consistency,
+			// but 10,000 slots should handle most practical bursts.
+			diskQueue <- diskTask{msgType, payload}
 
 		case protocol.MsgHeartbeat:
 			sendMu.Lock()
