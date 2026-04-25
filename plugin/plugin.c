@@ -108,6 +108,8 @@ static _Atomic int    g_freeze_timeout = 0;  /* set when shipper sends MSG_FREEZ
 static int            g_monitor_started = 0;
 static pthread_t      g_monitor_thread;
 static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
+/* Serialises concurrent writes to g_shipper_fd (main thread vs monitor thread). */
+static pthread_mutex_t g_send_mu      = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------- helpers ---------- */
 
@@ -246,7 +248,10 @@ static void refresh_ack_cache(void)
         }
     }
 
-    if (send_msg(g_shipper_fd, MSG_ACK_QUERY, NULL, 0) < 0)
+    pthread_mutex_lock(&g_send_mu);
+    int _rc = send_msg(g_shipper_fd, MSG_ACK_QUERY, NULL, 0);
+    pthread_mutex_unlock(&g_send_mu);
+    if (_rc < 0)
         return;
 
     fd_set rfds;
@@ -534,7 +539,9 @@ static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
     memcpy(p + 17, &dl_be,  4);
     memcpy(p + 21, data,    dlen);
 
+    pthread_mutex_lock(&g_send_mu);
     send_msg(g_shipper_fd, MSG_CHUNK, p, (uint32_t)plen);
+    pthread_mutex_unlock(&g_send_mu);
     free(p);
 }
 
