@@ -259,6 +259,13 @@ func handlePluginConn(pluginConn net.Conn) {
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 	defer closeDone()
 
+	type outMsg struct {
+		msgType uint8
+		payload []byte
+	}
+	prioQueue := make(chan outMsg, 100)  // heartbeats, input
+	bulkQueue := make(chan outMsg, 1000) // tty output
+
 	pr := bufio.NewReader(pluginConn)
 	pw := bufio.NewWriter(pluginConn)
 
@@ -313,7 +320,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	}()
 
 	// ── Step 3: per-session ACK tracking ──────────────────────────────────
-	const ackLagLimit = int64(2 * time.Second)
+	const ackLagLimit = int64(5 * time.Second)
 
 	// guiFrames receives JPEG frames from the Wayland proxy for GUI sessions.
 	// Populated in the MsgServerReady case below; consumed after forward() is declared.
@@ -578,7 +585,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	// SESSION_READY is sent only after the server confirms the session is
 	// accepted (MsgServerReady) so that block-policy denials reach the plugin
 	// before sudo forks the child process.
-	serverBuf := bufio.NewWriter(serverConn)
+	serverBuf := bufio.NewWriterSize(serverConn, 32*1024)
 
 	// Redact the command metadata before sending to server.
 	start.Command = redactor.RedactString(start.Command)
@@ -653,6 +660,46 @@ func handlePluginConn(pluginConn net.Conn) {
 		return
 	}
 
+	// ── Step 5c: start sender goroutine ─────────────────────────────────
+	//
+	// De-couples terminal reading from network writing.  Always drains the
+	// priority queue (heartbeats, input) before sending bulk output chunks.
+	go func() {
+		for {
+			var msg outMsg
+			select {
+			case <-done:
+				return
+			case msg = <-prioQueue:
+				// Priority: heartbeat or input.
+			default:
+				// Bulk: wait for either.
+				select {
+				case <-done:
+					return
+				case msg = <-prioQueue:
+				case msg = <-bulkQueue:
+				}
+			}
+
+			serverWriteMu.Lock()
+			serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			werr := protocol.WriteMessageNoFlush(serverBuf, msg.msgType, msg.payload)
+			if werr == nil && (len(prioQueue) == 0 && len(bulkQueue) == 0) {
+				// Flush when queues are drained.
+				serverBuf.Flush()
+			}
+			serverConn.SetWriteDeadline(time.Time{})
+			serverWriteMu.Unlock()
+
+			if werr != nil {
+				log.Printf("[%s] forward to server: %v", start.SessionID, werr)
+				markDead()
+				return
+			}
+		}
+	}()
+
 	// ── Step 6: read messages from server (ACKs + heartbeat replies) ──────
 	//
 	// sr0 is reused here (not a new bufio.Reader) to avoid silently dropping
@@ -714,17 +761,8 @@ func handlePluginConn(pluginConn net.Conn) {
 				return
 			case <-ticker.C:
 			}
-			serverWriteMu.Lock()
-			serverConn.SetWriteDeadline(time.Now().Add(hbInterval))
-			werr := protocol.WriteMessage(serverBuf, protocol.MsgHeartbeat, nil)
-			serverConn.SetWriteDeadline(time.Time{})
-			serverWriteMu.Unlock()
 
-			if werr != nil {
-				// TCP connection is gone — no recovery possible.
-				markDead()
-				return
-			}
+			prioQueue <- outMsg{msgType: protocol.MsgHeartbeat}
 
 			lastServerMsgMu.Lock()
 			age := time.Since(lastServerMsg)
@@ -756,16 +794,30 @@ func handlePluginConn(pluginConn net.Conn) {
 		if !alive {
 			return
 		}
-		serverWriteMu.Lock()
-		serverConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		werr := protocol.WriteMessageNoFlush(serverBuf, msgType, payload)
-		serverConn.SetWriteDeadline(time.Time{})
-		serverWriteMu.Unlock()
-		if werr != nil {
-			log.Printf("forward to server: %v", werr)
-			markDead()
-			return
+
+		msg := outMsg{msgType: msgType, payload: payload}
+		isPrio := msgType == protocol.MsgSessionEnd || msgType == protocol.MsgSessionAbandon || msgType == protocol.MsgSessionFreezing
+
+		if !isPrio && msgType == protocol.MsgChunk && len(payload) > 16 {
+			stream := payload[16]
+			if stream == protocol.StreamStdin || stream == protocol.StreamTtyIn {
+				isPrio = true
+			}
 		}
+
+		if isPrio {
+			select {
+			case prioQueue <- msg:
+			case <-done:
+			}
+		} else {
+			select {
+			case bulkQueue <- msg:
+			case <-done:
+				// If session is ending, we don't care about bulk logs anymore.
+			}
+		}
+
 		if msgType == protocol.MsgChunk {
 			sessionAckMu.Lock()
 			if ackDebtStartNs == 0 {
@@ -829,17 +881,6 @@ loop:
 
 		default:
 			log.Printf("unknown message type 0x%02x len=%d — ignoring", msgType, plen)
-		}
-
-		// Smart Flush: if there are no more messages immediately available from
-		// the plugin, flush the server buffer to ensure the user sees their
-		// keystrokes in real time.  Under high load (e.g. 'cat large_file'),
-		// pr.Buffered() will be > 0 and we will skip flushing to allow the
-		// bufio.Writer to batch multiple chunks into a single TLS record.
-		if pr.Buffered() == 0 {
-			serverWriteMu.Lock()
-			serverBuf.Flush()
-			serverWriteMu.Unlock()
 		}
 	}
 
