@@ -1258,7 +1258,11 @@ let screenIdx    = -1;
 let screenPopOut = null;
 let sessStartNs  = 0;
 
-function isScreenSession() { return screenFrames.length > 0; }
+function isScreenSession() {
+  if (screenFrames.length > 0) return true;
+  const s = allSessions.find(s => s.tsid === currentTSID);
+  return !!(s && s.has_frames);
+}
 
 function showScreenPlayer() {
   const playerEl = document.querySelector('.player');
@@ -1740,7 +1744,7 @@ async function selectScreenSession(tsid, sess) {
     screenIdx = -1;
     // Total duration is already set from session metadata or TTY
     setControlsEnabled(true);
-    syncScreenToTime(0);
+    syncScreenToTime(elapsedSec());
   } catch (err) {
     if (currentTSID !== tsid) return;
     elScreenImg.alt = `Failed to load frames: ${err.message}`;
@@ -1751,7 +1755,7 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
   try {
     const res = await fetch(`/api/session/events?tsid=${encodeURIComponent(tsid)}`);
     if (!res.ok) {
-      if (res.status === 404 && (isScreenSession() || (sess && sess.has_frames))) {
+      if (res.status === 404 && isScreenSession()) {
         // Pure Wayland session, no TTY events. This is okay.
         events = [];
         totalDuration = sess ? sess.duration : 0;
@@ -1778,7 +1782,7 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
     else if (autoplay) play();
   } catch (err) {
     if (currentTSID !== tsid) return;
-    if (isScreenSession() || (sess && sess.has_frames)) {
+    if (isScreenSession()) {
       events = [];
       totalDuration = sess ? sess.duration : 0;
       elTimeTotal.textContent = fmt(totalDuration);
