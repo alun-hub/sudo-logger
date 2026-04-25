@@ -758,7 +758,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 		serverWriteMu.Lock()
 		serverConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-		werr := protocol.WriteMessage(serverBuf, msgType, payload)
+		werr := protocol.WriteMessageNoFlush(serverBuf, msgType, payload)
 		serverConn.SetWriteDeadline(time.Time{})
 		serverWriteMu.Unlock()
 		if werr != nil {
@@ -829,6 +829,17 @@ loop:
 
 		default:
 			log.Printf("unknown message type 0x%02x len=%d — ignoring", msgType, plen)
+		}
+
+		// Smart Flush: if there are no more messages immediately available from
+		// the plugin, flush the server buffer to ensure the user sees their
+		// keystrokes in real time.  Under high load (e.g. 'cat large_file'),
+		// pr.Buffered() will be > 0 and we will skip flushing to allow the
+		// bufio.Writer to batch multiple chunks into a single TLS record.
+		if pr.Buffered() == 0 {
+			serverWriteMu.Lock()
+			serverBuf.Flush()
+			serverWriteMu.Unlock()
 		}
 	}
 

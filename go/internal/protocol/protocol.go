@@ -124,6 +124,14 @@ type Ack struct {
 
 // WriteMessage writes a framed message to w.
 func WriteMessage(w *bufio.Writer, msgType uint8, payload []byte) error {
+	if err := WriteMessageNoFlush(w, msgType, payload); err != nil {
+		return err
+	}
+	return w.Flush()
+}
+
+// WriteMessageNoFlush writes a framed message to w without flushing.
+func WriteMessageNoFlush(w *bufio.Writer, msgType uint8, payload []byte) error {
 	hdr := [5]byte{msgType}
 	binary.BigEndian.PutUint32(hdr[1:], uint32(len(payload)))
 	if _, err := w.Write(hdr[:]); err != nil {
@@ -134,7 +142,7 @@ func WriteMessage(w *bufio.Writer, msgType uint8, payload []byte) error {
 			return err
 		}
 	}
-	return w.Flush()
+	return nil
 }
 
 // ReadHeader reads a 5-byte message header from r.
