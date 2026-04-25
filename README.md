@@ -82,7 +82,7 @@ is unreachable at this point, sudo is blocked entirely — the command never
 runs. If the connection succeeds, sudo proceeds and all I/O is streamed to
 the server in real time. The server acknowledges every chunk and replies to
 periodic heartbeat probes. If ACKs and heartbeats stop arriving (network
-loss, server crash), the child process is frozen within ~1 second — no
+loss, server crash), the child process is frozen within ~800 ms — no
 further input reaches it until ACKs resume or the session is killed with
 Ctrl+C.
 
@@ -119,7 +119,7 @@ sudo session:
 - Receives and ed25519-verifies ACKs from the server
 - Tracks ACK state per session; responds instantly to plugin ACK queries
 - Sends a HEARTBEAT to the server every 400 ms; declares the connection
-  dead if no HEARTBEAT_ACK arrives within 800 ms (~1 s freeze latency)
+  dead if no HEARTBEAT_ACK arrives within 800 ms (2 missed heartbeats)
 - Recovers automatically when the network returns; the TCP connection
   remains alive as long as the OS retransmission timeout has not expired
   (typically several minutes on Linux with default settings)
@@ -190,7 +190,7 @@ migrate-sessions \
 | Property | Detail |
 |----------|--------|
 | **Sudo blocked at start** | If the log server is unreachable when sudo runs, the session is rejected before the command executes |
-| **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen within ~1 second |
+| **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen within ~800 ms |
 | **Freeze cannot be escaped with `fg`** | Terminal sessions are frozen via `cgroup.freeze=1` — no job-control signals involved, so `fg` cannot escape the freeze |
 | **cgroup namespace isolation** | At session start the plugin calls `unshare(CLONE_NEWCGROUP)`: child processes see the session cgroup as their filesystem root for `/sys/fs/cgroup`. They cannot migrate to a parent cgroup to escape the freeze, even with `CAP_SYS_ADMIN`. The shipper remains in the host cgroup namespace and manages freeze/unfreeze normally. |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
@@ -220,7 +220,7 @@ migrate-sessions \
 - SELinux policy for `sudo-shipper` (enforcing mode, ships in the `selinux/` directory)
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
-- Freeze within ~1 s of network loss; automatic recovery when network returns
+- Freeze within ~800 ms of network loss; automatic recovery when network returns
 - Frozen sessions automatically terminated after configurable timeout (default 3 min) with a human-readable error banner — prevents permanent hangs when the TCP connection dies
 - Terminal sessions (bash, zsh, …) frozen via `cgroup.freeze` — no job control triggered
 - GUI programs with own process group (gvim, okular, …) frozen via direct SIGSTOP/SIGCONT
@@ -246,11 +246,12 @@ migrate-sessions \
   case: it terminates the frozen session, unfreezes the cgroup, and prints
   a human-readable error banner so the user knows why the session ended.
   Without this, a dead TCP connection would cause a permanent freeze that
-  could only be broken with `kill -9` from another terminal.
+  could only be broken with Ctrl+C or `kill` from another terminal.
 
 - **No session buffer on reconnect**: chunks sent during the window between
-  network loss and freeze detection (~400–800 ms) may not be acknowledged.
-  The session recording up to that point is intact on the server.
+  network loss and freeze detection (up to 800 ms — 2 heartbeat intervals)
+  may not be acknowledged. The session recording up to that point is intact
+  on the server.
 
 - **One client certificate for all clients** (default setup): the included
   `setup.sh` generates one client certificate shared across all machines.
@@ -1634,7 +1635,7 @@ podman-compose up -d
 | ✅ | Distroless base image (minimal attack surface) | Good |
 | ✅ | Runs as nonroot UID 65532 | Good |
 | ✅ | Named volume (no bind mount permission issues) | Good |
-| ✅ | Replay server mounts log volume read-only | Good |
+| ⚠️ | Replay server mounts log volume read-write | Required for `risk.json` score-cache files; add `:ro` only if risk scoring is disabled |
 | ✅ | Replay server supports Basic Auth + TLS + trusted-user-header | See [Authentication](#authentication) |
 | ⚠️ | No `no-new-privileges` / `cap_drop: ALL` | Add to both services for defence in depth |
 | ⚠️ | No resource limits | Add `deploy.resources.limits` for memory/CPU |
@@ -1798,7 +1799,7 @@ migrate-sessions \
 
 | Resource | Per session |
 |----------|-------------|
-| Goroutines | 3 (main loop + ACK reader + heartbeat) |
+| Goroutines | 3 (main read loop + disk writer + ACK coalescer) |
 | Memory | ~100–200 KB |
 | File descriptors | 4 |
 
@@ -1808,7 +1809,8 @@ file to raise this to ~15 000+ sessions.
 
 **Known resource leak:** a shipper that is killed without sending
 `SESSION_END` and without the OS sending a TCP RST (e.g. VM hard-reset
-with network down) leaves a goroutine and 4 FDs open on the server.
+with network down) leaves 3 goroutines and 2 FDs open on the server
+(TLS socket + open session.cast).
 The included `sudo-logserver-restart.timer` restarts the server daily at
 03:00 to reclaim any leaked resources. For Kubernetes deployments, add a
 liveness probe instead.
@@ -1860,16 +1862,18 @@ The `sudo-logger` package automatically includes these variables in its `env_kee
 ### Terminal freezes and network has returned
 
 If the freeze banner is visible and the network is back, the session should
-resume automatically within ~1 second once a `HEARTBEAT_ACK` arrives.
+resume automatically within ~400 ms once a `HEARTBEAT_ACK` arrives.
 
 If bash was suspended by job control (visible as `[1]+ Stopped sudo bash`
 in the parent shell), run `fg` to bring it back to the foreground.
 
 ### Terminal freezes and `fg`/network does not resume
 
-If the network was down for > 2 s, the TCP connection is gone and the
-session cannot recover. Use Ctrl+C to kill the frozen session, wait for
-the network to return, then start a new `sudo` session.
+If the TCP connection died (network was down long enough for the OS to
+give up retransmitting — typically several minutes with Linux defaults),
+the session cannot recover automatically. The freeze-timeout watchdog
+will terminate it after the configured timeout (default 3 min). You can
+also press Ctrl+C to kill the frozen session immediately.
 
 ### Terminal freezes immediately on session start
 
@@ -1884,7 +1888,7 @@ journalctl -u sudo-logserver -n 50
 ### Freeze is too slow after network loss
 
 Ensure you are running client ≥ 1.3.0 and server ≥ 1.3.0. Earlier versions
-used TCP keepalive only (~2 s latency). Current versions use heartbeats (~1 s).
+used TCP keepalive only (~2 s latency). Current versions use heartbeats (~800 ms).
 
 ---
 
