@@ -272,11 +272,15 @@ migrate-sessions \
   it to `/etc/logrotate.d/sudo-logserver`. To enforce a maximum session age,
   add a cron job: `find /var/log/sudoreplay -mindepth 3 -maxdepth 3 -type d -mtime +365 -exec rm -rf {} +`
 
-- **GUI programs that share bash's process group are not frozen**: helper
-  processes launched by bash that share its process group are dropped from
-  freeze tracking — sending SIGSTOP to their group would also stop bash and
-  trigger job control. Only GUI apps that have their own process group
-  (e.g. gvim after setsid) are frozen via direct SIGSTOP.
+- **Escaped processes sharing bash's process group cannot be SIGSTOP'd**: if
+  a process escapes the session cgroup and still shares bash's process group
+  (pgid != own pid), SIGSTOP cannot be used — it would signal the entire
+  group including bash and trigger job control. The shipper instead attempts
+  to reclaim such processes back into the session cgroup so that
+  `cgroup.freeze` covers them. If reclaim fails (e.g. systemd placed them in
+  a delegation-locked scope), they remain unfrozen. Processes that are their
+  own process group leader (e.g. `gvim` after `setsid`) are always
+  hard-frozen via SIGSTOP/SIGCONT.
 
 - **Requires sudo 1.9+**: uses the sudo 1.9 I/O plugin API.
 
@@ -1375,15 +1379,15 @@ For processes that escape the session cgroup (moved by GNOME/systemd to
 `app-*.scope`), the shipper tracks them and applies per-process SIGSTOP if
 safe. Safety is determined by process group membership:
 
-- **Shell processes** (bash, zsh, …): reclaimed back into the session cgroup
-  so `cgroup.freeze` covers them. SIGSTOP is never sent to shells — it would
-  trigger job control and background the session.
-- **Escaped GUI apps with own process group** (e.g. gvim after `setsid`):
-  frozen via `syscall.Kill(pid, SIGSTOP)` targeting only that PID directly.
-  On unfreeze, `syscall.Kill(pid, SIGCONT)` resumes them.
-- **Escaped helpers sharing bash's process group**: dropped from tracking.
-  Sending SIGSTOP to their process group would also stop bash and trigger
-  job control, so they are left alone.
+- **Shell processes and any escaped process with a TTY or shared process
+  group** (bash, zsh, helper processes sharing bash's pgid): reclaimed back
+  into the session cgroup so `cgroup.freeze` covers them. SIGSTOP is never
+  used — it would signal the whole process group, trigger job control, and
+  background the session. If reclaim fails (e.g. systemd placed the process
+  in a delegation-locked scope), the PID is tracked but not frozen.
+- **Escaped GUI apps that are their own process group leader** (e.g. gvim
+  after `setsid`): frozen via `syscall.Kill(pid, SIGSTOP)` targeting only
+  that PID. On unfreeze, `syscall.Kill(pid, SIGCONT)` resumes them.
 
 During a freeze, terminal sessions are suspended via `cgroup.freeze=1` and
 the plugin writes the freeze banner to the terminal. When the network returns,
