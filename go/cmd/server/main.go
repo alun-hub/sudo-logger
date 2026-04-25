@@ -232,6 +232,59 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 	var sess *session
 
+	// ── Async ACK Coalescer ───────────────────────────────────────────────
+	// Prevents TCP flow control deadlocks by decoupling reads from writes.
+	// Under high I/O, this naturally coalesces thousands of ACKs into one.
+	var (
+		sendMu           sync.Mutex
+		sendCond         = sync.NewCond(&sendMu)
+		pendingSeq       uint64
+		pendingHeartbeat bool
+		senderClosed     bool
+		sessionID        string
+	)
+
+	go func() {
+		for {
+			sendMu.Lock()
+			for pendingSeq == 0 && !pendingHeartbeat && !senderClosed {
+				sendCond.Wait()
+			}
+			if senderClosed {
+				sendMu.Unlock()
+				return
+			}
+			seq := pendingSeq
+			pendingSeq = 0
+			hb := pendingHeartbeat
+			pendingHeartbeat = false
+			sid := sessionID
+			sendMu.Unlock()
+
+			if seq > 0 {
+				ackPayload := srv.buildACK(sid, seq)
+				if err := protocol.WriteMessage(w, protocol.MsgAck, ackPayload); err != nil {
+					log.Printf("[%s] write ack (async): %v", sid, err)
+					return
+				}
+			}
+			if hb {
+				if err := protocol.WriteMessage(w, protocol.MsgHeartbeatAck, nil); err != nil {
+					log.Printf("[%s] write hb ack (async): %v", sid, err)
+					return
+				}
+			}
+		}
+	}()
+
+	defer func() {
+		sendMu.Lock()
+		senderClosed = true
+		sendCond.Signal()
+		sendMu.Unlock()
+	}()
+	// ──────────────────────────────────────────────────────────────────────
+
 	for {
 		msgType, plen, err := protocol.ReadHeader(r)
 		if err != nil {
@@ -312,6 +365,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				return
 			}
 
+			sendMu.Lock()
+			sessionID = start.SessionID
+			sendMu.Unlock()
+
 		case protocol.MsgChunk:
 			if sess == nil {
 				log.Printf("chunk before session_start from %s", remote)
@@ -342,16 +399,16 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 			sess.lastSeq = chunk.Seq
 
-			ackPayload := srv.buildACK(sess.id, chunk.Seq)
-			if err := protocol.WriteMessage(w, protocol.MsgAck, ackPayload); err != nil {
-				log.Printf("[%s] write ack: %v", sess.id, err)
-				return
-			}
+			sendMu.Lock()
+			pendingSeq = chunk.Seq
+			sendCond.Signal()
+			sendMu.Unlock()
 
 		case protocol.MsgHeartbeat:
-			if err := protocol.WriteMessage(w, protocol.MsgHeartbeatAck, nil); err != nil {
-				return
-			}
+			sendMu.Lock()
+			pendingHeartbeat = true
+			sendCond.Signal()
+			sendMu.Unlock()
 
 		case protocol.MsgSessionEnd:
 			end, err := protocol.ParseSessionEnd(payload)

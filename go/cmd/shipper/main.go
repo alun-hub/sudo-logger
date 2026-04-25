@@ -589,7 +589,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	// SESSION_READY is sent only after the server confirms the session is
 	// accepted (MsgServerReady) so that block-policy denials reach the plugin
 	// before sudo forks the child process.
-	serverBuf := bufio.NewWriterSize(serverConn, 32*1024)
+	serverBuf := bufio.NewWriterSize(serverConn, 8*1024)
 
 	// Redact the command metadata before sending to server.
 	start.Command = redactor.RedactString(start.Command)
@@ -784,7 +784,7 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	// ── Step 6b: heartbeat goroutine ──────────────────────────────────────
 	// Sends MsgHeartbeat every 400 ms.
-	//   • No reply in 800 ms → markDead() (freeze), but keep pinging.
+	//   • No reply in 2000 ms (5 missed) → markDead() (freeze), but keep pinging.
 	//   • 2 consecutive windows with a response → markAlive() (unfreeze).
 	//   • Write fails → TCP truly dead, exit goroutine.
 	//
@@ -809,7 +809,7 @@ func handlePluginConn(pluginConn net.Conn) {
 			lastServerMsgMu.Lock()
 			age := time.Since(lastServerMsg)
 			lastServerMsgMu.Unlock()
-			if age > 2*hbInterval {
+			if age > 5*hbInterval {
 				// No response from server — freeze, but keep pinging.
 				consecutiveOK = 0
 				markDead()
