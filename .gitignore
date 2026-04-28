@@ -48,3 +48,7 @@ entities.json
 docs/superpowers/
 .gemini_security/
 .gemini_reliability.md
+
+# Claude Code project instructions and AI tool configs
+CLAUDE.md
+GUIRECORD-TODO.md
