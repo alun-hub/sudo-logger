@@ -235,8 +235,8 @@ func (s *ebpfSubsystem) handleExecve(raw []byte) {
 	// ev.Uid is always 0 because sudo calls setuid(0) before exec'ing the target
 	// command.  The invoking user's uid lives in the parent process (the shell).
 	invokingUID := parentRealUID(ev.Pid)
-	debugLog("ebpf: execve hook: comm=%s sudo_uid=%d invoking_uid=%d cgroup=%d", comm, ev.Uid, invokingUID, ev.CgroupID)
-	s.divergence.registerEBPF(invokingUID, comm)
+	debugLog("ebpf: execve hook: comm=%s pid=%d sudo_uid=%d invoking_uid=%d cgroup=%d", comm, ev.Pid, ev.Uid, invokingUID, ev.CgroupID)
+	s.divergence.registerEBPF(invokingUID, ev.Pid, comm)
 }
 
 // parentRealUID returns the real uid of the parent of pid by reading

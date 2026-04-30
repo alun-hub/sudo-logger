@@ -19,15 +19,23 @@ type divergenceTracker struct {
 	hostname string
 	// pending maps "user|host" to an ordered list of pending sudo execve events.
 	// Multiple concurrent sudo invocations by the same user produce multiple entries.
-	pending       map[string][]*pendingSudoExec
-	// lastConfirmed records when the most recent plugin SESSION_START was confirmed
-	// for a given "user|host" key.  Used to suppress duplicate execve events that
-	// arrive after confirmPlugin returns (sudo fires 2 execve calls per invocation).
-	lastConfirmed map[string]time.Time
+	pending map[string][]*pendingSudoExec
+	// lastConfirmed records the PID of the most recently confirmed sudo invocation
+	// for a given "user|host" key.  Used to suppress the second execve that sudo
+	// fires for the same invocation (sudo fires sys_enter_execve twice: once when
+	// the shell exec's sudo, and once when sudo exec's the target command — both
+	// events share the same PID because exec does not change PID).
+	lastConfirmed map[string]confirmedPID
 	alertFn       func(user, host, comm string, ts time.Time)
 }
 
+type confirmedPID struct {
+	pid uint32
+	at  time.Time
+}
+
 type pendingSudoExec struct {
+	pid      uint32 // PID of the process that called execve
 	comm     string // "sudo" or "pkexec"
 	wallTime time.Time
 	timer    *time.Timer
@@ -37,14 +45,14 @@ func newDivergenceTracker(hostname string, alertFn func(user, host, comm string,
 	return &divergenceTracker{
 		hostname:      hostname,
 		pending:       make(map[string][]*pendingSudoExec),
-		lastConfirmed: make(map[string]time.Time),
+		lastConfirmed: make(map[string]confirmedPID),
 		alertFn:       alertFn,
 	}
 }
 
 // registerEBPF is called when the eBPF execve hook sees a sudo or pkexec invocation.
-// uid is the numeric UID of the invoking user; cgroupID is the parent cgroup.
-func (d *divergenceTracker) registerEBPF(uid uint32, comm string) {
+// uid is the numeric UID of the invoking user; pid is the PID of the execve caller.
+func (d *divergenceTracker) registerEBPF(uid uint32, pid uint32, comm string) {
 	username, err := lookupUsername(uid)
 	if err != nil {
 		debugLog("divergence: uid %d lookup: %v", uid, err)
@@ -54,19 +62,20 @@ func (d *divergenceTracker) registerEBPF(uid uint32, comm string) {
 	now := time.Now()
 	key := username + "|" + d.hostname
 
-	// Suppress duplicate execve events that arrive after confirmPlugin has already
-	// run.  sudo fires sys_enter_execve twice per invocation (once for itself, once
-	// when exec'ing the target command); the second event arrives ~1 s after the
-	// first has already been confirmed by the plugin SESSION_START.
+	// Suppress the second execve that sudo fires for the same invocation.
+	// sudo exec's itself (PID X → sudo), then exec's the target command (PID X
+	// → target), so both events share the same PID.  If we already confirmed
+	// a session for this PID, the second event is a duplicate — skip it.
 	d.mu.Lock()
-	if t, ok := d.lastConfirmed[key]; ok && now.Sub(t) < 5*time.Second {
+	if c, ok := d.lastConfirmed[key]; ok && c.pid == pid {
 		d.mu.Unlock()
-		debugLog("divergence: suppressed duplicate execve for %s within grace window", username)
+		debugLog("divergence: suppressed duplicate execve pid=%d for %s (same sudo invocation)", pid, username)
 		return
 	}
 	d.mu.Unlock()
 
 	entry := &pendingSudoExec{
+		pid:      pid,
 		comm:     comm,
 		wallTime: now,
 	}
@@ -85,7 +94,7 @@ func (d *divergenceTracker) registerEBPF(uid uint32, comm string) {
 	d.pending[key] = append(d.pending[key], entry)
 	d.mu.Unlock()
 
-	debugLog("divergence: registered %s execve by uid=%d user=%s", comm, uid, username)
+	debugLog("divergence: registered %s execve pid=%d by uid=%d user=%s", comm, pid, uid, username)
 }
 
 // confirmPlugin is called when the plugin delivers a SESSION_START for user+host.
@@ -105,13 +114,13 @@ func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	entry := queue[0]
 	remaining := queue[1:]
 
-	// A single sudo invocation can produce multiple execve events (sudo execs
-	// itself for pty handling, then execs the target command).  Drain any
-	// subsequent entries registered within 5 s — they are part of the same
+	// A single sudo invocation fires execve twice (once for itself, once for the
+	// target command).  Both events share the same PID.  Drain any subsequent
+	// entries in the queue that share the same PID — they are part of the same
 	// invocation and should not trigger a separate divergence alert.
 	var keep []*pendingSudoExec
 	for _, e := range remaining {
-		if now.Sub(e.wallTime) < 5*time.Second {
+		if e.pid == entry.pid {
 			e.timer.Stop()
 		} else {
 			keep = append(keep, e)
@@ -122,17 +131,16 @@ func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	} else {
 		d.pending[key] = keep
 	}
+
+	// Record the confirmed PID so that any late-arriving duplicate execve with
+	// the same PID is suppressed in registerEBPF.
+	d.lastConfirmed[key] = confirmedPID{pid: entry.pid, at: now}
 	d.mu.Unlock()
 
 	entry.timer.Stop()
-	// Record confirmation time so that late-arriving duplicate execve events
-	// from the same sudo invocation are suppressed in registerEBPF.
-	d.mu.Lock()
-	d.lastConfirmed[key] = now
-	d.mu.Unlock()
 
-	debugLog("divergence: confirmed plugin SESSION_START for %s@%s (latency %v)",
-		username, host, time.Since(entry.wallTime))
+	debugLog("divergence: confirmed plugin SESSION_START for %s@%s pid=%d (latency %v)",
+		username, host, entry.pid, time.Since(entry.wallTime))
 	return true
 }
 
