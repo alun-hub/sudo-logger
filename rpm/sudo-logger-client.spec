@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.17.36
+Version:        1.19.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -19,9 +19,12 @@ Requires:       systemd
 Requires:       selinux-policy
 
 %description
-Sudo I/O plugin (sudo_logger_plugin.so) and local shipper daemon
-(sudo-shipper) that together record all sudo sessions and ship them
-in real-time to a remote sudo-logger-server instance over mutual TLS.
+Sudo I/O plugin (sudo_logger_plugin.so) and local agent daemon
+(sudo-logger-agent) that together record all sudo sessions and ship
+them in real-time to a remote sudo-logger-server instance over
+mutual TLS.  The agent also uses eBPF tracepoints (when available)
+to capture su, screen, tmux, and polkit/pkexec privilege escalations
+and to detect attempts to bypass the plugin.
 
 Input is frozen if the log server stops acknowledging, preventing
 users from running sudo commands without a verified log trail.
@@ -38,9 +41,11 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
     -o sudo_logger_plugin.so \
     plugin.c -lpthread
 
-# Build the shipper daemon and Wayland proxy
+# Build the agent daemon and Wayland proxy.
+# The eBPF Go bindings (recorder_bpf*.go / *.o) are pre-generated and
+# included in the source tarball, so clang/bpf2go are not needed here.
 cd ../go
-/usr/lib/golang/bin/go build -mod=vendor -o sudo-shipper ./cmd/shipper
+/usr/lib/golang/bin/go build -mod=vendor -o sudo-logger-agent ./cmd/agent
 /usr/lib/golang/bin/go build -mod=vendor -o wayland-proxy ./cmd/wayland-proxy
 
 # Build the SELinux policy module
@@ -52,9 +57,9 @@ make -f /usr/share/selinux/devel/Makefile sudo_logger.pp
 install -D -m 0755 plugin/sudo_logger_plugin.so \
     %{buildroot}%{_libexecdir}/sudo/sudo_logger_plugin.so
 
-# Shipper binary
-install -D -m 0755 go/sudo-shipper \
-    %{buildroot}%{_bindir}/sudo-shipper
+# Agent binary (replaces sudo-shipper)
+install -D -m 0755 go/sudo-logger-agent \
+    %{buildroot}%{_bindir}/sudo-logger-agent
 
 # Wayland proxy binary (used by shipper for GUI screen capture)
 install -d -m 0755 %{buildroot}%{_libexecdir}/sudo-logger
@@ -62,8 +67,8 @@ install -D -m 0755 go/wayland-proxy \
     %{buildroot}%{_libexecdir}/sudo-logger/wayland-proxy
 
 # Systemd service
-install -D -m 0644 sudo-shipper.service \
-    %{buildroot}%{_unitdir}/sudo-shipper.service
+install -D -m 0644 sudo-logger-agent.service \
+    %{buildroot}%{_unitdir}/sudo-logger-agent.service
 
 # Config directory (certs placed here by admin)
 install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
@@ -82,7 +87,7 @@ install -D -m 0644 selinux/sudo_logger.pp \
 
 # Man pages
 install -D -m 0644 man/sudo-shipper.8 \
-    %{buildroot}%{_mandir}/man8/sudo-shipper.8
+    %{buildroot}%{_mandir}/man8/sudo-logger-agent.8
 install -D -m 0644 man/sudo_logger_plugin.8 \
     %{buildroot}%{_mandir}/man8/sudo_logger_plugin.8
 
@@ -91,6 +96,7 @@ install -D -m 0644 man/sudo_logger_plugin.8 \
 # This is needed for upgrades — on first install the files don't exist yet
 # so the commands silently fail (|| true).
 chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
+chattr -i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
 chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 
@@ -101,16 +107,16 @@ if ! grep -q 'Plugin sudo_logger_plugin sudo_logger_plugin.so' /etc/sudo.conf 2>
 fi
 # Load SELinux policy module
 semodule -i %{_datadir}/selinux/packages/sudo_logger.pp 2>/dev/null || true
-%systemd_post sudo-shipper.service
+%systemd_post sudo-logger-agent.service
 
 %posttrans
-# Make plugin binary and shipper immutable so they cannot be silently replaced
+# Make plugin binary and agent immutable so they cannot be silently replaced
 # or removed without first running chattr -i (which requires root intent).
 chattr +i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
-chattr +i %{_bindir}/sudo-shipper                         2>/dev/null || true
+chattr +i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr +i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 # Relabel installed files with correct SELinux contexts
-restorecon -R %{_bindir}/sudo-shipper \
+restorecon -R %{_bindir}/sudo-logger-agent \
               %{_libexecdir}/sudo/sudo_logger_plugin.so \
               %{_libexecdir}/sudo-logger/wayland-proxy \
               %{_sysconfdir}/sudo-logger 2>/dev/null || true
@@ -118,9 +124,9 @@ restorecon -R %{_bindir}/sudo-shipper \
 %preun
 # Remove immutable flag so RPM can delete the files on uninstall.
 chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
-chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
+chattr -i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
-%systemd_preun sudo-shipper.service
+%systemd_preun sudo-logger-agent.service
 # Remove SELinux policy module on full uninstall (not on upgrade)
 if [ $1 -eq 0 ]; then
     semodule -r sudo_logger 2>/dev/null || true
@@ -131,33 +137,42 @@ if [ $1 -eq 0 ]; then
 fi
 
 %postun
-# On upgrade: reload unit and signal the running shipper to restart.
+# On upgrade: reload unit and signal the running agent to restart.
 # We cannot use %%systemd_postun_with_restart / systemctl try-restart because
 # RefuseManualStop=yes blocks those operations.  Instead, send SIGTERM via
 # systemctl kill (not blocked by RefuseManualStop) and let Restart=always
 # pick up the new binary after daemon-reload.
 if [ $1 -ge 1 ]; then
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl kill sudo-shipper.service >/dev/null 2>&1 || true
+    systemctl kill sudo-logger-agent.service >/dev/null 2>&1 || true
 else
     systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 
 %files
 %{_libexecdir}/sudo/sudo_logger_plugin.so
-%{_bindir}/sudo-shipper
+%{_bindir}/sudo-logger-agent
 %dir %{_libexecdir}/sudo-logger
 %{_libexecdir}/sudo-logger/wayland-proxy
-%{_unitdir}/sudo-shipper.service
+%{_unitdir}/sudo-logger-agent.service
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 %config(noreplace) %attr(0440, root, root) %{_sysconfdir}/sudoers.d/sudo-logger-wayland
 %{_datadir}/selinux/packages/sudo_logger.pp
-%{_mandir}/man8/sudo-shipper.8*
+%{_mandir}/man8/sudo-logger-agent.8*
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 30 2026 sudo-logger 1.19.0-1
+- feat: merge sudo-shipper and ebpf-recorder into sudo-logger-agent
+- feat: eBPF tracepoints for PTY I/O, sudo/pkexec execve, and process exit
+- feat: divergence detection — alerts when sudo runs without plugin logging
+- feat: graceful degradation to plugin-only mode on kernels without BTF
+- feat: BPF program pinning to /sys/fs/bpf/sudo-logger for crash resilience
+- protocol: add source, parent_session_id, has_io fields to SESSION_START
+- store: add source, divergence_status, matched_session_id to SessionRecord
+
 * Sat Apr 25 2026 sudo-logger 1.17.36-1
 - fix(shipper): restore heartbeat dead-declaration to 2 missed (800 ms); Gemini had raised it to 5 missed (2000 ms) as a workaround for false freezes now resolved by plugin mutex fix
 

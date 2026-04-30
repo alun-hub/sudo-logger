@@ -35,6 +35,13 @@ type SessionMeta struct {
 	Flags           string
 	Rows            int // terminal height; 0 → default 50
 	Cols            int // terminal width;  0 → default 220
+	// Source identifies the recording path: "plugin", "ebpf-tty", "ebpf-pkexec".
+	// Empty means "plugin" (backward compatible with pre-agent recordings).
+	Source          string
+	// ParentSessionID links an ebpf-pkexec session to its parent session.
+	ParentSessionID string
+	// HasIO is false for pkexec background services that produce no TTY output.
+	HasIO           bool
 }
 
 // Writer appends events to an asciinema v2 cast file.
@@ -65,6 +72,9 @@ type castHeader struct {
 	Command         string `json:"command"`
 	ResolvedCommand string `json:"resolved_command,omitempty"`
 	Flags           string `json:"flags,omitempty"`
+	Source          string `json:"source,omitempty"`
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	HasIO           bool   `json:"has_io,omitempty"`
 }
 
 // NewWriter creates the session directory and opens session.cast for writing.
@@ -125,6 +135,9 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 		Command:         meta.Command,
 		ResolvedCommand: meta.ResolvedCommand,
 		Flags:           meta.Flags,
+		Source:          meta.Source,
+		ParentSessionID: meta.ParentSessionID,
+		HasIO:           meta.HasIO,
 	}
 
 	b, err := json.Marshal(hdr)

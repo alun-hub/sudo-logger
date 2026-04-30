@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.18.1
+Version:        1.19.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,10 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Thu Apr 30 2026 sudo-logger 1.19.0-1
+- feat: accept source, parent_session_id, has_io fields from sudo-logger-agent
+- store: add divergence_status and matched_session_id to SessionRecord
+
 * Sat Apr 25 2026 sudo-logger 1.18.1-1
 - fix(server): non-blocking disk queue handoff and precise write deadlines to prevent heartbeat stalls under high I/O (Release 12)
 

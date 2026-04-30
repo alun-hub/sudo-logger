@@ -87,6 +87,17 @@ type SessionStart struct {
 	XdgRuntimeDir   string `json:"xdg_runtime_dir,omitempty"`  // $XDG_RUNTIME_DIR from the invoking user's env
 	UserUID         int    `json:"user_uid,omitempty"`         // invoking user's UID from user_info[]
 	UserGID         int    `json:"user_gid,omitempty"`         // invoking user's primary GID from user_info[]
+	// Source identifies the recording path (added by agent v2+).
+	// "plugin" = sudo C plugin (default, omitempty means old shippers look the same).
+	// "ebpf-tty" = eBPF TTY session (SSH/su/screen without sudo).
+	// "ebpf-pkexec" = polkit/pkexec privilege elevation.
+	// Receivers must tolerate an empty value (treat as "plugin").
+	Source          string `json:"source,omitempty"`
+	// ParentSessionID links an ebpf-pkexec session to its parent SSH/TTY session.
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	// HasIO is false for pkexec background services that produce no TTY output.
+	// Omitted (false) for all plugin sessions (backward compatible).
+	HasIO           bool   `json:"has_io,omitempty"`
 }
 
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.

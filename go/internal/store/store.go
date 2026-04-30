@@ -180,6 +180,12 @@ type SessionRecord struct {
 	Incomplete    bool
 	NetworkOutage bool // true when terminated by network loss (not a shipper kill)
 	InProgress    bool
+	// Agent v2+ fields (zero value = backward-compatible defaults).
+	Source           string // "plugin" | "ebpf-tty" | "ebpf-pkexec"; empty = "plugin"
+	ParentSessionID  string // links ebpf-pkexec to its parent session
+	HasIO            bool   // false for pkexec background services with no TTY
+	DivergenceStatus string // "pending" | "confirmed" | "unwitnessed" | "missing_plugin"
+	MatchedSessionID string // TSID of the matched counterpart stream
 }
 
 // ScreenFrameInfo describes one stored screen frame.

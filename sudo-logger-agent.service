@@ -1,0 +1,37 @@
+[Unit]
+Description=sudo-logger audit agent (plugin handler + eBPF recorder)
+# Must start after systemd-logind (cgroup session scopes) and network (logserver).
+After=systemd-logind.service network-online.target
+Wants=network-online.target
+# Prevent manual stop to close the attack vector where a user stops the agent
+# to avoid logging.  Any kill -9 typed inside a sudo session is itself captured
+# as TTY I/O before the agent dies, making the tampering self-documenting.
+RefuseManualStop=yes
+
+[Service]
+ExecStart=/usr/bin/sudo-logger-agent -config /etc/sudo-logger/shipper.conf
+KillMode=process
+Restart=always
+RestartSec=2
+
+User=root
+# eBPF requires CAP_BPF (implicit when running as root on kernel ≥ 5.8).
+# BPF program pinning requires write access to /sys/fs/bpf.
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+# eBPF CO-RE relocation needs access to /sys/kernel/btf/vmlinux.
+ReadOnlyPaths=/sys/kernel/btf
+# BPF program pinning.
+ReadWritePaths=/sys/fs/bpf
+# Wayland proxy socket creation requires write access to /run/user.
+ReadWritePaths=/run/user
+
+[Install]
+WantedBy=multi-user.target
