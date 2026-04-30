@@ -259,6 +259,12 @@ type SessionInfo struct {
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
 	RiskReasons     []string `json:"risk_reasons,omitempty"`
 	HasFrames       bool     `json:"has_frames,omitempty"` // true for GUI sessions with screen capture
+	// eBPF / divergence fields (agent v2+)
+	Source           string `json:"source,omitempty"`            // "plugin" | "ebpf-tty" | "ebpf-pkexec"
+	ParentSessionID  string `json:"parent_session_id,omitempty"` // for ebpf-pkexec → parent session
+	HasIO            bool   `json:"has_io,omitempty"`            // false for pkexec background services
+	DivergenceStatus string `json:"divergence_status,omitempty"` // "confirmed" | "unwitnessed" | "missing_plugin"
+	MatchedSessionID string `json:"matched_session_id,omitempty"` // TSID of matched counterpart
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -465,24 +471,33 @@ func (c *sessionCache) invalidate() {
 
 // recordToInfo converts a store.SessionRecord to a SessionInfo (without risk fields).
 func recordToInfo(r store.SessionRecord) SessionInfo {
+	src := r.Source
+	if src == "" {
+		src = "plugin"
+	}
 	return SessionInfo{
-		TSID:            r.TSID,
-		SessionID:       r.SessionID,
-		User:            r.User,
-		Host:            r.Host,
-		Runas:           r.Runas,
-		RunasUID:        r.RunasUID,
-		RunasGID:        r.RunasGID,
-		Command:         r.Command,
-		ResolvedCommand: r.ResolvedCommand,
-		Cwd:             r.Cwd,
-		Flags:           r.Flags,
-		StartTime:       r.StartTime,
-		Duration:        r.Duration,
-		ExitCode:        r.ExitCode,
-		Incomplete:      r.Incomplete,
-		NetworkOutage:   r.NetworkOutage,
-		InProgress:      r.InProgress,
+		TSID:             r.TSID,
+		SessionID:        r.SessionID,
+		User:             r.User,
+		Host:             r.Host,
+		Runas:            r.Runas,
+		RunasUID:         r.RunasUID,
+		RunasGID:         r.RunasGID,
+		Command:          r.Command,
+		ResolvedCommand:  r.ResolvedCommand,
+		Cwd:              r.Cwd,
+		Flags:            r.Flags,
+		StartTime:        r.StartTime,
+		Duration:         r.Duration,
+		ExitCode:         r.ExitCode,
+		Incomplete:       r.Incomplete,
+		NetworkOutage:    r.NetworkOutage,
+		InProgress:       r.InProgress,
+		Source:           src,
+		ParentSessionID:  r.ParentSessionID,
+		HasIO:            r.HasIO,
+		DivergenceStatus: r.DivergenceStatus,
+		MatchedSessionID: r.MatchedSessionID,
 	}
 }
 
@@ -1126,6 +1141,12 @@ func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, 
 
 	sessions := make([]SessionInfo, 0, len(all))
 	for _, s := range all {
+		// Hide eBPF TTY sessions that are matched to a plugin session — the
+		// plugin session already appears in the list with full detail.
+		// Unmatched eBPF sessions (su, screen, SSH without sudo) are shown.
+		if s.Source == "ebpf-tty" && s.MatchedSessionID != "" {
+			continue
+		}
 		if from > 0 && s.StartTime < from {
 			continue
 		}
