@@ -179,9 +179,18 @@ int record_write(struct trace_event_raw_sys_enter *ctx)
 }
 
 // ── Hook 2: sudo / pkexec ─────────────────────────────────────────────────────
-// Fires on any execve where the executing process is named "sudo" or "pkexec".
-// No cgroup filter: we want to catch sudo invocations even when the plugin is
-// disabled (which is exactly the tamper scenario we are detecting).
+// Fires on any execve where the executing process is named "sudo" or "pkexec",
+// BUT only when the current cgroup is NOT already tracked.
+//
+// Why the cgroup filter: sudo fires sys_enter_execve twice per invocation —
+// once when the shell exec's sudo (new invocation, not yet tracked) and once
+// when sudo forks and the child exec's the target command (inside the tracked
+// cgroup scope created by the agent).  We only want the first event.
+//
+// Race-freedom: the agent adds the session cgroup to tracked_cgroups before
+// sending SESSION_READY to the plugin.  sudo only forks after receiving
+// SESSION_READY, so by the time the second execve fires the cgroup is
+// already in the map.
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int trace_execve(struct trace_event_raw_sys_enter *ctx)
@@ -196,12 +205,17 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx)
 	if (!is_sudo && !is_pkexec)
 		return 0;
 
+	// Skip execve from within an already-tracked sudo session.
+	__u64 cgid = bpf_get_current_cgroup_id();
+	if (bpf_map_lookup_elem(&tracked_cgroups, &cgid))
+		return 0;
+
 	struct exec_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
 	if (!e)
 		return 0;
 
 	e->event_type   = EVENT_EXEC;
-	e->cgroup_id    = bpf_get_current_cgroup_id();
+	e->cgroup_id    = cgid;
 	e->timestamp_ns = bpf_ktime_get_ns();
 	e->pid          = (bpf_get_current_pid_tgid() >> 32);
 	e->uid          = (bpf_get_current_uid_gid() & 0xffffffff);
