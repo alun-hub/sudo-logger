@@ -1641,12 +1641,11 @@ function renderSessionList(sessions) {
     if (isEventCard)   meta.appendChild(el('span', 'sc-event-label', '⚡ event'));
     if (s.network_outage) meta.appendChild(el('span', 'sc-network-outage', '⏱ network outage'));
     else if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
-    // divergence badge — only for plugin sessions and only when meaningful
+    // divergence badge — only for plugin sessions, only show actionable states.
+    // "unwitnessed" is the default for all pre-agent sessions — omitting it avoids noise.
     if ((!s.source || s.source === 'plugin') && s.divergence_status) {
       if (s.divergence_status === 'confirmed') {
         meta.appendChild(el('span', 'sc-div confirmed', '✓ ebpf'));
-      } else if (s.divergence_status === 'unwitnessed') {
-        meta.appendChild(el('span', 'sc-div unwitnessed', '? ebpf'));
       } else if (s.divergence_status === 'missing_plugin') {
         meta.appendChild(el('span', 'sc-div missing-plugin', '⚠ no plugin'));
       }
