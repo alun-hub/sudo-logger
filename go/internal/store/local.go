@@ -439,6 +439,12 @@ func (ls *LocalStore) MarkSessionNetworkOutage(_ context.Context, sessionID stri
 		[]byte("session terminated by freeze-timeout watchdog\n"), 0o640)
 }
 
+// UpdateDivergenceStatus implements SessionStore.
+// LocalStore has no DB — divergence status is not persisted to disk.
+func (ls *LocalStore) UpdateDivergenceStatus(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
 // resolveSessionDir converts tsid to an absolute directory path and checks
 // that it stays within logDir (path-traversal guard).
 func (ls *LocalStore) resolveSessionDir(tsid string) (string, error) {

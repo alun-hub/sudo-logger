@@ -231,8 +231,49 @@ func (s *ebpfSubsystem) handleExecve(raw []byte) {
 		return
 	}
 	comm := strings.TrimRight(string(ev.Comm[:]), "\x00")
-	debugLog("ebpf: execve hook: comm=%s uid=%d cgroup=%d", comm, ev.Uid, ev.CgroupID)
-	s.divergence.registerEBPF(ev.Uid, comm)
+
+	// ev.Uid is always 0 because sudo calls setuid(0) before exec'ing the target
+	// command.  The invoking user's uid lives in the parent process (the shell).
+	invokingUID := parentRealUID(ev.Pid)
+	debugLog("ebpf: execve hook: comm=%s sudo_uid=%d invoking_uid=%d cgroup=%d", comm, ev.Uid, invokingUID, ev.CgroupID)
+	s.divergence.registerEBPF(invokingUID, comm)
+}
+
+// parentRealUID returns the real uid of the parent of pid by reading
+// /proc/<pid>/status (PPid line) and then /proc/<ppid>/status (Uid line).
+// Falls back to 0 on any read error (treated as root — still safe for alerting).
+func parentRealUID(pid uint32) uint32 {
+	readStatus := func(p uint32) map[string]string {
+		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", p))
+		if err != nil {
+			return nil
+		}
+		m := make(map[string]string)
+		for _, line := range strings.SplitAfter(string(data), "\n") {
+			if i := strings.IndexByte(line, ':'); i > 0 {
+				m[strings.TrimSpace(line[:i])] = strings.TrimSpace(line[i+1:])
+			}
+		}
+		return m
+	}
+
+	st := readStatus(pid)
+	if st == nil {
+		return 0
+	}
+	var ppid uint32
+	fmt.Sscanf(st["PPid"], "%d", &ppid)
+	if ppid == 0 {
+		return 0
+	}
+	pst := readStatus(ppid)
+	if pst == nil {
+		return 0
+	}
+	// Uid field: "real  effective  saved  fs" — we want real uid (first value).
+	var uid uint32
+	fmt.Sscanf(pst["Uid"], "%d", &uid)
+	return uid
 }
 
 func (s *ebpfSubsystem) logDropped(ctx context.Context) {
@@ -356,16 +397,20 @@ func (s *ebpfSubsystem) sessionStarted(scopePath, scopeName string) {
 	num := strings.TrimPrefix(strings.TrimSuffix(scopeName, ".scope"), "session-")
 	cgroupID, err := cgroupInode(scopePath)
 	if err != nil {
-		log.Printf("ebpf: sessionStarted: stat %s: %v", scopePath, err)
+		// Scope may have been removed before the 200 ms delay elapsed — normal.
+		debugLog("ebpf: sessionStarted: stat %s: %v", scopePath, err)
 		return
 	}
 
 	meta, err := loginctlSession(num)
 	if err != nil {
-		log.Printf("ebpf: sessionStarted: loginctl session %s: %v", num, err)
+		debugLog("ebpf: sessionStarted: loginctl session %s: %v", num, err)
 		return
 	}
-	if meta.stype != "" && meta.stype != "tty" && meta.stype != "unspecified" {
+	// Only record interactive terminal sessions.  Seat, greeter, x11, wayland
+	// and other non-TTY session types are skipped silently.
+	if meta.stype != "tty" && meta.stype != "unspecified" {
+		debugLog("ebpf: sessionStarted: skipping session %s (type=%q)", num, meta.stype)
 		return
 	}
 
@@ -597,8 +642,9 @@ func loginctlSession(num string) (sessionMeta, error) {
 		return sessionMeta{}, fmt.Errorf("loginctl show-session %s: %w", num, err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) < len(props) {
-		return sessionMeta{}, fmt.Errorf("loginctl returned %d lines, want %d", len(lines), len(props))
+	// Pad with empty strings — system/seat sessions may return fewer properties.
+	for len(lines) < len(props) {
+		lines = append(lines, "")
 	}
 	meta := sessionMeta{
 		user:   lines[0],

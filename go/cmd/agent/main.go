@@ -65,10 +65,9 @@ func main() {
 		hostname = "unknown"
 	}
 
-	// Set up divergence tracker.  Alerts log locally for now; Fas 4 will add
-	// server-side storage.
-	div = newDivergenceTracker(hostname, func(user, host, comm string, _ time.Time) {
+	div = newDivergenceTracker(hostname, func(user, host, comm string, ts time.Time) {
 		log.Printf("ALERT: divergence detected — %s ran %q on %s without plugin logging", user, comm, host)
+		go sendDivergenceAlert(user, host, comm, ts)
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

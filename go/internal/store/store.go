@@ -146,6 +146,12 @@ type SessionStore interface {
 	// limit caps the number of entries (max 1000).
 	ListAccessLog(ctx context.Context, viewer string, limit int) ([]AccessLogEntry, error)
 
+	// UpdateDivergenceStatus sets the divergence_status and optionally the
+	// matched_session_id for a session identified by tsid.
+	// matchedTSID may be empty when no counterpart session exists.
+	// Returns nil if the session is not found (idempotent).
+	UpdateDivergenceStatus(ctx context.Context, tsid, status, matchedTSID string) error
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }

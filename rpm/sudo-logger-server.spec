@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.19.0
+Version:        1.20.0
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 

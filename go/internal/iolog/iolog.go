@@ -42,6 +42,10 @@ type SessionMeta struct {
 	ParentSessionID string
 	// HasIO is false for pkexec background services that produce no TTY output.
 	HasIO           bool
+	// DivergenceStatus is the initial status set by the agent at session start.
+	// "confirmed" = eBPF witnessed the sudo execve; "unwitnessed" = eBPF
+	// was down or did not see the execve.  Empty is treated as "unwitnessed".
+	DivergenceStatus string
 }
 
 // Writer appends events to an asciinema v2 cast file.

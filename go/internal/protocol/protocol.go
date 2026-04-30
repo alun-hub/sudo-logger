@@ -54,7 +54,8 @@ const (
 	MsgSessionDenied  = uint8(0x0c) // server→shipper AND shipper→plugin: policy denial
 	MsgFreezeTimeout  = uint8(0x0d) // shipper→plugin: server unreachable for too long, session will be terminated
 	MsgSessionAbandon  = uint8(0x0e) // shipper→server (new conn): freeze-timeout fired; payload = session_id UTF-8
-	MsgSessionFreezing = uint8(0x0f) // shipper→server (new conn): session frozen due to network loss; payload = session_id UTF-8
+	MsgSessionFreezing  = uint8(0x0f) // shipper→server (new conn): session frozen due to network loss; payload = session_id UTF-8
+	MsgDivergenceAlert  = uint8(0x10) // agent→server: sudo execve seen but no plugin SESSION_START within 30s
 
 	StreamStdin   = uint8(0x00)
 	StreamStdout  = uint8(0x01)
@@ -98,6 +99,21 @@ type SessionStart struct {
 	// HasIO is false for pkexec background services that produce no TTY output.
 	// Omitted (false) for all plugin sessions (backward compatible).
 	HasIO           bool   `json:"has_io,omitempty"`
+	// DivergenceStatus is set by the agent before forwarding to the server.
+	// "confirmed" = eBPF witnessed the sudo execve; "unwitnessed" = eBPF was
+	// not running or did not see the execve (plugin-only mode).
+	// Empty is treated as "unwitnessed" for backward compatibility.
+	DivergenceStatus string `json:"divergence_status,omitempty"`
+}
+
+// DivergenceAlert is the JSON payload for MsgDivergenceAlert.
+// Sent by the agent when eBPF sees a sudo/pkexec execve but no plugin
+// SESSION_START arrives within 30 seconds — indicating tampered sudo.conf.
+type DivergenceAlert struct {
+	User    string `json:"user"`
+	Host    string `json:"host"`
+	Comm    string `json:"comm"`    // "sudo" or "pkexec"
+	Ts      int64  `json:"ts"`      // Unix timestamp of the execve event
 }
 
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.

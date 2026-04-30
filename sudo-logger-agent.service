@@ -19,7 +19,6 @@ User=root
 # BPF program pinning requires write access to /sys/fs/bpf.
 
 ProtectSystem=strict
-ProtectHome=read-only
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
@@ -30,8 +29,10 @@ RestrictSUIDSGID=yes
 ReadOnlyPaths=/sys/kernel/btf
 # BPF program pinning.
 ReadWritePaths=/sys/fs/bpf
-# Wayland proxy socket creation requires write access to /run/user.
-ReadWritePaths=/run/user
+# /run/user/<uid> is a per-user tmpfs submount managed by systemd-logind.
+# ProtectHome would shadow it (making /run/user/1000 appear empty/read-only
+# inside the namespace).  We omit ProtectHome so the agent can create the
+# Wayland proxy socket in /run/user/<uid>/ without a bind-mount conflict.
 
 [Install]
 WantedBy=multi-user.target

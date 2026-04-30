@@ -178,7 +178,14 @@ func handlePluginConn(pluginConn net.Conn) {
 	}
 
 	// Notify the divergence tracker that the plugin logged this sudo session.
-	div.confirmPlugin(start.User, start.Host)
+	// witnessed=true means eBPF saw the execve — the session is fully confirmed.
+	// witnessed=false means eBPF was not running or missed the execve.
+	witnessed := div.confirmPlugin(start.User, start.Host)
+	if witnessed {
+		start.DivergenceStatus = "confirmed"
+	} else {
+		start.DivergenceStatus = "unwitnessed"
+	}
 
 	cg := newCgroupSession(start.SessionID, start.Pid)
 	registerCg(cg)
@@ -906,4 +913,38 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 		}
 	}()
 	return proxySocket, ch, killProxy, nil
+}
+
+// sendDivergenceAlert opens a short-lived TLS connection to the log server and
+// sends a DIVERGENCE_ALERT message.  Called by the divergence tracker alertFn
+// when a sudo execve is seen without a matching plugin SESSION_START.
+func sendDivergenceAlert(user, host, comm string, ts time.Time) {
+	alert := protocol.DivergenceAlert{
+		User: user,
+		Host: host,
+		Comm: comm,
+		Ts:   ts.Unix(),
+	}
+	payload, err := json.Marshal(alert)
+	if err != nil {
+		log.Printf("divergence alert marshal: %v", err)
+		return
+	}
+
+	conn, err := tls.Dial("tcp", cfg.Server, tlsCfg)
+	if err != nil {
+		log.Printf("divergence alert: dial %s: %v", cfg.Server, err)
+		return
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	w := bufio.NewWriter(conn)
+	if err := protocol.WriteMessage(w, protocol.MsgDivergenceAlert, payload); err != nil {
+		log.Printf("divergence alert: send: %v", err)
+		return
+	}
+	if err := w.Flush(); err != nil {
+		log.Printf("divergence alert: flush: %v", err)
+	}
 }

@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.19.0
+Version:        1.20.0
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,16 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu Apr 30 2026 sudo-logger 1.19.2-1
+- fix(agent/divergence): suppress late-arriving duplicate execve via grace window (lastConfirmed)
+- fix(agent): downgrade transient scope stat errors to debug (race between inotify and scope deletion)
+
+* Thu Apr 30 2026 sudo-logger 1.19.1-1
+- fix(agent): read parent process uid to identify invoking user (sudo setuid(0) before exec caused uid=0 mismatch)
+- fix(agent): drain all execve events within 5s on plugin confirm (sudo fires 2 execve per invocation)
+- fix(agent): tolerate loginctl returning partial data for system sessions
+- fix(agent): remove ProtectHome to allow Wayland proxy socket in /run/user/<uid>
+
 * Thu Apr 30 2026 sudo-logger 1.19.0-1
 - feat: merge sudo-shipper and ebpf-recorder into sudo-logger-agent
 - feat: eBPF tracepoints for PTY I/O, sudo/pkexec execve, and process exit

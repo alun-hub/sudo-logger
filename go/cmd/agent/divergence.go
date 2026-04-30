@@ -19,8 +19,12 @@ type divergenceTracker struct {
 	hostname string
 	// pending maps "user|host" to an ordered list of pending sudo execve events.
 	// Multiple concurrent sudo invocations by the same user produce multiple entries.
-	pending  map[string][]*pendingSudoExec
-	alertFn  func(user, host, comm string, ts time.Time)
+	pending       map[string][]*pendingSudoExec
+	// lastConfirmed records when the most recent plugin SESSION_START was confirmed
+	// for a given "user|host" key.  Used to suppress duplicate execve events that
+	// arrive after confirmPlugin returns (sudo fires 2 execve calls per invocation).
+	lastConfirmed map[string]time.Time
+	alertFn       func(user, host, comm string, ts time.Time)
 }
 
 type pendingSudoExec struct {
@@ -31,9 +35,10 @@ type pendingSudoExec struct {
 
 func newDivergenceTracker(hostname string, alertFn func(user, host, comm string, ts time.Time)) *divergenceTracker {
 	return &divergenceTracker{
-		hostname: hostname,
-		pending:  make(map[string][]*pendingSudoExec),
-		alertFn:  alertFn,
+		hostname:      hostname,
+		pending:       make(map[string][]*pendingSudoExec),
+		lastConfirmed: make(map[string]time.Time),
+		alertFn:       alertFn,
 	}
 }
 
@@ -48,6 +53,18 @@ func (d *divergenceTracker) registerEBPF(uid uint32, comm string) {
 
 	now := time.Now()
 	key := username + "|" + d.hostname
+
+	// Suppress duplicate execve events that arrive after confirmPlugin has already
+	// run.  sudo fires sys_enter_execve twice per invocation (once for itself, once
+	// when exec'ing the target command); the second event arrives ~1 s after the
+	// first has already been confirmed by the plugin SESSION_START.
+	d.mu.Lock()
+	if t, ok := d.lastConfirmed[key]; ok && now.Sub(t) < 5*time.Second {
+		d.mu.Unlock()
+		debugLog("divergence: suppressed duplicate execve for %s within grace window", username)
+		return
+	}
+	d.mu.Unlock()
 
 	entry := &pendingSudoExec{
 		comm:     comm,
@@ -76,6 +93,7 @@ func (d *divergenceTracker) registerEBPF(uid uint32, comm string) {
 // plugin session has no eBPF witness (unwitnessed — eBPF may be down).
 func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	key := username + "|" + host
+	now := time.Now()
 
 	d.mu.Lock()
 	queue := d.pending[key]
@@ -85,13 +103,34 @@ func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	}
 	// Dequeue the oldest pending entry (FIFO — sudo invocations are ordered).
 	entry := queue[0]
-	d.pending[key] = queue[1:]
-	if len(d.pending[key]) == 0 {
+	remaining := queue[1:]
+
+	// A single sudo invocation can produce multiple execve events (sudo execs
+	// itself for pty handling, then execs the target command).  Drain any
+	// subsequent entries registered within 5 s — they are part of the same
+	// invocation and should not trigger a separate divergence alert.
+	var keep []*pendingSudoExec
+	for _, e := range remaining {
+		if now.Sub(e.wallTime) < 5*time.Second {
+			e.timer.Stop()
+		} else {
+			keep = append(keep, e)
+		}
+	}
+	if len(keep) == 0 {
 		delete(d.pending, key)
+	} else {
+		d.pending[key] = keep
 	}
 	d.mu.Unlock()
 
 	entry.timer.Stop()
+	// Record confirmation time so that late-arriving duplicate execve events
+	// from the same sudo invocation are suppressed in registerEBPF.
+	d.mu.Lock()
+	d.lastConfirmed[key] = now
+	d.mu.Unlock()
+
 	debugLog("divergence: confirmed plugin SESSION_START for %s@%s (latency %v)",
 		username, host, time.Since(entry.wallTime))
 	return true

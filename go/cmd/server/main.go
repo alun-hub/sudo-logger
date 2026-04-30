@@ -12,6 +12,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -572,6 +573,19 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			return
 
+		case protocol.MsgDivergenceAlert:
+			// Agent detected a sudo/pkexec execve with no plugin SESSION_START.
+			// This indicates sudo.conf was tampered with (Plugin line removed).
+			var alert protocol.DivergenceAlert
+			if err := json.Unmarshal(payload, &alert); err != nil {
+				log.Printf("parse DIVERGENCE_ALERT from %s: %v", remote, err)
+				return
+			}
+			log.Printf("SECURITY ALERT: DIVERGENCE_ALERT from %s — %s ran %q on %s at %s but plugin did not log it",
+				remote, alert.User, alert.Comm, alert.Host,
+				time.Unix(alert.Ts, 0).Format(time.RFC3339))
+			return
+
 		default:
 			log.Printf("unknown msg 0x%02x len=%d from %s", msgType, plen, remote)
 		}
@@ -602,21 +616,29 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 		cwd = "/"
 	}
 
+	divStatus := start.DivergenceStatus
+	if divStatus == "" {
+		divStatus = "unwitnessed"
+	}
 	w, err := srv.sessionStore.CreateSession(
 		context.Background(),
 		iolog.SessionMeta{
-			SessionID:       start.SessionID,
-			User:            user,
-			Host:            host,
-			RunasUser:       runasUser,
-			RunasUID:        start.RunasUID,
-			RunasGID:        start.RunasGID,
-			Cwd:             cwd,
-			Command:         start.Command,
-			ResolvedCommand: start.ResolvedCommand,
-			Flags:           start.Flags,
-			Rows:            start.Rows,
-			Cols:            start.Cols,
+			SessionID:        start.SessionID,
+			User:             user,
+			Host:             host,
+			RunasUser:        runasUser,
+			RunasUID:         start.RunasUID,
+			RunasGID:         start.RunasGID,
+			Cwd:              cwd,
+			Command:          start.Command,
+			ResolvedCommand:  start.ResolvedCommand,
+			Flags:            start.Flags,
+			Rows:             start.Rows,
+			Cols:             start.Cols,
+			Source:           start.Source,
+			ParentSessionID:  start.ParentSessionID,
+			HasIO:            start.HasIO,
+			DivergenceStatus: divStatus,
 		},
 		startTime,
 	)
