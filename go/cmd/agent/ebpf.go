@@ -462,6 +462,32 @@ func (s *ebpfSubsystem) sessionEnded(scopePath string) {
 	log.Printf("ebpf: session ended: %s", sess.id)
 }
 
+// trackPluginCgroup adds the cgroup at cgroupPath to the BPF tracked_cgroups
+// map so that the execve hook ignores the second exec fired by sudo from within
+// that session.  Must be called before SESSION_READY is sent to the plugin.
+func (s *ebpfSubsystem) trackPluginCgroup(cgroupPath, sessionID string) {
+	id, err := cgroupInode(cgroupPath)
+	if err != nil {
+		debugLog("ebpf: trackPluginCgroup %s: %v", cgroupPath, err)
+		return
+	}
+	var key [64]byte
+	copy(key[:], sessionID)
+	if err := s.objs.TrackedCgroups.Put(id, key); err != nil {
+		debugLog("ebpf: trackPluginCgroup put %s: %v", cgroupPath, err)
+	}
+}
+
+// untrackPluginCgroup removes the cgroup from the BPF tracked_cgroups map
+// when the plugin session ends.
+func (s *ebpfSubsystem) untrackPluginCgroup(cgroupPath string) {
+	id, err := cgroupInode(cgroupPath)
+	if err != nil {
+		return
+	}
+	_ = s.objs.TrackedCgroups.Delete(id)
+}
+
 // ── ebpfSession ───────────────────────────────────────────────────────────────
 
 type ebpfSession struct {

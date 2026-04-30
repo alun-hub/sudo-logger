@@ -189,7 +189,16 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	cg := newCgroupSession(start.SessionID, start.Pid)
 	registerCg(cg)
+	// Add the plugin session's cgroup to the BPF tracked_cgroups map so that
+	// the execve hook suppresses the second exec sudo fires from within it.
+	// Must happen before SESSION_READY is sent (sudo forks only after that).
+	if cg != nil && ebpfSys != nil {
+		ebpfSys.trackPluginCgroup(cg.path, start.SessionID)
+	}
 	defer func() {
+		if cg != nil && ebpfSys != nil {
+			ebpfSys.untrackPluginCgroup(cg.path)
+		}
 		unregisterCg(cg)
 		if cg.hasPids() || cg.hasEscapedRunning() {
 			go lingerCgroup(cg, cfg.Server, tlsCfg)
