@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.10
+Version:        1.20.11
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,9 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 01 2026 sudo-logger 1.20.11-1
+- debug: log monoToWallNS at startup and first IO event per pkexec session
+
 * Thu May 01 2026 sudo-logger 1.20.10-1
 - fix(agent/ebpf): convert BPF ktime (CLOCK_MONOTONIC) to wall-clock Unix ns
   using boot time from /proc/uptime; fixes all eBPF I/O events appearing at

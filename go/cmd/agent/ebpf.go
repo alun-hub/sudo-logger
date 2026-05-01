@@ -123,6 +123,7 @@ func (s *ebpfSubsystem) start(ctx context.Context) error {
 	// bpf_ktime_get_ns() and /proc/uptime both exclude suspend time, so they
 	// track the same monotonic clock.
 	s.monoToWallNS = bootUnixNano()
+	log.Printf("ebpf: monoToWallNS=%d bootTime=%s", s.monoToWallNS, time.Unix(0, s.monoToWallNS).UTC().Format(time.RFC3339))
 
 	objs := &RecorderObjects{}
 	if err := LoadRecorderObjects(objs, nil); err != nil {
@@ -248,6 +249,9 @@ func (s *ebpfSubsystem) handleIO(raw []byte) {
 	// ev.TimestampNS is bpf_ktime_get_ns() — CLOCK_MONOTONIC nanoseconds since
 	// boot.  Convert to wall-clock Unix nanoseconds for the iolog writer.
 	wallNS := int64(ev.TimestampNS) + s.monoToWallNS
+	if sess.seq == 0 && sess.source == "ebpf-pkexec" {
+		log.Printf("ebpf: first IO for %s: monoNS=%d wallNS=%d wall=%s", sess.id, ev.TimestampNS, wallNS, time.Unix(0, wallNS).UTC().Format("15:04:05.000"))
+	}
 	sess.sendChunk(wallNS, ev.Stream, data)
 }
 
