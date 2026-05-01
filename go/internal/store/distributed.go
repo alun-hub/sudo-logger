@@ -350,7 +350,7 @@ func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.Session
 	tsid := filepath.ToSlash(rel)
 
 	divStatus := meta.DivergenceStatus
-	if divStatus == "" {
+	if divStatus == "" && (meta.Source == "" || meta.Source == "plugin") {
 		divStatus = "unwitnessed"
 	}
 	_, err = d.db.Exec(ctx, `
