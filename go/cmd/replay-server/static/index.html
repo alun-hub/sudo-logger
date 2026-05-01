@@ -158,6 +158,7 @@
       border: 1px solid var(--border); padding: 1px 6px; border-radius: 3px;
       flex-shrink: 0; font-family: var(--font-ui); }
     .session-card.active .sc-dur { border-color: var(--green-dim); color: var(--green); }
+    .sc-exit { font-size: 11px; color: var(--text-dim); padding: 1px 0; font-family: var(--font-ui); flex-shrink: 0; }
     .sc-screen { font-size: 11px; color: var(--blue); background: rgba(80,160,255,0.10);
       border: 1px solid rgba(80,160,255,0.3); padding: 1px 5px; border-radius: 3px; }
     .sc-incomplete { font-size: 11px; color: var(--red); background: rgba(255,80,80,0.08);
@@ -1632,7 +1633,8 @@ function renderSessionList(sessions) {
 
     const meta = el('div', 'sc-meta');
     meta.appendChild(el('span', 'sc-date', fmtDate(s.start_time)));
-    if (!isEventCard) meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
+    meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
+    if (isEventCard && s.exit_code != null) meta.appendChild(el('span', 'sc-exit', 'exit: ' + s.exit_code));
     if (s.risk_level && s.risk_level !== 'low') {
       meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
     }
@@ -1758,6 +1760,13 @@ async function selectSession(tsid, initialSeek = 0) {
 
   const playerEl = document.querySelector('.player');
   playerEl.classList.remove('split-view');
+
+  // Event-only sessions (pkexec background, no TTY): show info message, skip event fetch.
+  if (sess && sess.source === 'ebpf-pkexec' && !sess.has_io) {
+    hideScreenPlayer();
+    term.write('\r\n  \x1b[2m⚡ Privileged process event — no terminal I/O was recorded.\x1b[0m\r\n');
+    return;
+  }
 
   const termTask = selectTerminalSession(tsid, sess, initialSeek);
 
@@ -1995,6 +2004,25 @@ function renderInfoBar(sess) {
       row2.appendChild(w);
     }
     elInfoBar.appendChild(row2);
+  }
+
+  // Row 3: event metadata for pkexec event cards (no TTY I/O)
+  if (sess.source === 'ebpf-pkexec' && !sess.has_io) {
+    const evRow = el('div', 'info-row');
+    addItem(evRow, 'source', 'polkit / eBPF', 'dim', '');
+    if (sess.duration) addItem(evRow, 'duration', fmt(sess.duration), 'dim', '');
+    if (sess.exit_code != null) addItem(evRow, 'exit', String(sess.exit_code), sess.exit_code === 0 ? '' : 'red', '');
+    if (sess.parent_session_id) {
+      const w = el('div', 'info-item');
+      w.appendChild(el('span', 'il', 'from'));
+      const link = el('span', 'iv blue', '↑ parent session');
+      link.style.cursor = 'pointer';
+      link.title = sess.parent_session_id;
+      link.addEventListener('click', () => selectSession(sess.parent_session_id));
+      w.appendChild(link);
+      evRow.appendChild(w);
+    }
+    elInfoBar.appendChild(evRow);
   }
 }
 
