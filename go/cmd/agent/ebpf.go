@@ -329,9 +329,11 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		username = fmt.Sprintf("uid%d", invokingUID)
 	}
 
-	// Read the invoking cgroup path NOW while pkexec is still alive.
-	// Used as fallback when polkit doesn't create a dedicated transient scope.
-	invokingCgroupPath := readProcCgroupPath(ev.Pid, s.cgroupRoot)
+	// Read pkexec's current cgroup path NOW — polkit may have already moved it
+	// into a new session scope (e.g. user-0.slice/session-N.scope) before this
+	// goroutine runs.
+	currentCgroupPath := readProcCgroupPath(ev.Pid, s.cgroupRoot)
+	currentCgroupID, _ := cgroupInode(currentCgroupPath)
 
 	// Look up the parent eBPF session from the calling process's cgroup.
 	s.mu.Lock()
@@ -343,45 +345,60 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	}
 
 	sessID := generatePkexecSessionID(s.hostname, username)
-	log.Printf("ebpf: pkexec by user=%s parent=%s", username, parentSessID)
+	log.Printf("ebpf: pkexec by user=%s parent=%s cgroup=%d", username, parentSessID, currentCgroupID)
 
-	// Register a waiter so watch() can notify us when a scope appears.
-	waiter := &pkexecWaiter{
-		invokingUID: invokingUID,
-		ts:          time.Now(),
-		ch:          make(chan string, 1),
-	}
-	s.pkexecMu.Lock()
-	s.pendingPkexec = append(s.pendingPkexec, waiter)
-	s.pkexecMu.Unlock()
-
-	// Block until scope appears or 2s timeout.
+	// Fast path: pkexec has already moved to a new cgroup (polkit-assigned
+	// session scope).  Register it immediately — don't wait the full 2 s,
+	// since the command may finish before the timer fires.
 	var scopePath string
-	select {
-	case scopePath = <-waiter.ch:
-	case <-time.After(2 * time.Second):
-	}
-
-	s.pkexecMu.Lock()
-	for i, w := range s.pendingPkexec {
-		if w == waiter {
-			s.pendingPkexec = append(s.pendingPkexec[:i], s.pendingPkexec[i+1:]...)
-			break
-		}
-	}
-	s.pkexecMu.Unlock()
-
-	// Fallback: polkit ran the command directly in the caller's cgroup (common
-	// on Fedora) — no new scope appeared.  Register the invoking cgroup for I/O
-	// capture if it is not already tracked by another session.
 	usingInvokingCgroup := false
-	if scopePath == "" && invokingCgroupPath != "" {
+	if currentCgroupID != 0 && currentCgroupID != ev.CgroupID {
 		s.mu.Lock()
-		_, alreadyTracked := s.sessions[ev.CgroupID]
+		_, alreadyTracked := s.sessions[currentCgroupID]
 		s.mu.Unlock()
 		if !alreadyTracked {
-			scopePath = invokingCgroupPath
+			scopePath = currentCgroupPath
 			usingInvokingCgroup = true
+			log.Printf("ebpf: pkexec fast-path: using cgroup %s", filepath.Base(currentCgroupPath))
+		}
+	}
+
+	if scopePath == "" {
+		// Register a waiter so watch() can notify us when a scope appears.
+		waiter := &pkexecWaiter{
+			invokingUID: invokingUID,
+			ts:          time.Now(),
+			ch:          make(chan string, 1),
+		}
+		s.pkexecMu.Lock()
+		s.pendingPkexec = append(s.pendingPkexec, waiter)
+		s.pkexecMu.Unlock()
+
+		// Block until scope appears or 2s timeout.
+		select {
+		case scopePath = <-waiter.ch:
+		case <-time.After(2 * time.Second):
+		}
+
+		s.pkexecMu.Lock()
+		for i, w := range s.pendingPkexec {
+			if w == waiter {
+				s.pendingPkexec = append(s.pendingPkexec[:i], s.pendingPkexec[i+1:]...)
+				break
+			}
+		}
+		s.pkexecMu.Unlock()
+
+		// Fallback: polkit ran the command in the caller's cgroup (no new scope
+		// appeared at all).  Register the original invoking cgroup if untracked.
+		if scopePath == "" && currentCgroupPath != "" && currentCgroupID == ev.CgroupID {
+			s.mu.Lock()
+			_, alreadyTracked := s.sessions[ev.CgroupID]
+			s.mu.Unlock()
+			if !alreadyTracked {
+				scopePath = currentCgroupPath
+				usingInvokingCgroup = true
+			}
 		}
 	}
 
