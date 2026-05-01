@@ -48,6 +48,19 @@ struct {
 	__type(value, __u8[64]);
 } tracked_cgroups SEC(".maps");
 
+// Tracked sudo PIDs: key = pid (u32), value = u8 marker.
+// When the agent registers a plugin session, it inserts the sudo process PID.
+// The execve hook checks the invoking process's parent (and grandparent) against
+// this map to suppress the child execve that sudo fires when running the target
+// command.  This correctly handles sudo's monitor-process architecture where
+// sudo may interpose a monitor process between itself and the target.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 256);
+	__type(key, __u32);
+	__type(value, __u8);
+} tracked_sudo_pids SEC(".maps");
+
 // Ring buffer for all events.  8 MB gives ~2000 full io_events of headroom.
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -179,18 +192,17 @@ int record_write(struct trace_event_raw_sys_enter *ctx)
 }
 
 // ── Hook 2: sudo / pkexec ─────────────────────────────────────────────────────
-// Fires on any execve where the executing process is named "sudo" or "pkexec",
-// BUT only when the current cgroup is NOT already tracked.
+// Fires on any execve where the executing process is named "sudo" or "pkexec".
 //
-// Why the cgroup filter: sudo fires sys_enter_execve twice per invocation —
-// once when the shell exec's sudo (new invocation, not yet tracked) and once
-// when sudo forks and the child exec's the target command (inside the tracked
-// cgroup scope created by the agent).  We only want the first event.
+// sudo fires sys_enter_execve twice per invocation:
+//   1. When the shell forks and the child exec's sudo (new session — we want this).
+//   2. When sudo (or its monitor child) exec's the target command (we skip this).
 //
-// Race-freedom: the agent adds the session cgroup to tracked_cgroups before
-// sending SESSION_READY to the plugin.  sudo only forks after receiving
-// SESSION_READY, so by the time the second execve fires the cgroup is
-// already in the map.
+// We distinguish the two by checking whether the process's parent (or
+// grandparent) is a PID registered in tracked_sudo_pids.  The agent inserts
+// the sudo PID when the plugin opens a session; by the time the second execve
+// fires the PID is already in the map.  Two ancestry levels handle sudo's
+// optional monitor-process architecture (sudo → monitor → target).
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int trace_execve(struct trace_event_raw_sys_enter *ctx)
@@ -205,9 +217,17 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx)
 	if (!is_sudo && !is_pkexec)
 		return 0;
 
-	// Skip execve from within an already-tracked sudo session.
-	__u64 cgid = bpf_get_current_cgroup_id();
-	if (bpf_map_lookup_elem(&tracked_cgroups, &cgid))
+	// Skip if the invoking process is a child of a tracked sudo session.
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	struct task_struct *parent = BPF_CORE_READ(task, real_parent);
+	__u32 ppid = BPF_CORE_READ(parent, tgid);
+	if (bpf_map_lookup_elem(&tracked_sudo_pids, &ppid))
+		return 0;
+
+	// Also check grandparent to handle sudo's monitor-process architecture.
+	struct task_struct *gparent = BPF_CORE_READ(parent, real_parent);
+	__u32 pppid = BPF_CORE_READ(gparent, tgid);
+	if (bpf_map_lookup_elem(&tracked_sudo_pids, &pppid))
 		return 0;
 
 	struct exec_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
@@ -215,7 +235,7 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx)
 		return 0;
 
 	e->event_type   = EVENT_EXEC;
-	e->cgroup_id    = cgid;
+	e->cgroup_id    = bpf_get_current_cgroup_id();
 	e->timestamp_ns = bpf_ktime_get_ns();
 	e->pid          = (bpf_get_current_pid_tgid() >> 32);
 	e->uid          = (bpf_get_current_uid_gid() & 0xffffffff);

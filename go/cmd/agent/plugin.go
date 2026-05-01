@@ -189,13 +189,20 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	cg := newCgroupSession(start.SessionID, start.Pid)
 	registerCg(cg)
-	// Add the plugin session's cgroup to the BPF tracked_cgroups map so that
-	// the execve hook suppresses the second exec sudo fires from within it.
-	// Must happen before SESSION_READY is sent (sudo forks only after that).
+	// Register the sudo PID in the BPF tracked_sudo_pids map so the execve hook
+	// suppresses the child execve sudo fires when running the target command.
+	// Also register the session cgroup for PTY I/O capture.
+	// Both must happen before SESSION_READY is sent (sudo forks only after that).
+	if ebpfSys != nil {
+		ebpfSys.trackSudoPID(uint32(start.Pid), start.SessionID)
+	}
 	if cg != nil && ebpfSys != nil {
 		ebpfSys.trackPluginCgroup(cg.path, start.SessionID)
 	}
 	defer func() {
+		if ebpfSys != nil {
+			ebpfSys.untrackSudoPID(uint32(start.Pid))
+		}
 		if cg != nil && ebpfSys != nil {
 			ebpfSys.untrackPluginCgroup(cg.path)
 		}

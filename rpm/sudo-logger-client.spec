@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.3
+Version:        1.20.4
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 01 2026 sudo-logger 1.20.4-1
+- fix(agent/ebpf): replace cgroup-based execve filter with PID-parent check in BPF
+- fix(agent/divergence): discard stale pending execve entries (>10s) before FIFO match
+
 * Thu May 01 2026 sudo-logger 1.20.3-1
 - debug(agent/ebpf): log inode when trackPluginCgroup adds/removes cgroup from BPF map
 

@@ -63,8 +63,9 @@ type RecorderProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type RecorderMapSpecs struct {
-	Events         *ebpf.MapSpec `ebpf:"events"`
-	TrackedCgroups *ebpf.MapSpec `ebpf:"tracked_cgroups"`
+	Events          *ebpf.MapSpec `ebpf:"events"`
+	TrackedCgroups  *ebpf.MapSpec `ebpf:"tracked_cgroups"`
+	TrackedSudoPids *ebpf.MapSpec `ebpf:"tracked_sudo_pids"`
 }
 
 // RecorderVariableSpecs contains global variables before they are loaded into the kernel.
@@ -93,14 +94,16 @@ func (o *RecorderObjects) Close() error {
 //
 // It can be passed to LoadRecorderObjects or ebpf.CollectionSpec.LoadAndAssign.
 type RecorderMaps struct {
-	Events         *ebpf.Map `ebpf:"events"`
-	TrackedCgroups *ebpf.Map `ebpf:"tracked_cgroups"`
+	Events          *ebpf.Map `ebpf:"events"`
+	TrackedCgroups  *ebpf.Map `ebpf:"tracked_cgroups"`
+	TrackedSudoPids *ebpf.Map `ebpf:"tracked_sudo_pids"`
 }
 
 func (m *RecorderMaps) Close() error {
 	return _RecorderClose(
 		m.Events,
 		m.TrackedCgroups,
+		m.TrackedSudoPids,
 	)
 }
 

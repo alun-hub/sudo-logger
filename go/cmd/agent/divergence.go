@@ -74,25 +74,47 @@ func (d *divergenceTracker) registerEBPF(uid uint32, pid uint32, comm string) {
 	debugLog("divergence: registered %s execve pid=%d by uid=%d user=%s", comm, pid, uid, username)
 }
 
+// maxExecveAge is the maximum age of a pending execve entry that can be matched
+// against a plugin SESSION_START.  Entries older than this are from sudo
+// invocations that never received a SESSION_START (e.g. killed before the
+// plugin could respond) and must not pollute future matches.
+const maxExecveAge = 10 * time.Second
+
 // confirmPlugin is called when the plugin delivers a SESSION_START for user+host.
 // Returns true if a matching eBPF execve was found (confirmed), false if the
 // plugin session has no eBPF witness (unwitnessed — eBPF may be down).
 func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	key := username + "|" + host
+	now := time.Now()
 
 	d.mu.Lock()
 	queue := d.pending[key]
-	if len(queue) == 0 {
+
+	// Discard stale entries (from sudo invocations that were killed before the
+	// plugin responded).  Keep only entries newer than maxExecveAge.
+	var fresh []*pendingSudoExec
+	for _, e := range queue {
+		if now.Sub(e.wallTime) <= maxExecveAge {
+			fresh = append(fresh, e)
+		} else {
+			e.timer.Stop()
+			debugLog("divergence: discarding stale execve pid=%d age=%v", e.pid, now.Sub(e.wallTime))
+		}
+	}
+
+	if len(fresh) == 0 {
+		delete(d.pending, key)
 		d.mu.Unlock()
 		return false // no matching eBPF execve seen — eBPF may be disabled
 	}
-	// Dequeue the oldest pending entry (FIFO — concurrent sudo invocations by
-	// the same user are matched in arrival order).
-	entry := queue[0]
-	if len(queue) == 1 {
+
+	// Dequeue the oldest fresh entry (FIFO — concurrent sudo invocations by the
+	// same user are matched in the order they arrived).
+	entry := fresh[0]
+	if len(fresh) == 1 {
 		delete(d.pending, key)
 	} else {
-		d.pending[key] = queue[1:]
+		d.pending[key] = fresh[1:]
 	}
 	d.mu.Unlock()
 

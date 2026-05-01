@@ -462,9 +462,30 @@ func (s *ebpfSubsystem) sessionEnded(scopePath string) {
 	log.Printf("ebpf: session ended: %s", sess.id)
 }
 
+// trackSudoPID inserts sudoPid into the BPF tracked_sudo_pids map.
+// The execve hook checks parent and grandparent PIDs against this map to
+// suppress the child execve that sudo fires when running the target command.
+// Must be called before SESSION_READY is sent so the PID is in the map by
+// the time sudo forks and the child calls execve.
+func (s *ebpfSubsystem) trackSudoPID(sudoPid uint32, sessionID string) {
+	marker := uint8(1)
+	if err := s.objs.TrackedSudoPids.Put(sudoPid, marker); err != nil {
+		log.Printf("ebpf: trackSudoPID pid=%d session=%s: %v", sudoPid, sessionID, err)
+	} else {
+		log.Printf("ebpf: trackSudoPID: added pid=%d for session %s", sudoPid, sessionID)
+	}
+}
+
+// untrackSudoPID removes sudoPid from the BPF tracked_sudo_pids map when the
+// plugin session ends.
+func (s *ebpfSubsystem) untrackSudoPID(sudoPid uint32) {
+	if err := s.objs.TrackedSudoPids.Delete(sudoPid); err == nil {
+		log.Printf("ebpf: untrackSudoPID: removed pid=%d", sudoPid)
+	}
+}
+
 // trackPluginCgroup adds the cgroup at cgroupPath to the BPF tracked_cgroups
-// map so that the execve hook ignores the second exec fired by sudo from within
-// that session.  Must be called before SESSION_READY is sent to the plugin.
+// map so that PTY I/O events from plugin sessions are captured.
 func (s *ebpfSubsystem) trackPluginCgroup(cgroupPath, sessionID string) {
 	id, err := cgroupInode(cgroupPath)
 	if err != nil {
