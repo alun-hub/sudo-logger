@@ -617,7 +617,10 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 	}
 
 	divStatus := start.DivergenceStatus
-	if divStatus == "" {
+	// Only default to "unwitnessed" for plugin sessions (or old clients that
+	// don't set Source).  eBPF-sourced sessions (ebpf-pkexec, ebpf-tty) have no
+	// plugin counterpart by design, so divergence is not applicable.
+	if divStatus == "" && (start.Source == "" || start.Source == "plugin") {
 		divStatus = "unwitnessed"
 	}
 	w, err := srv.sessionStore.CreateSession(
