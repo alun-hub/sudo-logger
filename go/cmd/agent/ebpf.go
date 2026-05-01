@@ -90,6 +90,7 @@ type ebpfSubsystem struct {
 
 	mu           sync.Mutex
 	sessions     map[uint64]*ebpfSession
+	scopeToCgroup map[string]uint64 // scopePath → cgroupID, for sessionEnded after scope is deleted
 	droppedTotal atomic.Uint64
 
 	pkexecMu      sync.Mutex
@@ -98,12 +99,13 @@ type ebpfSubsystem struct {
 
 func newEBPFSubsystem(cfg agentConfig, tlsCfg *tls.Config, hostname string, div *divergenceTracker) *ebpfSubsystem {
 	return &ebpfSubsystem{
-		cfg:        cfg,
-		tlsCfg:     tlsCfg,
-		hostname:   hostname,
-		divergence: div,
-		cgroupRoot: "/sys/fs/cgroup",
-		sessions:   make(map[uint64]*ebpfSession),
+		cfg:           cfg,
+		tlsCfg:        tlsCfg,
+		hostname:      hostname,
+		divergence:    div,
+		cgroupRoot:    "/sys/fs/cgroup",
+		sessions:      make(map[uint64]*ebpfSession),
+		scopeToCgroup: make(map[string]uint64),
 	}
 }
 
@@ -178,6 +180,7 @@ func (s *ebpfSubsystem) stop() {
 		_ = s.objs.TrackedCgroups.Delete(id)
 	}
 	s.sessions = make(map[uint64]*ebpfSession)
+	s.scopeToCgroup = make(map[string]uint64)
 	s.mu.Unlock()
 	for _, sess := range sessions {
 		sess.close(0)
@@ -444,6 +447,11 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 
 	s.mu.Lock()
 	s.sessions[cgroupID] = sess
+	if !usingInvokingCgroup {
+		// Register the reverse mapping so sessionEnded() can find this session
+		// by scopePath even after the scope directory has been deleted.
+		s.scopeToCgroup[scopePath] = cgroupID
+	}
 	s.mu.Unlock()
 
 	if usingInvokingCgroup {
@@ -667,17 +675,28 @@ func (s *ebpfSubsystem) sessionStarted(scopePath, scopeName string) {
 
 	s.mu.Lock()
 	s.sessions[cgroupID] = sess
+	s.scopeToCgroup[scopePath] = cgroupID
 	s.mu.Unlock()
 
 	log.Printf("ebpf: session started: %s user=%s remote=%s", sess.id, sess.user, sess.remote)
 }
 
 func (s *ebpfSubsystem) sessionEnded(scopePath string) {
-	cgroupID, err := cgroupInode(scopePath)
-	if err != nil {
-		return
-	}
 	s.mu.Lock()
+	// Try reverse map first — the scope directory may already be deleted when
+	// inotify fires IN_DELETE, making cgroupInode fail with ENOENT.
+	cgroupID, mapped := s.scopeToCgroup[scopePath]
+	if mapped {
+		delete(s.scopeToCgroup, scopePath)
+	} else {
+		// Fallback: scope still exists (called very quickly after deletion).
+		var err error
+		cgroupID, err = cgroupInode(scopePath)
+		if err != nil {
+			s.mu.Unlock()
+			return
+		}
+	}
 	sess, ok := s.sessions[cgroupID]
 	if ok {
 		delete(s.sessions, cgroupID)
