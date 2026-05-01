@@ -468,13 +468,15 @@ func (s *ebpfSubsystem) sessionEnded(scopePath string) {
 func (s *ebpfSubsystem) trackPluginCgroup(cgroupPath, sessionID string) {
 	id, err := cgroupInode(cgroupPath)
 	if err != nil {
-		debugLog("ebpf: trackPluginCgroup %s: %v", cgroupPath, err)
+		log.Printf("ebpf: trackPluginCgroup %s: stat error: %v", cgroupPath, err)
 		return
 	}
 	var key [64]byte
 	copy(key[:], sessionID)
 	if err := s.objs.TrackedCgroups.Put(id, key); err != nil {
-		debugLog("ebpf: trackPluginCgroup put %s: %v", cgroupPath, err)
+		log.Printf("ebpf: trackPluginCgroup put %s inode=%d: %v", cgroupPath, id, err)
+	} else {
+		log.Printf("ebpf: trackPluginCgroup: added inode=%d for session %s", id, sessionID)
 	}
 }
 
@@ -485,7 +487,9 @@ func (s *ebpfSubsystem) untrackPluginCgroup(cgroupPath string) {
 	if err != nil {
 		return
 	}
-	_ = s.objs.TrackedCgroups.Delete(id)
+	if err := s.objs.TrackedCgroups.Delete(id); err == nil {
+		log.Printf("ebpf: untrackPluginCgroup: removed inode=%d", id)
+	}
 }
 
 // ── ebpfSession ───────────────────────────────────────────────────────────────
