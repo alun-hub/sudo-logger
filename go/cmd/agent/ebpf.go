@@ -249,9 +249,6 @@ func (s *ebpfSubsystem) handleIO(raw []byte) {
 	// ev.TimestampNS is bpf_ktime_get_ns() — CLOCK_MONOTONIC nanoseconds since
 	// boot.  Convert to wall-clock Unix nanoseconds for the iolog writer.
 	wallNS := int64(ev.TimestampNS) + s.monoToWallNS
-	if sess.seq == 0 && sess.source == "ebpf-pkexec" {
-		log.Printf("ebpf: first IO for %s: monoNS=%d wallNS=%d wall=%s", sess.id, ev.TimestampNS, wallNS, time.Unix(0, wallNS).UTC().Format("15:04:05.000"))
-	}
 	sess.sendChunk(wallNS, ev.Stream, data)
 }
 
@@ -612,12 +609,12 @@ func (s *ebpfSubsystem) watch(ctx context.Context) {
 			if strings.HasSuffix(name, ".scope") {
 				if ev.Mask&syscall.IN_CREATE != 0 {
 					if strings.HasPrefix(name, "session-") {
-						time.AfterFunc(200*time.Millisecond, func() {
+						time.AfterFunc(50*time.Millisecond, func() {
 							s.sessionStarted(fullPath, name)
 						})
 					} else {
 						// Non-session scope — could be a pkexec transient scope.
-						time.AfterFunc(100*time.Millisecond, func() {
+						time.AfterFunc(50*time.Millisecond, func() {
 							s.resolvePkexecScope(fullPath)
 						})
 					}

@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.11
+Version:        1.20.12
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 01 2026 sudo-logger 1.20.12-1
+- fix(agent/ebpf): reduce inotify scope-detection delay from 200ms/100ms to
+  50ms, narrowing the window where early PTY writes are missed before the
+  cgroup is registered in the BPF tracked_cgroups map
+- fix(agent/ebpf): log monoToWallNS boot time at startup for diagnostics
+
 * Thu May 01 2026 sudo-logger 1.20.11-1
 - debug: log monoToWallNS at startup and first IO event per pkexec session
 
