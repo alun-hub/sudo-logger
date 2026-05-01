@@ -69,6 +69,14 @@ type exitEvent struct {
 
 // ── eBPF subsystem ────────────────────────────────────────────────────────────
 
+// pkexecWaiter is registered by handlePkexecExec so that the watch() goroutine
+// can notify it when a new cgroup scope appears (pkexec's transient scope).
+type pkexecWaiter struct {
+	invokingUID uint32
+	ts          time.Time
+	ch          chan string // receives scope cgroup path, or "" on timeout
+}
+
 type ebpfSubsystem struct {
 	cfg        agentConfig
 	tlsCfg     *tls.Config
@@ -83,6 +91,9 @@ type ebpfSubsystem struct {
 	mu           sync.Mutex
 	sessions     map[uint64]*ebpfSession
 	droppedTotal atomic.Uint64
+
+	pkexecMu      sync.Mutex
+	pendingPkexec []*pkexecWaiter
 }
 
 func newEBPFSubsystem(cfg agentConfig, tlsCfg *tls.Config, hostname string, div *divergenceTracker) *ebpfSubsystem {
@@ -236,6 +247,13 @@ func (s *ebpfSubsystem) handleExecve(raw []byte) {
 	// command.  The invoking user's uid lives in the parent process (the shell).
 	invokingUID := parentRealUID(ev.Pid)
 	debugLog("ebpf: execve hook: comm=%s pid=%d sudo_uid=%d invoking_uid=%d cgroup=%d", comm, ev.Pid, ev.Uid, invokingUID, ev.CgroupID)
+
+	if comm == "pkexec" {
+		// pkexec uses polkit — the sudo plugin is never involved, so divergence
+		// tracking does not apply.  Handle it separately.
+		go s.handlePkexecExec(ev, invokingUID)
+		return
+	}
 	s.divergence.registerEBPF(invokingUID, ev.Pid, comm)
 }
 
@@ -292,6 +310,151 @@ func (s *ebpfSubsystem) logDropped(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ── pkexec session handling ───────────────────────────────────────────────────
+
+// handlePkexecExec is called when the eBPF execve hook sees a pkexec invocation.
+// Unlike sudo, pkexec uses polkit and never triggers the sudo plugin, so there
+// is no SESSION_START from the plugin side.  We create a separate session record
+// with source="ebpf-pkexec".
+//
+// We wait up to 2 seconds for a new cgroup scope to appear (created by
+// systemd/polkit for the target command).  If one appears, we track its I/O.
+// If not, we emit an instant event (has_io=false) — typical for background
+// services like packagekitd.
+func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
+	username, err := lookupUsername(invokingUID)
+	if err != nil {
+		username = fmt.Sprintf("uid%d", invokingUID)
+	}
+
+	// Look up the parent eBPF session from the calling process's cgroup.
+	s.mu.Lock()
+	parentSess := s.sessions[ev.CgroupID]
+	s.mu.Unlock()
+	parentSessID := ""
+	if parentSess != nil {
+		parentSessID = parentSess.id
+	}
+
+	sessID := generatePkexecSessionID(s.hostname, username)
+	log.Printf("ebpf: pkexec by user=%s parent=%s", username, parentSessID)
+
+	// Register a waiter so watch() can notify us when a scope appears.
+	waiter := &pkexecWaiter{
+		invokingUID: invokingUID,
+		ts:          time.Now(),
+		ch:          make(chan string, 1),
+	}
+	s.pkexecMu.Lock()
+	s.pendingPkexec = append(s.pendingPkexec, waiter)
+	s.pkexecMu.Unlock()
+
+	// Block until scope appears or 2s timeout.
+	var scopePath string
+	select {
+	case scopePath = <-waiter.ch:
+	case <-time.After(2 * time.Second):
+	}
+
+	s.pkexecMu.Lock()
+	for i, w := range s.pendingPkexec {
+		if w == waiter {
+			s.pendingPkexec = append(s.pendingPkexec[:i], s.pendingPkexec[i+1:]...)
+			break
+		}
+	}
+	s.pkexecMu.Unlock()
+
+	hasIO := scopePath != ""
+	sess := &ebpfSession{
+		id:       sessID,
+		user:     username,
+		host:     s.hostname,
+		command:  "pkexec",
+		source:   "ebpf-pkexec",
+		parentID: parentSessID,
+		hasIO:    hasIO,
+	}
+
+	if err := sess.connect(s.cfg.Server, s.tlsCfg, nil); err != nil {
+		log.Printf("ebpf: pkexec [%s]: connect: %v", sessID, err)
+		return
+	}
+
+	if !hasIO {
+		// Background pkexec — no I/O to capture.
+		sess.close(0)
+		log.Printf("ebpf: pkexec event recorded: %s user=%s (no scope)", sessID, username)
+		return
+	}
+
+	// Scope found — add to tracked_cgroups so PTY I/O is captured.
+	cgroupID, err := cgroupInode(scopePath)
+	if err != nil {
+		log.Printf("ebpf: pkexec scope stat %s: %v", scopePath, err)
+		sess.close(0)
+		return
+	}
+	sess.cgroupID = cgroupID
+
+	var key [64]byte
+	copy(key[:], sessID)
+	if err := s.objs.TrackedCgroups.Put(cgroupID, key); err != nil {
+		log.Printf("ebpf: pkexec trackCgroup %s: %v", filepath.Base(scopePath), err)
+		sess.close(0)
+		return
+	}
+
+	s.mu.Lock()
+	s.sessions[cgroupID] = sess
+	s.mu.Unlock()
+
+	log.Printf("ebpf: pkexec session started: %s user=%s scope=%s", sessID, username, filepath.Base(scopePath))
+	// Session ends when the scope disappears via inotify → sessionEnded().
+}
+
+// resolvePkexecScope notifies the oldest pending pkexec waiter that a new
+// cgroup scope appeared.  Called by watch() when a non-session *.scope is
+// created within the user cgroup hierarchy.
+func (s *ebpfSubsystem) resolvePkexecScope(scopePath string) {
+	s.pkexecMu.Lock()
+	defer s.pkexecMu.Unlock()
+
+	for i, w := range s.pendingPkexec {
+		if time.Since(w.ts) > 5*time.Second {
+			continue
+		}
+		// Notify the oldest waiter within the time window.
+		s.pendingPkexec = append(s.pendingPkexec[:i], s.pendingPkexec[i+1:]...)
+		select {
+		case w.ch <- scopePath:
+		default:
+		}
+		return
+	}
+}
+
+func generatePkexecSessionID(hostname, username string) string {
+	ts := strconv.FormatInt(time.Now().UnixNano(), 10)
+	safe := func(s string) string {
+		var b strings.Builder
+		for _, c := range s {
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+				(c >= '0' && c <= '9') || c == '-' || c == '_' {
+				b.WriteRune(c)
+			} else {
+				b.WriteRune('_')
+			}
+		}
+		return b.String()
+	}
+	id := fmt.Sprintf("pkexec.%s.%s.%s", safe(hostname), safe(username), ts)
+	if len(id) > 200 {
+		id = id[:200]
+	}
+	return id
 }
 
 // ── Cgroup / session lifecycle ────────────────────────────────────────────────
@@ -367,11 +530,18 @@ func (s *ebpfSubsystem) watch(ctx context.Context) {
 				continue
 			}
 
-			if strings.HasPrefix(name, "session-") && strings.HasSuffix(name, ".scope") {
+			if strings.HasSuffix(name, ".scope") {
 				if ev.Mask&syscall.IN_CREATE != 0 {
-					time.AfterFunc(200*time.Millisecond, func() {
-						s.sessionStarted(fullPath, name)
-					})
+					if strings.HasPrefix(name, "session-") {
+						time.AfterFunc(200*time.Millisecond, func() {
+							s.sessionStarted(fullPath, name)
+						})
+					} else {
+						// Non-session scope — could be a pkexec transient scope.
+						time.AfterFunc(100*time.Millisecond, func() {
+							s.resolvePkexecScope(fullPath)
+						})
+					}
 				} else if ev.Mask&syscall.IN_DELETE != 0 {
 					s.sessionEnded(fullPath)
 				}
@@ -522,6 +692,9 @@ type ebpfSession struct {
 	remote   string
 	command  string
 	cgroupID uint64
+	source   string // "ebpf-tty" or "ebpf-pkexec"
+	parentID string // parent session ID (pkexec only)
+	hasIO    bool   // false = no TTY data expected (background pkexec)
 
 	mu     sync.Mutex
 	conn   net.Conn
@@ -555,14 +728,20 @@ func (s *ebpfSession) connect(addr string, tlsCfg *tls.Config, verifyKey []byte)
 	s.conn = tlsConn
 	s.bw = bufio.NewWriterSize(tlsConn, 64*1024)
 
+	src := s.source
+	if src == "" {
+		src = "ebpf-tty"
+	}
 	start := protocol.SessionStart{
-		SessionID: s.id,
-		User:      s.user,
-		Host:      s.host,
-		Command:   s.command,
-		Ts:        time.Now().Unix(),
-		Pid:       os.Getpid(),
-		Source:    "ebpf-tty",
+		SessionID:       s.id,
+		User:            s.user,
+		Host:            s.host,
+		Command:         s.command,
+		Ts:              time.Now().Unix(),
+		Pid:             os.Getpid(),
+		Source:          src,
+		ParentSessionID: s.parentID,
+		HasIO:           s.hasIO,
 	}
 	payload, _ := json.Marshal(start)
 	if err := protocol.WriteMessage(s.bw, protocol.MsgSessionStart, payload); err != nil {
