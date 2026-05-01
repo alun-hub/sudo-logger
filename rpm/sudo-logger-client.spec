@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.7
+Version:        1.20.8
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 01 2026 sudo-logger 1.20.8-1
+- fix(agent/ebpf): route empty-type session scopes (polkit PAM root sessions)
+  to pkexec waiter instead of dropping them; fixes I/O capture for pkexec bash
+
 * Thu May 01 2026 sudo-logger 1.20.7-1
 - fix(agent/ebpf): fast-path pkexec cgroup registration — polkit moves pkexec
   into a new session scope almost immediately; read /proc/<pid>/cgroup at

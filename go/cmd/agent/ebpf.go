@@ -629,6 +629,13 @@ func (s *ebpfSubsystem) sessionStarted(scopePath, scopeName string) {
 		debugLog("ebpf: sessionStarted: loginctl session %s: %v", num, err)
 		return
 	}
+	// An empty session type means a polkit/pkexec-created PAM session for root.
+	// Route it to any pending pkexec waiter rather than tracking it as a TTY session.
+	if meta.stype == "" {
+		debugLog("ebpf: sessionStarted: routing session %s (type=%q) to pkexec waiter", num, meta.stype)
+		s.resolvePkexecScope(scopePath)
+		return
+	}
 	// Only record interactive terminal sessions.  Seat, greeter, x11, wayland
 	// and other non-TTY session types are skipped silently.
 	if meta.stype != "tty" && meta.stype != "unspecified" {
