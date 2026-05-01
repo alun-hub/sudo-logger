@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.9
+Version:        1.20.10
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 01 2026 sudo-logger 1.20.10-1
+- fix(agent/ebpf): convert BPF ktime (CLOCK_MONOTONIC) to wall-clock Unix ns
+  using boot time from /proc/uptime; fixes all eBPF I/O events appearing at
+  t=0 in replay instead of at their correct relative timestamps
+
 * Thu May 01 2026 sudo-logger 1.20.9-1
 - fix(agent/ebpf): add scopeToCgroup reverse map so sessionEnded() can close
   pkexec sessions even after the scope directory is already deleted by inotify
