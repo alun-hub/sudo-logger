@@ -329,6 +329,10 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		username = fmt.Sprintf("uid%d", invokingUID)
 	}
 
+	// Read the invoking cgroup path NOW while pkexec is still alive.
+	// Used as fallback when polkit doesn't create a dedicated transient scope.
+	invokingCgroupPath := readProcCgroupPath(ev.Pid, s.cgroupRoot)
+
 	// Look up the parent eBPF session from the calling process's cgroup.
 	s.mu.Lock()
 	parentSess := s.sessions[ev.CgroupID]
@@ -367,6 +371,20 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	}
 	s.pkexecMu.Unlock()
 
+	// Fallback: polkit ran the command directly in the caller's cgroup (common
+	// on Fedora) — no new scope appeared.  Register the invoking cgroup for I/O
+	// capture if it is not already tracked by another session.
+	usingInvokingCgroup := false
+	if scopePath == "" && invokingCgroupPath != "" {
+		s.mu.Lock()
+		_, alreadyTracked := s.sessions[ev.CgroupID]
+		s.mu.Unlock()
+		if !alreadyTracked {
+			scopePath = invokingCgroupPath
+			usingInvokingCgroup = true
+		}
+	}
+
 	hasIO := scopePath != ""
 	sess := &ebpfSession{
 		id:       sessID,
@@ -384,13 +402,13 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	}
 
 	if !hasIO {
-		// Background pkexec — no I/O to capture.
+		// Background pkexec (e.g. packagekitd) — no I/O to capture.
 		sess.close(0)
 		log.Printf("ebpf: pkexec event recorded: %s user=%s (no scope)", sessID, username)
 		return
 	}
 
-	// Scope found — add to tracked_cgroups so PTY I/O is captured.
+	// Scope or invoking cgroup found — register in tracked_cgroups for PTY I/O.
 	cgroupID, err := cgroupInode(scopePath)
 	if err != nil {
 		log.Printf("ebpf: pkexec scope stat %s: %v", scopePath, err)
@@ -411,8 +429,25 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	s.sessions[cgroupID] = sess
 	s.mu.Unlock()
 
-	log.Printf("ebpf: pkexec session started: %s user=%s scope=%s", sessID, username, filepath.Base(scopePath))
-	// Session ends when the scope disappears via inotify → sessionEnded().
+	if usingInvokingCgroup {
+		// Session ends when pkexec (ev.Pid) exits — no inotify signal for this cgroup.
+		log.Printf("ebpf: pkexec session started: %s user=%s cgroup=%s (invoking cgroup)",
+			sessID, username, filepath.Base(scopePath))
+		go func() {
+			waitForPID(ev.Pid)
+			s.mu.Lock()
+			if s.sessions[cgroupID] == sess {
+				delete(s.sessions, cgroupID)
+			}
+			s.mu.Unlock()
+			_ = s.objs.TrackedCgroups.Delete(cgroupID)
+			sess.close(0)
+			log.Printf("ebpf: pkexec session ended: %s user=%s", sessID, username)
+		}()
+	} else {
+		log.Printf("ebpf: pkexec session started: %s user=%s scope=%s", sessID, username, filepath.Base(scopePath))
+		// Session ends when the scope disappears via inotify → sessionEnded().
+	}
 }
 
 // resolvePkexecScope notifies the oldest pending pkexec waiter that a new
@@ -848,6 +883,35 @@ func (s *ebpfSession) drainACKs(ctx context.Context, verifyKey []byte) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// readProcCgroupPath returns the absolute cgroup v2 path for pid, or "" on error.
+// Must be called while the process is still alive.
+func readProcCgroupPath(pid uint32, cgroupRoot string) string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "0::") {
+			rel := strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+			if rel == "" || rel == "/" {
+				return ""
+			}
+			return filepath.Join(cgroupRoot, rel)
+		}
+	}
+	return ""
+}
+
+// waitForPID blocks until /proc/<pid> disappears (process has exited).
+func waitForPID(pid uint32) {
+	for {
+		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
 
 func cgroupInode(path string) (uint64, error) {
 	var st syscall.Stat_t

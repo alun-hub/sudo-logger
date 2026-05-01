@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.5
+Version:        1.20.6
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 01 2026 sudo-logger 1.20.6-1
+- fix(agent/ebpf): capture pkexec bash I/O via invoking cgroup when polkit
+  creates no dedicated scope (common on Fedora); exit detected by polling
+  pkexec PID via /proc
+
 * Thu May 01 2026 sudo-logger 1.20.5-1
 - feat(agent/ebpf): track pkexec invocations as ebpf-pkexec sessions in replay
 - fix(agent/ebpf): stop false divergence alerts for pkexec (polkit, not sudo plugin)
