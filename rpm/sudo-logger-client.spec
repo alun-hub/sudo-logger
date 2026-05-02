@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.15
+Version:        1.20.16
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 02 2026 sudo-logger 1.20.16-1
+- fix(agent/dbus): skip auto-authorized polkit events (exitCode=0);
+  only record challenge (exitCode=2) and denied (exitCode=1) events
+
 * Sat May 02 2026 sudo-logger 1.20.15-1
 - fix(agent/dbus): resolve real username from /proc/<pid>/status for
   unix-process polkit subjects instead of using the raw D-Bus subject
