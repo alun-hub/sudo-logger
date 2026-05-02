@@ -157,9 +157,10 @@ func (d *dbusSubsystem) emitEvent(call *pendingPolkitCall, exitCode int32) {
 		hasIO:   false,
 	}
 	if err := sess.connect(cfg.Server, tlsCfg, verifyKey); err != nil {
-		log.Printf("dbus: emit: %v", err)
+		log.Printf("dbus: polkit event lost: %v", err)
 		return
 	}
+	log.Printf("dbus: polkit action=%q subject=%q exitCode=%d", call.actionID, call.subject, exitCode)
 	sess.close(exitCode)
 }
 
