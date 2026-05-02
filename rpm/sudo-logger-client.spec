@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.13
+Version:        1.20.14
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 02 2026 sudo-logger 1.20.14-1
+- fix(agent/ebpf): route short-lived pkexec scopes to waiter; query
+  loginctlSession before cgroupInode in sessionStarted so polkit PAM sessions
+  with < 50ms scope lifetime still notify the pkexec waiter
+- fix(agent/ebpf): stat scope before session connect; set hasIO=false when
+  scope is gone to avoid sending hasIO=true sessions with no content
+
 * Sat May 02 2026 sudo-logger 1.20.13-1
 - feat(agent): add D-Bus polkit monitoring subsystem (dbus.go); agent now
   connects to the system bus as a BecomeMonitor and captures polkit
