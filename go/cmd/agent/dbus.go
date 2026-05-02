@@ -29,6 +29,7 @@ type dbusSubsystem struct {
 type pendingPolkitCall struct {
 	actionID string
 	subject  string // human-readable: "pid:1234", "session:c2", …
+	user     string // filesystem-safe username for the session user field
 	ts       time.Time
 }
 
@@ -122,6 +123,7 @@ func (d *dbusSubsystem) handleCall(msg *dbus.Message, pending map[uint32]*pendin
 	pending[msg.Serial()] = &pendingPolkitCall{
 		actionID: actionID,
 		subject:  extractPolkitSubject(msg.Body[0]),
+		user:     extractPolkitUser(msg.Body[0]),
 		ts:       time.Now(),
 	}
 }
@@ -150,7 +152,7 @@ func (d *dbusSubsystem) emitEvent(call *pendingPolkitCall, exitCode int32) {
 	hostname, _ := os.Hostname()
 	sess := &ebpfSession{
 		id:      generateDBusSessionID(hostname, call.actionID, call.ts),
-		user:    call.subject,
+		user:    call.user,
 		host:    hostname,
 		command: call.actionID,
 		source:  "dbus-polkit",
@@ -160,7 +162,7 @@ func (d *dbusSubsystem) emitEvent(call *pendingPolkitCall, exitCode int32) {
 		log.Printf("dbus: polkit event lost: %v", err)
 		return
 	}
-	log.Printf("dbus: polkit action=%q subject=%q exitCode=%d", call.actionID, call.subject, exitCode)
+	log.Printf("dbus: polkit action=%q subject=%q user=%q exitCode=%d", call.actionID, call.subject, call.user, exitCode)
 	sess.close(exitCode)
 }
 
@@ -194,6 +196,51 @@ func extractPolkitSubject(v interface{}) string {
 		return kind
 	}
 	return "unknown"
+}
+
+// extractPolkitUser returns a filesystem-safe username for the polkit subject,
+// suitable for the session user field (must pass server's sanitizeName check).
+// For unix-process subjects it looks up the invoking UID from /proc; for all
+// other subject kinds it falls back to "polkit".
+func extractPolkitUser(v interface{}) string {
+	parts, ok := v.([]interface{})
+	if !ok || len(parts) == 0 {
+		return "polkit"
+	}
+	kind, _ := parts[0].(string)
+	if kind == "unix-process" && len(parts) > 1 {
+		details, _ := parts[1].(map[string]dbus.Variant)
+		if pidV, ok := details["pid"]; ok {
+			pidStr := fmt.Sprintf("%v", pidV.Value())
+			pid64, err := strconv.ParseUint(pidStr, 10, 32)
+			if err == nil {
+				uid := uidForPID(uint32(pid64))
+				if uid != ^uint32(0) {
+					if name, lerr := lookupUsername(uid); lerr == nil {
+						return name
+					}
+				}
+			}
+		}
+	}
+	return "polkit"
+}
+
+// uidForPID reads the real UID of process pid from /proc/<pid>/status.
+// Returns ^uint32(0) on any error.
+func uidForPID(pid uint32) uint32 {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return ^uint32(0)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "Uid:") {
+			var uid uint32
+			fmt.Sscanf(strings.TrimPrefix(line, "Uid:"), "%d", &uid)
+			return uid
+		}
+	}
+	return ^uint32(0)
 }
 
 // parsePolkitResult parses an AuthorizationResult (bba{ss}) from a D-Bus reply.
