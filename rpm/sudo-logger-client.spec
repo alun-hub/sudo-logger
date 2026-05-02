@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.14
+Version:        1.20.15
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 02 2026 sudo-logger 1.20.15-1
+- fix(agent/dbus): resolve real username from /proc/<pid>/status for
+  unix-process polkit subjects instead of using the raw D-Bus subject
+  string (e.g. "bus::1.1474") — server's sanitizeName rejects colons,
+  causing all dbus-polkit sessions to be silently dropped
+
 * Sat May 02 2026 sudo-logger 1.20.14-1
 - fix(agent/ebpf): route short-lived pkexec scopes to waiter; query
   loginctlSession before cgroupInode in sessionStarted so polkit PAM sessions
