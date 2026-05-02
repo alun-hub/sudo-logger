@@ -421,6 +421,21 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		}
 	}
 
+	// Stat the scope before creating the session so hasIO reflects actual
+	// availability.  Short-lived polkit scopes (background jobs, firewall helpers)
+	// may vanish before we reach this point; in that case we emit a no-io event
+	// rather than a session with hasIO=true but empty content.
+	var cgroupID uint64
+	if scopePath != "" {
+		id, serr := cgroupInode(scopePath)
+		if serr != nil {
+			debugLog("ebpf: pkexec scope %s gone: %v — recording as event", filepath.Base(scopePath), serr)
+			scopePath = ""
+		} else {
+			cgroupID = id
+		}
+	}
+
 	hasIO := scopePath != ""
 	sess := &ebpfSession{
 		id:       sessID,
@@ -438,19 +453,12 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	}
 
 	if !hasIO {
-		// Background pkexec (e.g. packagekitd) — no I/O to capture.
+		// Background pkexec (e.g. packagekitd, firewall helpers) — no I/O to capture.
 		sess.close(0)
 		log.Printf("ebpf: pkexec event recorded: %s user=%s (no scope)", sessID, username)
 		return
 	}
 
-	// Scope or invoking cgroup found — register in tracked_cgroups for PTY I/O.
-	cgroupID, err := cgroupInode(scopePath)
-	if err != nil {
-		log.Printf("ebpf: pkexec scope stat %s: %v", scopePath, err)
-		sess.close(0)
-		return
-	}
 	sess.cgroupID = cgroupID
 
 	var key [64]byte
@@ -641,23 +649,28 @@ func (s *ebpfSubsystem) scanExistingSessions(userDir string) {
 
 func (s *ebpfSubsystem) sessionStarted(scopePath, scopeName string) {
 	num := strings.TrimPrefix(strings.TrimSuffix(scopeName, ".scope"), "session-")
+
+	// Query loginctl before statting the scope so that polkit/pkexec PAM
+	// sessions with short-lived scopes (< 50 ms) can still be routed to a
+	// pending pkexec waiter even after the scope directory has vanished.
+	meta, lerr := loginctlSession(num)
+	if lerr == nil && meta.stype == "" {
+		// Empty session type = polkit/pkexec PAM session for root.
+		// Route to pkexec waiter even if the scope has already been removed.
+		debugLog("ebpf: sessionStarted: routing session %s (type=%q) to pkexec waiter", num, meta.stype)
+		s.resolvePkexecScope(scopePath)
+		return
+	}
+
 	cgroupID, err := cgroupInode(scopePath)
 	if err != nil {
-		// Scope may have been removed before the 200 ms delay elapsed — normal.
+		// Scope removed before the 50 ms delay elapsed — normal for short-lived scopes.
 		debugLog("ebpf: sessionStarted: stat %s: %v", scopePath, err)
 		return
 	}
 
-	meta, err := loginctlSession(num)
-	if err != nil {
-		debugLog("ebpf: sessionStarted: loginctl session %s: %v", num, err)
-		return
-	}
-	// An empty session type means a polkit/pkexec-created PAM session for root.
-	// Route it to any pending pkexec waiter rather than tracking it as a TTY session.
-	if meta.stype == "" {
-		debugLog("ebpf: sessionStarted: routing session %s (type=%q) to pkexec waiter", num, meta.stype)
-		s.resolvePkexecScope(scopePath)
+	if lerr != nil {
+		debugLog("ebpf: sessionStarted: loginctl session %s: %v", num, lerr)
 		return
 	}
 	// Only record interactive terminal sessions.  Seat, greeter, x11, wayland
