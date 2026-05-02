@@ -123,10 +123,7 @@ allow sudo_shipper_t dri_device_t:chr_file { read write open getattr ioctl };
 # Connect to the D-Bus system bus for polkit CheckAuthorization monitoring.
 # The agent uses BecomeMonitor to receive copies of polkit calls without
 # interfering with bus traffic.  Requires D-Bus >= 1.9 (RHEL 8+, Fedora 23+).
-require { type system_dbusd_t; }
-allow sudo_shipper_t system_dbusd_t:unix_stream_socket connectto;
-allow sudo_shipper_t system_dbusd_t:dbus { send_msg acquire_svc };
-allow sudo_shipper_t self:dbus send_msg;
+dbus_system_bus_client(sudo_shipper_t)
 
 # Logging
 logging_send_syslog_msg(sudo_shipper_t)
