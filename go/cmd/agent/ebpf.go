@@ -793,15 +793,16 @@ func (s *ebpfSubsystem) untrackPluginCgroup(cgroupPath string) {
 // ── ebpfSession ───────────────────────────────────────────────────────────────
 
 type ebpfSession struct {
-	id       string
-	user     string
-	host     string
-	remote   string
-	command  string
-	cgroupID uint64
-	source   string // "ebpf-tty" or "ebpf-pkexec"
-	parentID string // parent session ID (pkexec only)
-	hasIO    bool   // false = no TTY data expected (background pkexec)
+	id            string
+	user          string
+	host          string
+	remote        string
+	command       string
+	cgroupID      uint64
+	source        string // "ebpf-tty" or "ebpf-pkexec"
+	parentID      string // parent session ID (pkexec only)
+	hasIO         bool   // false = no TTY data expected (background pkexec)
+	callerProcess string // process name (unix-process) or inferred service (dbus-polkit)
 
 	mu     sync.Mutex
 	conn   net.Conn
@@ -849,6 +850,7 @@ func (s *ebpfSession) connect(addr string, tlsCfg *tls.Config, verifyKey []byte)
 		Source:          src,
 		ParentSessionID: s.parentID,
 		HasIO:           s.hasIO,
+		CallerProcess:   s.callerProcess,
 	}
 	payload, _ := json.Marshal(start)
 	if err := protocol.WriteMessage(s.bw, protocol.MsgSessionStart, payload); err != nil {

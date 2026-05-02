@@ -135,7 +135,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	3 — added sudo_schema_version table; schema version tracking
 //	4 — added FOREIGN KEY ON DELETE CASCADE to sudo_access_log
 //	5 — added source, parent_session_id, has_io, divergence_status, matched_session_id
-const currentSchemaVersion = 5
+//	6 — added caller_process (polkit/dbus calling process name or service)
+const currentSchemaVersion = 6
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -239,6 +240,9 @@ CREATE INDEX IF NOT EXISTS sudo_sessions_parent
 CREATE INDEX IF NOT EXISTS sudo_sessions_div_pending
     ON sudo_sessions(divergence_status)
     WHERE divergence_status != 'confirmed';
+
+-- migration v6: caller_process for polkit/D-Bus events
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS caller_process TEXT DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
 `); err != nil {
@@ -357,14 +361,14 @@ func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.Session
 INSERT INTO sudo_sessions
   (tsid, session_id, "user", host, runas, runas_uid, runas_gid,
    command, resolved_command, cwd, flags, start_time, in_progress,
-   source, parent_session_id, has_io, divergence_status)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,$13,$14,$15,$16)
+   source, parent_session_id, has_io, divergence_status, caller_process)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,$13,$14,$15,$16,$17)
 ON CONFLICT (tsid) DO NOTHING`,
 		tsid, meta.SessionID, meta.User, meta.Host,
 		meta.RunasUser, meta.RunasUID, meta.RunasGID,
 		meta.Command, meta.ResolvedCommand, meta.Cwd, meta.Flags,
 		startTime.Unix(),
-		meta.Source, meta.ParentSessionID, meta.HasIO, divStatus,
+		meta.Source, meta.ParentSessionID, meta.HasIO, divStatus, meta.CallerProcess,
 	)
 	if err != nil {
 		_ = w.Close()
@@ -383,7 +387,7 @@ SELECT tsid, session_id, "user", host, runas, runas_uid, runas_gid,
        incomplete, network_outage, in_progress,
        COALESCE(source, 'plugin'), COALESCE(parent_session_id, ''),
        COALESCE(has_io, TRUE), COALESCE(divergence_status, 'unwitnessed'),
-       COALESCE(matched_session_id, '')
+       COALESCE(matched_session_id, ''), COALESCE(caller_process, '')
 FROM sudo_sessions
 ORDER BY start_time DESC`)
 	if err != nil {
@@ -400,7 +404,7 @@ ORDER BY start_time DESC`)
 			&r.Cwd, &r.Flags, &r.StartTime, &r.Duration, &r.ExitCode,
 			&r.Incomplete, &r.NetworkOutage, &r.InProgress,
 			&r.Source, &r.ParentSessionID, &r.HasIO,
-			&r.DivergenceStatus, &r.MatchedSessionID,
+			&r.DivergenceStatus, &r.MatchedSessionID, &r.CallerProcess,
 		); err != nil {
 			return nil, fmt.Errorf("scan session row: %w", err)
 		}

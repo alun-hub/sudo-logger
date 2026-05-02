@@ -104,6 +104,10 @@ type SessionStart struct {
 	// not running or did not see the execve (plugin-only mode).
 	// Empty is treated as "unwitnessed" for backward compatibility.
 	DivergenceStatus string `json:"divergence_status,omitempty"`
+	// CallerProcess is the process name that triggered the polkit authorization
+	// (for dbus-polkit: process comm or inferred service name like "firewalld").
+	// Empty for plugin and ebpf-tty sessions.
+	CallerProcess string `json:"caller_process,omitempty"`
 }
 
 // DivergenceAlert is the JSON payload for MsgDivergenceAlert.

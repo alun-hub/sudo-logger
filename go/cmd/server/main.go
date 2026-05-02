@@ -642,6 +642,7 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 			ParentSessionID:  start.ParentSessionID,
 			HasIO:            start.HasIO,
 			DivergenceStatus: divStatus,
+			CallerProcess:    start.CallerProcess,
 		},
 		startTime,
 	)

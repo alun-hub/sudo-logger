@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.17
+Version:        1.20.18
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,15 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 02 2026 sudo-logger 1.20.18-1
+- feat(agent/dbus): capture calling process name from /proc/<pid>/comm for
+  unix-process polkit subjects; infer service name (firewalld, NetworkManager,
+  systemd, etc.) from action ID prefix for system-bus-name subjects
+- feat(replay): output panel now shows action description, risk level (critical/
+  high/medium/low), caller process/service, and user for polkit event sessions;
+  adds JS-side lookup table covering ~35 common polkit action ID prefixes
+- feat(store): add caller_process field to protocol, iolog, store (schema v6)
+
 * Sat May 02 2026 sudo-logger 1.20.17-1
 - feat(replay): show polkit action ID, result, and user in output panel for
   dbus-polkit and pkexec event-only sessions instead of generic placeholder text

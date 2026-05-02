@@ -265,6 +265,7 @@ type SessionInfo struct {
 	HasIO            bool   `json:"has_io,omitempty"`            // false for pkexec background services
 	DivergenceStatus string `json:"divergence_status,omitempty"` // "confirmed" | "unwitnessed" | "missing_plugin"
 	MatchedSessionID string `json:"matched_session_id,omitempty"` // TSID of matched counterpart
+	CallerProcess    string `json:"caller_process,omitempty"`    // process/service that triggered polkit (dbus-polkit only)
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -503,6 +504,7 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 		HasIO:            r.HasIO,
 		DivergenceStatus: r.DivergenceStatus,
 		MatchedSessionID: r.MatchedSessionID,
+		CallerProcess:    r.CallerProcess,
 	}
 }
 

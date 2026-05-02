@@ -46,6 +46,9 @@ type SessionMeta struct {
 	// "confirmed" = eBPF witnessed the sudo execve; "unwitnessed" = eBPF
 	// was down or did not see the execve.  Empty is treated as "unwitnessed".
 	DivergenceStatus string
+	// CallerProcess is the process name or service that triggered the polkit
+	// authorization (dbus-polkit sessions only; empty for sudo plugin sessions).
+	CallerProcess string
 }
 
 // Writer appends events to an asciinema v2 cast file.
@@ -79,6 +82,7 @@ type castHeader struct {
 	Source          string `json:"source,omitempty"`
 	ParentSessionID string `json:"parent_session_id,omitempty"`
 	HasIO           bool   `json:"has_io,omitempty"`
+	CallerProcess   string `json:"caller_process,omitempty"`
 }
 
 // NewWriter creates the session directory and opens session.cast for writing.
@@ -142,6 +146,7 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 		Source:          meta.Source,
 		ParentSessionID: meta.ParentSessionID,
 		HasIO:           meta.HasIO,
+		CallerProcess:   meta.CallerProcess,
 	}
 
 	b, err := json.Marshal(hdr)

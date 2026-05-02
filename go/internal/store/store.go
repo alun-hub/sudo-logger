@@ -192,6 +192,7 @@ type SessionRecord struct {
 	HasIO            bool   // false for pkexec background services with no TTY
 	DivergenceStatus string // "pending" | "confirmed" | "unwitnessed" | "missing_plugin"
 	MatchedSessionID string // TSID of the matched counterpart stream
+	CallerProcess    string // process name or service that triggered polkit (dbus-polkit only)
 }
 
 // ScreenFrameInfo describes one stored screen frame.

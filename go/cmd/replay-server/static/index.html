@@ -1454,6 +1454,69 @@ function renderScreenFrame(idx) {
   }
 }
 
+// ── Polkit action lookup ───────────────────────────────────────────────────────
+// Maps action ID prefixes to { desc, risk }.  risk: 'critical'|'high'|'medium'|'low'
+const POLKIT_ACTIONS = [
+  // pkexec — arbitrary execution as root
+  { prefix: 'org.freedesktop.policykit.exec',                     desc: 'Execute program as root (pkexec)',                   risk: 'critical' },
+  // systemd
+  { prefix: 'org.freedesktop.systemd1.manage-units',              desc: 'Start / stop / restart system services',             risk: 'high'     },
+  { prefix: 'org.freedesktop.systemd1.manage-unit-files',         desc: 'Enable / disable / mask service unit files',         risk: 'high'     },
+  { prefix: 'org.freedesktop.systemd1.reload-daemon',             desc: 'Reload systemd daemon configuration',                risk: 'medium'   },
+  { prefix: 'org.freedesktop.systemd1',                           desc: 'Systemd privileged action',                          risk: 'high'     },
+  // NetworkManager
+  { prefix: 'org.freedesktop.NetworkManager.settings.modify.system', desc: 'Modify system-wide network settings',             risk: 'high'     },
+  { prefix: 'org.freedesktop.NetworkManager.network-control',     desc: 'Control active network connections',                  risk: 'medium'   },
+  { prefix: 'org.freedesktop.NetworkManager.wifi.share',          desc: 'Share Wi-Fi connection as hotspot',                  risk: 'medium'   },
+  { prefix: 'org.freedesktop.NetworkManager',                     desc: 'NetworkManager privileged action',                   risk: 'medium'   },
+  // Firewall
+  { prefix: 'org.fedoraproject.FirewallD1.manage',                desc: 'Modify firewall rules / zones',                      risk: 'high'     },
+  { prefix: 'org.fedoraproject.FirewallD1.config',                desc: 'Change persistent firewall configuration',            risk: 'high'     },
+  { prefix: 'org.fedoraproject.FirewallD1',                       desc: 'Firewall privileged action',                         risk: 'high'     },
+  // PackageKit / software
+  { prefix: 'org.freedesktop.packagekit.package-install',         desc: 'Install software package',                           risk: 'high'     },
+  { prefix: 'org.freedesktop.packagekit.package-remove',          desc: 'Remove software package',                            risk: 'high'     },
+  { prefix: 'org.freedesktop.packagekit.trigger-offline-update',  desc: 'Apply offline system update',                        risk: 'high'     },
+  { prefix: 'org.freedesktop.packagekit',                         desc: 'Package management action',                          risk: 'high'     },
+  // Apt (Debian/Ubuntu)
+  { prefix: 'org.debian.apt.install-or-remove-packages',          desc: 'Install or remove packages (apt)',                   risk: 'high'     },
+  { prefix: 'org.debian.apt',                                      desc: 'APT package management action',                      risk: 'high'     },
+  // fwupd
+  { prefix: 'org.freedesktop.fwupd.update-hotplug',               desc: 'Update device firmware',                             risk: 'high'     },
+  { prefix: 'org.freedesktop.fwupd',                              desc: 'Firmware update action',                             risk: 'high'     },
+  // Login / power
+  { prefix: 'org.freedesktop.login1.reboot',                      desc: 'Reboot the system',                                  risk: 'high'     },
+  { prefix: 'org.freedesktop.login1.power-off',                   desc: 'Power off the system',                               risk: 'high'     },
+  { prefix: 'org.freedesktop.login1.hibernate',                   desc: 'Hibernate the system',                               risk: 'low'      },
+  { prefix: 'org.freedesktop.login1.suspend',                     desc: 'Suspend the system',                                 risk: 'low'      },
+  { prefix: 'org.freedesktop.login1',                             desc: 'Session / login management action',                  risk: 'medium'   },
+  // Storage
+  { prefix: 'org.freedesktop.UDisks2.encrypted-unlock',           desc: 'Unlock encrypted storage device',                    risk: 'high'     },
+  { prefix: 'org.freedesktop.UDisks2.filesystem-mount',           desc: 'Mount filesystem',                                   risk: 'medium'   },
+  { prefix: 'org.freedesktop.UDisks2.filesystem-unmount-others',  desc: "Unmount another user's filesystem",                  risk: 'medium'   },
+  { prefix: 'org.freedesktop.UDisks2',                            desc: 'Storage / disk management action',                   risk: 'medium'   },
+  // Time / hostname
+  { prefix: 'org.freedesktop.timedate1.set-time',                 desc: 'Set system clock',                                   risk: 'medium'   },
+  { prefix: 'org.freedesktop.timedate1',                          desc: 'System time / NTP configuration',                    risk: 'low'      },
+  { prefix: 'org.freedesktop.hostname1.set-hostname',             desc: 'Change system hostname',                             risk: 'medium'   },
+  { prefix: 'org.freedesktop.hostname1',                          desc: 'Hostname / machine-info action',                     risk: 'low'      },
+];
+
+const RISK_COLORS = {
+  critical: '\x1b[1;31m',  // bold red
+  high:     '\x1b[33m',    // yellow
+  medium:   '\x1b[36m',    // cyan
+  low:      '\x1b[2m',     // dim
+};
+
+function polkitActionInfo(actionID) {
+  if (!actionID) return null;
+  for (const a of POLKIT_ACTIONS) {
+    if (actionID.startsWith(a.prefix)) return a;
+  }
+  return null;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let allSessions      = [];
@@ -1772,16 +1835,32 @@ async function selectSession(tsid, initialSeek = 0) {
   // Event-only sessions (pkexec background or D-Bus polkit): show structured event info.
   if (sess && ((sess.source === 'ebpf-pkexec' && !sess.has_io) || sess.source === 'dbus-polkit')) {
     hideScreenPlayer();
-    const resultLabel = sess.exit_code === 0 ? '\x1b[32m✓ authorized\x1b[0m'
-                      : sess.exit_code === 2 ? '\x1b[33m⚡ challenge (password required)\x1b[0m'
-                      :                        '\x1b[31m✗ denied\x1b[0m';
-    const actionLine  = sess.command ? '\x1b[1m' + sess.command + '\x1b[0m' : '(unknown action)';
-    const srcLabel    = sess.source === 'dbus-polkit' ? 'polkit/D-Bus' : 'pkexec/eBPF';
+    const info = polkitActionInfo(sess.command);
+    const resultCode = sess.exit_code;
+    const resultLabel = resultCode === 0 ? '\x1b[32m✓ AUTHORIZED\x1b[0m'
+                      : resultCode === 2 ? '\x1b[33m⚡ CHALLENGE — password required\x1b[0m'
+                      :                   '\x1b[31m✗ DENIED\x1b[0m';
+    const riskColor  = info ? (RISK_COLORS[info.risk] || '\x1b[0m') : '\x1b[0m';
+    const riskLabel  = info ? riskColor + info.risk.toUpperCase() + '\x1b[0m' : '';
+    const srcLabel   = sess.source === 'dbus-polkit' ? 'polkit/D-Bus' : 'pkexec/eBPF';
     term.write('\r\n');
-    term.write('  ' + resultLabel + '\r\n');
-    term.write('  \x1b[2maction:\x1b[0m ' + actionLine + '\r\n');
-    if (sess.user) term.write('  \x1b[2muser:   ' + sess.user + '\x1b[0m\r\n');
-    term.write('  \x1b[2msource: ' + srcLabel + '\x1b[0m\r\n');
+    term.write('  ' + resultLabel + (riskLabel ? '    \x1b[2mrisk:\x1b[0m ' + riskLabel : '') + '\r\n');
+    term.write('\r\n');
+    if (info) {
+      term.write('  \x1b[2maction:\x1b[0m  \x1b[1m' + sess.command + '\x1b[0m\r\n');
+      term.write('           \x1b[2m' + info.desc + '\x1b[0m\r\n');
+    } else {
+      term.write('  \x1b[2maction:\x1b[0m  \x1b[1m' + (sess.command || '(unknown)') + '\x1b[0m\r\n');
+    }
+    if (sess.caller_process) {
+      const callerType = sess.source === 'dbus-polkit' && sess.user === 'polkit'
+                       ? 'system daemon' : 'process';
+      term.write('  \x1b[2mcaller:\x1b[0m  ' + sess.caller_process + '  \x1b[2m(' + callerType + ')\x1b[0m\r\n');
+    }
+    if (sess.user && sess.user !== 'polkit') {
+      term.write('  \x1b[2muser:\x1b[0m    ' + sess.user + '\r\n');
+    }
+    term.write('  \x1b[2msource:\x1b[0m  ' + srcLabel + '\r\n');
     return;
   }
 

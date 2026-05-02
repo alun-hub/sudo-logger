@@ -683,6 +683,10 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 		Command         string `json:"command"`
 		ResolvedCommand string `json:"resolved_command"`
 		Flags           string `json:"flags"`
+		Source          string `json:"source"`
+		ParentSessionID string `json:"parent_session_id"`
+		HasIO           bool   `json:"has_io"`
+		CallerProcess   string `json:"caller_process"`
 	}
 	if err := json.Unmarshal(scanner.Bytes(), &hdr); err != nil {
 		return nil, fmt.Errorf("parse cast header: %w", err)
@@ -702,6 +706,10 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 		Flags:           hdr.Flags,
 		StartTime:       hdr.Timestamp,
 		Duration:        castLastTime(sessDir),
+		Source:          hdr.Source,
+		ParentSessionID: hdr.ParentSessionID,
+		HasIO:           hdr.HasIO,
+		CallerProcess:   hdr.CallerProcess,
 	}
 
 	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {

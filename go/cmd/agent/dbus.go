@@ -27,10 +27,11 @@ type dbusSubsystem struct {
 // pendingPolkitCall tracks an in-flight CheckAuthorization request.
 // The D-Bus serial links the call to its reply.
 type pendingPolkitCall struct {
-	actionID string
-	subject  string // human-readable: "pid:1234", "session:c2", …
-	user     string // filesystem-safe username for the session user field
-	ts       time.Time
+	actionID      string
+	subject       string // human-readable: "pid:1234", "session:c2", …
+	user          string // filesystem-safe username for the session user field
+	callerProcess string // process name (unix-process) or inferred service name (system-bus-name)
+	ts            time.Time
 }
 
 func (d *dbusSubsystem) start(ctx context.Context) error {
@@ -121,10 +122,11 @@ func (d *dbusSubsystem) handleCall(msg *dbus.Message, pending map[uint32]*pendin
 		return
 	}
 	pending[msg.Serial()] = &pendingPolkitCall{
-		actionID: actionID,
-		subject:  extractPolkitSubject(msg.Body[0]),
-		user:     extractPolkitUser(msg.Body[0]),
-		ts:       time.Now(),
+		actionID:      actionID,
+		subject:       extractPolkitSubject(msg.Body[0]),
+		user:          extractPolkitUser(msg.Body[0]),
+		callerProcess: extractCallerProcess(msg.Body[0], actionID),
+		ts:            time.Now(),
 	}
 }
 
@@ -157,18 +159,19 @@ func (d *dbusSubsystem) handleReply(msg *dbus.Message, pending map[uint32]*pendi
 func (d *dbusSubsystem) emitEvent(call *pendingPolkitCall, exitCode int32) {
 	hostname, _ := os.Hostname()
 	sess := &ebpfSession{
-		id:      generateDBusSessionID(hostname, call.actionID, call.ts),
-		user:    call.user,
-		host:    hostname,
-		command: call.actionID,
-		source:  "dbus-polkit",
-		hasIO:   false,
+		id:            generateDBusSessionID(hostname, call.actionID, call.ts),
+		user:          call.user,
+		host:          hostname,
+		command:       call.actionID,
+		source:        "dbus-polkit",
+		hasIO:         false,
+		callerProcess: call.callerProcess,
 	}
 	if err := sess.connect(cfg.Server, tlsCfg, verifyKey); err != nil {
 		log.Printf("dbus: polkit event lost: %v", err)
 		return
 	}
-	log.Printf("dbus: polkit action=%q subject=%q user=%q exitCode=%d", call.actionID, call.subject, call.user, exitCode)
+	log.Printf("dbus: polkit action=%q caller=%q user=%q exitCode=%d", call.actionID, call.callerProcess, call.user, exitCode)
 	sess.close(exitCode)
 }
 
@@ -247,6 +250,55 @@ func uidForPID(pid uint32) uint32 {
 		}
 	}
 	return ^uint32(0)
+}
+
+// extractCallerProcess returns the calling process name for unix-process subjects
+// (read from /proc/<pid>/comm) or infers the service name from the action ID prefix
+// for system-bus-name subjects and fallbacks.
+func extractCallerProcess(v interface{}, actionID string) string {
+	parts, ok := v.([]interface{})
+	if ok && len(parts) > 0 {
+		kind, _ := parts[0].(string)
+		if kind == "unix-process" && len(parts) > 1 {
+			details, _ := parts[1].(map[string]dbus.Variant)
+			if pidV, ok := details["pid"]; ok {
+				pidStr := fmt.Sprintf("%v", pidV.Value())
+				if pid64, err := strconv.ParseUint(pidStr, 10, 32); err == nil {
+					if comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid64)); err == nil {
+						if name := strings.TrimSpace(string(comm)); name != "" {
+							return name
+						}
+					}
+				}
+			}
+		}
+	}
+	return inferServiceFromAction(actionID)
+}
+
+// inferServiceFromAction maps well-known polkit action ID prefixes to their
+// originating system service name.
+func inferServiceFromAction(actionID string) string {
+	prefixes := [...]struct{ prefix, service string }{
+		{"org.fedoraproject.FirewallD1", "firewalld"},
+		{"org.freedesktop.NetworkManager", "NetworkManager"},
+		{"org.freedesktop.systemd1", "systemd"},
+		{"org.freedesktop.packagekit", "PackageKit"},
+		{"org.freedesktop.UDisks2", "udisksd"},
+		{"org.freedesktop.login1", "systemd-logind"},
+		{"org.freedesktop.fwupd", "fwupd"},
+		{"org.freedesktop.timedate1", "systemd-timedated"},
+		{"org.freedesktop.hostname1", "systemd-hostnamed"},
+		{"org.freedesktop.policykit.exec", "pkexec"},
+		{"org.debian.apt", "apt"},
+		{"com.ubuntu.pkexec", "pkexec"},
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(actionID, p.prefix) {
+			return p.service
+		}
+	}
+	return ""
 }
 
 // parsePolkitResult parses an AuthorizationResult (bba{ss}) from a D-Bus reply.
