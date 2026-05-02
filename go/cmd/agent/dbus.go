@@ -145,6 +145,12 @@ func (d *dbusSubsystem) handleReply(msg *dbus.Message, pending map[uint32]*pendi
 	} else {
 		exitCode = parsePolkitResult(msg.Body)
 	}
+	// Skip auto-authorized actions (exitCode=0): no user interaction required,
+	// no password/PIN presented — background noise from KDE, NetworkManager etc.
+	// Only record challenge (2 = requires auth) and denied (1 = access refused).
+	if exitCode == 0 {
+		return
+	}
 	d.emitEvent(call, exitCode)
 }
 
