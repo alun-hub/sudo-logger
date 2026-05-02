@@ -355,6 +355,11 @@ type Rule struct {
 	Incomplete     *bool         `yaml:"incomplete"       json:"incomplete,omitempty"`
 	AfterHours     *bool         `yaml:"after_hours"      json:"after_hours,omitempty"`
 	MinDuration    float64       `yaml:"min_duration"     json:"min_duration,omitempty"`
+	// Source filters by session source ("plugin", "ebpf-tty", "ebpf-pkexec", "dbus-polkit").
+	// Empty means the rule applies to all sources.
+	Source   string `yaml:"source"    json:"source,omitempty"`
+	// ExitCode, when non-nil, requires an exact exit-code match.
+	ExitCode *int32 `yaml:"exit_code" json:"exit_code,omitempty"`
 }
 
 // RuleSet is the top-level structure of the risk-rules YAML file.
@@ -1911,6 +1916,12 @@ func matchPattern(p *MatchPattern, text string) bool {
 // to catch both "sudo visudo" (command_base_any matches) and "sudo bash →
 // type visudo" (content matches) without requiring separate rules.
 func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func() string) bool {
+	if rule.Source != "" && s.Source != rule.Source {
+		return false
+	}
+	if rule.ExitCode != nil && s.ExitCode != *rule.ExitCode {
+		return false
+	}
 	if rule.Incomplete != nil {
 		// A freeze-timeout is a network event, not a security incident — treat
 		// it as "not unexpectedly terminated" for risk scoring purposes so it

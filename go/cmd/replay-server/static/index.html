@@ -180,6 +180,7 @@
     @keyframes live-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
     .session-card.in-progress { border-left-color: #4caf50 !important; }
     .session-card.ebpf-pkexec { border-left-color: #8b6fff !important; }
+    .session-card.dbus-polkit { border-left-color: #17a2b8 !important; }
     .session-card.missing-plugin { border-left-color: var(--red) !important;
       background: rgba(255,95,109,0.04); }
     /* divergence status badges */
@@ -192,6 +193,7 @@
     .sc-source { font-size: 11px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
       font-family: var(--font-ui); border: 1px solid;
       color: #8b6fff; border-color: rgba(139,111,255,0.35); background: rgba(139,111,255,0.07); }
+    .sc-source.dbus-polkit { color: #17a2b8; border-color: rgba(23,162,184,0.35); background: rgba(23,162,184,0.07); }
     /* pkexec event card (no TTY playback) */
     .session-card.event-card { opacity: 0.88; }
     .session-card.event-card .sc-cmd { font-style: italic; }
@@ -1600,7 +1602,8 @@ function renderSessionList(sessions) {
   for (const s of sessions) {
     const isMissingPlugin = s.divergence_status === 'missing_plugin';
     const isEbpfPkexec   = s.source === 'ebpf-pkexec';
-    const isEventCard    = isEbpfPkexec && !s.has_io;
+    const isDbusPolkit   = s.source === 'dbus-polkit';
+    const isEventCard    = (isEbpfPkexec && !s.has_io) || isDbusPolkit;
     let cardCls = 'session-card';
     if (s.tsid === currentTSID)  cardCls += ' active';
     if (s.in_progress)           cardCls += ' in-progress';
@@ -1608,6 +1611,7 @@ function renderSessionList(sessions) {
     else if (s.network_outage)   cardCls += ' network-outage';
     else if (s.incomplete)       cardCls += ' incomplete';
     if (isEbpfPkexec)            cardCls += ' ebpf-pkexec';
+    if (isDbusPolkit)            cardCls += ' dbus-polkit';
     if (isEventCard)             cardCls += ' event-card';
 
     const card = el('div', cardCls);
@@ -1624,8 +1628,12 @@ function renderSessionList(sessions) {
     }
     // source badge for non-plugin sessions
     if (s.source && s.source !== 'plugin') {
-      const label = s.source === 'ebpf-pkexec' ? 'pkexec' : s.source === 'ebpf-tty' ? 'ebpf' : s.source;
-      userRow.appendChild(el('span', 'sc-source', label));
+      const label = s.source === 'ebpf-pkexec' ? 'pkexec'
+                  : s.source === 'ebpf-tty'    ? 'ebpf'
+                  : s.source === 'dbus-polkit'  ? 'polkit'
+                  : s.source;
+      const badgeCls = s.source === 'dbus-polkit' ? 'sc-source dbus-polkit' : 'sc-source';
+      userRow.appendChild(el('span', badgeCls, label));
     }
 
     const cmd = el('div', 'sc-cmd');
@@ -1761,10 +1769,11 @@ async function selectSession(tsid, initialSeek = 0) {
   const playerEl = document.querySelector('.player');
   playerEl.classList.remove('split-view');
 
-  // Event-only sessions (pkexec background, no TTY): show info message, skip event fetch.
-  if (sess && sess.source === 'ebpf-pkexec' && !sess.has_io) {
+  // Event-only sessions (pkexec background or D-Bus polkit): show info message, skip event fetch.
+  if (sess && ((sess.source === 'ebpf-pkexec' && !sess.has_io) || sess.source === 'dbus-polkit')) {
     hideScreenPlayer();
-    term.write('\r\n  \x1b[2m⚡ Privileged process event — no terminal I/O was recorded.\x1b[0m\r\n');
+    const label = sess.source === 'dbus-polkit' ? 'D-Bus polkit authorization event' : 'Privileged process event';
+    term.write('\r\n  \x1b[2m⚡ ' + label + ' — no terminal I/O was recorded.\x1b[0m\r\n');
     return;
   }
 
@@ -2006,12 +2015,24 @@ function renderInfoBar(sess) {
     elInfoBar.appendChild(row2);
   }
 
-  // Row 3: event metadata for pkexec event cards (no TTY I/O)
-  if (sess.source === 'ebpf-pkexec' && !sess.has_io) {
+  // Row 3: event metadata for event cards (pkexec background or D-Bus polkit)
+  const isInfoEvent = (sess.source === 'ebpf-pkexec' && !sess.has_io) || sess.source === 'dbus-polkit';
+  if (isInfoEvent) {
     const evRow = el('div', 'info-row');
-    addItem(evRow, 'source', 'polkit / eBPF', 'dim', '');
+    if (sess.source === 'dbus-polkit') {
+      const resultLabel = sess.exit_code === 0 ? '✓ authorized'
+                        : sess.exit_code === 2 ? '⚡ challenge'
+                        : '✗ denied';
+      const resultColor = sess.exit_code === 0 ? '' : 'red';
+      addItem(evRow, 'result', resultLabel, resultColor, '');
+      addItem(evRow, 'source', 'polkit / D-Bus', 'dim', '');
+    } else {
+      addItem(evRow, 'source', 'polkit / eBPF', 'dim', '');
+    }
     if (sess.duration) addItem(evRow, 'duration', fmt(sess.duration), 'dim', '');
-    if (sess.exit_code != null) addItem(evRow, 'exit', String(sess.exit_code), sess.exit_code === 0 ? '' : 'red', '');
+    if (sess.source !== 'dbus-polkit' && sess.exit_code != null) {
+      addItem(evRow, 'exit', String(sess.exit_code), sess.exit_code === 0 ? '' : 'red', '');
+    }
     if (sess.parent_session_id) {
       const w = el('div', 'info-item');
       w.appendChild(el('span', 'il', 'from'));

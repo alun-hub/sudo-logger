@@ -396,3 +396,32 @@ rules:
     score: 5
     reason: "extended session (>2 h)"
     min_duration: 7200
+
+  # ── D-Bus polkit authorization events ─────────────────────────────────────
+  # Captured by the D-Bus monitor subsystem in sudo-logger-agent.
+  # source=dbus-polkit means the session is an authorization event, not a
+  # terminal session.  exit_code: 0=authorized, 1=denied, 2=challenge.
+
+  - id: dbus_polkit
+    score: 25
+    reason: "Polkit privilege authorization via D-Bus"
+    source: dbus-polkit
+
+  - id: dbus_polkit_high_value
+    score: 40
+    reason: "High-value polkit action (exec/systemd/network/packages)"
+    source: dbus-polkit
+    command:
+      contains_any:
+        - "org.freedesktop.policykit.exec"
+        - "org.freedesktop.systemd1.manage-units"
+        - "org.freedesktop.systemd1.manage-unit-files"
+        - "org.freedesktop.NetworkManager"
+        - "org.debian.apt"
+        - "org.freedesktop.packagekit"
+
+  - id: dbus_polkit_denied
+    score: 50
+    reason: "Polkit authorization denied — possible privilege escalation probe"
+    source: dbus-polkit
+    exit_code: 1

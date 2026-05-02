@@ -27,6 +27,9 @@ type agentConfig struct {
 	// Ebpf controls whether the eBPF subsystem is enabled.
 	// Defaults to true; set to false on kernels without BTF support.
 	Ebpf bool
+	// Dbus controls whether D-Bus polkit monitoring is enabled.
+	// Requires D-Bus >= 1.9 (Fedora 23+, RHEL 8+). Defaults to true.
+	Dbus bool
 }
 
 func defaultConfig() agentConfig {
@@ -44,6 +47,7 @@ func defaultConfig() agentConfig {
 		Debug:         false,
 		Wayland:       true,
 		Ebpf:          true,
+		Dbus:          true,
 	}
 }
 
@@ -122,6 +126,8 @@ func loadConfig(path string) (agentConfig, error) {
 			cfg.DisclaimerColor = v
 		case "ebpf":
 			cfg.Ebpf = v != "false" && v != "0" && v != "no"
+		case "dbus":
+			cfg.Dbus = v != "false" && v != "0" && v != "no"
 		default:
 			// Silently ignore unknown keys for backward compatibility.
 		}

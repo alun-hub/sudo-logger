@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.12
+Version:        1.20.13
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,18 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 02 2026 sudo-logger 1.20.13-1
+- feat(agent): add D-Bus polkit monitoring subsystem (dbus.go); agent now
+  connects to the system bus as a BecomeMonitor and captures polkit
+  CheckAuthorization calls, emitting dbus-polkit source events for each
+  authorization request (authorized/denied/challenge) to the log server
+- feat(selinux): allow sudo_shipper_t to connect to system_dbusd_t socket
+  and send D-Bus messages for the polkit monitor
+- feat(replay): add source/exit_code conditions to risk rules; D-Bus polkit
+  rules added (dbus_polkit, dbus_polkit_high_value, dbus_polkit_denied)
+- feat(replay/ui): teal card border and badge for dbus-polkit sessions;
+  authorized/denied/challenge result shown in info bar
+
 * Thu May 01 2026 sudo-logger 1.20.12-1
 - fix(agent/ebpf): reduce inotify scope-detection delay from 200ms/100ms to
   50ms, narrowing the window where early PTY writes are missed before the
