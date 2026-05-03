@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.21
+Version:        1.20.22
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -92,6 +92,14 @@ install -D -m 0644 man/sudo_logger_plugin.8 \
     %{buildroot}%{_mandir}/man8/sudo_logger_plugin.8
 
 %pre
+# Migrate legacy shipper.conf → agent.conf BEFORE RPM installs new files.
+# Must run in %pre so the file exists when RPM processes %config(noreplace),
+# causing RPM to keep the user's migrated config instead of overwriting it.
+if [ ! -f %{_sysconfdir}/sudo-logger/agent.conf ] && \
+   [ -f %{_sysconfdir}/sudo-logger/shipper.conf ]; then
+    cp -p %{_sysconfdir}/sudo-logger/shipper.conf \
+          %{_sysconfdir}/sudo-logger/agent.conf
+fi
 # Remove immutable flag from our binaries before RPM writes new files.
 # This is needed for upgrades — on first install the files don't exist yet
 # so the commands silently fail (|| true).
@@ -104,12 +112,6 @@ chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 # Add plugin line to sudo.conf if not already present
 if ! grep -q 'Plugin sudo_logger_plugin sudo_logger_plugin.so' /etc/sudo.conf 2>/dev/null; then
     echo 'Plugin sudo_logger_plugin sudo_logger_plugin.so' >> /etc/sudo.conf
-fi
-# Migrate legacy shipper.conf → agent.conf on first upgrade
-if [ ! -f %{_sysconfdir}/sudo-logger/agent.conf ] && \
-   [ -f %{_sysconfdir}/sudo-logger/shipper.conf ]; then
-    cp -p %{_sysconfdir}/sudo-logger/shipper.conf \
-          %{_sysconfdir}/sudo-logger/agent.conf
 fi
 # Load SELinux policy module
 semodule -i %{_datadir}/selinux/packages/sudo_logger.pp 2>/dev/null || true
@@ -170,6 +172,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 03 2026 sudo-logger 1.20.22-1
+- fix(spec): move shipper.conf → agent.conf migration from %%post to %%pre
+  so it runs before RPM installs new files; %%config(noreplace) then
+  preserves the migrated config instead of overwriting it with the example
+
 * Sat May 03 2026 sudo-logger 1.20.21-1
 - rename config file from shipper.conf to agent.conf; upgrade migrates
   existing shipper.conf automatically via %post cp; agent falls back to
