@@ -24,7 +24,9 @@ import (
 	"time"
 )
 
-var flagConfig = flag.String("config", "/etc/sudo-logger/shipper.conf", "Path to configuration file")
+const defaultConfigPath = "/etc/sudo-logger/agent.conf"
+
+var flagConfig = flag.String("config", defaultConfigPath, "Path to configuration file")
 
 // Package-level state shared across plugin.go, ebpf.go, cgroup.go, dbus.go.
 var (
@@ -42,8 +44,21 @@ var debugLog = func(format string, args ...any) {}
 func main() {
 	flag.Parse()
 
+	configPath := *flagConfig
+	// Backward compatibility: if agent.conf is missing but the legacy
+	// shipper.conf exists, use it automatically.
+	if configPath == defaultConfigPath {
+		if _, serr := os.Stat(configPath); os.IsNotExist(serr) {
+			legacy := "/etc/sudo-logger/shipper.conf"
+			if _, lerr := os.Stat(legacy); lerr == nil {
+				log.Printf("config: %s not found, using legacy %s (rename to agent.conf to silence this warning)", configPath, legacy)
+				configPath = legacy
+			}
+		}
+	}
+
 	var err error
-	cfg, err = loadConfig(*flagConfig)
+	cfg, err = loadConfig(configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}

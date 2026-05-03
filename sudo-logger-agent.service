@@ -9,7 +9,7 @@ Wants=network-online.target
 RefuseManualStop=yes
 
 [Service]
-ExecStart=/usr/bin/sudo-logger-agent -config /etc/sudo-logger/shipper.conf
+ExecStart=/usr/bin/sudo-logger-agent -config /etc/sudo-logger/agent.conf
 KillMode=process
 Restart=always
 RestartSec=2

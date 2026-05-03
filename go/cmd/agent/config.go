@@ -51,9 +51,9 @@ func defaultConfig() agentConfig {
 	}
 }
 
-// loadConfig parses a key = value config file compatible with shipper.conf.
-// Unknown keys are silently ignored (unlike the shipper which rejects them)
-// so the agent remains backward-compatible when deployed alongside older configs.
+// loadConfig parses a key = value config file (agent.conf or legacy shipper.conf).
+// Unknown keys are silently ignored so the agent remains backward-compatible
+// when reading older configs.
 func loadConfig(path string) (agentConfig, error) {
 	cfg := defaultConfig()
 

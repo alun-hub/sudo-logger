@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.20
+Version:        1.20.21
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -74,8 +74,8 @@ install -D -m 0644 sudo-logger-agent.service \
 install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
 
 # Default client config (LOGSERVER address)
-install -D -m 0640 shipper.conf \
-    %{buildroot}%{_sysconfdir}/sudo-logger/shipper.conf
+install -D -m 0640 agent.conf \
+    %{buildroot}%{_sysconfdir}/sudo-logger/agent.conf
 
 # Sudoers drop-in: preserve WAYLAND_DISPLAY so the proxy reaches GUI commands
 install -D -m 0440 sudo-logger-wayland.sudoers \
@@ -104,6 +104,12 @@ chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 # Add plugin line to sudo.conf if not already present
 if ! grep -q 'Plugin sudo_logger_plugin sudo_logger_plugin.so' /etc/sudo.conf 2>/dev/null; then
     echo 'Plugin sudo_logger_plugin sudo_logger_plugin.so' >> /etc/sudo.conf
+fi
+# Migrate legacy shipper.conf → agent.conf on first upgrade
+if [ ! -f %{_sysconfdir}/sudo-logger/agent.conf ] && \
+   [ -f %{_sysconfdir}/sudo-logger/shipper.conf ]; then
+    cp -p %{_sysconfdir}/sudo-logger/shipper.conf \
+          %{_sysconfdir}/sudo-logger/agent.conf
 fi
 # Load SELinux policy module
 semodule -i %{_datadir}/selinux/packages/sudo_logger.pp 2>/dev/null || true
@@ -156,7 +162,7 @@ fi
 %{_libexecdir}/sudo-logger/wayland-proxy
 %{_unitdir}/sudo-logger-agent.service
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
-%config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
+%config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/agent.conf
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 %config(noreplace) %attr(0440, root, root) %{_sysconfdir}/sudoers.d/sudo-logger-wayland
 %{_datadir}/selinux/packages/sudo_logger.pp
@@ -164,6 +170,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 03 2026 sudo-logger 1.20.21-1
+- rename config file from shipper.conf to agent.conf; upgrade migrates
+  existing shipper.conf automatically via %post cp; agent falls back to
+  shipper.conf with a deprecation warning if agent.conf is missing
+- document dbus option in agent.conf (disable polkit D-Bus logging with
+  dbus = false)
+
 * Sat May 03 2026 sudo-logger 1.20.20-1
 - fix(agent/ebpf): timestamp pkexec sessions using Go reception time instead
   of BPF ktime conversion; bpf_ktime_get_ns() (CLOCK_MONOTONIC) and
