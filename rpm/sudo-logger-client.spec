@@ -1,7 +1,7 @@
 Name:           sudo-logger-client
 Version:        1.20.26
 Release:        1%{?dist}
-Summary:        Sudo I/O plugin and shipper for remote session logging
+Summary:        Sudo I/O plugin and agent for remote session logging
 
 License:        MIT
 Source0:        sudo-logger-%{version}.tar.gz
@@ -61,7 +61,7 @@ install -D -m 0755 plugin/sudo_logger_plugin.so \
 install -D -m 0755 go/sudo-logger-agent \
     %{buildroot}%{_bindir}/sudo-logger-agent
 
-# Wayland proxy binary (used by shipper for GUI screen capture)
+# Wayland proxy binary (used by agent for GUI screen capture)
 install -d -m 0755 %{buildroot}%{_libexecdir}/sudo-logger
 install -D -m 0755 go/wayland-proxy \
     %{buildroot}%{_libexecdir}/sudo-logger/wayland-proxy
@@ -86,7 +86,7 @@ install -D -m 0644 selinux/sudo_logger.pp \
     %{buildroot}%{_datadir}/selinux/packages/sudo_logger.pp
 
 # Man pages
-install -D -m 0644 man/sudo-shipper.8 \
+install -D -m 0644 man/sudo-logger-agent.8 \
     %{buildroot}%{_mandir}/man8/sudo-logger-agent.8
 install -D -m 0644 man/sudo_logger_plugin.8 \
     %{buildroot}%{_mandir}/man8/sudo_logger_plugin.8

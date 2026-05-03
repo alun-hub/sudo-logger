@@ -50,14 +50,16 @@ User runs sudo
 ┌─────────────────────┐
 │  sudo C plugin      │  Loaded by sudo for every invocation.
 │  (plugin.so)        │  Records stdin/stdout/tty I/O.
-│                     │  Blocks sudo entirely if shipper is unavailable.
+│                     │  Blocks sudo entirely if agent is unavailable.
 │                     │  Freezes child process if ACKs go stale.
 └────────┬────────────┘
          │ Unix socket (/run/sudo-logger/plugin.sock)
          ▼
 ┌─────────────────────┐
-│  sudo-shipper       │  Local daemon running as root.
+│  sudo-logger-agent  │  Local daemon running as root.
 │  (Go)               │  Bridges plugin ↔ server.
+│                     │  eBPF: captures su/screen/tmux/pkexec sessions.
+│                     │  D-Bus: records polkit privilege escalations.
 │                     │  Tracks ACK state per session.
 │                     │  Responds instantly to ACK queries.
 │                     │  Sends heartbeats every 400 ms.
@@ -76,8 +78,8 @@ User runs sudo
   /var/log/sudoreplay/<user>/<host>_<timestamp>/session.cast
 ```
 
-When a user runs `sudo`, the plugin connects to the local shipper daemon.
-The shipper opens a TLS connection to the remote log server. If the server
+When a user runs `sudo`, the plugin connects to the local agent daemon.
+The agent opens a TLS connection to the remote log server. If the server
 is unreachable at this point, sudo is blocked entirely — the command never
 runs. If the connection succeeds, sudo proceeds and all I/O is streamed to
 the server in real time. The server acknowledges every chunk and replies to
@@ -97,22 +99,24 @@ Ctrl+C.
 A sudo I/O plugin loaded via `/etc/sudo.conf`. Implements the `sudo_plugin.h`
 API. Hooks into every sudo session to:
 
-- Connect to the local shipper over a Unix socket at session open
+- Connect to the local agent over a Unix socket at session open
 - Forward all terminal input (`log_ttyin`), output (`log_ttyout`), stdin,
   stdout, and stderr as framed chunks
 - Run a background monitor thread that polls ACK state every 150 ms and
   writes freeze/unfreeze banners to `/dev/tty` when ACK state changes
-- Block sudo entirely if the shipper/server is unreachable at startup
-- Terminate the active sudo session if the shipper socket drops mid-session
+- Block sudo entirely if the agent/server is unreachable at startup
+- Terminate the active sudo session if the agent socket drops mid-session
   (EPIPE/ECONNRESET/EOF detected by monitor thread → SIGTERM to sudo within 150 ms)
-- Actual process freezing is performed by the shipper via cgroup.freeze (see
+- Actual process freezing is performed by the agent via cgroup.freeze (see
   [Freeze mechanism](#freeze-mechanism))
 
-### Go shipper (`go/cmd/shipper/`)
+### Go agent (`go/cmd/agent/`)
 
-A systemd service running as root on each client machine. Acts as a proxy
-between the plugin (Unix socket) and the server (TLS). One goroutine per
-sudo session:
+A systemd service running as root on each client machine. Consolidates four
+subsystems that share session state:
+
+**Plugin handler** — bridges the sudo plugin (Unix socket) to the log server (TLS).
+One goroutine per sudo session:
 
 - Opens a TLS connection to the server for each new session
 - Forwards SESSION_START, CHUNK, SESSION_END messages
@@ -136,7 +140,25 @@ sudo session:
 - Enters linger mode after `sudo` exits if GUI processes remain in the session
   cgroup — holds the server connection open until all GUI processes exit, then
   sends SESSION_END
-- Reads all settings from `/etc/sudo-logger/shipper.conf` (key = value format)
+
+**eBPF subsystem** — three kernel tracepoints loaded at startup (requires
+`/sys/kernel/btf/vmlinux`; degrades gracefully to plugin-only mode if absent):
+
+- `sys_enter_write` — captures TTY I/O from tracked cgroups (su, screen, tmux, pkexec)
+- `sys_enter_execve` — detects sudo and pkexec invocations for divergence tracking
+- `sched_process_exit` — closes eBPF sessions when processes exit
+
+**D-Bus polkit monitor** — listens on the system bus for `CheckAuthorization`
+calls using `BecomeMonitor`. Records each privilege escalation (challenge or
+denied; auto-authorized calls are filtered) as a `dbus-polkit` session.
+Failed deliveries are retried for up to 10 minutes with 30-second intervals.
+
+**Divergence detector** — correlates eBPF sudo execve events with plugin
+`SESSION_START` messages. If no match arrives within 30 seconds, sends a
+`DIVERGENCE_ALERT` to the server which creates a visible `⚠ no plugin` session
+in the replay UI, indicating sudo ran without the plugin logging it.
+
+Reads all settings from `/etc/sudo-logger/agent.conf` (key = value format).
 
 ### Go log server (`go/cmd/server/`)
 
@@ -192,21 +214,21 @@ migrate-sessions \
 | **Sudo blocked at start** | If the log server is unreachable when sudo runs, the session is rejected before the command executes |
 | **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen within ~800 ms |
 | **Freeze cannot be escaped with `fg`** | Terminal sessions are frozen via `cgroup.freeze=1` — no job-control signals involved, so `fg` cannot escape the freeze |
-| **cgroup namespace isolation** | At session start the plugin calls `unshare(CLONE_NEWCGROUP)`: child processes see the session cgroup as their filesystem root for `/sys/fs/cgroup`. They cannot migrate to a parent cgroup to escape the freeze, even with `CAP_SYS_ADMIN`. The shipper remains in the host cgroup namespace and manages freeze/unfreeze normally. |
+| **cgroup namespace isolation** | At session start the plugin calls `unshare(CLONE_NEWCGROUP)`: child processes see the session cgroup as their filesystem root for `/sys/fs/cgroup`. They cannot migrate to a parent cgroup to escape the freeze, even with `CAP_SYS_ADMIN`. The agent remains in the host cgroup namespace and manages freeze/unfreeze normally. |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
 | **Asymmetric ACK signing (ed25519)** | Server signs each ACK with its ed25519 private key over `sessionID \|\| seq \|\| ts_ns`; a compromised client cannot forge ACKs for other sessions or other clients |
 | **ACK bound to session** | Session ID is included in every ACK signature — a valid ACK for session A cannot be replayed to unfreeze session B |
-| **Host field verified against TLS certificate** | Server rejects SESSION_START if the claimed `host` does not match the CN or DNS SANs of the presenting client certificate; a compromised shipper on host A cannot forge log entries attributed to host B |
-| **Plugin socket peer verification** | Shipper verifies via `SO_PEERCRED` that only root processes (sudo) may connect to the Unix socket, as a second layer beyond file permissions |
+| **Host field verified against TLS certificate** | Server rejects SESSION_START if the claimed `host` does not match the CN or DNS SANs of the presenting client certificate; a compromised agent on host A cannot forge log entries attributed to host B |
+| **Plugin socket peer verification** | Agent verifies via `SO_PEERCRED` that only root processes (sudo) may connect to the Unix socket, as a second layer beyond file permissions |
 | **Session ID collision resistance** | Session IDs include nanosecond precision and 4 cryptographically random bytes — simultaneous sessions on the same host are always distinct |
 | **Tamper-evident log storage** | Logs are written on a separate server that the sudo-running user has no access to |
 | **All I/O captured** | stdin, stdout, stderr, tty input and tty output are all recorded |
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
-| **SELinux domain confinement** | `sudo-shipper` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the shipper process can access |
-| **Active session terminated if shipper dies** | If the shipper socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the shipper restarts (~2 s). |
-| **Incomplete session detection** | If the shipper is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
+| **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
+| **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
+| **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 
 ---
 
@@ -214,10 +236,10 @@ migrate-sessions \
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
 - **Wayland screen capture**: GUI programs started with `sudo` on a Wayland desktop are screen-recorded via a transparent compositor proxy — no compositor patches required. The replay interface shows an image slideshow for GUI sessions. Multiple GUI applications can be recorded in sequence within the same session (e.g., run `konsole`, close it, then run `gvim`).
-- **Automatic secret redaction**: the shipper masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `shipper.conf`.
-- Active session terminated if shipper is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
-- Incomplete session detection — replay UI flags sessions where the shipper was killed mid-recording
-- SELinux policy for `sudo-shipper` (enforcing mode, ships in the `selinux/` directory)
+- **Automatic secret redaction**: the agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `agent.conf`.
+- Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
+- Incomplete session detection — replay UI flags sessions where the agent was killed mid-recording
+- SELinux policy for `sudo-logger-agent` (enforcing mode, ships in the `selinux/` directory)
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
 - Freeze within ~800 ms of network loss; automatic recovery when network returns
@@ -236,7 +258,7 @@ migrate-sessions \
 
 ## Limitations
 
-- **Recovery window limited by TCP retransmission timeout**: the shipper
+- **Recovery window limited by TCP retransmission timeout**: the agent
   keeps the TCP connection alive by writing heartbeats into the kernel send
   buffer even when the network is down. Recovery happens automatically when
   the network returns, as long as the OS retransmission timeout has not
@@ -266,12 +288,12 @@ migrate-sessions \
   `setup.sh` generates one client certificate shared across all machines.
   For stronger isolation, generate per-machine client certificates.
 
-- **Root on the client machine is not fully constrained**: the shipper runs as
+- **Root on the client machine is not fully constrained**: the agent runs as
   root and can be killed by a user with a `sudo bash` shell (`unconfined_t`
-  in Fedora's targeted SELinux policy). When the shipper dies, the plugin
+  in Fedora's targeted SELinux policy). When the agent dies, the plugin
   detects the socket drop (EPIPE/ECONNRESET) and terminates the active sudo
   session within 150 ms — the kill command itself is already in the log.
-  `Restart=always` brings the shipper back within 2 seconds; until then,
+  `Restart=always` brings the agent back within 2 seconds; until then,
   new sudo sessions are fail-closed. The server also writes an `INCOMPLETE`
   marker. This system is designed to deter and audit; a fully compromised
   root at the kernel level is out of scope for any software solution.
@@ -284,7 +306,7 @@ migrate-sessions \
 - **Escaped processes sharing bash's process group cannot be SIGSTOP'd**: if
   a process escapes the session cgroup and still shares bash's process group
   (pgid != own pid), SIGSTOP cannot be used — it would signal the entire
-  group including bash and trigger job control. The shipper instead attempts
+  group including bash and trigger job control. The agent instead attempts
   to reclaim such processes back into the session cgroup so that
   `cgroup.freeze` covers them. If reclaim fails (e.g. systemd placed them in
   a delegation-locked scope), they remain unfrozen. Processes that are their
@@ -412,15 +434,15 @@ scp logserver:/etc/sudo-logger/ack-verify.key /etc/sudo-logger/
 chmod 600 /etc/sudo-logger/client.key
 
 # Set the log server address
-vim /etc/sudo-logger/shipper.conf
+vim /etc/sudo-logger/agent.conf
 # Change: server = logserver.example.com:9876
 
 # Start service
-systemctl enable --now sudo-shipper
+systemctl enable --now sudo-logger-agent
 
 # Verify
-systemctl status sudo-shipper
-journalctl -u sudo-shipper -f
+systemctl status sudo-logger-agent
+journalctl -u sudo-logger-agent -f
 
 # Test
 sudo ls
@@ -436,9 +458,9 @@ On uninstall (`dnf remove`), this line is automatically removed.
 
 ## Configuration
 
-### Client: `/etc/sudo-logger/shipper.conf`
+### Client: `/etc/sudo-logger/agent.conf`
 
-All shipper settings live in a single `key = value` config file. Lines
+All agent settings live in a single `key = value` config file. Lines
 starting with `#` are comments. All keys are optional — the defaults below
 match a standard RPM installation.
 
@@ -463,6 +485,14 @@ server = logserver.example.com:9876
 # Path to the wayland-proxy helper binary.
 #proxy_bin     = /usr/libexec/sudo-logger/wayland-proxy
 
+# D-Bus polkit monitoring.
+# Records polkit CheckAuthorization calls (challenge/denied) as dbus-polkit sessions.
+#dbus          = true
+
+# eBPF session recording (requires kernel with BTF support).
+# Falls back to plugin-only mode on older kernels.
+#ebpf          = true
+
 # How long to keep a session frozen when the log server is unreachable
 # before abandoning it. Use Go duration syntax (e.g. 3m, 90s, 0 = never).
 #freeze_timeout = 3m
@@ -476,20 +506,20 @@ server = logserver.example.com:9876
 #debug         = false
 ```
 
-After editing, restart the shipper:
+After editing, restart the agent:
 
 ```bash
-sudo systemctl kill -s SIGTERM sudo-shipper.service
+sudo systemctl restart sudo-logger-agent.service
 ```
 
 #### Verbose debug logging
 
-By default, `sudo-shipper` only logs errors and key events (session start,
+By default, `sudo-logger-agent` only logs errors and key events (session start,
 freeze/unfreeze). To enable verbose logging, set `debug = true` in
-`shipper.conf` and restart the shipper. Then watch the full output:
+`agent.conf` and restart the agent. Then watch the full output:
 
 ```bash
-journalctl -u sudo-shipper -f
+journalctl -u sudo-logger-agent -f
 ```
 
 ### Server: `/etc/sudo-logger/server.conf`
@@ -525,7 +555,7 @@ ExecStart=/usr/bin/sudo-logserver \
 
 ### Secret redaction
 
-The shipper automatically redacts secrets from terminal streams (stdin, stdout, tty in/out) **before** they are sent to the log server. Redaction happens locally using a "Surgical Redactor" architecture that masks only the sensitive value while preserving key names and separators (e.g. `api_key=****************`) for context.
+The agent automatically redacts secrets from terminal streams (stdin, stdout, tty in/out) **before** they are sent to the log server. Redaction happens locally using a "Surgical Redactor" architecture that masks only the sensitive value while preserving key names and separators (e.g. `api_key=****************`) for context.
 
 **Built-in patterns** (always active):
 
@@ -546,7 +576,7 @@ The shipper automatically redacts secrets from terminal streams (stdin, stdout, 
 - **Metadata Protection:** Patterns are automatically applied to the `command` and `resolved_command` fields in session metadata, preventing secrets passed as CLI arguments from appearing in the replay header.
 - **Standalone Tokens:** For high-entropy tokens found outside assignments (e.g. a random AWS ID in a log), the first 4 characters are revealed (e.g. `AKIA****`) to allow administrators to distinguish between different keys.
 
-**Adding custom patterns** in `/etc/sudo-logger/shipper.conf`:
+**Adding custom patterns** in `/etc/sudo-logger/agent.conf`:
 
 ```ini
 # Redact 32-char hex tokens
@@ -617,19 +647,19 @@ After import, rules are served from the database and changes via the Settings UI
 |----------|---------|-------------|
 | `SHIPPER_SOCK_PATH` | `/run/sudo-logger/plugin.sock` | Unix socket path |
 | `ACK_TIMEOUT_SECS` | `2` | Seconds without ACK before plugin-side freeze |
-| `ACK_REFRESH_SECS` | `0` | Re-query shipper on every monitor poll (every 150 ms) |
-| `ACK_QUERY_TIMEOUT_MS` | `100` | Max wait for ACK_RESPONSE from shipper |
+| `ACK_REFRESH_SECS` | `0` | Re-query agent on every monitor poll (every 150 ms) |
+| `ACK_QUERY_TIMEOUT_MS` | `100` | Max wait for ACK_RESPONSE from agent |
 
-### Tunable constants in `go/cmd/shipper/main.go`
+### Tunable constants in `go/cmd/agent/main.go`
 
 | Constant | Default | Description |
 |----------|---------|-------------|
 | `ackLagLimit` | `5s` | Unacknowledged chunk age before reporting dead to plugin |
 | `hbInterval` | `400ms` | Heartbeat interval; freeze declared after 2 missed replies (800 ms) |
 
-### Shipper config keys
+### Agent config keys
 
-All of these go in `/etc/sudo-logger/shipper.conf`:
+All of these go in `/etc/sudo-logger/agent.conf`:
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -638,6 +668,8 @@ All of these go in `/etc/sudo-logger/shipper.conf`:
 | `wayland` | `true` | Enable Wayland screen capture for GUI sessions. Set to `false` to disable. |
 | `proxy_bin` | `/usr/libexec/sudo-logger/wayland-proxy` | Path to the wayland-proxy helper binary. |
 | `proxy_period` | `300` | Capture interval for Wayland frames in milliseconds. Lower values give smoother replay at the cost of more storage. |
+| `ebpf` | `true` | Enable eBPF session recording. Requires kernel BTF support (`/sys/kernel/btf/vmlinux`). Degrades gracefully to plugin-only mode on older kernels. |
+| `dbus` | `true` | Enable D-Bus polkit monitoring. Records polkit privilege escalations from any application. Requires D-Bus ≥ 1.9 (Fedora 23+, RHEL 8+). |
 | `mask_pattern` | — | Additional regex pattern to redact from terminal streams. Can be repeated for multiple patterns. See [Secret redaction](#secret-redaction). |
 
 ### Wayland screen capture
@@ -663,7 +695,7 @@ This is included in the sudoers snippet installed by the client RPM
 **Disable Wayland capture** (e.g. on headless or X11-only machines):
 
 ```ini
-# /etc/sudo-logger/shipper.conf
+# /etc/sudo-logger/agent.conf
 wayland = false
 ```
 
@@ -1215,9 +1247,16 @@ sudo-logger/
 ├── go/
 │   ├── go.mod
 │   ├── cmd/
-│   │   ├── shipper/
-│   │   │   ├── main.go          # Local shipper daemon
-│   │   │   └── cgroup.go        # Per-session cgroup management + freeze tracking
+│   │   ├── agent/
+│   │   │   ├── main.go          # Agent daemon (plugin handler + eBPF + D-Bus)
+│   │   │   ├── plugin.go        # Unix socket handler for sudo plugin
+│   │   │   ├── ebpf.go          # eBPF ring buffer consumer + pkexec tracking
+│   │   │   ├── dbus.go          # D-Bus polkit monitoring
+│   │   │   ├── divergence.go    # eBPF vs plugin divergence detection
+│   │   │   ├── cgroup.go        # Per-session cgroup management + freeze
+│   │   │   ├── config.go        # Config file parser
+│   │   │   └── bpf/
+│   │   │       └── recorder.c   # eBPF tracepoint hooks (compiled via bpf2go)
 │   │   ├── server/
 │   │   │   └── main.go          # Remote log server
 │   │   ├── replay-server/
@@ -1246,13 +1285,13 @@ sudo-logger/
 │   ├── sudo-logger-server.spec  # RPM spec for server package
 │   └── sudo-logger-replay.spec  # RPM spec for replay web interface
 ├── setup.sh                # PKI bootstrap script
-├── sudo-shipper.service         # systemd unit for shipper
+├── sudo-logger-agent.service    # systemd unit for agent
 ├── sudo-logserver.service       # systemd unit for server
 ├── sudo-logserver-restart.timer # daily 03:00 restart timer (leak mitigation)
 ├── sudo-logserver-restart.service # oneshot unit invoked by the timer
 ├── sudo-replay.service          # systemd unit for replay web interface
 ├── sudo-logserver.logrotate     # logrotate config for /var/log/sudoreplay
-├── shipper.conf            # Default client config
+├── agent.conf              # Default client config
 └── server.conf             # Default server config
 ```
 
@@ -1266,9 +1305,9 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
     -D_GNU_SOURCE \
     -o sudo_logger_plugin.so plugin.c
 
-# Build the shipper, server, and replay interface
+# Build the agent, server, and replay interface
 cd go
-go build -o sudo-shipper       ./cmd/shipper
+go build -o sudo-logger-agent  ./cmd/agent
 go build -o sudo-logserver     ./cmd/server
 go build -o sudo-replay-server ./cmd/replay-server
 
@@ -1288,20 +1327,20 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 
 | Type | Hex | Direction | Description |
 |------|-----|-----------|-------------|
-| `SESSION_START` | `0x01` | plugin → shipper → server | JSON: session_id, user, host, command, ts, pid, rows, cols |
-| `CHUNK` | `0x02` | plugin → shipper → server | Binary: seq(8) + ts_ns(8) + stream(1) + len(4) + data |
-| `SESSION_END` | `0x03` | plugin → shipper → server | Binary: final_seq(8) + exit_code(4) |
-| `ACK` | `0x04` | server → shipper | Binary: seq(8) + ts_ns(8) + sig(64) |
-| `ACK_QUERY` | `0x05` | plugin → shipper | Empty — plugin requests latest ACK state |
-| `ACK_RESPONSE` | `0x06` | shipper → plugin | Binary: last_ack_ts_ns(8) + last_seq(8) |
-| `SESSION_READY` | `0x07` | shipper → plugin | Empty — server connection established, sudo may proceed |
-| `SESSION_ERROR` | `0x08` | shipper → plugin | String error message — server unreachable, sudo blocked |
-| `HEARTBEAT` | `0x09` | shipper → server | Empty — keepalive probe sent every 400 ms |
-| `HEARTBEAT_ACK` | `0x0a` | server → shipper | Empty — immediate reply to HEARTBEAT |
-| `SERVER_READY` | `0x0b` | server → shipper | Empty — session accepted, shipper may send SESSION_READY |
-| `SESSION_DENIED` | `0x0c` | server → shipper → plugin | String block message — policy denial, sudo blocked |
-| `FREEZE_TIMEOUT` | `0x0d` | shipper → plugin | Empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
-| `SESSION_ABANDON` | `0x0e` | shipper → server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session as `freeze_timeout` |
+| `SESSION_START` | `0x01` | plugin → agent → server | JSON: session_id, user, host, command, ts, pid, rows, cols |
+| `CHUNK` | `0x02` | plugin → agent → server | Binary: seq(8) + ts_ns(8) + stream(1) + len(4) + data |
+| `SESSION_END` | `0x03` | plugin → agent → server | Binary: final_seq(8) + exit_code(4) |
+| `ACK` | `0x04` | server → agent | Binary: seq(8) + ts_ns(8) + sig(64) |
+| `ACK_QUERY` | `0x05` | plugin → agent | Empty — plugin requests latest ACK state |
+| `ACK_RESPONSE` | `0x06` | agent → plugin | Binary: last_ack_ts_ns(8) + last_seq(8) |
+| `SESSION_READY` | `0x07` | agent → plugin | Empty — server connection established, sudo may proceed |
+| `SESSION_ERROR` | `0x08` | agent → plugin | String error message — server unreachable, sudo blocked |
+| `HEARTBEAT` | `0x09` | agent → server | Empty — keepalive probe sent every 400 ms |
+| `HEARTBEAT_ACK` | `0x0a` | server → agent | Empty — immediate reply to HEARTBEAT |
+| `SERVER_READY` | `0x0b` | server → agent | Empty — session accepted, agent may send SESSION_READY |
+| `SESSION_DENIED` | `0x0c` | server → agent → plugin | String block message — policy denial, sudo blocked |
+| `FREEZE_TIMEOUT` | `0x0d` | agent → plugin | Empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
+| `SESSION_ABANDON` | `0x0e` | agent → server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session as `freeze_timeout` |
 
 **CHUNK stream types:**
 
@@ -1320,7 +1359,7 @@ The server signs each ACK with its ed25519 private key over:
 sessionID || 0x00 || seq_be(8 bytes) || ts_ns_be(8 bytes)
 ```
 The null byte separates the variable-length session ID from the fixed fields.
-The shipper verifies the signature using the server's public key before
+The agent verifies the signature using the server's public key before
 accepting the ACK.
 
 This design provides two layers of protection:
@@ -1338,17 +1377,17 @@ and cannot forge valid ACKs for any session on any client.
 ### ACK mechanism
 
 ```
-Server ──ACK/HEARTBEAT_ACK──► Shipper (ACK reader goroutine)
-                                    │ updateAck() / markAlive() / touchServerMsg()
-                                    │
-Shipper ──HEARTBEAT──────────► Server (heartbeat goroutine, every 400 ms)
-                                    │ markDead() if no reply within 800 ms
-                                    │
-Plugin ──ACK_QUERY──────────► Shipper (main loop, readAck())
-Plugin ◄──ACK_RESPONSE────── (ts=time.Now() if alive, ts=0 if dead)
+Server ──ACK/HEARTBEAT_ACK──► Agent (ACK reader goroutine)
+                                   │ updateAck() / markAlive() / touchServerMsg()
+                                   │
+Agent ──HEARTBEAT──────────► Server (heartbeat goroutine, every 400 ms)
+                                   │ markDead() if no reply within 800 ms
+                                   │
+Plugin ──ACK_QUERY──────────► Agent (main loop, readAck())
+Plugin ◄──ACK_RESPONSE─────── (ts=time.Now() if alive, ts=0 if dead)
 ```
 
-The shipper's `readAck()` returns:
+The agent's `readAck()` returns:
 
 1. `(0, lastSeq)` if `serverConnAlive == false` — connection declared dead
 2. `(0, lastSeq)` if unACKed chunks exist and debt age > `ackLagLimit` (5 s)
@@ -1374,10 +1413,10 @@ monitor thread (every 150 ms)
 ```
 
 The plugin does **not** send any signals. All process freezing is delegated
-to the shipper (cgroup-based), keeping the plugin simple and avoiding any
+to the agent (cgroup-based), keeping the plugin simple and avoiding any
 interaction with the kernel's job-control machinery.
 
-**Shipper-side (Go):** the shipper manages a per-session cgroup subtree and
+**Agent-side (Go):** the agent manages a per-session cgroup subtree and
 freezes processes at the cgroup level:
 
 ```
@@ -1385,7 +1424,7 @@ cgroup.freeze=1  →  all processes in the session cgroup are suspended
 ```
 
 For processes that escape the session cgroup (moved by GNOME/systemd to
-`app-*.scope`), the shipper tracks them and applies per-process SIGSTOP if
+`app-*.scope`), the agent tracks them and applies per-process SIGSTOP if
 safe. Safety is determined by process group membership:
 
 - **Shell processes and any escaped process with a TTY or shared process
@@ -1407,11 +1446,11 @@ out of the session cgroup and ended up backgrounded (visible as
 **Freeze-timeout (permanent hang prevention):** if the server connection
 cannot be recovered — because the OS TCP retransmission timer expired and
 the kernel closed the socket — the session would remain frozen permanently
-until killed from another terminal. The shipper's freeze-timeout watchdog
+until killed from another terminal. The agent's freeze-timeout watchdog
 prevents this:
 
 ```
-Shipper detects server dead (markDead())
+Agent detects server dead (markDead())
     │
     └─ frozenSince = time.Now()
 
@@ -1424,25 +1463,25 @@ Watchdog goroutine (checks every 10 s)
            └── close plugin connection → plugin detects EOF → kill(-pgrp, SIGTERM)
 ```
 
-The plugin distinguishes `FREEZE_TIMEOUT` from an ordinary shipper death
+The plugin distinguishes `FREEZE_TIMEOUT` from an ordinary agent death
 and prints a different banner:
 
 ```
 [ SUDO-LOGGER: gave up waiting for log server — session terminated ]
 ```
 
-The `-freeze-timeout` flag (default `3m`) controls how long the shipper
+The `-freeze-timeout` flag (default `3m`) controls how long the agent
 waits before giving up. Set to `0` to disable (not recommended — sessions
 may hang indefinitely if the log server is permanently unreachable).
 
 The freeze-timeout is also the reason the plugin calls
 `unfreeze_session_cgroup()` itself on receiving `FREEZE_TIMEOUT`: even if
-the shipper is already dead, the plugin ensures the cgroup is unfrozen so
+the agent is already dead, the plugin ensures the cgroup is unfrozen so
 the SIGTERM actually reaches the shell.
 
-**Distinguishing freeze-timeout from shipper-killed in the replay UI:**
+**Distinguishing freeze-timeout from agent-killed in the replay UI:**
 
-When the freeze-timeout fires, the shipper is still alive and knows why
+When the freeze-timeout fires, the agent is still alive and knows why
 the session ended. After terminating the plugin it opens a **new** TLS
 connection to the server and sends `SESSION_ABANDON (0x0e)` with the
 session ID:
@@ -1466,7 +1505,7 @@ Freeze-timeout fires
 This covers the common case — a temporary outage where the server came
 back before or shortly after the timeout fired. For permanent outages
 where the server never becomes reachable, the session remains as generic
-INCOMPLETE (the shipper cannot contact an unreachable server).
+INCOMPLETE (the agent cannot contact an unreachable server).
 
 | Termination cause | Badge | Risk score | Server sees |
 |-------------------|-------|-----------|-------------|
@@ -1513,7 +1552,7 @@ packages are versioned independently; only bump the affected package.
 ## Container deployment (Podman)
 
 The repository includes a `Dockerfile` and `docker-compose.yaml` for running
-the log server and web replay interface as containers. The plugin and shipper
+the log server and web replay interface as containers. The plugin and agent
 still run natively on client machines — only the server side is containerised.
 
 Containers run as the distroless nonroot user (UID 65532). Because rootless
@@ -1688,7 +1727,7 @@ kubectl apply -k k8s/
 # 4. Get the external IP
 kubectl get svc -n sudo-logger sudo-logserver
 
-# 5. Update shipper.conf on all clients
+# 5. Update agent.conf on all clients
 # LOGSERVER=<EXTERNAL-IP>:9876
 ```
 
@@ -1820,7 +1859,7 @@ migrate-sessions \
 1 024 caps at ~250 sessions. Add `LimitNOFILE=65536` to the server service
 file to raise this to ~15 000+ sessions.
 
-**Known resource leak:** a shipper that is killed without sending
+**Known resource leak:** an agent that is killed without sending
 `SESSION_END` and without the OS sending a TCP RST (e.g. VM hard-reset
 with network down) leaves 3 goroutines and 2 FDs open on the server
 (TLS socket + open session.cast).
@@ -1840,11 +1879,11 @@ grep Plugin /etc/sudo.conf
 # Expected: Plugin sudo_logger_plugin sudo_logger_plugin.so
 ```
 
-### `sudo-logger: cannot connect to shipper daemon`
+### `sudo-logger: cannot connect to agent daemon`
 
 ```bash
-systemctl status sudo-shipper
-journalctl -u sudo-shipper -n 50
+systemctl status sudo-logger-agent
+journalctl -u sudo-logger-agent -n 50
 ls /run/sudo-logger/plugin.sock
 ```
 
@@ -1890,10 +1929,10 @@ also press Ctrl+C to kill the frozen session immediately.
 
 ### Terminal freezes immediately on session start
 
-The shipper cannot reach the server, or the `ack-verify.key` on the client
+The agent cannot reach the server, or the `ack-verify.key` on the client
 does not match the `ack-sign.key` on the server:
 ```bash
-journalctl -u sudo-shipper -n 50
+journalctl -u sudo-logger-agent -n 50
 # On the server:
 journalctl -u sudo-logserver -n 50
 ```

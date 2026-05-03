@@ -11,7 +11,7 @@ sudo-logger is a mandatory sudo session recording system. Every sudo invocation 
 │  Client machine (each host)                                      │
 │                                                                  │
 │  ┌─────────────────┐   Unix socket    ┌───────────────────────┐  │
-│  │  sudo + plugin  │ ──────────────► │  shipper daemon       │  │
+│  │  sudo + plugin  │ ──────────────► │  agent daemon         │  │
 │  │  (C plugin)     │ ◄────────────── │  (Go, runs as root)   │  │
 │  └─────────────────┘                 └──────────┬────────────┘  │
 │                                                 │ TLS TCP :9876  │
@@ -33,7 +33,7 @@ sudo-logger is a mandatory sudo session recording system. Every sudo invocation 
 | Component | Language | Runs on | Purpose |
 |-----------|----------|---------|---------|
 | `plugin/plugin.c` | C | Every client (loaded by sudo) | Intercepts sudo, streams I/O, enforces freeze |
-| `go/cmd/shipper` | Go | Every client (systemd service) | Bridges plugin ↔ log server via TLS |
+| `go/cmd/agent` | Go | Every client (systemd service) | Bridges plugin ↔ log server; eBPF session recording; pkexec/polkit tracking; divergence detection |
 | `go/cmd/server` | Go | Central server | Receives sessions, writes .cast files, signs ACKs, enforces block policy |
 | `go/cmd/replay-server` | Go | Central server | Browser GUI for playback, reporting, configuration |
 
@@ -46,10 +46,10 @@ sudo-logger is a mandatory sudo session recording system. Every sudo invocation 
 ```
 plugin_open()
   │
-  ├─ connect to shipper (Unix socket /run/sudo-logger/plugin.sock)
+  ├─ connect to agent (Unix socket /run/sudo-logger/plugin.sock)
   ├─ send SESSION_START (JSON: user, host, command, pid, terminal size…)
   │
-  │             shipper
+  │             agent
   │               ├─ create session cgroup, move sudo PID into it
   │               ├─ connect to log server (TLS TCP :9876)
   │               ├─ forward SESSION_START to server
@@ -69,12 +69,12 @@ plugin_open()
      (or SESSION_DENIED / SESSION_ERROR → sudo blocked, message shown)
 ```
 
-sudo is blocked at the prompt until the shipper responds. If the log server is unreachable or denies the session, sudo never executes the command.
+sudo is blocked at the prompt until the agent responds. If the log server is unreachable or denies the session, sudo never executes the command.
 
 ### 2. Recording (concurrent)
 
 ```
-plugin (main thread)           shipper                    log server
+plugin (main thread)           agent                    log server
   │                              │                           │
   ├─ log_ttyin/ttyout()          │                           │
   │  → send CHUNK frames ───────►│                           │
@@ -85,26 +85,26 @@ plugin (main thread)           shipper                    log server
   │◄── ACK_RESPONSE ─────────────┤ (plugin polls every 150ms)│
   │    (cached, no round-trip)   │                           │
   │                              │◄──── HEARTBEAT_ACK ───────┤
-  │                              │  (shipper sends HB/400ms) │
+  │                              │  (agent sends HB/400ms) │
 ```
 
-The plugin never waits for the server. It polls the shipper for the latest ACK timestamp via ACK_QUERY/ACK_RESPONSE — the shipper answers from its in-memory cache, making the round-trip sub-millisecond.
+The plugin never waits for the server. It polls the agent for the latest ACK timestamp via ACK_QUERY/ACK_RESPONSE — the agent answers from its in-memory cache, making the round-trip sub-millisecond.
 
 ### 3. Freeze (network loss)
 
-If the shipper stops receiving ACKs or heartbeat replies for ~800 ms, it calls `cgroup.freeze` on the session cgroup. This suspends all child processes at the kernel level — they cannot be unfrozen with `fg`, `kill -CONT`, or by escaping to another cgroup (see [Cgroup isolation](#cgroup-isolation) below). When the connection recovers, the shipper unfreezes and the session continues transparently.
+If the agent stops receiving ACKs or heartbeat replies for ~800 ms, it calls `cgroup.freeze` on the session cgroup. This suspends all child processes at the kernel level — they cannot be unfrozen with `fg`, `kill -CONT`, or by escaping to another cgroup (see [Cgroup isolation](#cgroup-isolation) below). When the connection recovers, the agent unfreezes and the session continues transparently.
 
 ### 4. Freeze-timeout and network-outage detection
 
-If the network does not recover, the shipper's freeze-timeout watchdog (default 5 min, `-freeze-timeout`) terminates the session. Two out-of-band messages allow the server to distinguish a **network outage** from a **shipper kill**:
+If the network does not recover, the agent's freeze-timeout watchdog (default 5 min, `-freeze-timeout`) terminates the session. Two out-of-band messages allow the server to distinguish a **network outage** from an **agent kill**:
 
 | Time | Actor | Event |
 |------|-------|-------|
 | t = 0 | — | Network drops |
-| t ≈ 800 ms | Shipper | `markDead()` fires; cgroup frozen; shipper opens a **new TLS connection** and sends **SESSION_FREEZING (0x0f)** with the session ID |
+| t ≈ 800 ms | Agent | `markDead()` fires; cgroup frozen; agent opens a **new TLS connection** and sends **SESSION_FREEZING (0x0f)** with the session ID |
 | t ≈ 800 ms | Server | Receives SESSION_FREEZING; sets `freezeCandidate = true` on the active session |
 | t ≈ 3.4 min | Server | TCP ETIMEDOUT — connection drops; because `freezeCandidate` is set, calls `MarkNetworkOutage()` instead of `MarkIncomplete()` |
-| t = 5 min | Shipper | Freeze-timeout fires; unfreeze cgroup; send `MsgFreezeTimeout` to plugin; send **SESSION_ABANDON (0x0e)** as fallback (succeeds only if network has recovered) |
+| t = 5 min | Agent | Freeze-timeout fires; unfreeze cgroup; send `MsgFreezeTimeout` to plugin; send **SESSION_ABANDON (0x0e)** as fallback (succeeds only if network has recovered) |
 
 **Why two messages?**
 SESSION_FREEZING is sent at t≈800 ms when the server is still likely reachable over TCP. SESSION_ABANDON is sent at t=5 min after the watchdog fires — by then the network is often still down, making it unreliable as the sole signal. SESSION_ABANDON is kept as a fallback for sessions where SESSION_FREEZING was lost.
@@ -126,7 +126,7 @@ To handle 500+ concurrent sessions and massive I/O bursts (e.g., `cat` of multi-
 plugin_close()
   ├─ send SESSION_END (final_seq, exit_code)
   │
-  shipper
+  agent
   ├─ forward SESSION_END to server
   ├─ wait for cgroup to empty (all child PIDs exit)
   └─ remove session cgroup
@@ -151,21 +151,21 @@ Defined in `go/internal/protocol/protocol.go` (Go) and inline in `plugin/plugin.
 
 | Hex | Name | Direction | Payload |
 |-----|------|-----------|---------|
-| `0x01` | `SESSION_START` | plugin→shipper→server | JSON (SessionStart) |
-| `0x02` | `CHUNK` | plugin→shipper→server | seq(8)+ts_ns(8)+stream(1)+len(4)+data |
-| `0x03` | `SESSION_END` | plugin→shipper→server | final_seq(8)+exit_code(4) |
-| `0x04` | `ACK` | server→shipper | seq(8)+ts_ns(8)+sig(64) — ed25519 signed |
-| `0x05` | `ACK_QUERY` | plugin→shipper | empty |
-| `0x06` | `ACK_RESPONSE` | shipper→plugin | last_ts_ns(8)+last_seq(8) |
-| `0x07` | `SESSION_READY` | shipper→plugin | empty — sudo may proceed |
-| `0x08` | `SESSION_ERROR` | shipper→plugin | string — infrastructure failure, sudo blocked |
-| `0x09` | `HEARTBEAT` | shipper→server | empty — sent every 400 ms |
-| `0x0a` | `HEARTBEAT_ACK` | server→shipper | empty |
-| `0x0b` | `SERVER_READY` | server→shipper | empty — session accepted |
-| `0x0c` | `SESSION_DENIED` | server→shipper, shipper→plugin | string block message — policy denial |
-| `0x0d` | `FREEZE_TIMEOUT` | shipper→plugin | empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
-| `0x0e` | `SESSION_ABANDON` | shipper→server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session `freeze_timeout` |
-| `0x0f` | `SESSION_FREEZING` | shipper→server (new conn) | UTF-8 session_id — session is being frozen due to network loss |
+| `0x01` | `SESSION_START` | plugin→agent→server | JSON (SessionStart) |
+| `0x02` | `CHUNK` | plugin→agent→server | seq(8)+ts_ns(8)+stream(1)+len(4)+data |
+| `0x03` | `SESSION_END` | plugin→agent→server | final_seq(8)+exit_code(4) |
+| `0x04` | `ACK` | server→agent | seq(8)+ts_ns(8)+sig(64) — ed25519 signed |
+| `0x05` | `ACK_QUERY` | plugin→agent | empty |
+| `0x06` | `ACK_RESPONSE` | agent→plugin | last_ts_ns(8)+last_seq(8) |
+| `0x07` | `SESSION_READY` | agent→plugin | empty — sudo may proceed |
+| `0x08` | `SESSION_ERROR` | agent→plugin | string — infrastructure failure, sudo blocked |
+| `0x09` | `HEARTBEAT` | agent→server | empty — sent every 400 ms |
+| `0x0a` | `HEARTBEAT_ACK` | server→agent | empty |
+| `0x0b` | `SERVER_READY` | server→agent | empty — session accepted |
+| `0x0c` | `SESSION_DENIED` | server→agent, agent→plugin | string block message — policy denial |
+| `0x0d` | `FREEZE_TIMEOUT` | agent→plugin | empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
+| `0x0e` | `SESSION_ABANDON` | agent→server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session `freeze_timeout` |
+| `0x0f` | `SESSION_FREEZING` | agent→server (new conn) | UTF-8 session_id — session is being frozen due to network loss |
 
 CHUNK stream types: `0x00` stdin, `0x01` stdout, `0x02` stderr, `0x03` tty-in, `0x04` tty-out.
 
@@ -173,25 +173,25 @@ CHUNK stream types: `0x00` stdin, `0x01` stdout, `0x02` stderr, `0x03` tty-in, `
 
 ## ACK signing
 
-The server signs every ACK with an **ed25519 private key** (`/etc/sudo-logger/ack-sign.key`). The shipper verifies signatures using the corresponding public key (`/etc/sudo-logger/ack-verify.key`). The signed message is:
+The server signs every ACK with an **ed25519 private key** (`/etc/sudo-logger/ack-sign.key`). The agent verifies signatures using the corresponding public key (`/etc/sudo-logger/ack-verify.key`). The signed message is:
 
 ```
 sessionID || 0x00 || seq_be(8) || ts_ns_be(8)
 ```
 
-The session ID in the signature prevents a valid ACK from one session being replayed to satisfy the freeze check of another. A compromised shipper cannot forge ACKs for sessions it does not own.
+The session ID in the signature prevents a valid ACK from one session being replayed to satisfy the freeze check of another. A compromised agent cannot forge ACKs for sessions it does not own.
 
 ---
 
 ## Cgroup isolation
 
-The shipper places each sudo session in a dedicated cgroup subtree under the shipper's delegated cgroup. This enables two things:
+The agent places each sudo session in a dedicated cgroup subtree under the agent's delegated cgroup. This enables two things:
 
 1. **Atomic freeze** — `echo 1 > cgroup.freeze` suspends every process in the subtree simultaneously, including GUI applications that re-parent to init.
 
 2. **Escape prevention** — the plugin calls `unshare(CLONE_NEWCGROUP)` immediately after receiving `SESSION_READY`. All child processes see the session cgroup as the root of the cgroup hierarchy. Writing a PID to `/sys/fs/cgroup/../../escape/cgroup.procs` resolves only within the private subtree and fails — even with `CAP_SYS_ADMIN`.
 
-For processes that escape to foreign cgroups before the namespace is established (e.g. GNOME or systemd moving a GUI process to an app scope), the shipper tracks them via `/proc/<pid>/cgroup` polling and sends `SIGSTOP`/`SIGCONT` as a fallback.
+For processes that escape to foreign cgroups before the namespace is established (e.g. GNOME or systemd moving a GUI process to an app scope), the agent tracks them via `/proc/<pid>/cgroup` polling and sends `SIGSTOP`/`SIGCONT` as a fallback.
 
 ---
 
@@ -314,7 +314,7 @@ log server (background goroutine)
 
 next sudo attempt by blocked user
   └─ log server sends SESSION_DENIED during startup handshake
-       └─ shipper forwards SESSION_DENIED to plugin
+       └─ agent forwards SESSION_DENIED to plugin
             └─ plugin shows red banner + configured message
                  └─ sudo exits without running the command
 ```
@@ -330,19 +330,19 @@ Blocking is per-user and optionally per-host. An empty host list means "all host
 | File | Used by | Hot-reloaded |
 |------|---------|--------------|
 | `/etc/sudo-logger/server.conf` | log server (systemd env) | No (restart required) |
-| `/etc/sudo-logger/shipper.conf` | shipper (systemd env) | No |
+| `/etc/sudo-logger/agent.conf` | agent (systemd env) | No |
 | `/etc/sudo-logger/risk-rules.yaml` | replay server | On each request |
 | `/etc/sudo-logger/siem.yaml` | replay server | Every 30 s |
 | `/etc/sudo-logger/blocked-users.yaml` | log server, replay server | Every 30 s |
 | `/etc/sudo-logger/ack-sign.key` | log server | No |
-| `/etc/sudo-logger/ack-verify.key` | shipper | No |
+| `/etc/sudo-logger/ack-verify.key` | agent | No |
 | `/etc/sudo-logger/server.crt/.key` | log server | No |
-| `/etc/sudo-logger/client.crt/.key` | shipper | No |
-| `/etc/sudo-logger/ca.crt` | log server, shipper | No |
+| `/etc/sudo-logger/client.crt/.key` | agent | No |
+| `/etc/sudo-logger/ca.crt` | log server, agent | No |
 
 ### Distributed storage mode (Kubernetes)
 
-File-based config for SIEM and blocked-users is replaced by PostgreSQL tables (`sudo_config`, `sudo_blocked_users`). TLS certificates are managed as Kubernetes Secrets and mounted into pods. Only the shipper and plugin config files remain on disk.
+File-based config for SIEM and blocked-users is replaced by PostgreSQL tables (`sudo_config`, `sudo_blocked_users`). TLS certificates are managed as Kubernetes Secrets and mounted into pods. Only the agent and plugin config files remain on disk.
 
 ---
 
@@ -359,7 +359,7 @@ When `-health-listen=:9877` is set, the log server starts a plain HTTP listener 
 
 Both the log server and the replay server handle `SIGTERM` / `SIGINT` gracefully:
 
-- **Log server:** Closes the TLS accept loop so no new shipper connections are accepted. Active sessions have up to 30 seconds to send `SESSION_END`. Sessions still open after the drain window are marked `INCOMPLETE`.
+- **Log server:** Closes the TLS accept loop so no new agent connections are accepted. Active sessions have up to 30 seconds to send `SESSION_END`. Sessions still open after the drain window are marked `INCOMPLETE`.
 - **Replay server:** Calls `http.Server.Shutdown` with a 30-second timeout so in-flight HTTP requests complete before the process exits.
 
 In Kubernetes set `terminationGracePeriodSeconds: 40` on the pod spec to give the 30-second drain window a 10-second buffer before the container is forcibly killed.
@@ -370,14 +370,14 @@ In Kubernetes set `terminationGracePeriodSeconds: 40` on the pod spec to give th
 
 | Property | Mechanism |
 |----------|-----------|
-| Sudo blocked if server unreachable | Plugin waits for `SESSION_READY`; times out and returns -1 if shipper is down |
-| Session frozen on network loss | Shipper calls `cgroup.freeze` within ~800 ms of last ACK/heartbeat |
-| Network outage vs shipper kill | SESSION_FREEZING sent at t≈800 ms; server marks session `network_outage` instead of generic `incomplete` |
+| Sudo blocked if server unreachable | Plugin waits for `SESSION_READY`; times out and returns -1 if agent is down |
+| Session frozen on network loss | Agent calls `cgroup.freeze` within ~800 ms of last ACK/heartbeat |
+| Network outage vs agent kill | SESSION_FREEZING sent at t≈800 ms; server marks session `network_outage` instead of generic `incomplete` |
 | Freeze cannot be escaped by the user | `unshare(CLONE_NEWCGROUP)` in plugin at session start; subtree appears as root to all children |
 | ACKs cannot be forged | ed25519 signature over `sessionID‖seq‖ts_ns`; private key stays on log server |
 | ACKs cannot be replayed across sessions | Session ID is included in every signed message |
 | Host identity verified | Log server checks that claimed `host` in SESSION_START matches the TLS client certificate CN/SAN |
-| Plugin socket access restricted | Shipper verifies `SO_PEERCRED`; only root (sudo) can connect |
+| Plugin socket access restricted | Agent verifies `SO_PEERCRED`; only root (sudo) can connect |
 | Block policy enforced centrally | Policy check happens at the log server during startup handshake, before sudo forks the child |
 | SIEM cert upload blocked in K8s | `/api/siem-cert` returns 501 in distributed mode; use Kubernetes Secrets instead |
 | Single SIEM forwarder in multi-replica | PostgreSQL advisory lock ensures exactly one replica forwards events |
