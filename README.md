@@ -253,6 +253,15 @@ migrate-sessions \
   may not be acknowledged. The session recording up to that point is intact
   on the server.
 
+- **Interactive pkexec sessions lost when server is unreachable**: `pkexec`
+  sessions with terminal I/O (e.g. `pkexec bash`) cannot be buffered if the
+  log server is down at session start. The kernel BPF map must be updated
+  immediately to capture I/O, and the cgroup scope is gone by the time the
+  server comes back — there is no way to replay already-streamed events.
+  Background pkexec commands (no TTY, e.g. `pkexec id`) and D-Bus polkit
+  events are buffered in memory for up to 10 minutes and delivered
+  automatically on reconnect.
+
 - **One client certificate for all clients** (default setup): the included
   `setup.sh` generates one client certificate shared across all machines.
   For stronger isolation, generate per-machine client certificates.

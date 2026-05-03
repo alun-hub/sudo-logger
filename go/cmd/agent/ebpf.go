@@ -523,7 +523,12 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 			}
 			s.retryMu.Unlock()
 		} else {
-			log.Printf("ebpf: pkexec [%s]: connect: %v", sessID, err)
+			// Known limitation: interactive pkexec sessions (hasIO=true) cannot
+			// be buffered when the log server is unreachable.  Buffering would
+			// require writing I/O chunks to a local file and replaying them on
+			// reconnect — the cgroup scope is gone by the time the server comes
+			// back, so we cannot re-register it in the BPF map after the fact.
+			log.Printf("ebpf: pkexec [%s]: connect: %v (interactive session lost — server unreachable)", sessID, err)
 		}
 		return
 	}
