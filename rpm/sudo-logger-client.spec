@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.23
+Version:        1.20.24
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -172,6 +172,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 03 2026 sudo-logger 1.20.24-1
+- fix(server): create session record for divergence alerts so they appear
+  in the replay UI with red "⚠ no plugin" badge and a warning message
+  in the output panel when the Plugin line is missing from sudo.conf
+
 * Sat May 03 2026 sudo-logger 1.20.23-1
 - fix(agent/ebpf): capture pkexec target command in BPF at tracepoint time
   instead of reading /proc/<pid>/cmdline from Go; the process can die

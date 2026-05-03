@@ -36,6 +36,9 @@ import (
 // Maximum 64 characters. Rejects empty strings, dots-only, and path separators.
 var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 
+// nonIDChar matches characters not allowed in a session ID.
+var nonIDChar = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+
 // validSessionID is a looser check for the full session ID, which includes
 // host, user, PID, nanosecond timestamp and a random hex suffix — and is
 // therefore longer than a single name component (up to 255 chars).
@@ -584,6 +587,28 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			log.Printf("SECURITY ALERT: DIVERGENCE_ALERT from %s — %s ran %q on %s at %s but plugin did not log it",
 				remote, alert.User, alert.Comm, alert.Host,
 				time.Unix(alert.Ts, 0).Format(time.RFC3339))
+			// Create a session record so the alert appears in the replay UI.
+			safeUser := nonIDChar.ReplaceAllLiteralString(alert.User, "-")
+			safeHost := nonIDChar.ReplaceAllLiteralString(alert.Host, "-")
+			synthID := fmt.Sprintf("div.%s.%s.%d", safeHost, safeUser, alert.Ts)
+			if len(synthID) > 255 {
+				synthID = synthID[:255]
+			}
+			synthSess, sErr := srv.openSession(&protocol.SessionStart{
+				SessionID:        synthID,
+				User:             alert.User,
+				Host:             alert.Host,
+				Command:          alert.Comm,
+				Ts:               alert.Ts,
+				Source:           "plugin",
+				HasIO:            false,
+				DivergenceStatus: "missing_plugin",
+			})
+			if sErr != nil {
+				log.Printf("DIVERGENCE_ALERT: store synthetic session: %v", sErr)
+			} else {
+				srv.closeSession(synthSess)
+			}
 			return
 
 		default:

@@ -1956,6 +1956,21 @@ async function selectSession(tsid, initialSeek = 0) {
   const playerEl = document.querySelector('.player');
   playerEl.classList.remove('split-view');
 
+  // Divergence alert: sudo ran but plugin never logged it.
+  if (sess && sess.divergence_status === 'missing_plugin') {
+    hideScreenPlayer();
+    term.write('\r\n');
+    term.write('  \x1b[1;31m⚠  SUDO RAN WITHOUT PLUGIN LOGGING\x1b[0m\r\n');
+    term.write('\r\n');
+    term.write('  \x1b[2mcommand:\x1b[0m  ' + (sess.command || 'sudo') + '\r\n');
+    term.write('  \x1b[2muser:\x1b[0m     ' + (sess.user || '?') + '\r\n');
+    term.write('  \x1b[2mhost:\x1b[0m     ' + (sess.host || '?') + '\r\n');
+    term.write('\r\n');
+    term.write('  \x1b[2mThe sudo plugin did not log this session.\x1b[0m\r\n');
+    term.write('  \x1b[2mCheck that the Plugin line is present in /etc/sudo.conf.\x1b[0m\r\n');
+    return;
+  }
+
   // Event-only sessions (pkexec background or D-Bus polkit): show structured event info.
   if (sess && ((sess.source === 'ebpf-pkexec' && !sess.has_io) || sess.source === 'dbus-polkit')) {
     hideScreenPlayer();
