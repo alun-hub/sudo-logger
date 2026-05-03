@@ -189,6 +189,26 @@
     .sc-div.confirmed  { color: #00c766; border-color: rgba(0,199,102,0.35); background: rgba(0,199,102,0.07); }
     .sc-div.unwitnessed { color: #e67e00; border-color: rgba(230,126,0,0.35); background: rgba(230,126,0,0.07); }
     .sc-div.missing-plugin { color: var(--red); border-color: rgba(255,95,109,0.45); background: rgba(255,95,109,0.10); font-weight: 600; }
+    /* polkit session group */
+    .session-group { border-bottom: 1px solid var(--border); }
+    .sg-header { padding: 10px 14px; cursor: pointer; display: flex; flex-direction: column;
+      gap: 4px; transition: background 0.1s; border-left: 2px solid #17a2b8; }
+    .sg-header:hover { background: var(--card-hover); }
+    .sg-top { display: flex; align-items: center; gap: 7px; }
+    .sg-caller { font-size: 13px; font-weight: 600; color: var(--text); font-family: var(--font);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sg-count { font-size: 11px; padding: 1px 7px; border-radius: 10px; flex-shrink: 0;
+      color: #17a2b8; border: 1px solid rgba(23,162,184,0.35); background: rgba(23,162,184,0.07);
+      font-family: var(--font-ui); }
+    .sg-toggle { margin-left: auto; font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+    .sg-meta { display: flex; align-items: center; gap: 6px; }
+    .sg-user { font-size: 11px; color: var(--text-sub); font-family: var(--font-ui); }
+    .sg-date { font-size: 11px; color: var(--text-sub); font-family: var(--font-ui); }
+    .sg-children { display: none; }
+    .sg-children.open { display: block; }
+    .sg-children .session-card { border-left: none; padding-left: 28px;
+      border-top: 1px solid var(--border); border-bottom: none; }
+    .sg-children .session-card:last-child { border-bottom: none; }
     /* source / event-type badges */
     .sc-source { font-size: 11px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
       font-family: var(--font-ui); border: 1px solid;
@@ -1525,6 +1545,7 @@ let totalDuration    = 0;
 let currentTSID      = null;
 let currentSession   = null;
 let autoplay         = true;
+const expandedGroups = new Set(); // group keys of expanded polkit session groups
 let liveRefreshTimer = null;
 
 const fetchState = {
@@ -1654,6 +1675,129 @@ async function fetchSessions(reset = true) {
 
 // ── Session list render ───────────────────────────────────────────────────────
 
+const RISK_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
+
+function worstRisk(sessions) {
+  let best = 0, level = '';
+  for (const s of sessions) {
+    const info = polkitActionInfo(s.command);
+    const r = info ? (RISK_ORDER[info.risk] || 0) : 0;
+    if (r > best) { best = r; level = info.risk; }
+  }
+  return level;
+}
+
+// Group consecutive dbus-polkit sessions with the same caller_process and user
+// that start within GROUP_WINDOW_S seconds of the first in the group.
+const GROUP_WINDOW_S = 3;
+
+function groupSessions(sessions) {
+  const out = [];
+  let i = 0;
+  while (i < sessions.length) {
+    const s = sessions[i];
+    if (s.source === 'dbus-polkit' && s.caller_process) {
+      const grp = [s];
+      let j = i + 1;
+      while (j < sessions.length) {
+        const t = sessions[j];
+        if (t.source === 'dbus-polkit' &&
+            t.caller_process === s.caller_process &&
+            t.user === s.user &&
+            t.host === s.host &&
+            Math.abs(t.start_time - s.start_time) <= GROUP_WINDOW_S) {
+          grp.push(t);
+          j++;
+        } else {
+          break;
+        }
+      }
+      if (grp.length > 1) {
+        const key = s.caller_process + '|' + s.user + '|' + s.host + '|' + s.start_time;
+        out.push({ type: 'group', key, sessions: grp });
+        i = j;
+        continue;
+      }
+    }
+    out.push({ type: 'single', session: s });
+    i++;
+  }
+  return out;
+}
+
+function buildSessionCard(s, q) {
+  const isMissingPlugin = s.divergence_status === 'missing_plugin';
+  const isEbpfPkexec   = s.source === 'ebpf-pkexec';
+  const isDbusPolkit   = s.source === 'dbus-polkit';
+  const isEventCard    = (isEbpfPkexec && !s.has_io) || isDbusPolkit;
+  let cardCls = 'session-card';
+  if (s.tsid === currentTSID)  cardCls += ' active';
+  if (s.in_progress)           cardCls += ' in-progress';
+  else if (isMissingPlugin)    cardCls += ' missing-plugin';
+  else if (s.network_outage)   cardCls += ' network-outage';
+  else if (s.incomplete)       cardCls += ' incomplete';
+  if (isEbpfPkexec)            cardCls += ' ebpf-pkexec';
+  if (isDbusPolkit)            cardCls += ' dbus-polkit';
+  if (isEventCard)             cardCls += ' event-card';
+
+  const card = el('div', cardCls);
+  card.dataset.tsid = s.tsid;
+
+  const userRow = el('div', 'sc-user');
+  const userText = el('span', 'sc-user-text');
+  applyHighlight(userText, `${s.user}@${s.host}`, q);
+  userRow.appendChild(userText);
+  if (s.runas) {
+    const isRoot = s.runas === 'root';
+    userRow.appendChild(el('span', 'sc-runas' + (isRoot ? '' : ' nonroot'), `→ ${s.runas}`));
+  }
+  if (s.source && s.source !== 'plugin') {
+    const label = s.source === 'ebpf-pkexec' ? 'pkexec'
+                : s.source === 'ebpf-tty'    ? 'ebpf'
+                : s.source === 'dbus-polkit'  ? 'polkit'
+                : s.source;
+    const badgeCls = s.source === 'dbus-polkit' ? 'sc-source dbus-polkit' : 'sc-source';
+    userRow.appendChild(el('span', badgeCls, label));
+  }
+
+  const cmd = el('div', 'sc-cmd');
+  applyHighlight(cmd, s.command, q);
+
+  const meta = el('div', 'sc-meta');
+  meta.appendChild(el('span', 'sc-date', fmtDate(s.start_time)));
+  meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
+  if (isEventCard && s.exit_code != null) meta.appendChild(el('span', 'sc-exit', 'exit: ' + s.exit_code));
+  if (s.risk_level && s.risk_level !== 'low') {
+    meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
+  }
+  if (s.in_progress) meta.appendChild(el('span', 'sc-live', 'live'));
+  if (s.has_frames)  meta.appendChild(el('span', 'sc-screen', '▣ screen'));
+  if (isEventCard)   meta.appendChild(el('span', 'sc-event-label', '⚡ event'));
+  if (s.network_outage) meta.appendChild(el('span', 'sc-network-outage', '⏱ network outage'));
+  else if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
+  if ((!s.source || s.source === 'plugin') && s.divergence_status) {
+    if (s.divergence_status === 'confirmed') {
+      meta.appendChild(el('span', 'sc-div confirmed', '✓ ebpf'));
+    } else if (s.divergence_status === 'missing_plugin') {
+      meta.appendChild(el('span', 'sc-div missing-plugin', '⚠ no plugin'));
+    }
+  }
+  if (s.parent_session_id) {
+    const link = el('span', 'sc-source', `↑ parent`);
+    link.title = s.parent_session_id;
+    link.style.cursor = 'pointer';
+    link.addEventListener('click', e => { e.stopPropagation(); selectSession(s.parent_session_id); });
+    meta.appendChild(link);
+  }
+
+  card.appendChild(userRow);
+  card.appendChild(cmd);
+  if (s.cwd && s.cwd !== '/') card.appendChild(el('div', 'sc-cwd', s.cwd));
+  card.appendChild(meta);
+  card.addEventListener('click', () => selectSession(s.tsid));
+  return card;
+}
+
 function renderSessionList(sessions) {
   elSessionList.textContent = '';
   if (!sessions.length) {
@@ -1662,82 +1806,62 @@ function renderSessionList(sessions) {
   }
   const q = fetchState.q;
   const frag = document.createDocumentFragment();
-  for (const s of sessions) {
-    const isMissingPlugin = s.divergence_status === 'missing_plugin';
-    const isEbpfPkexec   = s.source === 'ebpf-pkexec';
-    const isDbusPolkit   = s.source === 'dbus-polkit';
-    const isEventCard    = (isEbpfPkexec && !s.has_io) || isDbusPolkit;
-    let cardCls = 'session-card';
-    if (s.tsid === currentTSID)  cardCls += ' active';
-    if (s.in_progress)           cardCls += ' in-progress';
-    else if (isMissingPlugin)    cardCls += ' missing-plugin';
-    else if (s.network_outage)   cardCls += ' network-outage';
-    else if (s.incomplete)       cardCls += ' incomplete';
-    if (isEbpfPkexec)            cardCls += ' ebpf-pkexec';
-    if (isDbusPolkit)            cardCls += ' dbus-polkit';
-    if (isEventCard)             cardCls += ' event-card';
+  const items = groupSessions(sessions);
 
-    const card = el('div', cardCls);
-    card.dataset.tsid = s.tsid;
-
-    // user@host row with runas badge
-    const userRow = el('div', 'sc-user');
-    const userText = el('span', 'sc-user-text');
-    applyHighlight(userText, `${s.user}@${s.host}`, q);
-    userRow.appendChild(userText);
-    if (s.runas) {
-      const isRoot = s.runas === 'root';
-      userRow.appendChild(el('span', 'sc-runas' + (isRoot ? '' : ' nonroot'), `→ ${s.runas}`));
-    }
-    // source badge for non-plugin sessions
-    if (s.source && s.source !== 'plugin') {
-      const label = s.source === 'ebpf-pkexec' ? 'pkexec'
-                  : s.source === 'ebpf-tty'    ? 'ebpf'
-                  : s.source === 'dbus-polkit'  ? 'polkit'
-                  : s.source;
-      const badgeCls = s.source === 'dbus-polkit' ? 'sc-source dbus-polkit' : 'sc-source';
-      userRow.appendChild(el('span', badgeCls, label));
+  for (const item of items) {
+    if (item.type === 'single') {
+      frag.appendChild(buildSessionCard(item.session, q));
+      continue;
     }
 
-    const cmd = el('div', 'sc-cmd');
-    applyHighlight(cmd, s.command, q);
+    // Group of dbus-polkit events from same caller
+    const grp = item.sessions;
+    const first = grp[0];
+    const risk = worstRisk(grp);
+    const isExpanded = expandedGroups.has(item.key);
 
-    const meta = el('div', 'sc-meta');
-    meta.appendChild(el('span', 'sc-date', fmtDate(s.start_time)));
-    meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
-    if (isEventCard && s.exit_code != null) meta.appendChild(el('span', 'sc-exit', 'exit: ' + s.exit_code));
-    if (s.risk_level && s.risk_level !== 'low') {
-      meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
+    const groupEl = el('div', 'session-group');
+
+    const header = el('div', 'sg-header');
+    const top = el('div', 'sg-top');
+
+    const callerSpan = el('span', 'sg-caller', first.caller_process || 'polkit');
+    const countBadge = el('span', 'sg-count', grp.length + ' auth.');
+    top.appendChild(callerSpan);
+    top.appendChild(countBadge);
+    if (risk && risk !== 'low') {
+      top.appendChild(el('span', `risk-badge risk-${risk} sg-risk`, risk.toUpperCase()));
     }
-    if (s.in_progress) meta.appendChild(el('span', 'sc-live', 'live'));
-    if (s.has_frames)  meta.appendChild(el('span', 'sc-screen', '▣ screen'));
-    if (isEventCard)   meta.appendChild(el('span', 'sc-event-label', '⚡ event'));
-    if (s.network_outage) meta.appendChild(el('span', 'sc-network-outage', '⏱ network outage'));
-    else if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
-    // divergence badge — only for plugin sessions, only show actionable states.
-    // "unwitnessed" is the default for all pre-agent sessions — omitting it avoids noise.
-    if ((!s.source || s.source === 'plugin') && s.divergence_status) {
-      if (s.divergence_status === 'confirmed') {
-        meta.appendChild(el('span', 'sc-div confirmed', '✓ ebpf'));
-      } else if (s.divergence_status === 'missing_plugin') {
-        meta.appendChild(el('span', 'sc-div missing-plugin', '⚠ no plugin'));
+    top.appendChild(el('span', 'sg-toggle', isExpanded ? '▼' : '▶'));
+
+    const sgMeta = el('div', 'sg-meta');
+    sgMeta.appendChild(el('span', 'sg-user', `${first.user}@${first.host}`));
+    sgMeta.appendChild(el('span', 'sg-date', fmtDate(first.start_time)));
+
+    header.appendChild(top);
+    header.appendChild(sgMeta);
+
+    const children = el('div', 'sg-children' + (isExpanded ? ' open' : ''));
+    for (const s of grp) {
+      children.appendChild(buildSessionCard(s, q));
+    }
+
+    header.addEventListener('click', () => {
+      const nowExpanded = expandedGroups.has(item.key);
+      if (nowExpanded) {
+        expandedGroups.delete(item.key);
+        children.classList.remove('open');
+        header.querySelector('.sg-toggle').textContent = '▶';
+      } else {
+        expandedGroups.add(item.key);
+        children.classList.add('open');
+        header.querySelector('.sg-toggle').textContent = '▼';
       }
-    }
-    // parent session link for pkexec events
-    if (s.parent_session_id) {
-      const link = el('span', 'sc-source', `↑ parent`);
-      link.title = s.parent_session_id;
-      link.style.cursor = 'pointer';
-      link.addEventListener('click', e => { e.stopPropagation(); selectSession(s.parent_session_id); });
-      meta.appendChild(link);
-    }
+    });
 
-    card.appendChild(userRow);
-    card.appendChild(cmd);
-    if (s.cwd && s.cwd !== '/') card.appendChild(el('div', 'sc-cwd', s.cwd));
-    card.appendChild(meta);
-    card.addEventListener('click', () => selectSession(s.tsid));
-    frag.appendChild(card);
+    groupEl.appendChild(header);
+    groupEl.appendChild(children);
+    frag.appendChild(groupEl);
   }
   elSessionList.appendChild(frag);
 }

@@ -342,10 +342,35 @@ func (s *ebpfSubsystem) logDropped(ctx context.Context) {
 // systemd/polkit for the target command).  If one appears, we track its I/O.
 // If not, we emit an instant event (has_io=false) — typical for background
 // services like packagekitd.
+// readPkexecCommand reads the target command from /proc/<pid>/cmdline.
+// The cmdline is null-separated.  If pkexec hasn't exec'd yet we see
+// "pkexec\0<target>\0…" and return <target>.  If it already exec'd into
+// the target we see "<target>\0…" and return that directly.
+func readPkexecCommand(pid uint32) string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	args := bytes.SplitN(bytes.TrimRight(data, "\x00"), []byte{0}, 3)
+	prog := filepath.Base(string(args[0]))
+	if prog == "pkexec" {
+		if len(args) >= 2 {
+			return filepath.Base(string(args[1]))
+		}
+		return "pkexec"
+	}
+	return prog
+}
+
 func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	username, err := lookupUsername(invokingUID)
 	if err != nil {
 		username = fmt.Sprintf("uid%d", invokingUID)
+	}
+	// Read target command early, while the process is likely still alive.
+	pkexecCmd := readPkexecCommand(ev.Pid)
+	if pkexecCmd == "" {
+		pkexecCmd = "pkexec"
 	}
 
 	// Read pkexec's current cgroup path NOW — polkit may have already moved it
@@ -364,7 +389,7 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	}
 
 	sessID := generatePkexecSessionID(s.hostname, username)
-	log.Printf("ebpf: pkexec by user=%s parent=%s cgroup=%d", username, parentSessID, currentCgroupID)
+	log.Printf("ebpf: pkexec by user=%s cmd=%s parent=%s cgroup=%d", username, pkexecCmd, parentSessID, currentCgroupID)
 
 	// Fast path: pkexec has already moved to a new cgroup (polkit-assigned
 	// session scope).  Register it immediately — don't wait the full 2 s,
@@ -441,7 +466,7 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		id:       sessID,
 		user:     username,
 		host:     s.hostname,
-		command:  "pkexec",
+		command:  pkexecCmd,
 		source:   "ebpf-pkexec",
 		parentID: parentSessID,
 		hasIO:    hasIO,
