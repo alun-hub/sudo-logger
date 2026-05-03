@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.24
+Version:        1.20.25
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -172,6 +172,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 03 2026 sudo-logger 1.20.25-1
+- feat(agent/dbus): buffer failed polkit events and retry every 30s;
+  events are kept up to 10 minutes and then discarded if server remains
+  unreachable; queue capped at 200 events
+
 * Sat May 03 2026 sudo-logger 1.20.24-1
 - fix(server): create session record for divergence alerts so they appear
   in the replay UI with red "⚠ no plugin" badge and a warning message

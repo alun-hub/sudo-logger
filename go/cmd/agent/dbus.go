@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -22,6 +23,21 @@ import (
 type dbusSubsystem struct {
 	conn   *dbus.Conn
 	cancel context.CancelFunc
+	mu     sync.Mutex
+	retryQ []*pendingEvent
+}
+
+const (
+	maxPendingAge = 10 * time.Minute
+	maxPendingQ   = 200
+	retryInterval = 30 * time.Second
+)
+
+// pendingEvent holds a failed dbus-polkit emission for later retry.
+type pendingEvent struct {
+	call     *pendingPolkitCall
+	exitCode int32
+	queued   time.Time
 }
 
 // pendingPolkitCall tracks an in-flight CheckAuthorization request.
@@ -60,6 +76,7 @@ func (d *dbusSubsystem) start(ctx context.Context) error {
 	ctx2, cancel := context.WithCancel(ctx)
 	d.cancel = cancel
 	go d.loop(ctx2)
+	go d.retryLoop(ctx2)
 	return nil
 }
 
@@ -156,7 +173,7 @@ func (d *dbusSubsystem) handleReply(msg *dbus.Message, pending map[uint32]*pendi
 	d.emitEvent(call, exitCode)
 }
 
-func (d *dbusSubsystem) emitEvent(call *pendingPolkitCall, exitCode int32) {
+func (d *dbusSubsystem) sendEvent(call *pendingPolkitCall, exitCode int32) error {
 	hostname, _ := os.Hostname()
 	sess := &ebpfSession{
 		id:            generateDBusSessionID(hostname, call.actionID, call.ts),
@@ -168,11 +185,82 @@ func (d *dbusSubsystem) emitEvent(call *pendingPolkitCall, exitCode int32) {
 		callerProcess: call.callerProcess,
 	}
 	if err := sess.connect(cfg.Server, tlsCfg, verifyKey); err != nil {
-		log.Printf("dbus: polkit event lost: %v", err)
-		return
+		return err
 	}
 	log.Printf("dbus: polkit action=%q caller=%q user=%q exitCode=%d", call.actionID, call.callerProcess, call.user, exitCode)
 	sess.close(exitCode)
+	return nil
+}
+
+func (d *dbusSubsystem) emitEvent(call *pendingPolkitCall, exitCode int32) {
+	if err := d.sendEvent(call, exitCode); err != nil {
+		d.mu.Lock()
+		if len(d.retryQ) < maxPendingQ {
+			d.retryQ = append(d.retryQ, &pendingEvent{call: call, exitCode: exitCode, queued: time.Now()})
+			log.Printf("dbus: polkit event queued for retry (%d in queue): %v", len(d.retryQ), err)
+		} else {
+			log.Printf("dbus: polkit event dropped (retry queue full): action=%q user=%q", call.actionID, call.user)
+		}
+		d.mu.Unlock()
+	}
+}
+
+func (d *dbusSubsystem) retryLoop(ctx context.Context) {
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.drainRetryQueue()
+		}
+	}
+}
+
+func (d *dbusSubsystem) drainRetryQueue() {
+	d.mu.Lock()
+	if len(d.retryQ) == 0 {
+		d.mu.Unlock()
+		return
+	}
+	queue := d.retryQ
+	d.retryQ = nil
+	d.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxPendingAge)
+	var remaining []*pendingEvent
+	serverDown := false
+
+	for i, e := range queue {
+		if e.queued.Before(cutoff) {
+			log.Printf("dbus: dropping expired polkit event: action=%q user=%q age=%v",
+				e.call.actionID, e.call.user, time.Since(e.queued).Round(time.Second))
+			continue
+		}
+		if serverDown {
+			remaining = append(remaining, queue[i:]...)
+			break
+		}
+		if err := d.sendEvent(e.call, e.exitCode); err != nil {
+			log.Printf("dbus: retry failed (%d events remain queued): %v", len(queue)-i, err)
+			serverDown = true
+			remaining = append(remaining, queue[i:]...)
+			break
+		}
+	}
+
+	if len(remaining) > 0 {
+		d.mu.Lock()
+		// Prepend unsent events before any newly queued ones.
+		d.retryQ = append(remaining, d.retryQ...)
+		if len(d.retryQ) > maxPendingQ {
+			dropped := len(d.retryQ) - maxPendingQ
+			log.Printf("dbus: retry queue overflow, dropping %d oldest events", dropped)
+			d.retryQ = d.retryQ[dropped:]
+		}
+		d.mu.Unlock()
+	}
 }
 
 // extractPolkitSubject extracts a human-readable string from a polkit (sa{sv})
