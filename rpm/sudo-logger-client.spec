@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.19
+Version:        1.20.20
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -164,6 +164,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 03 2026 sudo-logger 1.20.20-1
+- fix(agent/ebpf): timestamp pkexec sessions using Go reception time instead
+  of BPF ktime conversion; bpf_ktime_get_ns() (CLOCK_MONOTONIC) and
+  /proc/uptime (CLOCK_BOOTTIME) diverge after suspend/resume, causing all
+  event timestamps to be before session startTime and clamped to 0,
+  resulting in all output appearing at once in replay
+
 * Sat May 02 2026 sudo-logger 1.20.19-1
 - feat(agent/ebpf): read actual command from /proc/<pid>/cmdline for pkexec
   events instead of hardcoding "pkexec"

@@ -88,11 +88,6 @@ type ebpfSubsystem struct {
 	rd      *ringbuf.Reader
 	links   []link.Link
 
-	// monoToWallNS converts BPF ktime (CLOCK_MONOTONIC nanoseconds since boot)
-	// to wall-clock Unix nanoseconds: wallNS = monoNS + monoToWallNS.
-	// Computed once at start() so all chunks get consistent timestamps.
-	monoToWallNS int64
-
 	mu            sync.Mutex
 	sessions      map[uint64]*ebpfSession
 	scopeToCgroup map[string]uint64 // scopePath → cgroupID, for sessionEnded after scope is deleted
@@ -117,14 +112,6 @@ func newEBPFSubsystem(cfg agentConfig, tlsCfg *tls.Config, hostname string, div 
 // start loads the BPF objects, attaches tracepoints, and begins the watch loop.
 // Returns an error if eBPF is unavailable; caller falls back to plugin-only mode.
 func (s *ebpfSubsystem) start(ctx context.Context) error {
-	// Compute wall-clock offset once so BPF ktime (CLOCK_MONOTONIC, nanoseconds
-	// since boot) can be converted to wall-clock Unix nanoseconds:
-	//   wallNS = monoNS + monoToWallNS
-	// bpf_ktime_get_ns() and /proc/uptime both exclude suspend time, so they
-	// track the same monotonic clock.
-	s.monoToWallNS = bootUnixNano()
-	log.Printf("ebpf: monoToWallNS=%d bootTime=%s", s.monoToWallNS, time.Unix(0, s.monoToWallNS).UTC().Format(time.RFC3339))
-
 	objs := &RecorderObjects{}
 	if err := LoadRecorderObjects(objs, nil); err != nil {
 		return fmt.Errorf("load eBPF objects: %w", err)
@@ -246,10 +233,13 @@ func (s *ebpfSubsystem) handleIO(raw []byte) {
 		return
 	}
 	data := ev.Data[:ev.DataLen]
-	// ev.TimestampNS is bpf_ktime_get_ns() — CLOCK_MONOTONIC nanoseconds since
-	// boot.  Convert to wall-clock Unix nanoseconds for the iolog writer.
-	wallNS := int64(ev.TimestampNS) + s.monoToWallNS
-	sess.sendChunk(wallNS, ev.Stream, data)
+	// Use Go reception time rather than BPF ktime (CLOCK_MONOTONIC).
+	// bpf_ktime_get_ns() excludes suspend time but /proc/uptime includes it,
+	// causing all event timestamps to be before startTime after suspend/resume
+	// (elapsed clamped to 0 → all output shown at once in replay).
+	// Ring-buffer events are processed sequentially, so reception time is a
+	// faithful relative timestamp for interactive sessions.
+	sess.sendChunk(time.Now().UnixNano(), ev.Stream, data)
 }
 
 func (s *ebpfSubsystem) handleExecve(raw []byte) {
@@ -983,21 +973,6 @@ func (s *ebpfSession) drainACKs(ctx context.Context, verifyKey []byte) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// bootUnixNano returns the system boot time as Unix nanoseconds.
-// Used to convert BPF ktime (CLOCK_MONOTONIC nanoseconds since boot) to
-// wall-clock Unix nanoseconds: wallNS = monoNS + bootUnixNano().
-// /proc/uptime and bpf_ktime_get_ns() both exclude suspend time, so they
-// track the same monotonic reference.
-func bootUnixNano() int64 {
-	data, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return 0
-	}
-	var uptimeSec float64
-	fmt.Sscanf(strings.Fields(string(data))[0], "%f", &uptimeSec)
-	uptimeNS := int64(uptimeSec * 1e9)
-	return time.Now().UnixNano() - uptimeNS
-}
 
 // readProcCgroupPath returns the absolute cgroup v2 path for pid, or "" on error.
 // Must be called while the process is still alive.
