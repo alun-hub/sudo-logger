@@ -183,6 +183,7 @@ func (d *dbusSubsystem) sendEvent(call *pendingPolkitCall, exitCode int32) error
 		source:        "dbus-polkit",
 		hasIO:         false,
 		callerProcess: call.callerProcess,
+		ts:            call.ts,
 	}
 	if err := sess.connect(cfg.Server, tlsCfg, verifyKey); err != nil {
 		return err

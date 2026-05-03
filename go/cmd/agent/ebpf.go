@@ -96,6 +96,9 @@ type ebpfSubsystem struct {
 
 	pkexecMu      sync.Mutex
 	pendingPkexec []*pkexecWaiter
+
+	retryMu sync.Mutex
+	retryQ  []*ebpfSession // hasIO=false sessions waiting for server reconnect
 }
 
 func newEBPFSubsystem(cfg agentConfig, tlsCfg *tls.Config, hostname string, div *divergenceTracker) *ebpfSubsystem {
@@ -160,6 +163,9 @@ func (s *ebpfSubsystem) start(ctx context.Context) error {
 
 	// Goroutine: log dropped events periodically.
 	go s.logDropped(ctx)
+
+	// Goroutine: retry queued hasIO=false pkexec sessions when server reconnects.
+	go s.retryLoop(ctx)
 
 	return nil
 }
@@ -322,6 +328,64 @@ func (s *ebpfSubsystem) logDropped(ctx context.Context) {
 	}
 }
 
+func (s *ebpfSubsystem) retryLoop(ctx context.Context) {
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.drainRetryQueue()
+		}
+	}
+}
+
+func (s *ebpfSubsystem) drainRetryQueue() {
+	s.retryMu.Lock()
+	if len(s.retryQ) == 0 {
+		s.retryMu.Unlock()
+		return
+	}
+	queue := s.retryQ
+	s.retryQ = nil
+	s.retryMu.Unlock()
+
+	cutoff := time.Now().Add(-maxPendingAge)
+	var remaining []*ebpfSession
+	serverDown := false
+
+	for i, sess := range queue {
+		if sess.ts.Before(cutoff) {
+			log.Printf("ebpf: dropping expired pkexec event: id=%s age=%v",
+				sess.id, time.Since(sess.ts).Round(time.Second))
+			continue
+		}
+		if serverDown {
+			remaining = append(remaining, queue[i:]...)
+			break
+		}
+		if err := sess.connect(s.cfg.Server, s.tlsCfg, nil); err != nil {
+			log.Printf("ebpf: pkexec retry failed (%d events remain queued): %v", len(queue)-i, err)
+			serverDown = true
+			remaining = append(remaining, queue[i:]...)
+			break
+		}
+		sess.close(0)
+	}
+
+	if len(remaining) > 0 {
+		s.retryMu.Lock()
+		s.retryQ = append(remaining, s.retryQ...)
+		if len(s.retryQ) > maxPendingQ {
+			dropped := len(s.retryQ) - maxPendingQ
+			log.Printf("ebpf: pkexec retry queue overflow, dropping %d oldest events", dropped)
+			s.retryQ = s.retryQ[dropped:]
+		}
+		s.retryMu.Unlock()
+	}
+}
+
 // ── pkexec session handling ───────────────────────────────────────────────────
 
 // handlePkexecExec is called when the eBPF execve hook sees a pkexec invocation.
@@ -444,10 +508,23 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		source:   "ebpf-pkexec",
 		parentID: parentSessID,
 		hasIO:    hasIO,
+		ts:       time.Now(),
 	}
 
 	if err := sess.connect(s.cfg.Server, s.tlsCfg, nil); err != nil {
-		log.Printf("ebpf: pkexec [%s]: connect: %v", sessID, err)
+		if !hasIO {
+			// No I/O to lose — queue for retry when server comes back.
+			s.retryMu.Lock()
+			if len(s.retryQ) < maxPendingQ {
+				s.retryQ = append(s.retryQ, sess)
+				log.Printf("ebpf: pkexec [%s]: queued for retry (%d in queue): %v", sessID, len(s.retryQ), err)
+			} else {
+				log.Printf("ebpf: pkexec [%s]: dropped (retry queue full): %v", sessID, err)
+			}
+			s.retryMu.Unlock()
+		} else {
+			log.Printf("ebpf: pkexec [%s]: connect: %v", sessID, err)
+		}
 		return
 	}
 
@@ -802,6 +879,7 @@ type ebpfSession struct {
 	parentID      string // parent session ID (pkexec only)
 	hasIO         bool   // false = no TTY data expected (background pkexec)
 	callerProcess string // process name (unix-process) or inferred service (dbus-polkit)
+	ts            time.Time // event time; zero means use time.Now() at connect
 
 	mu     sync.Mutex
 	conn   net.Conn
@@ -844,7 +922,7 @@ func (s *ebpfSession) connect(addr string, tlsCfg *tls.Config, verifyKey []byte)
 		User:            s.user,
 		Host:            s.host,
 		Command:         s.command,
-		Ts:              time.Now().Unix(),
+		Ts:              func() int64 { if !s.ts.IsZero() { return s.ts.Unix() }; return time.Now().Unix() }(),
 		Pid:             os.Getpid(),
 		Source:          src,
 		ParentSessionID: s.parentID,

@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.25
+Version:        1.20.26
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -172,6 +172,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 03 2026 sudo-logger 1.20.26-1
+- fix(agent/ebpf): buffer failed hasIO=false pkexec sessions and retry
+  every 30s (same mechanism as D-Bus polkit events); also preserve
+  original event timestamp across retries for both eBPF and D-Bus paths
+
 * Sat May 03 2026 sudo-logger 1.20.25-1
 - feat(agent/dbus): buffer failed polkit events and retry every 30s;
   events are kept up to 10 minutes and then discarded if server remains
