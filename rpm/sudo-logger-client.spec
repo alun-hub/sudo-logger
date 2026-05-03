@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.22
+Version:        1.20.23
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and shipper for remote session logging
 
@@ -172,6 +172,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Sat May 03 2026 sudo-logger 1.20.23-1
+- fix(agent/ebpf): capture pkexec target command in BPF at tracepoint time
+  instead of reading /proc/<pid>/cmdline from Go; the process can die
+  before Go reads it (race condition), causing fallback to "pkexec"
+
 * Sat May 03 2026 sudo-logger 1.20.22-1
 - fix(spec): move shipper.conf → agent.conf migration from %%post to %%pre
   so it runs before RPM installs new files; %%config(noreplace) then

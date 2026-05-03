@@ -47,7 +47,7 @@ type ioEvent struct {
 }
 
 // execEvent mirrors struct exec_event in bpf/recorder.c.
-// Layout: event_type(1) comm(15) pid(4) uid(4) cgroup_id(8) timestamp_ns(8)
+// Layout: event_type(1) comm(15) pid(4) uid(4) cgroup_id(8) timestamp_ns(8) target(64)
 type execEvent struct {
 	EventType   uint8
 	Comm        [15]byte
@@ -55,6 +55,7 @@ type execEvent struct {
 	Uid         uint32
 	CgroupID    uint64
 	TimestampNS uint64
+	Target      [64]byte // path passed to execve, captured at tracepoint time
 }
 
 // exitEvent mirrors struct exit_event in bpf/recorder.c.
@@ -332,34 +333,17 @@ func (s *ebpfSubsystem) logDropped(ctx context.Context) {
 // systemd/polkit for the target command).  If one appears, we track its I/O.
 // If not, we emit an instant event (has_io=false) — typical for background
 // services like packagekitd.
-// readPkexecCommand reads the target command from /proc/<pid>/cmdline.
-// The cmdline is null-separated.  If pkexec hasn't exec'd yet we see
-// "pkexec\0<target>\0…" and return <target>.  If it already exec'd into
-// the target we see "<target>\0…" and return that directly.
-func readPkexecCommand(pid uint32) string {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil || len(data) == 0 {
-		return ""
-	}
-	args := bytes.SplitN(bytes.TrimRight(data, "\x00"), []byte{0}, 3)
-	prog := filepath.Base(string(args[0]))
-	if prog == "pkexec" {
-		if len(args) >= 2 {
-			return filepath.Base(string(args[1]))
-		}
-		return "pkexec"
-	}
-	return prog
-}
 
 func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 	username, err := lookupUsername(invokingUID)
 	if err != nil {
 		username = fmt.Sprintf("uid%d", invokingUID)
 	}
-	// Read target command early, while the process is likely still alive.
-	pkexecCmd := readPkexecCommand(ev.Pid)
-	if pkexecCmd == "" {
+	// Extract target command from the exec path captured at BPF tracepoint time.
+	// This avoids the race where the process dies before Go reads /proc/<pid>/cmdline.
+	target := strings.TrimRight(string(ev.Target[:]), "\x00")
+	pkexecCmd := filepath.Base(target)
+	if pkexecCmd == "" || pkexecCmd == "." {
 		pkexecCmd = "pkexec"
 	}
 

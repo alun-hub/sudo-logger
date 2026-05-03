@@ -85,7 +85,7 @@ struct sl_io_event {
 };
 
 // exec_event: sudo or pkexec execve from any cgroup.
-// Layout: event_type(1) comm(15) pid(4) uid(4) cgroup_id(8) timestamp_ns(8)
+// Layout: event_type(1) comm(15) pid(4) uid(4) cgroup_id(8) timestamp_ns(8) target(64)
 struct exec_event {
 	__u8  event_type;
 	__u8  comm[15];    // "sudo" or "pkexec" (null-terminated)
@@ -93,6 +93,7 @@ struct exec_event {
 	__u32 uid;
 	__u64 cgroup_id;   // parent cgroup ID (before pkexec creates a new transient scope)
 	__u64 timestamp_ns;
+	__u8  target[64];  // path passed to execve — captured at tracepoint time
 };
 
 // exit_event: process exit inside a tracked cgroup.
@@ -242,6 +243,13 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx)
 
 	__builtin_memcpy(e->comm, comm, 15);
 	e->comm[14] = '\0';
+
+	// Capture the path being exec'd.  For pkexec this is the target command
+	// (e.g. "/bin/ls"); for sudo this is the sudo binary itself.  Reading
+	// at tracepoint time avoids the race where the process dies before Go
+	// can read /proc/<pid>/cmdline.
+	const char *target_path = (const char *)(long)ctx->args[0];
+	bpf_probe_read_user_str(e->target, sizeof(e->target), target_path);
 
 	bpf_ringbuf_submit(e, 0);
 	return 0;
