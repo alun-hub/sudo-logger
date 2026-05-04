@@ -58,7 +58,7 @@ User runs sudo
 ┌─────────────────────┐
 │  sudo-logger-agent  │  Local daemon running as root.
 │  (Go)               │  Bridges plugin ↔ server.
-│                     │  eBPF: captures su/screen/tmux/pkexec sessions.
+│                     │  eBPF: records SSH/TTY login sessions and pkexec sessions.
 │                     │  D-Bus: records polkit privilege escalations.
 │                     │  Tracks ACK state per session.
 │                     │  Responds instantly to ACK queries.
@@ -144,7 +144,7 @@ One goroutine per sudo session:
 **eBPF subsystem** — three kernel tracepoints loaded at startup (requires
 `/sys/kernel/btf/vmlinux`; degrades gracefully to plugin-only mode if absent):
 
-- `sys_enter_write` — captures TTY I/O from tracked cgroups (su, screen, tmux, pkexec)
+- `sys_enter_write` — captures TTY I/O from all processes in tracked cgroups (SSH/TTY login sessions and pkexec scopes); su, screen, and tmux output is captured transparently within their enclosing login session, not as separate entries
 - `sys_enter_execve` — detects sudo and pkexec invocations for divergence tracking
 - `sched_process_exit` — closes eBPF sessions when processes exit
 
