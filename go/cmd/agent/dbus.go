@@ -23,14 +23,16 @@ import (
 type dbusSubsystem struct {
 	conn   *dbus.Conn
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 	mu     sync.Mutex
 	retryQ []*pendingEvent
 }
 
 const (
-	maxPendingAge = 10 * time.Minute
-	maxPendingQ   = 200
-	retryInterval = 30 * time.Second
+	maxPendingAge   = 10 * time.Minute
+	maxPendingQ     = 200
+	retryInterval   = 30 * time.Second
+	maxPendingCalls = 1000 // max in-flight CheckAuthorization calls tracked at once
 )
 
 // pendingEvent holds a failed dbus-polkit emission for later retry.
@@ -75,8 +77,9 @@ func (d *dbusSubsystem) start(ctx context.Context) error {
 	d.conn = conn
 	ctx2, cancel := context.WithCancel(ctx)
 	d.cancel = cancel
-	go d.loop(ctx2)
-	go d.retryLoop(ctx2)
+	d.wg.Add(2)
+	go func() { defer d.wg.Done(); d.loop(ctx2) }()
+	go func() { defer d.wg.Done(); d.retryLoop(ctx2) }()
 	return nil
 }
 
@@ -87,6 +90,7 @@ func (d *dbusSubsystem) stop() {
 	if d.conn != nil {
 		d.conn.Close()
 	}
+	d.wg.Wait()
 }
 
 func (d *dbusSubsystem) loop(ctx context.Context) {
@@ -136,6 +140,10 @@ func (d *dbusSubsystem) handleCall(msg *dbus.Message, pending map[uint32]*pendin
 	}
 	actionID, _ := msg.Body[1].(string)
 	if actionID == "" {
+		return
+	}
+	if len(pending) >= maxPendingCalls {
+		debugLog("dbus: pending map full (%d entries) — dropping CheckAuthorization serial=%d", len(pending), msg.Serial())
 		return
 	}
 	pending[msg.Serial()] = &pendingPolkitCall{

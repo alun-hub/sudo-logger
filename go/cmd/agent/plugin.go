@@ -166,6 +166,10 @@ func handlePluginConn(pluginConn net.Conn) {
 		log.Printf("expected SESSION_START, got 0x%02x — dropping", msgType)
 		return
 	}
+	if plen > protocol.MaxSessionStartPayload {
+		log.Printf("SESSION_START payload too large (%d bytes, max %d) — dropping", plen, protocol.MaxSessionStartPayload)
+		return
+	}
 	startPayload, err := protocol.ReadPayload(pr, plen)
 	if err != nil {
 		log.Printf("read SESSION_START payload: %v", err)

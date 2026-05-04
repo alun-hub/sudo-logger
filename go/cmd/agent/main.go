@@ -139,6 +139,7 @@ func main() {
 		<-sigCh
 		log.Printf("sudo-logger-agent shutting down")
 		cancel()
+		ln.Close() // unblocks ln.Accept() so the main loop exits cleanly
 		cleanupAllCgs()
 		if ebpfSys != nil {
 			ebpfSys.stop()

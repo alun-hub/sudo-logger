@@ -28,6 +28,11 @@ type pendingSudoExec struct {
 	comm     string // "sudo" or "pkexec"
 	wallTime time.Time
 	timer    *time.Timer
+	// cancelled is set under mu by confirmPlugin before it releases the lock.
+	// The timer callback checks this under mu to prevent a false alert when
+	// time.Timer.Stop() returns false (timer already fired but callback hasn't
+	// acquired mu yet).
+	cancelled bool
 }
 
 func newDivergenceTracker(hostname string, alertFn func(user, host, comm string, ts time.Time)) *divergenceTracker {
@@ -58,16 +63,33 @@ func (d *divergenceTracker) registerEBPF(uid uint32, pid uint32, comm string) {
 	}
 
 	// Start the 30-second timer. If no plugin SESSION_START arrives, alert.
+	// The callback acquires mu before checking entry.cancelled so that it
+	// cannot fire an alert for a session that confirmPlugin has already matched
+	// (timer.Stop returns false if the timer fired before Stop was called, but
+	// the callback may not have acquired mu yet — the cancelled flag bridges
+	// this gap).
 	entry.timer = time.AfterFunc(30*time.Second, func() {
+		d.mu.Lock()
+		if entry.cancelled {
+			d.mu.Unlock()
+			return
+		}
+		d.removeEntryLocked(key, entry)
+		d.mu.Unlock()
 		log.Printf("DIVERGENCE ALERT: %s ran %q on %s but plugin did not log it (no SESSION_START within 30s)",
 			username, comm, d.hostname)
 		if d.alertFn != nil {
 			d.alertFn(username, d.hostname, comm, now)
 		}
-		d.removeEntry(key, entry)
 	})
 
 	d.mu.Lock()
+	if len(d.pending[key]) >= maxExecvePerUser {
+		d.mu.Unlock()
+		entry.timer.Stop()
+		log.Printf("divergence: pending queue full for %s — dropping execve pid=%d comm=%s", username, pid, comm)
+		return
+	}
 	d.pending[key] = append(d.pending[key], entry)
 	d.mu.Unlock()
 
@@ -79,6 +101,10 @@ func (d *divergenceTracker) registerEBPF(uid uint32, pid uint32, comm string) {
 // invocations that never received a SESSION_START (e.g. killed before the
 // plugin could respond) and must not pollute future matches.
 const maxExecveAge = 10 * time.Second
+
+// maxExecvePerUser caps the per-user pending queue to prevent OOM when a user
+// issues many rapid sudo calls that never produce a plugin SESSION_START.
+const maxExecvePerUser = 100
 
 // confirmPlugin is called when the plugin delivers a SESSION_START for user+host.
 // Returns true if a matching eBPF execve was found (confirmed), false if the
@@ -97,6 +123,7 @@ func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 		if now.Sub(e.wallTime) <= maxExecveAge {
 			fresh = append(fresh, e)
 		} else {
+			e.cancelled = true // prevent alert if timer fires during/after Stop
 			e.timer.Stop()
 			debugLog("divergence: discarding stale execve pid=%d age=%v", e.pid, now.Sub(e.wallTime))
 		}
@@ -111,6 +138,9 @@ func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	// Dequeue the oldest fresh entry (FIFO — concurrent sudo invocations by the
 	// same user are matched in the order they arrived).
 	entry := fresh[0]
+	// Set cancelled under the lock so that a concurrently-firing timer callback
+	// that has not yet acquired mu will see it and skip the alert.
+	entry.cancelled = true
 	if len(fresh) == 1 {
 		delete(d.pending, key)
 	} else {
@@ -118,15 +148,16 @@ func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	}
 	d.mu.Unlock()
 
-	entry.timer.Stop()
+	entry.timer.Stop() // best-effort; cancelled flag handles the race if Stop returns false
 
 	debugLog("divergence: confirmed plugin SESSION_START for %s@%s pid=%d (latency %v)",
 		username, host, entry.pid, time.Since(entry.wallTime))
 	return true
 }
 
-func (d *divergenceTracker) removeEntry(key string, target *pendingSudoExec) {
-	d.mu.Lock()
+// removeEntryLocked removes target from the pending queue for key.
+// Caller must hold d.mu.
+func (d *divergenceTracker) removeEntryLocked(key string, target *pendingSudoExec) {
 	queue := d.pending[key]
 	for i, e := range queue {
 		if e == target {
@@ -137,7 +168,6 @@ func (d *divergenceTracker) removeEntry(key string, target *pendingSudoExec) {
 	if len(d.pending[key]) == 0 {
 		delete(d.pending, key)
 	}
-	d.mu.Unlock()
 }
 
 // lookupUsername resolves a numeric UID to a username.
