@@ -931,9 +931,8 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	return proxySocket, ch, killProxy, nil
 }
 
-// sendDivergenceAlert opens a short-lived TLS connection to the log server and
-// sends a DIVERGENCE_ALERT message.  Called by the divergence tracker alertFn
-// when a sudo execve is seen without a matching plugin SESSION_START.
+// sendDivergenceAlert sends a DIVERGENCE_ALERT to the log server with
+// exponential backoff retries.  Called as a goroutine by the divergence tracker.
 func sendDivergenceAlert(user, host, comm string, ts time.Time) {
 	alert := protocol.DivergenceAlert{
 		User: user,
@@ -947,20 +946,38 @@ func sendDivergenceAlert(user, host, comm string, ts time.Time) {
 		return
 	}
 
+	const maxAttempts = 5
+	delay := 5 * time.Second
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := trySendDivergenceAlert(payload); err == nil {
+			return
+		} else {
+			log.Printf("divergence alert: attempt %d/%d failed: %v", attempt, maxAttempts, err)
+		}
+		if attempt < maxAttempts {
+			time.Sleep(delay)
+			delay *= 2
+			if delay > 60*time.Second {
+				delay = 60 * time.Second
+			}
+		}
+	}
+	log.Printf("divergence alert: all %d attempts failed — alert for user=%s host=%s lost", maxAttempts, user, host)
+}
+
+func trySendDivergenceAlert(payload []byte) error {
 	conn, err := tls.Dial("tcp", cfg.Server, tlsCfg)
 	if err != nil {
-		log.Printf("divergence alert: dial %s: %v", cfg.Server, err)
-		return
+		return fmt.Errorf("dial %s: %w", cfg.Server, err)
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
-
 	w := bufio.NewWriter(conn)
 	if err := protocol.WriteMessage(w, protocol.MsgDivergenceAlert, payload); err != nil {
-		log.Printf("divergence alert: send: %v", err)
-		return
+		return fmt.Errorf("send: %w", err)
 	}
 	if err := w.Flush(); err != nil {
-		log.Printf("divergence alert: flush: %v", err)
+		return fmt.Errorf("flush: %w", err)
 	}
+	return nil
 }

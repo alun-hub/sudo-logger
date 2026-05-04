@@ -167,6 +167,9 @@ func (s *ebpfSubsystem) start(ctx context.Context) error {
 	// Goroutine: retry queued hasIO=false pkexec sessions when server reconnects.
 	go s.retryLoop(ctx)
 
+	// Goroutine: evict sessions that never generated a sched_process_exit event.
+	go s.sweepStaleSessions(ctx)
+
 	return nil
 }
 
@@ -341,6 +344,44 @@ func (s *ebpfSubsystem) retryLoop(ctx context.Context) {
 	}
 }
 
+const sessionMaxAge = 24 * time.Hour
+
+// sweepStaleSessions evicts sessions that have been connected longer than
+// sessionMaxAge.  This guards against sessions that never generate a
+// sched_process_exit event (e.g. zombie processes), which would otherwise
+// hold open TLS connections indefinitely.
+func (s *ebpfSubsystem) sweepStaleSessions(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		cutoff := time.Now().Add(-sessionMaxAge)
+		s.mu.Lock()
+		var stale []*ebpfSession
+		for id, sess := range s.sessions {
+			if !sess.connectedAt.IsZero() && sess.connectedAt.Before(cutoff) {
+				stale = append(stale, sess)
+				delete(s.sessions, id)
+				_ = s.objs.TrackedCgroups.Delete(id)
+			}
+		}
+		for path, id := range s.scopeToCgroup {
+			if _, ok := s.sessions[id]; !ok {
+				delete(s.scopeToCgroup, path)
+			}
+		}
+		s.mu.Unlock()
+		for _, sess := range stale {
+			log.Printf("ebpf: evicting stale session %s (connected %v ago)", sess.id, time.Since(sess.connectedAt).Round(time.Minute))
+			sess.close(0)
+		}
+	}
+}
+
 func (s *ebpfSubsystem) drainRetryQueue() {
 	s.retryMu.Lock()
 	if len(s.retryQ) == 0 {
@@ -365,7 +406,7 @@ func (s *ebpfSubsystem) drainRetryQueue() {
 			remaining = append(remaining, queue[i:]...)
 			break
 		}
-		if err := sess.connect(s.cfg.Server, s.tlsCfg, nil); err != nil {
+		if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {
 			log.Printf("ebpf: pkexec retry failed (%d events remain queued): %v", len(queue)-i, err)
 			serverDown = true
 			remaining = append(remaining, queue[i:]...)
@@ -511,7 +552,7 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		ts:       time.Now(),
 	}
 
-	if err := sess.connect(s.cfg.Server, s.tlsCfg, nil); err != nil {
+	if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {
 		if !hasIO {
 			// No I/O to lose — queue for retry when server comes back.
 			s.retryMu.Lock()
@@ -770,7 +811,7 @@ func (s *ebpfSubsystem) sessionStarted(scopePath, scopeName string) {
 		cgroupID: cgroupID,
 	}
 
-	if err := sess.connect(s.cfg.Server, s.tlsCfg, nil); err != nil {
+	if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {
 		log.Printf("ebpf: sessionStarted [%s]: connect: %v", sess.id, err)
 		return
 	}
@@ -885,6 +926,7 @@ type ebpfSession struct {
 	hasIO         bool   // false = no TTY data expected (background pkexec)
 	callerProcess string // process name (unix-process) or inferred service (dbus-polkit)
 	ts            time.Time // event time; zero means use time.Now() at connect
+	connectedAt   time.Time // set by connect(); used by sweeper to evict stale sessions
 
 	mu     sync.Mutex
 	conn   net.Conn
@@ -895,6 +937,7 @@ type ebpfSession struct {
 }
 
 func (s *ebpfSession) connect(addr string, tlsCfg *tls.Config, verifyKey []byte) error {
+	s.connectedAt = time.Now()
 	rawTCP, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", addr, err)
@@ -1022,12 +1065,26 @@ func (s *ebpfSession) drainACKs(ctx context.Context, verifyKey []byte) {
 		if err != nil {
 			return
 		}
-		if _, err := protocol.ReadPayload(br, payloadLen); err != nil {
+		payload, err := protocol.ReadPayload(br, payloadLen)
+		if err != nil {
 			return
 		}
 
 		switch msgType {
-		case protocol.MsgAck, protocol.MsgHeartbeatAck:
+		case protocol.MsgAck:
+			if verifyKey != nil {
+				ack, parseErr := protocol.ParseAck(payload)
+				if parseErr != nil {
+					log.Printf("ebpf [%s]: parse ACK: %v — ignoring", s.id, parseErr)
+					continue
+				}
+				if !verifyAckSig(ack, s.id, verifyKey) {
+					log.Printf("ebpf [%s]: ACK signature invalid seq=%d — ignoring", s.id, ack.Seq)
+					continue
+				}
+			}
+			lastACK = time.Now()
+		case protocol.MsgHeartbeatAck:
 			lastACK = time.Now()
 		}
 
