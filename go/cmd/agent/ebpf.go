@@ -32,6 +32,10 @@ const (
 	eventTypeIO   = uint8(1)
 	eventTypeExec = uint8(2)
 	eventTypeExit = uint8(3)
+
+	maxPendingAge  = 10 * time.Minute
+	maxPendingQ    = 200
+	retryInterval  = 30 * time.Second
 )
 
 // ioEvent mirrors struct io_event in bpf/recorder.c.

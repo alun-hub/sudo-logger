@@ -23,7 +23,7 @@ Sudo I/O plugin (sudo_logger_plugin.so) and local agent daemon
 (sudo-logger-agent) that together record all sudo sessions and ship
 them in real-time to a remote sudo-logger-server instance over
 mutual TLS.  The agent also uses eBPF tracepoints (when available)
-to capture su, screen, tmux, and polkit/pkexec privilege escalations
+to capture su, screen, tmux, and pkexec privilege escalations
 and to detect attempts to bypass the plugin.
 
 Input is frozen if the log server stops acknowledging, preventing

@@ -33,7 +33,7 @@ sudo-logger is a mandatory sudo session recording system. Every sudo invocation 
 | Component | Language | Runs on | Purpose |
 |-----------|----------|---------|---------|
 | `plugin/plugin.c` | C | Every client (loaded by sudo) | Intercepts sudo, streams I/O, enforces freeze |
-| `go/cmd/agent` | Go | Every client (systemd service) | Bridges plugin ↔ log server; eBPF session recording; pkexec/polkit tracking; divergence detection |
+| `go/cmd/agent` | Go | Every client (systemd service) | Bridges plugin ↔ log server; eBPF session recording; pkexec tracking; divergence detection |
 | `go/cmd/server` | Go | Central server | Receives sessions, writes .cast files, signs ACKs, enforces block policy |
 | `go/cmd/replay-server` | Go | Central server | Browser GUI for playback, reporting, configuration |
 

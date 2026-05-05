@@ -28,14 +28,13 @@ const defaultConfigPath = "/etc/sudo-logger/agent.conf"
 
 var flagConfig = flag.String("config", defaultConfigPath, "Path to configuration file")
 
-// Package-level state shared across plugin.go, ebpf.go, cgroup.go, dbus.go.
+// Package-level state shared across plugin.go, ebpf.go, cgroup.go.
 var (
 	cfg        agentConfig
 	verifyKey  ed25519.PublicKey
 	tlsCfg     *tls.Config
 	div        *divergenceTracker
 	ebpfSys    *ebpfSubsystem
-	dbusSys    *dbusSubsystem
 )
 
 // debugLog is a no-op by default; replaced with log.Printf when debug=true.
@@ -104,17 +103,6 @@ func main() {
 		log.Printf("ebpf: disabled by config — running in plugin-only mode")
 	}
 
-	// Try to start the D-Bus polkit monitoring subsystem.
-	if cfg.Dbus {
-		dbusSys = &dbusSubsystem{}
-		if err := dbusSys.start(ctx); err != nil {
-			log.Printf("dbus: %v — polkit D-Bus events will not be captured", err)
-			dbusSys = nil
-		}
-	} else {
-		log.Printf("dbus: disabled by config")
-	}
-
 	// Remove stale socket from previous run.
 	if err := os.Remove(cfg.Socket); err != nil && !os.IsNotExist(err) {
 		log.Printf("remove stale socket: %v", err)
@@ -144,18 +132,12 @@ func main() {
 		if ebpfSys != nil {
 			ebpfSys.stop()
 		}
-		if dbusSys != nil {
-			dbusSys.stop()
-		}
 		os.Exit(0)
 	}()
 
 	mode := "plugin-only"
 	if ebpfSys != nil {
 		mode = "plugin+eBPF"
-	}
-	if dbusSys != nil {
-		mode += "+dbus"
 	}
 	log.Printf("sudo-logger-agent listening on %s, forwarding to %s [mode: %s]",
 		cfg.Socket, cfg.Server, mode)

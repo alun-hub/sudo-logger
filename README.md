@@ -59,7 +59,6 @@ User runs sudo
 │  sudo-logger-agent  │  Local daemon running as root.
 │  (Go)               │  Bridges plugin ↔ server.
 │                     │  eBPF: records SSH/TTY login sessions and pkexec sessions.
-│                     │  D-Bus: records polkit privilege escalations.
 │                     │  Tracks ACK state per session.
 │                     │  Responds instantly to ACK queries.
 │                     │  Sends heartbeats every 400 ms.
@@ -147,11 +146,6 @@ One goroutine per sudo session:
 - `sys_enter_write` — captures TTY I/O from all processes in tracked cgroups (SSH/TTY login sessions and pkexec scopes); su, screen, and tmux output is captured transparently within their enclosing login session, not as separate entries
 - `sys_enter_execve` — detects sudo and pkexec invocations for divergence tracking
 - `sched_process_exit` — closes eBPF sessions when processes exit
-
-**D-Bus polkit monitor** — listens on the system bus for `CheckAuthorization`
-calls using `BecomeMonitor`. Records each privilege escalation (challenge or
-denied; auto-authorized calls are filtered) as a `dbus-polkit` session.
-Failed deliveries are retried for up to 10 minutes with 30-second intervals.
 
 **Divergence detector** — correlates eBPF sudo execve events with plugin
 `SESSION_START` messages. If no match arrives within 30 seconds, sends a
@@ -280,9 +274,8 @@ migrate-sessions \
   log server is down at session start. The kernel BPF map must be updated
   immediately to capture I/O, and the cgroup scope is gone by the time the
   server comes back — there is no way to replay already-streamed events.
-  Background pkexec commands (no TTY, e.g. `pkexec id`) and D-Bus polkit
-  events are buffered in memory for up to 10 minutes and delivered
-  automatically on reconnect.
+  Background pkexec commands (no TTY, e.g. `pkexec id`) are buffered in memory
+  for up to 10 minutes and delivered automatically on reconnect.
 
 - **One client certificate for all clients** (default setup): the included
   `setup.sh` generates one client certificate shared across all machines.
@@ -485,10 +478,6 @@ server = logserver.example.com:9876
 # Path to the wayland-proxy helper binary.
 #proxy_bin     = /usr/libexec/sudo-logger/wayland-proxy
 
-# D-Bus polkit monitoring.
-# Records polkit CheckAuthorization calls (challenge/denied) as dbus-polkit sessions.
-#dbus          = true
-
 # eBPF session recording (requires kernel with BTF support).
 # Falls back to plugin-only mode on older kernels.
 #ebpf          = true
@@ -669,7 +658,6 @@ All of these go in `/etc/sudo-logger/agent.conf`:
 | `proxy_bin` | `/usr/libexec/sudo-logger/wayland-proxy` | Path to the wayland-proxy helper binary. |
 | `proxy_period` | `300` | Capture interval for Wayland frames in milliseconds. Lower values give smoother replay at the cost of more storage. |
 | `ebpf` | `true` | Enable eBPF session recording. Requires kernel BTF support (`/sys/kernel/btf/vmlinux`). Degrades gracefully to plugin-only mode on older kernels. |
-| `dbus` | `true` | Enable D-Bus polkit monitoring. Records polkit privilege escalations from any application. Requires D-Bus ≥ 1.9 (Fedora 23+, RHEL 8+). |
 | `mask_pattern` | — | Additional regex pattern to redact from terminal streams. Can be repeated for multiple patterns. See [Secret redaction](#secret-redaction). |
 
 ### Wayland screen capture
@@ -1248,10 +1236,9 @@ sudo-logger/
 │   ├── go.mod
 │   ├── cmd/
 │   │   ├── agent/
-│   │   │   ├── main.go          # Agent daemon (plugin handler + eBPF + D-Bus)
+│   │   │   ├── main.go          # Agent daemon (plugin handler + eBPF)
 │   │   │   ├── plugin.go        # Unix socket handler for sudo plugin
 │   │   │   ├── ebpf.go          # eBPF ring buffer consumer + pkexec tracking
-│   │   │   ├── dbus.go          # D-Bus polkit monitoring
 │   │   │   ├── divergence.go    # eBPF vs plugin divergence detection
 │   │   │   ├── cgroup.go        # Per-session cgroup management + freeze
 │   │   │   ├── config.go        # Config file parser

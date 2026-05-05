@@ -55,18 +55,6 @@ invocations to correlate eBPF-observed sessions with plugin-reported sessions.
 .PP
 If the kernel lacks BTF support, the eBPF subsystem is skipped and the agent
 continues in plugin-only mode (a warning is logged).
-.SS D-Bus polkit monitor
-Uses
-.B BecomeMonitor
-on the system D-Bus to observe
-.B org.freedesktop.PolicyKit1.Authority.CheckAuthorization
-calls in read-only mode.
-For each completed authorization that required user interaction (challenged or
-denied), a session record is sent to the log server.
-Auto-authorized actions are silently skipped.
-.PP
-If the log server is unreachable, events are held in an in-memory queue
-(up to 200 events, 10-minute TTL) and retried every 30 seconds.
 .SS Divergence detector
 Correlates eBPF-observed
 .BR sudo (8)
@@ -117,7 +105,6 @@ proxy_period|200ms|Wayland screenshot capture interval
 freeze_timeout|3m|Terminate frozen sessions after this duration (0 = never)
 idle_timeout|0|Terminate sessions idle for this duration (0 = disabled)
 ebpf|true|Enable eBPF session recording (requires kernel BTF)
-dbus|true|Enable D-Bus polkit monitoring
 mask_pattern|\fI\(em\fR|Additional regex pattern for secret redaction (repeatable)
 disclaimer|\fI\(em\fR|Banner text written to each session terminal at start
 disclaimer_color|yellow|ANSI color for the disclaimer banner
