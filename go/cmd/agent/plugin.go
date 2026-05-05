@@ -229,11 +229,14 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 	}()
 
+	const maxDeadBuf = 500 // max chunks buffered while server unreachable
+
 	var (
 		sessionAckMu    sync.Mutex
 		sessionAckSeq   uint64
 		serverConnAlive bool
 		ackDebtStartNs  int64
+		deadBuf         []outMsg // chunks buffered during server outage
 	)
 	var frozenSince time.Time
 
@@ -307,9 +310,18 @@ func handlePluginConn(pluginConn net.Conn) {
 		wasAlive := serverConnAlive
 		serverConnAlive = true
 		ackDebtStartNs = 0
+		buf := deadBuf
+		deadBuf = nil
 		sessionAckMu.Unlock()
 		if !wasAlive {
 			cg.unfreeze()
+			for _, m := range buf {
+				select {
+				case bulkQueue <- m:
+				case <-done:
+					return
+				}
+			}
 		}
 	}
 
@@ -595,6 +607,13 @@ func handlePluginConn(pluginConn net.Conn) {
 	forward := func(msgType uint8, payload []byte) {
 		sessionAckMu.Lock()
 		alive := serverConnAlive
+		if !alive && msgType == protocol.MsgChunk {
+			if len(deadBuf) < maxDeadBuf {
+				deadBuf = append(deadBuf, outMsg{msgType: msgType, payload: payload})
+			}
+			sessionAckMu.Unlock()
+			return
+		}
 		sessionAckMu.Unlock()
 		if !alive {
 			return

@@ -145,6 +145,9 @@ func main() {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			log.Printf("accept: %v", err)
 			continue
 		}
