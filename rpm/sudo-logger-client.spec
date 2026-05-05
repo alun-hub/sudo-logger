@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.27
+Version:        1.20.28
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue May 05 2026 sudo-logger 1.20.28-1
+- fix(agent): exclude dbus-daemon from linger-mode exit detection; GUI
+  apps (e.g. gvim) spawn a private dbus-daemon that kept sessions stuck
+  in live state indefinitely after the main app exited
+
 * Tue May 05 2026 sudo-logger 1.20.27-1
 - remove(agent): drop D-Bus polkit monitoring subsystem; too noisy from
   system daemons (PowerDevil, logind, NetworkManager); pkexec sessions
