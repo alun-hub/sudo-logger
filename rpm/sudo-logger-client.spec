@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.26
+Version:        1.20.27
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,11 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue May 05 2026 sudo-logger 1.20.27-1
+- remove(agent): drop D-Bus polkit monitoring subsystem; too noisy from
+  system daemons (PowerDevil, logind, NetworkManager); pkexec sessions
+  already captured via eBPF; removes godbus/dbus dependency
+
 * Sat May 03 2026 sudo-logger 1.20.26-1
 - fix(agent/ebpf): buffer failed hasIO=false pkexec sessions and retry
   every 30s (same mechanism as D-Bus polkit events); also preserve
