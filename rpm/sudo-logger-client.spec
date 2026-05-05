@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.28
+Version:        1.20.29
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue May 05 2026 sudo-logger 1.20.29-1
+- fix(agent): buffer up to 500 session chunks while server unreachable;
+  replayed when connection recovers — prevents data loss during brief
+  outages where TLS connection remains intact but heartbeats time out
+- fix(agent): silence accept-loop log spam on SIGTERM by checking
+  context cancellation before logging the error
+
 * Tue May 05 2026 sudo-logger 1.20.28-1
 - fix(agent): exclude dbus-daemon from linger-mode exit detection; GUI
   apps (e.g. gvim) spawn a private dbus-daemon that kept sessions stuck
