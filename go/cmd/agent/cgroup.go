@@ -250,6 +250,14 @@ func (cg *cgroupSession) stopTracking() {
 	<-cg.trackDone
 }
 
+// backgroundComms are process names that must not gate session end.
+// GUI apps (e.g. gvim) may start a private dbus-daemon that outlives the
+// main application but has no relevance to the user's session activity.
+var backgroundComms = map[string]bool{
+	"dbus-daemon": true,
+	"dbus-launch": true,
+}
+
 func (cg *cgroupSession) hasPids() bool {
 	if cg == nil {
 		return false
@@ -259,7 +267,21 @@ func (cg *cgroupSession) hasPids() bool {
 		log.Printf("cgroup %s: hasPids read error: %v", cg.cgName, err)
 		return false
 	}
-	return strings.TrimSpace(string(data)) != ""
+	for _, pidStr := range strings.Fields(string(data)) {
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+		comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		if err != nil {
+			// Process may have just exited; treat as gone.
+			continue
+		}
+		if !backgroundComms[strings.TrimSpace(string(comm))] {
+			return true
+		}
+	}
+	return false
 }
 
 func (cg *cgroupSession) hasEscapedRunning() bool {
