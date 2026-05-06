@@ -88,6 +88,7 @@ type ebpfSubsystem struct {
 	hostname   string
 	divergence *divergenceTracker
 	cgroupRoot string
+	ctx        context.Context
 
 	objs    *RecorderObjects
 	rd      *ringbuf.Reader
@@ -120,6 +121,7 @@ func newEBPFSubsystem(cfg agentConfig, tlsCfg *tls.Config, hostname string, div 
 // start loads the BPF objects, attaches tracepoints, and begins the watch loop.
 // Returns an error if eBPF is unavailable; caller falls back to plugin-only mode.
 func (s *ebpfSubsystem) start(ctx context.Context) error {
+	s.ctx = ctx
 	objs := &RecorderObjects{}
 	if err := LoadRecorderObjects(objs, nil); err != nil {
 		return fmt.Errorf("load eBPF objects: %w", err)
@@ -184,18 +186,21 @@ func (s *ebpfSubsystem) stop() {
 	for _, l := range s.links {
 		l.Close()
 	}
-	if s.objs != nil {
-		s.objs.Close()
-	}
+	// Delete BPF map entries BEFORE closing BPF objects to avoid use-after-close.
 	s.mu.Lock()
 	sessions := make([]*ebpfSession, 0, len(s.sessions))
 	for id, sess := range s.sessions {
 		sessions = append(sessions, sess)
-		_ = s.objs.TrackedCgroups.Delete(id)
+		if s.objs != nil {
+			_ = s.objs.TrackedCgroups.Delete(id)
+		}
 	}
 	s.sessions = make(map[uint64]*ebpfSession)
 	s.scopeToCgroup = make(map[string]uint64)
 	s.mu.Unlock()
+	if s.objs != nil {
+		s.objs.Close()
+	}
 	for _, sess := range sessions {
 		sess.close(0)
 	}
@@ -609,7 +614,7 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		log.Printf("ebpf: pkexec session started: %s user=%s cgroup=%s (invoking cgroup)",
 			sessID, username, filepath.Base(scopePath))
 		go func() {
-			waitForPID(ev.Pid)
+			waitForPID(s.ctx, ev.Pid)
 			s.mu.Lock()
 			if s.sessions[cgroupID] == sess {
 				delete(s.sessions, cgroupID)
@@ -632,18 +637,24 @@ func (s *ebpfSubsystem) resolvePkexecScope(scopePath string) {
 	s.pkexecMu.Lock()
 	defer s.pkexecMu.Unlock()
 
-	for i, w := range s.pendingPkexec {
+	// Prune stale entries and notify the oldest fresh one.
+	var keep []*pkexecWaiter
+	notified := false
+	for _, w := range s.pendingPkexec {
 		if time.Since(w.ts) > 5*time.Second {
+			continue // drop stale waiter
+		}
+		if !notified {
+			select {
+			case w.ch <- scopePath:
+			default:
+			}
+			notified = true
 			continue
 		}
-		// Notify the oldest waiter within the time window.
-		s.pendingPkexec = append(s.pendingPkexec[:i], s.pendingPkexec[i+1:]...)
-		select {
-		case w.ch <- scopePath:
-		default:
-		}
-		return
+		keep = append(keep, w)
 	}
+	s.pendingPkexec = keep
 }
 
 func generatePkexecSessionID(hostname, username string) string {
@@ -677,7 +688,9 @@ func (s *ebpfSubsystem) watch(ctx context.Context) {
 		log.Printf("ebpf: inotify_init: %v", err)
 		return
 	}
-	defer syscall.Close(ifd)
+	var closeIfd sync.Once
+	closeInotify := func() { closeIfd.Do(func() { syscall.Close(ifd) }) }
+	defer closeInotify()
 
 	wdToDir := map[int32]string{}
 	var wdMu sync.Mutex
@@ -705,7 +718,7 @@ func (s *ebpfSubsystem) watch(ctx context.Context) {
 	// Cancel inotify read when ctx is done.
 	go func() {
 		<-ctx.Done()
-		syscall.Close(ifd)
+		closeInotify()
 	}()
 
 	buf := make([]byte, 4096)
@@ -928,7 +941,6 @@ type ebpfSession struct {
 	source        string // "ebpf-tty" or "ebpf-pkexec"
 	parentID      string // parent session ID (pkexec only)
 	hasIO         bool   // false = no TTY data expected (background pkexec)
-	callerProcess string // process name (unix-process) or inferred service (dbus-polkit)
 	ts            time.Time // event time; zero means use time.Now() at connect
 	connectedAt   time.Time // set by connect(); used by sweeper to evict stale sessions
 
@@ -979,7 +991,6 @@ func (s *ebpfSession) connect(addr string, tlsCfg *tls.Config, verifyKey []byte)
 		Source:          src,
 		ParentSessionID: s.parentID,
 		HasIO:           s.hasIO,
-		CallerProcess:   s.callerProcess,
 	}
 	payload, _ := json.Marshal(start)
 	if err := protocol.WriteMessage(s.bw, protocol.MsgSessionStart, payload); err != nil {
@@ -1121,13 +1132,17 @@ func readProcCgroupPath(pid uint32, cgroupRoot string) string {
 	return ""
 }
 
-// waitForPID blocks until /proc/<pid> disappears (process has exited).
-func waitForPID(pid uint32) {
+// waitForPID blocks until /proc/<pid> disappears or ctx is cancelled.
+func waitForPID(ctx context.Context, pid uint32) {
 	for {
 		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); os.IsNotExist(err) {
 			return
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
 }
 

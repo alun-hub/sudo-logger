@@ -315,10 +315,11 @@ func handlePluginConn(pluginConn net.Conn) {
 		sessionAckMu.Unlock()
 		if !wasAlive {
 			cg.unfreeze()
-			for _, m := range buf {
+			for i, m := range buf {
 				select {
 				case bulkQueue <- m:
 				case <-done:
+					log.Printf("markAlive: session closed mid-drain, dropping %d buffered chunks", len(buf)-i)
 					return
 				}
 			}

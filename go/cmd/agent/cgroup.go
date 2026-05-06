@@ -48,8 +48,9 @@ type cgroupSession struct {
 	escapedMu sync.Mutex
 	escaped   map[int]bool
 
-	stopTrack chan struct{}
-	trackDone chan struct{}
+	stopTrack  chan struct{}
+	trackDone  chan struct{}
+	removeOnce sync.Once
 }
 
 func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
@@ -355,25 +356,27 @@ func (cg *cgroupSession) remove() {
 	if cg == nil {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644)
-	cg.escapedMu.Lock()
-	for pid, shouldStop := range cg.escaped {
-		if shouldStop {
-			syscall.Kill(pid, syscall.SIGCONT)
-		}
-	}
-	cg.escapedMu.Unlock()
-	parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
-	if data, err := os.ReadFile(filepath.Join(cg.path, "cgroup.procs")); err == nil {
-		for _, pid := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-			if pid != "" {
-				_ = os.WriteFile(parentProcs, []byte(pid+"\n"), 0644)
+	cg.removeOnce.Do(func() {
+		_ = os.WriteFile(filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644)
+		cg.escapedMu.Lock()
+		for pid, shouldStop := range cg.escaped {
+			if shouldStop {
+				syscall.Kill(pid, syscall.SIGCONT)
 			}
 		}
-	}
-	if err := os.Remove(cg.path); err != nil {
-		log.Printf("cgroup remove %s: %v", cg.cgName, err)
-	} else {
-		debugLog("cgroup %s: removed", cg.cgName)
-	}
+		cg.escapedMu.Unlock()
+		parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
+		if data, err := os.ReadFile(filepath.Join(cg.path, "cgroup.procs")); err == nil {
+			for _, pid := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+				if pid != "" {
+					_ = os.WriteFile(parentProcs, []byte(pid+"\n"), 0644)
+				}
+			}
+		}
+		if err := os.Remove(cg.path); err != nil {
+			log.Printf("cgroup remove %s: %v", cg.cgName, err)
+		} else {
+			debugLog("cgroup %s: removed", cg.cgName)
+		}
+	})
 }
