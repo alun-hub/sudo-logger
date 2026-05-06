@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.29
+Version:        1.20.30
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,19 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Tue May 05 2026 sudo-logger 1.20.30-1
+- fix(agent): wrap cgroup remove() in sync.Once — prevents double-remove
+  when SIGTERM cleanupAllCgs() races with the linger goroutine defer
+- fix(agent): log dropped chunk count in markAlive() when session closes
+  mid-drain of the server-outage buffer
+- fix(agent): propagate context to waitForPID so pkexec goroutines exit
+  cleanly on agent shutdown instead of polling until process death
+- fix(agent): prune stale pendingPkexec entries in resolvePkexecScope()
+  to prevent unbounded slice growth over long uptimes
+- fix(agent): guard inotify fd close with sync.Once preventing double-
+  close race between defer and the ctx-cancel goroutine in watch()
+- fix(agent): remove dead callerProcess field from ebpfSession
+
 * Tue May 05 2026 sudo-logger 1.20.29-1
 - fix(agent): buffer up to 500 session chunks while server unreachable;
   replayed when connection recovers — prevents data loss during brief
