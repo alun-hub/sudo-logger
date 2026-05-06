@@ -33,18 +33,18 @@
     }
 
     [data-theme="light"] {
-      --bg:          #f5f6fa;
-      --surface:     #ffffff;
-      --card:        #f0f1f5;
-      --card-hover:  #e8eaf0;
-      --card-active: #dce8ff;
-      --border:      #dde0ea;
-      --border-mid:  #c8ccd8;
+      --bg:          #e8eaf4;
+      --surface:     #dfe2ef;
+      --card:        #d4d8e8;
+      --card-hover:  #c8cde0;
+      --card-active: #bccaf5;
+      --border:      #c8ccdb;
+      --border-mid:  #b4b9cc;
       --text:        #1e2030;
       --text-sub:    #5a5f72;
       --text-dim:    #9298aa;
       --green:       #0d9f58;
-      --green-dim:   #e6f7ee;
+      --green-dim:   #d8f0e6;
       --green-glow:  rgba(13, 159, 88, 0.12);
       --blue:        #3874d8;
       --red:         #d93f50;
@@ -232,6 +232,48 @@
     mark { background: rgba(0,232,122,0.18); color: var(--green);
       border-radius: 2px; padding: 0 1px; font-style: normal; }
     [data-theme="light"] mark { background: rgba(0, 122, 64, 0.14); }
+
+    /* Light mode: explicit card background so cards stand out from sidebar */
+    [data-theme="light"] .session-card { background: var(--card); }
+
+    /* Light mode: navy chrome for topbar and controls */
+    [data-theme="light"] .topbar {
+      background: #1a2a50; border-bottom-color: #253763;
+    }
+    [data-theme="light"] .topbar .logo { color: #2ecc71; }
+    [data-theme="light"] .topbar .badge {
+      background: rgba(0,0,0,0.22); border-color: rgba(255,255,255,0.12); color: #8898c0;
+    }
+    [data-theme="light"] .topbar .tab-btn { color: #8898c0; }
+    [data-theme="light"] .topbar .tab-btn:hover { color: #b0bcd8; border-color: rgba(255,255,255,0.2); }
+    [data-theme="light"] .topbar .tab-btn.active {
+      color: #2ecc71; border-color: #2ecc71; background: rgba(46,204,113,0.15);
+    }
+    [data-theme="light"] .topbar .theme-btn {
+      border-color: rgba(255,255,255,0.18); color: #8898c0;
+    }
+    [data-theme="light"] .topbar .theme-btn:hover { color: #b0bcd8; border-color: rgba(255,255,255,0.3); }
+    [data-theme="light"] .topbar .autoplay-label { color: #8898c0; }
+    [data-theme="light"] .topbar .user-chip { color: #8898c0; }
+    [data-theme="light"] .topbar .user-chip .user-name { color: #c8d4e8; }
+    [data-theme="light"] .topbar .logout-btn {
+      border-color: rgba(255,255,255,0.18); color: #8898c0;
+    }
+    [data-theme="light"] .topbar .logout-btn:hover { color: var(--red); border-color: var(--red); }
+    [data-theme="light"] .controls {
+      background: #1a2a50; border-top-color: #253763;
+    }
+    [data-theme="light"] .controls .btn-play {
+      background: rgba(46,204,113,0.18); border-color: #2ecc71; color: #2ecc71;
+    }
+    [data-theme="light"] .controls .btn-icon {
+      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: #94a8cc;
+    }
+    [data-theme="light"] .controls .time-cur { color: #2ecc71; }
+    [data-theme="light"] .controls .time-tot { color: #8898c0; }
+    [data-theme="light"] .controls .speed-select {
+      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: #94a8cc;
+    }
 
     .load-more { flex-shrink: 0; display: none; width: 100%; background: none;
       border: none; border-top: 1px solid var(--border); padding: 10px;
