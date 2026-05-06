@@ -186,8 +186,6 @@
     /* divergence status badges */
     .sc-div { font-size: 11px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
       font-family: var(--font-ui); border: 1px solid; }
-    .sc-div.confirmed  { color: #00c766; border-color: rgba(0,199,102,0.35); background: rgba(0,199,102,0.07); }
-    .sc-div.unwitnessed { color: #e67e00; border-color: rgba(230,126,0,0.35); background: rgba(230,126,0,0.07); }
     .sc-div.missing-plugin { color: var(--red); border-color: rgba(255,95,109,0.45); background: rgba(255,95,109,0.10); font-weight: 600; }
     /* polkit session group */
     .session-group { border-bottom: 1px solid var(--border); }
@@ -901,6 +899,65 @@
   <!-- ── Help tab ──────────────────────────────────────────────────────────── -->
   <div class="report-panel" id="tab-help">
     <div class="help-body">
+
+      <div class="help-section">
+        <h3>Session indicators</h3>
+        <p class="help-intro" style="margin-bottom:12px">
+          Badges shown on session cards. Hover a badge for extra detail where available.
+        </p>
+        <table class="help-table">
+          <thead><tr><th style="width:140px">Badge</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="sc-source">ebpf</span></td>
+              <td>Session captured by the eBPF TTY recorder instead of the sudo plugin. Appears for
+                  privilege escalations via <code>su</code>, <code>screen</code>, <code>tmux</code>
+                  or other programs that bypass sudo. The session is fully recorded — the capture
+                  path is just different.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-source">pkexec</span></td>
+              <td>Privilege escalation via <code>pkexec</code>, captured by the eBPF
+                  <code>execve</code> tracepoint. pkexec does not go through the sudo plugin so
+                  eBPF is the only capture mechanism for these events.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-live" style="pointer-events:none">live</span></td>
+              <td>Session is currently running. The recording is still in progress; the replay
+                  shows whatever has been captured so far.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-screen">▣ screen</span></td>
+              <td>Session contains a terminal recording with full frame history (screen or tmux).
+                  The player renders these as a video-like replay rather than a plain text stream.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-event-label">⚡ event</span></td>
+              <td>pkexec run with no attached TTY — a background privilege escalation with no
+                  interactive I/O. The record shows metadata (user, command, exit code, timestamp)
+                  but there is no terminal replay.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-network-outage">⏱ network outage</span></td>
+              <td>The agent lost contact with the log server during this session. Session processes
+                  were frozen until connectivity was restored so that no activity went unrecorded.
+                  The recording is complete but was delayed.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-incomplete">⚠ incomplete</span></td>
+              <td>The session ended without a clean close — the agent was killed or crashed before
+                  sending <code>SESSION_END</code>. The recording may be truncated.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-div missing-plugin">⚠ no plugin</span></td>
+              <td>eBPF detected a sudo execution on this host but the audit plugin never logged a
+                  matching session. This can mean the plugin is not installed, was bypassed, or
+                  the binary was invoked directly. There is no full audit trail — investigate
+                  immediately.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <div class="help-section">
         <h3>How risk scoring works</h3>
@@ -1775,12 +1832,8 @@ function buildSessionCard(s, q) {
   if (isEventCard)   meta.appendChild(el('span', 'sc-event-label', '⚡ event'));
   if (s.network_outage) meta.appendChild(el('span', 'sc-network-outage', '⏱ network outage'));
   else if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
-  if ((!s.source || s.source === 'plugin') && s.divergence_status) {
-    if (s.divergence_status === 'confirmed') {
-      meta.appendChild(el('span', 'sc-div confirmed', '✓ ebpf'));
-    } else if (s.divergence_status === 'missing_plugin') {
-      meta.appendChild(el('span', 'sc-div missing-plugin', '⚠ no plugin'));
-    }
+  if (s.divergence_status === 'missing_plugin') {
+    meta.appendChild(el('span', 'sc-div missing-plugin', '⚠ no plugin'));
   }
   if (s.parent_session_id) {
     const link = el('span', 'sc-source', `↑ parent`);
