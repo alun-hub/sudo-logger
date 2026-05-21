@@ -70,7 +70,9 @@ struct {
 static __always_inline int in_sandbox(void)
 {
 	__u64 cgid = bpf_get_current_cgroup_id();
-	return bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL;
+	int hit = bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL;
+	bpf_printk("in_sandbox: cgid=%llu hit=%d\n", cgid, hit);
+	return hit;
 }
 
 static __always_inline int inode_protected(struct inode *inode)
@@ -81,7 +83,9 @@ static __always_inline int inode_protected(struct inode *inode)
 	key.ino = BPF_CORE_READ(inode, i_ino);
 	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
 	key.pad = 0;
-	return bpf_map_lookup_elem(&protected_inodes, &key) != NULL;
+	int hit = bpf_map_lookup_elem(&protected_inodes, &key) != NULL;
+	bpf_printk("inode_protected: ino=%llu dev=%u hit=%d\n", key.ino, key.dev, hit);
+	return hit;
 }
 
 // Deny write access to protected inodes.
