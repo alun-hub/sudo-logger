@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.30
+Version:        1.20.31
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -76,6 +76,10 @@ install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
 # Default client config (LOGSERVER address)
 install -D -m 0640 agent.conf \
     %{buildroot}%{_sysconfdir}/sudo-logger/agent.conf
+
+# Example sandbox deny-list (not enabled by default)
+install -D -m 0640 sandbox.yaml \
+    %{buildroot}%{_sysconfdir}/sudo-logger/sandbox.yaml
 
 # Sudoers drop-in: preserve WAYLAND_DISPLAY so the proxy reaches GUI commands
 install -D -m 0440 sudo-logger-wayland.sudoers \
@@ -165,6 +169,7 @@ fi
 %{_unitdir}/sudo-logger-agent.service
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/agent.conf
+%config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/sandbox.yaml
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 %config(noreplace) %attr(0440, root, root) %{_sysconfdir}/sudoers.d/sudo-logger-wayland
 %{_datadir}/selinux/packages/sudo_logger.pp
@@ -172,6 +177,15 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Wed May 21 2026 sudo-logger 1.20.31-1
+- feat(agent): add eBPF LSM process sandbox — deny-list for files, devices,
+  sockets, /proc entries and process names; enforced at kernel level via
+  lsm/file_permission, inode_unlink, inode_rename and task_kill hooks;
+  scoped to session cgroup so only sudo processes are restricted
+- feat(agent): install /etc/sudo-logger/sandbox.yaml example config
+  covering Fedora security-critical paths; enable with sandbox_config
+  in agent.conf
+
 * Tue May 05 2026 sudo-logger 1.20.30-1
 - fix(agent): wrap cgroup remove() in sync.Once — prevents double-remove
   when SIGTERM cleanupAllCgs() races with the linger goroutine defer
