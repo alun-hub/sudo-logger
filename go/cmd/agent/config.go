@@ -27,6 +27,9 @@ type agentConfig struct {
 	// Ebpf controls whether the eBPF subsystem is enabled.
 	// Defaults to true; set to false on kernels without BTF support.
 	Ebpf bool
+	// SandboxConfig is the path to the sandbox YAML deny-list.
+	// Empty (default) disables the sandbox subsystem.
+	SandboxConfig string
 }
 
 func defaultConfig() agentConfig {
@@ -122,6 +125,8 @@ func loadConfig(path string) (agentConfig, error) {
 			cfg.DisclaimerColor = v
 		case "ebpf":
 			cfg.Ebpf = v != "false" && v != "0" && v != "no"
+		case "sandbox_config":
+			cfg.SandboxConfig = v
 		default:
 			// Silently ignore unknown keys for backward compatibility.
 		}

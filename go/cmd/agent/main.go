@@ -103,6 +103,11 @@ func main() {
 		log.Printf("ebpf: disabled by config — running in plugin-only mode")
 	}
 
+	// Start the sandbox LSM subsystem if configured.
+	if cfg.SandboxConfig != "" {
+		startSandbox(cfg.SandboxConfig)
+	}
+
 	// Remove stale socket from previous run.
 	if err := os.Remove(cfg.Socket); err != nil && !os.IsNotExist(err) {
 		log.Printf("remove stale socket: %v", err)
@@ -132,6 +137,7 @@ func main() {
 		if ebpfSys != nil {
 			ebpfSys.stop()
 		}
+		sandboxSys.stop()
 		os.Exit(0)
 	}()
 

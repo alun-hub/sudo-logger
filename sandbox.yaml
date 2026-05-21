@@ -1,0 +1,48 @@
+# /etc/sudo-logger/sandbox.yaml
+#
+# Process sandbox deny-list for sudo-logger.
+#
+# Processes running inside a sudo session are blocked from writing to, deleting,
+# or renaming the paths listed here, and from sending signals to the listed
+# process names. Enforcement is via eBPF LSM hooks in the agent — kernel-level,
+# not bypassable by root within the session.
+#
+# Requires: agent.conf sandbox_config = /etc/sudo-logger/sandbox.yaml
+#           lsm=bpf in kernel boot parameters (Fedora: add to GRUB_CMDLINE_LINUX)
+#
+# Path resolution: each path is stat(2)'d at agent startup to obtain its inode
+# number. Symlinks are followed. Non-existent paths are skipped with a warning.
+# Restart the agent after adding new paths.
+
+protect:
+  # Regular files and directories.
+  files:
+    - /var/log/sudo-logger
+    - /etc/sudoers
+    - /etc/sudoers.d
+    - /etc/sudo.conf
+    - /usr/libexec/sudo/sudo_logger_plugin.so
+
+  # Device nodes. Prevents raw disk and memory access.
+  devices:
+    - /dev/mem
+    - /dev/kmem
+    - /dev/sda
+
+  # Sensitive /proc entries.
+  proc:
+    - /proc/sysrq-trigger
+    - /proc/kcore
+    - /proc/kallsyms
+
+  # Unix domain sockets. Prevents sessions from injecting into these services.
+  sockets:
+    - /run/sudo-logger/plugin.sock
+
+  # Process names (max 15 characters). Sessions cannot send any signal
+  # (including SIGKILL) to processes with these names.
+  processes:
+    - sudo-logger-ag   # sudo-logger-agent (15 chars max)
+    - auditd
+    - systemd
+    - sshd

@@ -6,4 +6,5 @@
 //	go generate ./cmd/agent/    # compiles BPF C → Go bindings
 //
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -Werror -Wno-missing-declarations -Wno-missing-prototypes -D__TARGET_ARCH_x86_64" Recorder bpf/recorder.c -- -I./bpf
+//go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc clang -cflags "-O2 -g -Wall -Werror -Wno-missing-declarations -Wno-missing-prototypes -D__TARGET_ARCH_x86_64" Sandbox bpf/sandbox.bpf.c -- -I./bpf
 package main

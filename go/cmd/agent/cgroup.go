@@ -38,9 +38,10 @@ func init() {
 }
 
 type cgroupSession struct {
-	path    string
-	sudoPid int
-	cgName  string
+	path      string
+	sudoPid   int
+	cgName    string
+	cgroupID  uint64 // cgroup v2 ID (= inode of cgroup dir), used for sandbox scoping
 
 	mu     sync.Mutex
 	frozen bool
@@ -82,6 +83,17 @@ func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 		stopTrack: make(chan struct{}),
 		trackDone: make(chan struct{}),
 	}
+
+	// The cgroup v2 ID equals the inode number of the cgroup directory —
+	// this is what bpf_get_current_cgroup_id() returns in BPF programs.
+	var st syscall.Stat_t
+	if err := syscall.Stat(path, &st); err == nil {
+		cg.cgroupID = st.Ino
+		sandboxSys.registerCgroup(cg.cgroupID)
+	} else {
+		log.Printf("cgroup: stat %s for sandbox: %v", path, err)
+	}
+
 	go cg.trackDescendants()
 	return cg
 }
@@ -373,6 +385,7 @@ func (cg *cgroupSession) remove() {
 				}
 			}
 		}
+		sandboxSys.unregisterCgroup(cg.cgroupID)
 		if err := os.Remove(cg.path); err != nil {
 			log.Printf("cgroup remove %s: %v", cg.cgName, err)
 		} else {
