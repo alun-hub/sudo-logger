@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.32
+Version:        1.20.33
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -177,6 +177,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Wed May 21 2026 sudo-logger 1.20.33-1
+- debug(agent): narrow sandbox bpf_printk to sandboxed processes only —
+  logs cgid/ino/dev/blocked once per write attempt inside a session cgroup
+
 * Wed May 21 2026 sudo-logger 1.20.32-1
 - debug(agent): add bpf_printk tracing to sandbox LSM hooks — logs cgid,
   inode and dev for every in_sandbox/inode_protected check; read via
