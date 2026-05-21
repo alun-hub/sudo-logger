@@ -24,6 +24,7 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
 - [Configuration](#configuration)
   - [Wayland screen capture](#wayland-screen-capture)
   - [Secret redaction](#secret-redaction)
+  - [Process sandbox](#process-sandbox)
   - [Distributed storage (S3 + PostgreSQL)](#distributed-storage-s3--postgresql)
 - [Web replay interface](#web-replay-interface)
   - [Authentication](#authentication)
@@ -152,6 +153,15 @@ One goroutine per sudo session:
 `DIVERGENCE_ALERT` to the server which creates a visible `⚠ no plugin` session
 in the replay UI, indicating sudo ran without the plugin logging it.
 
+**Process sandbox** — optional eBPF LSM subsystem that enforces kernel-level
+write, delete, rename, and kill restrictions on all processes running inside
+sudo session cgroups. Four LSM hooks (`file_permission`, `inode_unlink`,
+`inode_rename`, `task_kill`) are loaded at startup; each hook checks whether
+the calling process belongs to a sandboxed session cgroup before applying a
+deny-list of protected inodes and process names configured by the operator.
+Session cgroups are registered with the sandbox on creation and removed on
+session end. See [Process sandbox](#process-sandbox).
+
 Reads all settings from `/etc/sudo-logger/agent.conf` (key = value format).
 
 ### Go log server (`go/cmd/server/`)
@@ -221,6 +231,7 @@ migrate-sessions \
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
+| **Process sandbox (optional)** | eBPF LSM hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot write to, delete, rename, or kill — not bypassable even by root within the session. Requires `lsm=bpf` in kernel boot parameters. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 
@@ -234,6 +245,7 @@ migrate-sessions \
 - Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the agent was killed mid-recording
 - SELinux policy for `sudo-logger-agent` (enforcing mode, ships in the `selinux/` directory)
+- **Process sandbox**: eBPF LSM deny-list prevents sudo session processes from writing to, deleting, or renaming protected files/devices/sockets and from killing protected daemons — kernel-enforced, not bypassable by root (see [Process sandbox](#process-sandbox))
 - Real-time streaming — no local buffering on the client
 - Interactive sessions (bash, vim, etc.) fully recorded including timing
 - Freeze within ~800 ms of network loss; automatic recovery when network returns
@@ -307,6 +319,26 @@ migrate-sessions \
   hard-frozen via SIGSTOP/SIGCONT.
 
 - **Requires sudo 1.9+**: uses the sudo 1.9 I/O plugin API.
+
+- **Process sandbox does not protect directory contents**: the sandbox
+  restricts writing to, deleting, and renaming the specific inodes listed in
+  `sandbox.yaml`. It does not prevent creating new files *inside* a protected
+  directory — doing so would require additional `inode_create` and `inode_mkdir`
+  LSM hooks (not yet implemented). For example, listing `/etc/sudoers.d`
+  prevents modification of that directory inode, but a new file can still be
+  created inside it.
+
+- **Process sandbox does not block Unix socket IPC**: `file_permission` with
+  `MAY_WRITE` prevents open-for-write and deletion/rename of socket files, but
+  it does not intercept `connect()` + `send()` — normal IPC to a listed socket
+  still works. The protection is against socket file replacement, not data injection.
+
+- **Process sandbox requires `lsm=bpf` kernel boot parameter**: BPF LSM hooks
+  are only active when `bpf` appears in the kernel's `lsm=` parameter. On
+  Fedora, add `lsm=bpf` (or append it to an existing list) to
+  `GRUB_CMDLINE_LINUX` in `/etc/default/grub` and run `grub2-mkconfig -o
+  /boot/grub2/grub.cfg`. If the parameter is missing, `AttachLSM` will fail
+  and the agent logs a warning; all other agent functions continue normally.
 
 ---
 
@@ -659,6 +691,7 @@ All of these go in `/etc/sudo-logger/agent.conf`:
 | `proxy_period` | `300` | Capture interval for Wayland frames in milliseconds. Lower values give smoother replay at the cost of more storage. |
 | `ebpf` | `true` | Enable eBPF session recording. Requires kernel BTF support (`/sys/kernel/btf/vmlinux`). Degrades gracefully to plugin-only mode on older kernels. |
 | `mask_pattern` | — | Additional regex pattern to redact from terminal streams. Can be repeated for multiple patterns. See [Secret redaction](#secret-redaction). |
+| `sandbox_config` | — | Path to a YAML deny-list for the process sandbox. Empty (default) disables sandbox enforcement. See [Process sandbox](#process-sandbox). |
 
 ### Wayland screen capture
 
@@ -700,6 +733,158 @@ fail immediately with *"cannot open display"*:
 ```
 Defaults env_delete += DISPLAY
 ```
+
+### Process sandbox
+
+The process sandbox enforces a kernel-level deny-list on every process running
+inside a sudo session cgroup. Unlike file permissions or SELinux policy, the
+restrictions cannot be bypassed by the sandboxed process — not even by root —
+because they are enforced by the Linux kernel's LSM framework via eBPF.
+
+#### Requirements
+
+| Requirement | Detail |
+|-------------|--------|
+| Kernel ≥ 5.7 | `lsm/` eBPF program type introduced in 5.7 |
+| `CONFIG_BPF_LSM=y` | Kernel compiled with BPF LSM support |
+| `lsm=bpf` boot parameter | BPF must appear in the active LSM list |
+| `CONFIG_DEBUG_INFO_BTF=y` | Required for CO-RE (Compile Once, Run Everywhere) |
+
+Enable on Fedora:
+
+```bash
+# Add lsm=bpf to GRUB_CMDLINE_LINUX in /etc/default/grub, for example:
+# GRUB_CMDLINE_LINUX="... lsm=selinux,bpf"
+grub2-mkconfig -o /boot/grub2/grub.cfg
+reboot
+```
+
+If the parameter is absent, the agent logs a warning at startup and continues
+without sandbox enforcement — all other functionality is unaffected.
+
+#### Enabling the sandbox
+
+Add one line to `/etc/sudo-logger/agent.conf`:
+
+```ini
+sandbox_config = /etc/sudo-logger/sandbox.yaml
+```
+
+Then create `/etc/sudo-logger/sandbox.yaml` (see format below) and restart
+the agent:
+
+```bash
+systemctl restart sudo-logger-agent
+```
+
+The agent logs a confirmation:
+
+```
+sandbox: LSM hooks attached (42 protected inodes, 15 protected processes)
+```
+
+#### Configuration file format
+
+`sandbox.yaml` uses a simple YAML structure with five protection categories.
+All categories are optional.
+
+```yaml
+protect:
+  # Regular files and directories — prevents write, delete, and rename.
+  files:
+    - /etc/sudoers
+    - /etc/sudoers.d
+    - /var/log/sudo-logger
+
+  # Device nodes — prevents raw disk and memory access.
+  devices:
+    - /dev/mem
+    - /dev/kmem
+    - /dev/sda
+
+  # /proc entries — prevents modifying sensitive kernel parameters.
+  proc:
+    - /proc/sysrq-trigger
+    - /proc/sys/kernel/randomize_va_space
+
+  # Unix domain socket files — prevents deletion and replacement.
+  # Does not block connect()+send() IPC (see Limitations).
+  sockets:
+    - /run/sudo-logger/plugin.sock
+
+  # Process names — sessions cannot send any signal to these processes,
+  # including SIGKILL. Names are capped at 15 characters (Linux TASK_COMM_LEN).
+  # Verify the exact truncated name with: cat /proc/<pid>/comm
+  processes:
+    - auditd
+    - sssd
+    - sshd
+    - systemd-journal    # systemd-journald truncates to 15 chars
+```
+
+A comprehensive example for Fedora systems (covering sudo, PAM, SSH, SSSD,
+Kerberos, auditd, SELinux, PKI, cron, systemd units, and all major security
+daemons) is included in `sandbox.yaml` in the repository root.
+
+#### How enforcement works
+
+At agent startup, each configured path is resolved to its inode number and
+block device ID using `stat(2)`. These `{inode, device}` pairs are loaded into
+a BPF hash map (`protected_inodes`). Process names are loaded into a second
+map (`protected_procs`).
+
+Four eBPF LSM hooks are then attached to the kernel:
+
+| Hook | What it blocks |
+|------|---------------|
+| `lsm/file_permission` | Writing or appending to a protected inode |
+| `lsm/inode_unlink` | Deleting a protected file |
+| `lsm/inode_rename` | Renaming a protected file, or renaming onto one |
+| `lsm/task_kill` | Sending any signal to a process whose name is in `protected_procs` |
+
+Each hook first checks whether the calling process belongs to a sandboxed
+session cgroup. The agent registers each new session's cgroup ID (= the inode
+of the cgroup v2 directory) in a `sandboxed_cgroups` BPF map when the session
+starts, and removes it when the session ends. Processes outside a sandboxed
+cgroup are unaffected — the hooks are global but effectively scoped.
+
+When a blocked operation is attempted, the kernel returns `EPERM` to the
+calling process. The session continues; only the specific operation is denied.
+
+#### Process name truncation
+
+Linux stores the process name (`comm`) in a 16-byte field including the null
+terminator, giving a maximum of 15 usable characters. Names longer than 15
+characters are silently truncated by the kernel. Verify the actual stored name
+before adding an entry:
+
+```bash
+# Find the PID
+pgrep -x systemd-journald
+
+# Read the kernel-stored name
+cat /proc/<pid>/comm
+# → systemd-journal
+```
+
+The agent also logs a warning when loading a name that exceeds 15 characters.
+
+#### Limitations
+
+- **Directory contents not protected**: the sandbox protects the listed
+  inodes. It does not prevent creating new files *inside* a protected
+  directory — only modification and deletion of the directory entry itself.
+
+- **Unix socket IPC not blocked**: listing a socket path prevents its
+  deletion and replacement, but does not intercept `connect()` + `send()`.
+  Normal IPC to the socket continues to work.
+
+- **Paths resolved at startup**: if a protected file does not exist when the
+  agent starts, it is skipped with a warning. Restart the agent after creating
+  new paths that should be protected.
+
+- **Symlinks followed**: paths are resolved with `stat(2)`, which follows
+  symlinks. The underlying inode is protected, not the symlink.
 
 ---
 
@@ -1242,8 +1427,11 @@ sudo-logger/
 │   │   │   ├── divergence.go    # eBPF vs plugin divergence detection
 │   │   │   ├── cgroup.go        # Per-session cgroup management + freeze
 │   │   │   ├── config.go        # Config file parser
+│   │   │   ├── sandbox.go       # eBPF LSM sandbox: load, attach, cgroup registration
+│   │   │   ├── sandbox_config.go # sandbox.yaml parser + inode resolver
 │   │   │   └── bpf/
-│   │   │       └── recorder.c   # eBPF tracepoint hooks (compiled via bpf2go)
+│   │   │       ├── recorder.c   # eBPF tracepoint hooks (compiled via bpf2go)
+│   │   │       └── sandbox.bpf.c # eBPF LSM hooks: file_permission, inode_unlink/rename, task_kill
 │   │   ├── server/
 │   │   │   └── main.go          # Remote log server
 │   │   ├── replay-server/
