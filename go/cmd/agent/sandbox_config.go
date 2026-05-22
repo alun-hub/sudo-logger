@@ -74,16 +74,6 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 			seen[key] = true
 			res.Inodes = append(res.Inodes, key)
 		}
-
-		// Always also add a wildcard entry with dev=0. The BPF program checks
-		// this if the specific ID doesn't match. This provides 100% reliability
-		// on Btrfs, ZFS, and virtual filesystems.
-		wildcard := inodeKey{Ino: st.Ino, Dev: 0}
-		if !seen[wildcard] {
-			seen[wildcard] = true
-			res.Inodes = append(res.Inodes, wildcard)
-			log.Printf("sandbox: protecting %s {ino=%d dev=0} (wildcard)", p, st.Ino)
-		}
 	}
 
 	for _, name := range cfg.Protect.Processes {

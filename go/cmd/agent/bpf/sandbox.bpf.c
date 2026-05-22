@@ -83,12 +83,6 @@ static __always_inline int inode_protected(struct inode *inode)
 	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
 	key.pad = 0;
 
-	if (bpf_map_lookup_elem(&protected_inodes, &key))
-		return 1;
-
-	// Fallback for filesystems with unstable/anonymous device IDs (like Btrfs).
-	// If the specific {ino, dev} isn't found, check for {ino, dev=0} as a wildcard.
-	key.dev = 0;
 	return bpf_map_lookup_elem(&protected_inodes, &key) != NULL;
 }
 

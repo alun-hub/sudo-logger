@@ -127,11 +127,6 @@ func (s *sandboxSubsystem) ResolveDeviceID(path string) (uint32, error) {
 			continue
 		}
 
-		// Field 3 (idx 2) is the anonymous dev ID (0:XX)
-		// Field 8+ (after the "-") contains the real device major:minor or name.
-		// For Btrfs, the internal s_dev often matches the ID of the physical device
-		// found in the mount source field (field 9 or after the separator).
-
 		majMin := fields[2]
 		parts := strings.SplitN(majMin, ":", 2)
 		if len(parts) == 2 {
@@ -139,26 +134,16 @@ func (s *sandboxSubsystem) ResolveDeviceID(path string) (uint32, error) {
 			minor, _ := strconv.ParseUint(parts[1], 10, 32)
 
 			if major == 0 {
-				// It's an anonymous device (Btrfs subvol).
-				// We need the physical device ID. Let's try to stat the source.
 				source := ""
 				for i := 6; i < len(fields); i++ {
 					if fields[i] == "-" && i+1 < len(fields) {
-						source = fields[i+2] // Usually field 10 (idx 9)
+						source = fields[i+2]
 						break
 					}
 				}
 				if source != "" && strings.HasPrefix(source, "/dev/") {
 					var srcSt syscall.Stat_t
 					if err := syscall.Stat(source, &srcSt); err == nil {
-						// For block devices, st.Rdev is the actual major:minor.
-						// This is what BPF sees in i_sb->s_dev on Btrfs.
-						major = uint64(srcSt.Rdev >> 8) & 0xfff
-						minor = uint64(srcSt.Rdev & 0xff) | (uint64(srcSt.Rdev >> 32) & 0xfff00)
-						// Wait, use the standard major/minor macros logic
-						major = uint64((srcSt.Rdev >> 8) & 0xfff) | ((srcSt.Rdev >> 32) & 0xfffff000)
-						minor = uint64(srcSt.Rdev & 0xff) | ((srcSt.Rdev >> 12) & 0xffffff00)
-						// Actually, just use the value directly if it's what BPF sees
 						bestDev = uint32(srcSt.Rdev)
 						bestLen = len(mountPoint)
 						continue
@@ -175,7 +160,6 @@ func (s *sandboxSubsystem) ResolveDeviceID(path string) (uint32, error) {
 	}
 	return bestDev, nil
 }
-
 // registerCgroup marks a cgroup as subject to sandbox restrictions.
 // Called when a sudo session cgroup is created.
 func (s *sandboxSubsystem) registerCgroup(cgroupID uint64) {
