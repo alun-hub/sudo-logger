@@ -119,12 +119,12 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 	key.pad = 0;
 
 	if (bpf_map_lookup_elem(&protected_inodes, &key)) {
-		bpf_printk("sandbox: BLOCKED write ino=%llu dev=%u", key.ino, key.dev);
+		bpf_printk("sandbox: BLOCKED write ino=%llu dev=%x", key.ino, key.dev);
 		return -EPERM;
 	}
 
 	// Only log allowed writes when actually in a sandbox to avoid trace_pipe spam
-	bpf_printk("sandbox: ALLOWED write ino=%llu dev=%u", key.ino, key.dev);
+	bpf_printk("sandbox: ALLOWED write ino=%llu dev=%x", key.ino, key.dev);
 	return 0;
 }
 

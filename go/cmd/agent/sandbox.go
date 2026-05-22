@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/fsnotify/fsnotify"
@@ -120,30 +121,75 @@ func (s *sandboxSubsystem) start(configPath string) error {
 }
 
 // ResolveDeviceID returns the kernel-internal s_dev for the filesystem
-// containing path, by triggering the LSM getattr hook and reading the
-// result from the resolved_devs BPF map.
+// containing path. On Btrfs, this is the physical device ID, while stat()
+// returns an anonymous ID. We parse /proc/self/mountinfo to find the real one.
 func (s *sandboxSubsystem) ResolveDeviceID(path string) (uint32, error) {
-	if s == nil || s.objs == nil {
-		return 0, fmt.Errorf("sandbox not initialized")
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return 0, fmt.Errorf("read mountinfo: %w", err)
 	}
-
-	var st syscall.Stat_t
-	if err := syscall.Stat(path, &st); err != nil {
-		return 0, err
-	}
-
-	// Triggering stat() above caused the BPF hook to populate resolved_devs.
-	// We retry a few times in case there is a tiny delay in map propagation.
-	var dev uint32
-	var err error
-	for i := 0; i < 5; i++ {
-		if err = s.objs.ResolvedDevs.Lookup(st.Ino, &dev); err == nil {
-			return dev, nil
+	bestLen := -1
+	var bestDev uint32
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		mountPoint := fields[4]
+		if mountPoint != "/" && path != mountPoint && !strings.HasPrefix(path, mountPoint+"/") {
+			continue
+		}
+		if len(mountPoint) <= bestLen {
+			continue
+		}
 
-	return 0, fmt.Errorf("BPF device resolution failed for %s: %w", path, err)
+		// Field 3 (idx 2) is the anonymous dev ID (0:XX)
+		// Field 8+ (after the "-") contains the real device major:minor or name.
+		// For Btrfs, the internal s_dev often matches the ID of the physical device
+		// found in the mount source field (field 9 or after the separator).
+
+		majMin := fields[2]
+		parts := strings.SplitN(majMin, ":", 2)
+		if len(parts) == 2 {
+			major, _ := strconv.ParseUint(parts[0], 10, 32)
+			minor, _ := strconv.ParseUint(parts[1], 10, 32)
+
+			if major == 0 {
+				// It's an anonymous device (Btrfs subvol).
+				// We need the physical device ID. Let's try to stat the source.
+				source := ""
+				for i := 6; i < len(fields); i++ {
+					if fields[i] == "-" && i+1 < len(fields) {
+						source = fields[i+2] // Usually field 10 (idx 9)
+						break
+					}
+				}
+				if source != "" && strings.HasPrefix(source, "/dev/") {
+					var srcSt syscall.Stat_t
+					if err := syscall.Stat(source, &srcSt); err == nil {
+						// For block devices, st.Rdev is the actual major:minor.
+						// This is what BPF sees in i_sb->s_dev on Btrfs.
+						major = uint64(srcSt.Rdev >> 8) & 0xfff
+						minor = uint64(srcSt.Rdev & 0xff) | (uint64(srcSt.Rdev >> 32) & 0xfff00)
+						// Wait, use the standard major/minor macros logic
+						major = uint64((srcSt.Rdev >> 8) & 0xfff) | ((srcSt.Rdev >> 32) & 0xfffff000)
+						minor = uint64(srcSt.Rdev & 0xff) | ((srcSt.Rdev >> 12) & 0xffffff00)
+						// Actually, just use the value directly if it's what BPF sees
+						bestDev = uint32(srcSt.Rdev)
+						bestLen = len(mountPoint)
+						continue
+					}
+				}
+			}
+
+			bestDev = (uint32(major) << 20) | uint32(minor)
+			bestLen = len(mountPoint)
+		}
+	}
+	if bestLen < 0 {
+		return 0, fmt.Errorf("no mount entry found for %s", path)
+	}
+	return bestDev, nil
 }
 
 // registerCgroup marks a cgroup as subject to sandbox restrictions.
