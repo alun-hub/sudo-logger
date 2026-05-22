@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.39
+Version:        1.20.40
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -177,6 +177,12 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 22 2026 sudo-logger 1.20.40-1
+- fix(sandbox): use bpf2go-generated SandboxInodeKey instead of hand-crafted
+  inodeKey to eliminate possible E2BIG key-size mismatch in ProtectedInodes map
+- diag(cgroup): log sudo's actual cgroup after move, children that trigger
+  moveSudoOut, and escaped process cgroup paths for debugging kill-protection race
+
 * Thu May 22 2026 sudo-logger 1.20.39-1
 - fix(sandbox): remove BPF wildcard dev=0 fallback — caused devpts false
   positives (major=0 anonymous devices) that intermittently blocked terminal

@@ -15,7 +15,7 @@ import (
 // Atomic editors (vi, cp, install) write to a temp file then rename it over
 // the target, assigning a new inode. Without this watcher the BPF map would
 // hold a stale inode and miss writes to the replaced file.
-func (s *sandboxSubsystem) startWatcher(pathInodes map[string]inodeKey) {
+func (s *sandboxSubsystem) startWatcher(pathInodes map[string]SandboxInodeKey) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Printf("sandbox: inotify watcher unavailable: %v — protected inodes will not auto-refresh", err)
@@ -84,7 +84,7 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 		log.Printf("sandbox: mountDev %s: %v (falling back to stat dev)", path, devErr)
 		dev = uint32(st.Dev)
 	}
-	newKey := inodeKey{Ino: st.Ino, Dev: dev}
+	newKey := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 	if newKey == old {
 		return // inode unchanged, nothing to do
 	}

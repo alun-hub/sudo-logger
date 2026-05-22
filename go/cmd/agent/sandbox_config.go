@@ -22,16 +22,9 @@ type sandboxYAML struct {
 	} `yaml:"protect"`
 }
 
-// inodeKey matches struct inode_key in sandbox.bpf.c — layout must be identical.
-type inodeKey struct {
-	Ino uint64
-	Dev uint32
-	Pad uint32
-}
-
 type resolvedSandbox struct {
-	Inodes     []inodeKey
-	PathInodes map[string]inodeKey // protected path → its current inode key
+	Inodes     []SandboxInodeKey
+	PathInodes map[string]SandboxInodeKey // protected path → its current inode key
 	Processes  []string
 }
 
@@ -88,9 +81,9 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 	}
 
 	res := &resolvedSandbox{
-		PathInodes: make(map[string]inodeKey),
+		PathInodes: make(map[string]SandboxInodeKey),
 	}
-	seen := make(map[inodeKey]bool)
+	seen := make(map[SandboxInodeKey]bool)
 
 	// Use a queue to implement recursive directory traversal.
 	queue := make([]string, 0,
@@ -134,7 +127,7 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 			dev = uint32(st.Dev)
 		}
 		log.Printf("sandbox: protecting %s {ino=%d dev=%d}", p, st.Ino, dev)
-		key := inodeKey{Ino: st.Ino, Dev: dev}
+		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
 		if !seen[key] {
 			seen[key] = true

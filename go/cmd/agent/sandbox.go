@@ -15,7 +15,7 @@ type sandboxSubsystem struct {
 	objs       *SandboxObjects
 	links      []link.Link
 	mu         sync.Mutex
-	pathInodes map[string]inodeKey // protected path → inode key currently in BPF map
+	pathInodes map[string]SandboxInodeKey // protected path → inode key currently in BPF map
 	watcher    *fsnotify.Watcher
 }
 
