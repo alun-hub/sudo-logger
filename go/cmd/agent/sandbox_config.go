@@ -48,15 +48,17 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 	}
 	seen := make(map[inodeKey]bool)
 
-	allPaths := make([]string, 0,
+	// Use a queue to implement recursive directory traversal.
+	queue := make([]string, 0,
 		len(cfg.Protect.Files)+len(cfg.Protect.Devices)+
 			len(cfg.Protect.Proc)+len(cfg.Protect.Sockets))
-	allPaths = append(allPaths, cfg.Protect.Files...)
-	allPaths = append(allPaths, cfg.Protect.Devices...)
-	allPaths = append(allPaths, cfg.Protect.Proc...)
-	allPaths = append(allPaths, cfg.Protect.Sockets...)
+	queue = append(queue, cfg.Protect.Files...)
+	queue = append(queue, cfg.Protect.Devices...)
+	queue = append(queue, cfg.Protect.Proc...)
+	queue = append(queue, cfg.Protect.Sockets...)
 
-	for _, p := range allPaths {
+	for i := 0; i < len(queue); i++ {
+		p := queue[i]
 		fi, err := os.Stat(p)
 		if err != nil {
 			log.Printf("sandbox: stat %s: %v (skipping)", p, err)
@@ -64,13 +66,12 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 		}
 
 		if fi.IsDir() {
-			// Recursively add all files in the directory.
 			entries, err := os.ReadDir(p)
 			if err != nil {
 				log.Printf("sandbox: readdir %s: %v", p, err)
 			} else {
 				for _, entry := range entries {
-					allPaths = append(allPaths, filepath.Join(p, entry.Name()))
+					queue = append(queue, filepath.Join(p, entry.Name()))
 				}
 			}
 		}
@@ -79,18 +80,25 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 		if err := syscall.Stat(p, &st); err != nil {
 			continue
 		}
-		// Use the eBPF-assisted device resolver to get the real s_dev.
-		dev, devErr := sandboxSys.ResolveDeviceID(p)
-		if devErr != nil {
-			log.Printf("sandbox: ResolveDeviceID %s: %v (falling back to stat dev)", p, devErr)
-			dev = uint32(st.Dev)
-		}
+		dev := uint32(st.Dev)
 		log.Printf("sandbox: protecting %s {ino=%d dev=%d}", p, st.Ino, dev)
 		key := inodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
 		if !seen[key] {
 			seen[key] = true
 			res.Inodes = append(res.Inodes, key)
+		}
+
+		// If it's an anonymous device (major 0, e.g. Btrfs), also add a
+		// wildcard entry with dev=0. The BPF program checks this if the
+		// specific ID doesn't match.
+		if (dev >> 20) == 0 {
+			wildcard := inodeKey{Ino: st.Ino, Dev: 0}
+			if !seen[wildcard] {
+				seen[wildcard] = true
+				res.Inodes = append(res.Inodes, wildcard)
+				log.Printf("sandbox: protecting %s {ino=%d dev=0} (wildcard)", p, st.Ino)
+			}
 		}
 	}
 

@@ -79,11 +79,7 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 		return
 	}
 
-	dev, devErr := s.ResolveDeviceID(path)
-	if devErr != nil {
-		log.Printf("sandbox: ResolveDeviceID %s: %v (falling back to stat dev)", path, devErr)
-		dev = uint32(st.Dev)
-	}
+	dev := uint32(st.Dev)
 	newKey := inodeKey{Ino: st.Ino, Dev: dev}
 	if newKey == old {
 		return // inode unchanged, nothing to do

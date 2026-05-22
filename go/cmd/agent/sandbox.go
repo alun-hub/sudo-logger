@@ -3,11 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/fsnotify/fsnotify"
@@ -144,65 +140,9 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	log.Printf("sandbox: LSM hooks attached (%d protected inodes, %d protected processes)",
 		len(res.Inodes), len(res.Processes))
 	return nil
-}
-
-// ResolveDeviceID returns the kernel-internal s_dev for the filesystem
-// containing path. On Btrfs, this is the physical device ID, while stat()
-// returns an anonymous ID. We parse /proc/self/mountinfo to find the real one.
-func (s *sandboxSubsystem) ResolveDeviceID(path string) (uint32, error) {
-	data, err := os.ReadFile("/proc/self/mountinfo")
-	if err != nil {
-		return 0, fmt.Errorf("read mountinfo: %w", err)
 	}
-	bestLen := -1
-	var bestDev uint32
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-		mountPoint := fields[4]
-		if mountPoint != "/" && path != mountPoint && !strings.HasPrefix(path, mountPoint+"/") {
-			continue
-		}
-		if len(mountPoint) <= bestLen {
-			continue
-		}
 
-		majMin := fields[2]
-		parts := strings.SplitN(majMin, ":", 2)
-		if len(parts) == 2 {
-			major, _ := strconv.ParseUint(parts[0], 10, 32)
-			minor, _ := strconv.ParseUint(parts[1], 10, 32)
-
-			if major == 0 {
-				source := ""
-				for i := 6; i < len(fields); i++ {
-					if fields[i] == "-" && i+1 < len(fields) {
-						source = fields[i+2]
-						break
-					}
-				}
-				if source != "" && strings.HasPrefix(source, "/dev/") {
-					var srcSt syscall.Stat_t
-					if err := syscall.Stat(source, &srcSt); err == nil {
-						bestDev = uint32(srcSt.Rdev)
-						bestLen = len(mountPoint)
-						continue
-					}
-				}
-			}
-
-			bestDev = (uint32(major) << 20) | uint32(minor)
-			bestLen = len(mountPoint)
-		}
-	}
-	if bestLen < 0 {
-		return 0, fmt.Errorf("no mount entry found for %s", path)
-	}
-	return bestDev, nil
-}
-// registerCgroup marks a cgroup as subject to sandbox restrictions.
+	// registerCgroup marks a cgroup as subject to sandbox restrictions.
 // Called when a sudo session cgroup is created.
 func (s *sandboxSubsystem) registerCgroup(cgroupID uint64) {
 	if s == nil || s.objs == nil {

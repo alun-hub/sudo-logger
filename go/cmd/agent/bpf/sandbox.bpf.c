@@ -83,7 +83,17 @@ static __always_inline int inode_protected(struct inode *inode)
 	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
 	key.pad = 0;
 
-	return bpf_map_lookup_elem(&protected_inodes, &key) != NULL;
+	if (bpf_map_lookup_elem(&protected_inodes, &key))
+		return 1;
+
+	// Safe wildcard fallback: only for anonymous devices (major 0, e.g. Btrfs).
+	// This prevents over-blocking and hangs on standard filesystems.
+	if ((key.dev >> 20) == 0) {
+		key.dev = 0;
+		return bpf_map_lookup_elem(&protected_inodes, &key) != NULL;
+	}
+
+	return 0;
 }
 
 // Deny write access to protected inodes.
