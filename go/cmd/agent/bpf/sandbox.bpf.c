@@ -39,10 +39,6 @@ struct inode_key {
 	__u32 pad;
 };
 
-// agent_pid: the PID of the sudo-logger-agent process.
-// Populated by the agent at startup; used to trigger device ID resolution.
-volatile const __u32 agent_pid = 0;
-
 // sandboxed_cgroups: set of session cgroup IDs subject to restrictions.
 // key = cgroup_id (u64), value = u8 marker.
 // Populated by the agent on session start; removed on session end.
@@ -52,16 +48,6 @@ struct {
 	__type(key, __u64);
 	__type(value, __u8);
 } sandboxed_cgroups SEC(".maps");
-
-// resolved_devs: mapping from inode to its actual i_sb->s_dev.
-// Used by the agent to resolve real device IDs for Btrfs subvolumes.
-// key = inode (u64), value = s_dev (u32).
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, MAX_RESOLVED_DEVS);
-	__type(key, __u64);
-	__type(value, __u32);
-} resolved_devs SEC(".maps");
 
 // protected_inodes: deny-list of inodes (files, devices, sockets, proc entries).
 // key = {inode number, block device id}, value = u8 marker.
@@ -117,31 +103,9 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 		return 0;
 
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
-	if (!inode)
-		return 0;
-
-	if (inode_protected(inode)) {
-		__u64 ino = BPF_CORE_READ(inode, i_ino);
-		__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
-		bpf_printk("sandbox: BLOCKED write ino=%llu dev=%x", ino, dev);
+	if (inode_protected(inode))
 		return -EPERM;
-	}
 
-	return 0;
-}
-
-// Resolve real device ID for the agent during stat() calls.
-SEC("lsm/inode_getattr")
-int BPF_PROG(sandbox_inode_getattr, const struct path *path)
-{
-	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
-	if (!inode)
-		return 0;
-
-	__u64 ino = BPF_CORE_READ(inode, i_ino);
-	__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
-
-	bpf_map_update_elem(&resolved_devs, &ino, &dev, BPF_ANY);
 	return 0;
 }
 
@@ -152,11 +116,8 @@ int BPF_PROG(sandbox_inode_unlink, struct inode *dir, struct dentry *dentry)
 	if (!in_sandbox())
 		return 0;
 	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
-	if (inode_protected(inode)) {
-		__u64 ino = BPF_CORE_READ(inode, i_ino);
-		bpf_printk("sandbox: BLOCKED unlink ino=%llu", ino);
+	if (inode_protected(inode))
 		return -EPERM;
-	}
 	return 0;
 }
 
@@ -170,17 +131,11 @@ int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_den
 	if (!in_sandbox())
 		return 0;
 	struct inode *old_inode = BPF_CORE_READ(old_dentry, d_inode);
-	if (inode_protected(old_inode)) {
-		__u64 ino = BPF_CORE_READ(old_inode, i_ino);
-		bpf_printk("sandbox: BLOCKED rename-from ino=%llu", ino);
+	if (inode_protected(old_inode))
 		return -EPERM;
-	}
 	struct inode *new_inode = BPF_CORE_READ(new_dentry, d_inode);
-	if (inode_protected(new_inode)) {
-		__u64 ino = BPF_CORE_READ(new_inode, i_ino);
-		bpf_printk("sandbox: BLOCKED rename-to ino=%llu", ino);
+	if (inode_protected(new_inode))
 		return -EPERM;
-	}
 	return 0;
 }
 

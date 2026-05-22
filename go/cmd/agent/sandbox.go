@@ -41,13 +41,6 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		return fmt.Errorf("load Sandbox spec: %w", err)
 	}
 
-	// Set the agent PID so the BPF getattr hook knows when to resolve devs.
-	if v, ok := spec.Variables["agent_pid"]; ok {
-		if err := v.Set(uint32(os.Getpid())); err != nil {
-			log.Printf("sandbox: set agent_pid spec: %v", err)
-		}
-	}
-
 	objs := &SandboxObjects{}
 	if err := spec.LoadAndAssign(objs, nil); err != nil {
 		return fmt.Errorf("load BPF objects: %w", err)
@@ -102,16 +95,7 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach lsm/task_kill: %w", err)
 	}
-	lsmGetattr, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeGetattr})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_getattr: %w", err)
-	}
-	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmGetattr}
+	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill}
 
 	s.startWatcher(res.PathInodes)
 

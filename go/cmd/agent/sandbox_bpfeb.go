@@ -63,7 +63,6 @@ type SandboxSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxProgramSpecs struct {
 	SandboxFilePermission *ebpf.ProgramSpec `ebpf:"sandbox_file_permission"`
-	SandboxInodeGetattr   *ebpf.ProgramSpec `ebpf:"sandbox_inode_getattr"`
 	SandboxInodeRename    *ebpf.ProgramSpec `ebpf:"sandbox_inode_rename"`
 	SandboxInodeUnlink    *ebpf.ProgramSpec `ebpf:"sandbox_inode_unlink"`
 	SandboxTaskKill       *ebpf.ProgramSpec `ebpf:"sandbox_task_kill"`
@@ -75,7 +74,6 @@ type SandboxProgramSpecs struct {
 type SandboxMapSpecs struct {
 	ProtectedInodes  *ebpf.MapSpec `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.MapSpec `ebpf:"protected_procs"`
-	ResolvedDevs     *ebpf.MapSpec `ebpf:"resolved_devs"`
 	SandboxedCgroups *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
 }
 
@@ -83,7 +81,6 @@ type SandboxMapSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxVariableSpecs struct {
-	AgentPid *ebpf.VariableSpec `ebpf:"agent_pid"`
 }
 
 // SandboxObjects contains all objects after they have been loaded into the kernel.
@@ -108,7 +105,6 @@ func (o *SandboxObjects) Close() error {
 type SandboxMaps struct {
 	ProtectedInodes  *ebpf.Map `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.Map `ebpf:"protected_procs"`
-	ResolvedDevs     *ebpf.Map `ebpf:"resolved_devs"`
 	SandboxedCgroups *ebpf.Map `ebpf:"sandboxed_cgroups"`
 }
 
@@ -116,7 +112,6 @@ func (m *SandboxMaps) Close() error {
 	return _SandboxClose(
 		m.ProtectedInodes,
 		m.ProtectedProcs,
-		m.ResolvedDevs,
 		m.SandboxedCgroups,
 	)
 }
@@ -125,7 +120,6 @@ func (m *SandboxMaps) Close() error {
 //
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxVariables struct {
-	AgentPid *ebpf.Variable `ebpf:"agent_pid"`
 }
 
 // SandboxPrograms contains all programs after they have been loaded into the kernel.
@@ -133,7 +127,6 @@ type SandboxVariables struct {
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxPrograms struct {
 	SandboxFilePermission *ebpf.Program `ebpf:"sandbox_file_permission"`
-	SandboxInodeGetattr   *ebpf.Program `ebpf:"sandbox_inode_getattr"`
 	SandboxInodeRename    *ebpf.Program `ebpf:"sandbox_inode_rename"`
 	SandboxInodeUnlink    *ebpf.Program `ebpf:"sandbox_inode_unlink"`
 	SandboxTaskKill       *ebpf.Program `ebpf:"sandbox_task_kill"`
@@ -142,7 +135,6 @@ type SandboxPrograms struct {
 func (p *SandboxPrograms) Close() error {
 	return _SandboxClose(
 		p.SandboxFilePermission,
-		p.SandboxInodeGetattr,
 		p.SandboxInodeRename,
 		p.SandboxInodeUnlink,
 		p.SandboxTaskKill,
