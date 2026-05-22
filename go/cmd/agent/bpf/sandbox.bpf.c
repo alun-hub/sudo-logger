@@ -97,14 +97,15 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 	            (comm[0]=='p' && comm[1]=='y');
 	__u64 cgid = bpf_get_current_cgroup_id();
 	__u8 *sandboxed = bpf_map_lookup_elem(&sandboxed_cgroups, &cgid);
-	if (trace)
-		bpf_printk("file_perm: comm=%s cgid=%llu sandboxed=%d", comm, cgid, sandboxed ? 1 : 0);
 	if (!sandboxed)
 		return 0;
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
+	__u64 ino = BPF_CORE_READ(inode, i_ino);
+	__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+	if (trace)
+		bpf_printk("sandboxed write: comm=%s ino=%llu dev=%u", comm, ino, dev);
 	if (inode_protected(inode)) {
-		__u64 ino = BPF_CORE_READ(inode, i_ino);
-		bpf_printk("BLOCK: comm=%s cgid=%llu ino=%llu", comm, cgid, ino);
+		bpf_printk("BLOCK: comm=%s ino=%llu dev=%u", comm, ino, dev);
 		return -EPERM;
 	}
 	return 0;
