@@ -200,10 +200,12 @@ func handlePluginConn(pluginConn net.Conn) {
 	if ebpfSys != nil {
 		ebpfSys.trackSudoPID(uint32(start.Pid), start.SessionID)
 	}
+	sandboxSys.registerPID(uint32(start.Pid))
 	if cg != nil && ebpfSys != nil {
 		ebpfSys.trackPluginCgroup(cg.path, start.SessionID)
 	}
 	defer func() {
+		sandboxSys.unregisterPID(uint32(start.Pid))
 		if ebpfSys != nil {
 			ebpfSys.untrackSudoPID(uint32(start.Pid))
 		}

@@ -9,6 +9,29 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// registerPID marks a PID (tgid) as sandboxed in the BPF map.
+// The sched_process_fork hook propagates membership to all descendants.
+func (s *sandboxSubsystem) registerPID(pid uint32) {
+	if s == nil || s.objs == nil {
+		return
+	}
+	marker := uint8(1)
+	if err := s.objs.SandboxedPids.Put(pid, marker); err != nil {
+		log.Printf("sandbox: register pid %d: %v", pid, err)
+	}
+	debugLog("sandbox: pid %d registered", pid)
+}
+
+// unregisterPID removes a PID from the sandbox restriction set.
+func (s *sandboxSubsystem) unregisterPID(pid uint32) {
+	if s == nil || s.objs == nil {
+		return
+	}
+	if err := s.objs.SandboxedPids.Delete(pid); err != nil {
+		debugLog("sandbox: unregister pid %d: %v", pid, err)
+	}
+}
+
 // sandboxSubsystem enforces filesystem and process-kill restrictions on
 // processes running inside sudo-logger session cgroups, via eBPF LSM hooks.
 type sandboxSubsystem struct {
@@ -133,7 +156,34 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach lsm/inode_symlink: %w", err)
 	}
-	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink}
+	tpFork, err := link.Tracepoint("sched", "sched_process_fork", objs.SandboxProcessFork, nil)
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		lsmMkdir.Close()
+		lsmCreate.Close()
+		lsmMknod.Close()
+		lsmSymlink.Close()
+		objs.Close()
+		return fmt.Errorf("attach tp/sched_process_fork: %w", err)
+	}
+	tpExit, err := link.Tracepoint("sched", "sched_process_exit", objs.SandboxProcessExit, nil)
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		lsmMkdir.Close()
+		lsmCreate.Close()
+		lsmMknod.Close()
+		lsmSymlink.Close()
+		tpFork.Close()
+		objs.Close()
+		return fmt.Errorf("attach tp/sched_process_exit: %w", err)
+	}
+	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink, tpFork, tpExit}
 
 	s.startWatcher(res.PathInodes)
 

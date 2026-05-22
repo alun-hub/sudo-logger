@@ -6,13 +6,19 @@
 // sudo-logger session cgroups, based on operator-configured deny lists.
 //
 // Hooks:
-//   lsm/file_permission  — deny writes to protected inodes (files, sockets, devices, proc)
-//   lsm/inode_unlink     — deny deletion of protected inodes
-//   lsm/inode_rename     — deny rename of/onto protected inodes (prevents atomic replacement)
-//   lsm/task_kill        — deny signals to protected process names
+//   lsm/file_permission      — deny writes to protected inodes (files, sockets, devices, proc)
+//   lsm/inode_unlink         — deny deletion of protected inodes
+//   lsm/inode_rename         — deny rename of/onto protected inodes (prevents atomic replacement)
+//   lsm/task_kill            — deny signals to protected process names
+//   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
+//   tp_btf/sched_process_exit — clean up PID tracking when a process exits
 //
-// Scoping: only processes whose cgroup ID is in sandboxed_cgroups are restricted.
-// The agent registers/unregisters cgroup IDs as sessions start and end.
+// Scoping: two complementary mechanisms identify restricted processes:
+//   1. sandboxed_cgroups — cgroup IDs registered by the agent at session start.
+//   2. sandboxed_pids    — PID-based tracking propagated from the sudo root PID
+//      via the sched_process_fork hook. This catches processes whose cgroup was
+//      changed by pam_systemd after plugin_open() returned but before the command
+//      was forked (the "PAM session scope migration" race).
 //
 // Requires: CONFIG_BPF_LSM=y, kernel >= 5.7, lsm=bpf in boot parameters.
 
@@ -22,7 +28,8 @@
 #include <bpf/bpf_core_read.h>
 
 #define MAX_SANDBOXED_CGROUPS  256
-#define MAX_PROTECTED_INODES   1024
+#define MAX_SANDBOXED_PIDS     4096
+#define MAX_PROTECTED_INODES   4096
 #define MAX_PROTECTED_PROCS    64
 #define TASK_COMM_LEN          16
 
@@ -48,6 +55,18 @@ struct {
 	__type(value, __u8);
 } sandboxed_cgroups SEC(".maps");
 
+// sandboxed_pids: PID-based sandbox set, propagated from the sudo root PID to
+// all descendants via sched_process_fork. Provides sandbox scoping that survives
+// pam_systemd moving the sudo process to a new session scope cgroup after the
+// plugin's open_session returned but before the command was forked.
+// key = tgid (u32), value = u8 marker.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, MAX_SANDBOXED_PIDS);
+	__type(key, __u32);
+	__type(value, __u8);
+} sandboxed_pids SEC(".maps");
+
 // protected_inodes: deny-list of inodes (files, devices, sockets, proc entries).
 // key = {inode number, block device id}, value = u8 marker.
 // Resolved from configured path strings at agent startup.
@@ -70,7 +89,10 @@ struct {
 static __always_inline int in_sandbox(void)
 {
 	__u64 cgid = bpf_get_current_cgroup_id();
-	return bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL;
+	if (bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL)
+		return 1;
+	__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+	return bpf_map_lookup_elem(&sandboxed_pids, &tgid) != NULL;
 }
 
 static __always_inline int inode_protected(struct inode *inode)
@@ -191,6 +213,33 @@ int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 	bpf_probe_read_kernel_str(comm, sizeof(comm), p->comm);
 	if (bpf_map_lookup_elem(&protected_procs, comm))
 		return -EPERM;
+	return 0;
+}
+
+// Propagate sandbox membership from parent to child at fork time.
+// Fires in the parent's context before the child runs any userspace code,
+// making it race-free against the PAM session scope cgroup migration.
+SEC("tp_btf/sched_process_fork")
+int BPF_PROG(sandbox_process_fork, struct task_struct *parent, struct task_struct *child)
+{
+	__u32 parent_tgid = BPF_CORE_READ(parent, tgid);
+	if (!bpf_map_lookup_elem(&sandboxed_pids, &parent_tgid))
+		return 0;
+	__u32 child_tgid = BPF_CORE_READ(child, tgid);
+	__u8 marker = 1;
+	bpf_map_update_elem(&sandboxed_pids, &child_tgid, &marker, BPF_ANY);
+	return 0;
+}
+
+// Remove a PID from sandbox tracking when the thread-group leader exits.
+SEC("tp_btf/sched_process_exit")
+int BPF_PROG(sandbox_process_exit, struct task_struct *p)
+{
+	__u32 tgid = BPF_CORE_READ(p, tgid);
+	__u32 pid = BPF_CORE_READ(p, pid);
+	// Only delete when the thread-group leader exits (pid == tgid).
+	if (pid == tgid)
+		bpf_map_delete_elem(&sandboxed_pids, &tgid);
 	return 0;
 }
 

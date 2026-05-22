@@ -69,6 +69,8 @@ type SandboxProgramSpecs struct {
 	SandboxInodeRename    *ebpf.ProgramSpec `ebpf:"sandbox_inode_rename"`
 	SandboxInodeSymlink   *ebpf.ProgramSpec `ebpf:"sandbox_inode_symlink"`
 	SandboxInodeUnlink    *ebpf.ProgramSpec `ebpf:"sandbox_inode_unlink"`
+	SandboxProcessExit    *ebpf.ProgramSpec `ebpf:"sandbox_process_exit"`
+	SandboxProcessFork    *ebpf.ProgramSpec `ebpf:"sandbox_process_fork"`
 	SandboxTaskKill       *ebpf.ProgramSpec `ebpf:"sandbox_task_kill"`
 }
 
@@ -79,6 +81,7 @@ type SandboxMapSpecs struct {
 	ProtectedInodes  *ebpf.MapSpec `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.MapSpec `ebpf:"protected_procs"`
 	SandboxedCgroups *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
+	SandboxedPids    *ebpf.MapSpec `ebpf:"sandboxed_pids"`
 }
 
 // SandboxVariableSpecs contains global variables before they are loaded into the kernel.
@@ -110,6 +113,7 @@ type SandboxMaps struct {
 	ProtectedInodes  *ebpf.Map `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.Map `ebpf:"protected_procs"`
 	SandboxedCgroups *ebpf.Map `ebpf:"sandboxed_cgroups"`
+	SandboxedPids    *ebpf.Map `ebpf:"sandboxed_pids"`
 }
 
 func (m *SandboxMaps) Close() error {
@@ -117,6 +121,7 @@ func (m *SandboxMaps) Close() error {
 		m.ProtectedInodes,
 		m.ProtectedProcs,
 		m.SandboxedCgroups,
+		m.SandboxedPids,
 	)
 }
 
@@ -137,6 +142,8 @@ type SandboxPrograms struct {
 	SandboxInodeRename    *ebpf.Program `ebpf:"sandbox_inode_rename"`
 	SandboxInodeSymlink   *ebpf.Program `ebpf:"sandbox_inode_symlink"`
 	SandboxInodeUnlink    *ebpf.Program `ebpf:"sandbox_inode_unlink"`
+	SandboxProcessExit    *ebpf.Program `ebpf:"sandbox_process_exit"`
+	SandboxProcessFork    *ebpf.Program `ebpf:"sandbox_process_fork"`
 	SandboxTaskKill       *ebpf.Program `ebpf:"sandbox_task_kill"`
 }
 
@@ -149,6 +156,8 @@ func (p *SandboxPrograms) Close() error {
 		p.SandboxInodeRename,
 		p.SandboxInodeSymlink,
 		p.SandboxInodeUnlink,
+		p.SandboxProcessExit,
+		p.SandboxProcessFork,
 		p.SandboxTaskKill,
 	)
 }
