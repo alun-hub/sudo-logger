@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.38
+Version:        1.20.39
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -177,6 +177,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 22 2026 sudo-logger 1.20.39-1
+- fix(sandbox): remove BPF wildcard dev=0 fallback — caused devpts false
+  positives (major=0 anonymous devices) that intermittently blocked terminal
+  writes and hung sudo; replace with exact i_sb->s_dev match using mountDev()
+  from /proc/self/mountinfo which returns the Btrfs superblock dev correctly
+- fix(sandbox): refreshInode now uses mountDev() for exact dev on atomic replace
+
 * Thu May 22 2026 sudo-logger 1.20.38-1
 - fix(sandbox): refreshInode now syncs wildcard dev=0 entries on atomic replace
   (visudo etc.) — old wildcard removed, new wildcard added, matching

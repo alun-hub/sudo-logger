@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -31,6 +33,48 @@ type resolvedSandbox struct {
 	Inodes     []inodeKey
 	PathInodes map[string]inodeKey // protected path → its current inode key
 	Processes  []string
+}
+
+// mountDev returns the kernel dev_t (MKDEV(major, minor)) for the filesystem
+// containing path by parsing /proc/self/mountinfo. This matches i_sb->s_dev
+// read by the BPF program, which on Btrfs differs from stat().st_dev (the
+// subvolume anon_dev) — both are anonymous devices (major 0) but different
+// minor numbers.
+func mountDev(path string) (uint32, error) {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return 0, fmt.Errorf("read mountinfo: %w", err)
+	}
+	bestLen := -1
+	var bestDev uint32
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		mountPoint := fields[4]
+		if mountPoint != "/" && path != mountPoint && !strings.HasPrefix(path, mountPoint+"/") {
+			continue
+		}
+		if len(mountPoint) <= bestLen {
+			continue
+		}
+		parts := strings.SplitN(fields[2], ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		major, err1 := strconv.ParseUint(parts[0], 10, 32)
+		minor, err2 := strconv.ParseUint(parts[1], 10, 32)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		bestLen = len(mountPoint)
+		bestDev = (uint32(major) << 20) | uint32(minor)
+	}
+	if bestLen < 0 {
+		return 0, fmt.Errorf("no mount entry found for %s", path)
+	}
+	return bestDev, nil
 }
 
 func loadSandboxConfig(path string) (*resolvedSandbox, error) {
@@ -80,25 +124,21 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 		if err := syscall.Stat(p, &st); err != nil {
 			continue
 		}
-		dev := uint32(st.Dev)
+		// Use mountinfo to get i_sb->s_dev (what BPF reads) rather than
+		// stat().st_dev. On Btrfs both are anonymous devices (major 0) but
+		// with different minor numbers: stat returns the subvolume anon_dev
+		// while the kernel superblock uses a separate anon_dev.
+		dev, devErr := mountDev(p)
+		if devErr != nil {
+			log.Printf("sandbox: mountDev %s: %v (falling back to stat dev)", p, devErr)
+			dev = uint32(st.Dev)
+		}
 		log.Printf("sandbox: protecting %s {ino=%d dev=%d}", p, st.Ino, dev)
 		key := inodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
 		if !seen[key] {
 			seen[key] = true
 			res.Inodes = append(res.Inodes, key)
-		}
-
-		// If it's an anonymous device (major 0, e.g. Btrfs), also add a
-		// wildcard entry with dev=0. The BPF program checks this if the
-		// specific ID doesn't match.
-		if (dev >> 20) == 0 {
-			wildcard := inodeKey{Ino: st.Ino, Dev: 0}
-			if !seen[wildcard] {
-				seen[wildcard] = true
-				res.Inodes = append(res.Inodes, wildcard)
-				log.Printf("sandbox: protecting %s {ino=%d dev=0} (wildcard)", p, st.Ino)
-			}
 		}
 	}
 
