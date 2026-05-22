@@ -218,7 +218,7 @@ migrate-sessions \
 | **Sudo blocked at start** | If the log server is unreachable when sudo runs, the session is rejected before the command executes |
 | **Child process frozen on network loss** | If ACKs stop arriving, the child process is frozen within ~800 ms |
 | **Freeze cannot be escaped with `fg`** | Terminal sessions are frozen via `cgroup.freeze=1` — no job-control signals involved, so `fg` cannot escape the freeze |
-| **cgroup namespace isolation** | At session start the plugin calls `unshare(CLONE_NEWCGROUP)`: child processes see the session cgroup as their filesystem root for `/sys/fs/cgroup`. They cannot migrate to a parent cgroup to escape the freeze, even with `CAP_SYS_ADMIN`. The agent remains in the host cgroup namespace and manages freeze/unfreeze normally. |
+| **cgroup namespace isolation** | At session start the plugin calls `unshare(CLONE_NEWCGROUP)`: child processes see the session cgroup as their filesystem root for `/sys/fs/cgroup`. They cannot migrate to a parent cgroup to escape the freeze, even with `CAP_SYS_ADMIN`. The agent uses a `readyToFork` barrier to ensure `sudo` remains in the restricted cgroup until the server is ready, guaranteeing child processes are born inside the sandbox. |
 | **Ctrl+C always works** | Ctrl+C and Ctrl+\ are forwarded to the child even while frozen; the session can always be killed |
 | **Mutual TLS** | Both client and server authenticate with certificates signed by a shared CA; unknown clients are rejected |
 | **Asymmetric ACK signing (ed25519)** | Server signs each ACK with its ed25519 private key over `sessionID \|\| seq \|\| ts_ns`; a compromised client cannot forge ACKs for other sessions or other clients |
@@ -231,7 +231,7 @@ migrate-sessions \
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
-| **Process sandbox (optional)** | eBPF LSM hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot write to, delete, rename, or kill — not bypassable even by root within the session. Requires `lsm=bpf` in kernel boot parameters. See [Process sandbox](#process-sandbox). |
+| **Process sandbox (optional)** | eBPF LSM hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot write to, delete, rename, or kill — not bypassable even by root. Supports Btrfs subvolumes via wildcard device ID matching. Requires `lsm=bpf`. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 
@@ -829,7 +829,7 @@ daemons) is included in `sandbox.yaml` in the repository root.
 #### How enforcement works
 
 At agent startup, each configured path is resolved to its inode number and
-block device ID using `stat(2)`. These `{inode, device}` pairs are loaded into
+block device ID using `stat(2)`. These `{inode, device}` pairs (and `dev=0` wildcards for Btrfs) are loaded into
 a BPF hash map (`protected_inodes`). Process names are loaded into a second
 map (`protected_procs`).
 
