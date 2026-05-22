@@ -6,6 +6,7 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/fsnotify/fsnotify"
@@ -132,11 +133,17 @@ func (s *sandboxSubsystem) ResolveDeviceID(path string) (uint32, error) {
 	}
 
 	// Triggering stat() above caused the BPF hook to populate resolved_devs.
+	// We retry a few times in case there is a tiny delay in map propagation.
 	var dev uint32
-	if err := s.objs.ResolvedDevs.Lookup(st.Ino, &dev); err != nil {
-		return 0, fmt.Errorf("BPF device resolution failed for %s: %w", path, err)
+	var err error
+	for i := 0; i < 5; i++ {
+		if err = s.objs.ResolvedDevs.Lookup(st.Ino, &dev); err == nil {
+			return dev, nil
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return dev, nil
+
+	return 0, fmt.Errorf("BPF device resolution failed for %s: %w", path, err)
 }
 
 // registerCgroup marks a cgroup as subject to sandbox restrictions.

@@ -67,6 +67,7 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 			log.Printf("sandbox: ResolveDeviceID %s: %v (falling back to stat dev)", p, devErr)
 			dev = uint32(st.Dev)
 		}
+		log.Printf("sandbox: protecting %s {ino=%d dev=%d}", p, st.Ino, dev)
 		key := inodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
 		if !seen[key] {

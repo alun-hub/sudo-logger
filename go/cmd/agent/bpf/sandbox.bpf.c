@@ -132,18 +132,12 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 SEC("lsm/inode_getattr")
 int BPF_PROG(sandbox_inode_getattr, const struct path *path)
 {
-	__u32 pid = bpf_get_current_pid_tgid() >> 32;
-	if (pid != agent_pid)
-		return 0;
-
 	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
 	if (!inode)
 		return 0;
 
 	__u64 ino = BPF_CORE_READ(inode, i_ino);
 	__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
-
-	bpf_printk("sandbox: RESOLVED agent_pid=%u ino=%llu dev=%u", pid, ino, dev);
 
 	bpf_map_update_elem(&resolved_devs, &ino, &dev, BPF_ANY);
 	return 0;
