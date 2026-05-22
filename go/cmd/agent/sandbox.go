@@ -25,11 +25,12 @@ var sandboxSys *sandboxSubsystem
 
 func startSandbox(configPath string) {
 	s := &sandboxSubsystem{}
+	sandboxSys = s // Set global variable BEFORE starting, so ResolveDeviceID works during init
 	if err := s.start(configPath); err != nil {
 		log.Printf("sandbox: %v — sandbox enforcement disabled", err)
+		sandboxSys = nil
 		return
 	}
-	sandboxSys = s
 }
 
 func (s *sandboxSubsystem) start(configPath string) error {

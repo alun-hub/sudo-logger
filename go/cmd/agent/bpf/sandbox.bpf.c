@@ -108,9 +108,22 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 		return 0;
 	if (!in_sandbox())
 		return 0;
+
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
-	if (inode_protected(inode))
+	if (!inode)
+		return 0;
+
+	struct inode_key key = {};
+	key.ino = BPF_CORE_READ(inode, i_ino);
+	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+	key.pad = 0;
+
+	if (bpf_map_lookup_elem(&protected_inodes, &key)) {
+		bpf_printk("sandbox: BLOCKED write to ino=%llu dev=%u", key.ino, key.dev);
 		return -EPERM;
+	}
+
+	bpf_printk("sandbox: ALLOWED write to ino=%llu dev=%u", key.ino, key.dev);
 	return 0;
 }
 
@@ -128,6 +141,8 @@ int BPF_PROG(sandbox_inode_getattr, const struct path *path)
 
 	__u64 ino = BPF_CORE_READ(inode, i_ino);
 	__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+
+	bpf_printk("sandbox: RESOLVED ino=%llu dev=%u", ino, dev);
 
 	bpf_map_update_elem(&resolved_devs, &ino, &dev, BPF_ANY);
 	return 0;
