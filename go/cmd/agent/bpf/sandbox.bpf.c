@@ -22,7 +22,7 @@
 #include <bpf/bpf_core_read.h>
 
 #define MAX_SANDBOXED_CGROUPS  256
-#define MAX_PROTECTED_INODES   512
+#define MAX_PROTECTED_INODES   1024
 #define MAX_PROTECTED_PROCS    64
 #define MAX_RESOLVED_DEVS      1024
 #define TASK_COMM_LEN          16
@@ -129,6 +129,52 @@ int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_den
 		return -EPERM;
 	struct inode *new_inode = BPF_CORE_READ(new_dentry, d_inode);
 	if (inode_protected(new_inode))
+		return -EPERM;
+
+	// Also prevent renaming a new file INTO a protected directory.
+	if (inode_protected(new_dir))
+		return -EPERM;
+
+	return 0;
+}
+
+// Deny creation of new files/directories inside protected directories.
+SEC("lsm/inode_mkdir")
+int BPF_PROG(sandbox_inode_mkdir, struct inode *dir, struct dentry *dentry, umode_t mode)
+{
+	if (!in_sandbox())
+		return 0;
+	if (inode_protected(dir))
+		return -EPERM;
+	return 0;
+}
+
+SEC("lsm/inode_create")
+int BPF_PROG(sandbox_inode_create, struct inode *dir, struct dentry *dentry, umode_t mode)
+{
+	if (!in_sandbox())
+		return 0;
+	if (inode_protected(dir))
+		return -EPERM;
+	return 0;
+}
+
+SEC("lsm/inode_mknod")
+int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
+{
+	if (!in_sandbox())
+		return 0;
+	if (inode_protected(dir))
+		return -EPERM;
+	return 0;
+}
+
+SEC("lsm/inode_symlink")
+int BPF_PROG(sandbox_inode_symlink, struct inode *dir, struct dentry *dentry, const char *old_name)
+{
+	if (!in_sandbox())
+		return 0;
+	if (inode_protected(dir))
 		return -EPERM;
 	return 0;
 }

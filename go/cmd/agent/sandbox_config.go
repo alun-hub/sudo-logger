@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -56,9 +57,26 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 	allPaths = append(allPaths, cfg.Protect.Sockets...)
 
 	for _, p := range allPaths {
+		fi, err := os.Stat(p)
+		if err != nil {
+			log.Printf("sandbox: stat %s: %v (skipping)", p, err)
+			continue
+		}
+
+		if fi.IsDir() {
+			// Recursively add all files in the directory.
+			entries, err := os.ReadDir(p)
+			if err != nil {
+				log.Printf("sandbox: readdir %s: %v", p, err)
+			} else {
+				for _, entry := range entries {
+					allPaths = append(allPaths, filepath.Join(p, entry.Name()))
+				}
+			}
+		}
+
 		var st syscall.Stat_t
 		if err := syscall.Stat(p, &st); err != nil {
-			log.Printf("sandbox: stat %s: %v (skipping)", p, err)
 			continue
 		}
 		// Use the eBPF-assisted device resolver to get the real s_dev.

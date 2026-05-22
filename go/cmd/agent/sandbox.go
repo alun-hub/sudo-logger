@@ -95,7 +95,49 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach lsm/task_kill: %w", err)
 	}
-	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill}
+	lsmMkdir, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeMkdir})
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		objs.Close()
+		return fmt.Errorf("attach lsm/inode_mkdir: %w", err)
+	}
+	lsmCreate, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeCreate})
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		lsmMkdir.Close()
+		objs.Close()
+		return fmt.Errorf("attach lsm/inode_create: %w", err)
+	}
+	lsmMknod, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeMknod})
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		lsmMkdir.Close()
+		lsmCreate.Close()
+		objs.Close()
+		return fmt.Errorf("attach lsm/inode_mknod: %w", err)
+	}
+	lsmSymlink, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeSymlink})
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		lsmMkdir.Close()
+		lsmCreate.Close()
+		lsmMknod.Close()
+		objs.Close()
+		return fmt.Errorf("attach lsm/inode_symlink: %w", err)
+	}
+	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink}
 
 	s.startWatcher(res.PathInodes)
 

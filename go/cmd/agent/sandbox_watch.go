@@ -26,7 +26,8 @@ func (s *sandboxSubsystem) startWatcher(pathInodes map[string]inodeKey) {
 
 	dirs := make(map[string]struct{})
 	for p := range pathInodes {
-		dirs[filepath.Dir(p)] = struct{}{}
+		parent := filepath.Dir(p)
+		dirs[parent] = struct{}{}
 	}
 	for dir := range dirs {
 		if err := watcher.Add(dir); err != nil {
