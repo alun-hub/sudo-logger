@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.36
+Version:        1.20.37
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -177,6 +177,13 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 22 2026 sudo-logger 1.20.37-1
+- fix(sandbox): use mountinfo MKDEV(major,minor) for protected inode dev field
+  instead of stat().st_dev; on Btrfs stat returns the subvolume anon_dev while
+  the BPF LSM hook reads i_sb->s_dev (superblock dev) — the mismatch caused
+  inode_protected() to never match, letting sandboxed writes through
+- fix(sandbox): remove debug bpf_printk from sandbox_file_permission
+
 * Thu May 22 2026 sudo-logger 1.20.36-1
 - debug(agent): log ino/dev for all sandboxed writes to diagnose why
   inode_protected() returns false despite the inode being in the map

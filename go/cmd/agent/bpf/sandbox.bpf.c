@@ -91,23 +91,11 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 {
 	if (!(mask & (MAY_WRITE | MAY_APPEND)))
 		return 0;
-	char comm[TASK_COMM_LEN] = {};
-	bpf_get_current_comm(comm, sizeof(comm));
-	int trace = (comm[0]=='b' && comm[1]=='a' && comm[2]=='s' && comm[3]=='h') ||
-	            (comm[0]=='p' && comm[1]=='y');
-	__u64 cgid = bpf_get_current_cgroup_id();
-	__u8 *sandboxed = bpf_map_lookup_elem(&sandboxed_cgroups, &cgid);
-	if (!sandboxed)
+	if (!in_sandbox())
 		return 0;
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
-	__u64 ino = BPF_CORE_READ(inode, i_ino);
-	__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
-	if (trace)
-		bpf_printk("sandboxed write: comm=%s ino=%llu dev=%u", comm, ino, dev);
-	if (inode_protected(inode)) {
-		bpf_printk("BLOCK: comm=%s ino=%llu dev=%u", comm, ino, dev);
+	if (inode_protected(inode))
 		return -EPERM;
-	}
 	return 0;
 }
 
