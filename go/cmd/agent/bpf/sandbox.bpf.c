@@ -120,18 +120,13 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 	if (!inode)
 		return 0;
 
-	struct inode_key key = {};
-	key.ino = BPF_CORE_READ(inode, i_ino);
-	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
-	key.pad = 0;
-
-	if (bpf_map_lookup_elem(&protected_inodes, &key)) {
-		bpf_printk("sandbox: BLOCKED write ino=%llu dev=%x", key.ino, key.dev);
+	if (inode_protected(inode)) {
+		__u64 ino = BPF_CORE_READ(inode, i_ino);
+		__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+		bpf_printk("sandbox: BLOCKED write ino=%llu dev=%x", ino, dev);
 		return -EPERM;
 	}
 
-	// Only log allowed writes when actually in a sandbox to avoid trace_pipe spam
-	bpf_printk("sandbox: ALLOWED write ino=%llu dev=%x", key.ino, key.dev);
 	return 0;
 }
 
@@ -157,8 +152,11 @@ int BPF_PROG(sandbox_inode_unlink, struct inode *dir, struct dentry *dentry)
 	if (!in_sandbox())
 		return 0;
 	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
-	if (inode_protected(inode))
+	if (inode_protected(inode)) {
+		__u64 ino = BPF_CORE_READ(inode, i_ino);
+		bpf_printk("sandbox: BLOCKED unlink ino=%llu", ino);
 		return -EPERM;
+	}
 	return 0;
 }
 
@@ -172,11 +170,17 @@ int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_den
 	if (!in_sandbox())
 		return 0;
 	struct inode *old_inode = BPF_CORE_READ(old_dentry, d_inode);
-	if (inode_protected(old_inode))
+	if (inode_protected(old_inode)) {
+		__u64 ino = BPF_CORE_READ(old_inode, i_ino);
+		bpf_printk("sandbox: BLOCKED rename-from ino=%llu", ino);
 		return -EPERM;
+	}
 	struct inode *new_inode = BPF_CORE_READ(new_dentry, d_inode);
-	if (inode_protected(new_inode))
+	if (inode_protected(new_inode)) {
+		__u64 ino = BPF_CORE_READ(new_inode, i_ino);
+		bpf_printk("sandbox: BLOCKED rename-to ino=%llu", ino);
 		return -EPERM;
+	}
 	return 0;
 }
 
