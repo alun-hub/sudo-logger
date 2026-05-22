@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"sync"
+	"syscall"
 
 	"github.com/cilium/ebpf/link"
 	"github.com/fsnotify/fsnotify"
@@ -31,16 +33,29 @@ func startSandbox(configPath string) {
 }
 
 func (s *sandboxSubsystem) start(configPath string) error {
-	res, err := loadSandboxConfig(configPath)
+	spec, err := LoadSandbox()
 	if err != nil {
-		return err
+		return fmt.Errorf("load Sandbox spec: %w", err)
+	}
+
+	// Set the agent PID so the BPF getattr hook knows when to resolve devs.
+	if v, ok := spec.Variables["agent_pid"]; ok {
+		if err := v.Set(uint32(os.Getpid())); err != nil {
+			log.Printf("sandbox: set agent_pid spec: %v", err)
+		}
 	}
 
 	objs := &SandboxObjects{}
-	if err := LoadSandboxObjects(objs, nil); err != nil {
+	if err := spec.LoadAndAssign(objs, nil); err != nil {
 		return fmt.Errorf("load BPF objects: %w", err)
 	}
 	s.objs = objs
+
+	res, err := loadSandboxConfig(configPath)
+	if err != nil {
+		objs.Close()
+		return err
+	}
 
 	marker := uint8(1)
 
@@ -84,13 +99,43 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach lsm/task_kill: %w", err)
 	}
-	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill}
+	lsmGetattr, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeGetattr})
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		objs.Close()
+		return fmt.Errorf("attach lsm/inode_getattr: %w", err)
+	}
+	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmGetattr}
 
 	s.startWatcher(res.PathInodes)
 
 	log.Printf("sandbox: LSM hooks attached (%d protected inodes, %d protected processes)",
 		len(res.Inodes), len(res.Processes))
 	return nil
+}
+
+// ResolveDeviceID returns the kernel-internal s_dev for the filesystem
+// containing path, by triggering the LSM getattr hook and reading the
+// result from the resolved_devs BPF map.
+func (s *sandboxSubsystem) ResolveDeviceID(path string) (uint32, error) {
+	if s == nil || s.objs == nil {
+		return 0, fmt.Errorf("sandbox not initialized")
+	}
+
+	var st syscall.Stat_t
+	if err := syscall.Stat(path, &st); err != nil {
+		return 0, err
+	}
+
+	// Triggering stat() above caused the BPF hook to populate resolved_devs.
+	var dev uint32
+	if err := s.objs.ResolvedDevs.Lookup(st.Ino, &dev); err != nil {
+		return 0, fmt.Errorf("BPF device resolution failed for %s: %w", path, err)
+	}
+	return dev, nil
 }
 
 // registerCgroup marks a cgroup as subject to sandbox restrictions.

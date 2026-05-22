@@ -43,8 +43,9 @@ type cgroupSession struct {
 	cgName    string
 	cgroupID  uint64 // cgroup v2 ID (= inode of cgroup dir), used for sandbox scoping
 
-	mu     sync.Mutex
-	frozen bool
+	mu          sync.Mutex
+	frozen      bool
+	readyToFork bool // Set to true when plugin sends SESSION_READY
 
 	escapedMu sync.Mutex
 	escaped   map[int]bool
@@ -96,6 +97,16 @@ func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 
 	go cg.trackDescendants()
 	return cg
+}
+
+func (cg *cgroupSession) SetReady() {
+	if cg == nil {
+		return
+	}
+	cg.mu.Lock()
+	cg.readyToFork = true
+	cg.mu.Unlock()
+	debugLog("cgroup %s: session ready (sudo may now fork)", cg.cgName)
 }
 
 func procChildren(pid int) []int {
@@ -185,8 +196,13 @@ func (cg *cgroupSession) trackDescendants() {
 				}
 			}
 			if !sudoMoved && len(seen) > 1 {
-				cg.moveSudoOut()
-				sudoMoved = true
+				cg.mu.Lock()
+				ready := cg.readyToFork
+				cg.mu.Unlock()
+				if ready {
+					cg.moveSudoOut()
+					sudoMoved = true
+				}
 			}
 			for pid := range seen {
 				if pid == cg.sudoPid {

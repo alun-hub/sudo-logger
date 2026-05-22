@@ -472,6 +472,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		} else {
 			protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody("", cfg.Disclaimer))
 		}
+		cg.SetReady()
 	default:
 		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
 		markDead()

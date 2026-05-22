@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"strings"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -32,51 +30,6 @@ type resolvedSandbox struct {
 	Inodes     []inodeKey
 	PathInodes map[string]inodeKey // protected path → its current inode key
 	Processes  []string
-}
-
-// mountDev returns the kernel dev_t (MKDEV(major, minor)) for the filesystem
-// containing path, by parsing /proc/self/mountinfo. This matches the value that
-// the BPF program reads from inode->i_sb->s_dev, which differs from stat().st_dev
-// on Btrfs (where stat returns the subvolume anon_dev, not the superblock dev).
-func mountDev(path string) (uint32, error) {
-	data, err := os.ReadFile("/proc/self/mountinfo")
-	if err != nil {
-		return 0, fmt.Errorf("read mountinfo: %w", err)
-	}
-	bestLen := -1
-	var bestDev uint32
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-		mountPoint := fields[4]
-		majMin := fields[2]
-		// Check if this mount point is a prefix of path.
-		if mountPoint != "/" {
-			if path != mountPoint && !strings.HasPrefix(path, mountPoint+"/") {
-				continue
-			}
-		}
-		if len(mountPoint) <= bestLen {
-			continue
-		}
-		parts := strings.SplitN(majMin, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		major, err1 := strconv.ParseUint(parts[0], 10, 32)
-		minor, err2 := strconv.ParseUint(parts[1], 10, 32)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		bestLen = len(mountPoint)
-		bestDev = (uint32(major) << 20) | uint32(minor)
-	}
-	if bestLen < 0 {
-		return 0, fmt.Errorf("no mount entry found for %s", path)
-	}
-	return bestDev, nil
 }
 
 func loadSandboxConfig(path string) (*resolvedSandbox, error) {
@@ -108,9 +61,10 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 			log.Printf("sandbox: stat %s: %v (skipping)", p, err)
 			continue
 		}
-		dev, devErr := mountDev(p)
+		// Use the eBPF-assisted device resolver to get the real s_dev.
+		dev, devErr := sandboxSys.ResolveDeviceID(p)
 		if devErr != nil {
-			log.Printf("sandbox: mountDev %s: %v (falling back to stat dev)", p, devErr)
+			log.Printf("sandbox: ResolveDeviceID %s: %v (falling back to stat dev)", p, devErr)
 			dev = uint32(st.Dev)
 		}
 		key := inodeKey{Ino: st.Ino, Dev: dev}
