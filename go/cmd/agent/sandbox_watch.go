@@ -85,7 +85,7 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 		return // inode unchanged, nothing to do
 	}
 
-	// Only delete the old key if no other protected path still uses it.
+	// Only delete the old keys if no other protected path still uses them.
 	shared := false
 	for otherPath, k := range s.pathInodes {
 		if otherPath != path && k == old {
@@ -95,12 +95,24 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 	}
 	if !shared {
 		_ = s.objs.ProtectedInodes.Delete(old)
+		// Remove the matching wildcard entry (dev=0) if one was registered.
+		if (old.Dev >> 20) == 0 {
+			_ = s.objs.ProtectedInodes.Delete(inodeKey{Ino: old.Ino, Dev: 0})
+		}
 	}
 
 	marker := uint8(1)
 	if err := s.objs.ProtectedInodes.Put(newKey, marker); err != nil {
 		log.Printf("sandbox: refresh inode for %s: %v", path, err)
 		return
+	}
+	// Add wildcard entry for anonymous-device filesystems (e.g. Btrfs), matching
+	// loadSandboxConfig's behaviour so inode_protected() finds the new inode.
+	if (dev >> 20) == 0 {
+		wc := inodeKey{Ino: newKey.Ino, Dev: 0}
+		if err := s.objs.ProtectedInodes.Put(wc, marker); err != nil {
+			log.Printf("sandbox: refresh wildcard for %s: %v", path, err)
+		}
 	}
 
 	s.pathInodes[path] = newKey

@@ -24,7 +24,6 @@
 #define MAX_SANDBOXED_CGROUPS  256
 #define MAX_PROTECTED_INODES   1024
 #define MAX_PROTECTED_PROCS    64
-#define MAX_RESOLVED_DEVS      1024
 #define TASK_COMM_LEN          16
 
 // Kernel MAY_* permission bits (from linux/fs.h).

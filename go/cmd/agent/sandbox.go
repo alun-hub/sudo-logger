@@ -140,9 +140,9 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	log.Printf("sandbox: LSM hooks attached (%d protected inodes, %d protected processes)",
 		len(res.Inodes), len(res.Processes))
 	return nil
-	}
+}
 
-	// registerCgroup marks a cgroup as subject to sandbox restrictions.
+// registerCgroup marks a cgroup as subject to sandbox restrictions.
 // Called when a sudo session cgroup is created.
 func (s *sandboxSubsystem) registerCgroup(cgroupID uint64) {
 	if s == nil || s.objs == nil {

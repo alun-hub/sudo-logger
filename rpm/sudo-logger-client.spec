@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.37
+Version:        1.20.38
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -177,6 +177,19 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Thu May 22 2026 sudo-logger 1.20.38-1
+- fix(sandbox): refreshInode now syncs wildcard dev=0 entries on atomic replace
+  (visudo etc.) — old wildcard removed, new wildcard added, matching
+  loadSandboxConfig behaviour so inode_protected() keeps working after rename
+- fix(sandbox): add readyToFork gate to prevent premature moveSudoOut race
+- feat(sandbox): wildcard dev=0 fallback in BPF for anonymous-device filesystems
+  (Btrfs) — stores both exact and wildcard entry in protected_inodes; BPF
+  tries exact i_sb->s_dev first then dev=0 if major==0
+- feat(sandbox): recursive directory traversal in loadSandboxConfig
+- feat(sandbox): new LSM hooks inode_mkdir/create/mknod/symlink to block file
+  creation inside protected directories
+- chore(sandbox): fix indentation in sandbox.go, remove unused MAX_RESOLVED_DEVS
+
 * Thu May 22 2026 sudo-logger 1.20.37-1
 - fix(sandbox): use mountinfo MKDEV(major,minor) for protected inode dev field
   instead of stat().st_dev; on Btrfs stat returns the subvolume anon_dev while
