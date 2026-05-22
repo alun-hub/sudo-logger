@@ -3,15 +3,20 @@ package main
 import (
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/cilium/ebpf/link"
+	"github.com/fsnotify/fsnotify"
 )
 
 // sandboxSubsystem enforces filesystem and process-kill restrictions on
 // processes running inside sudo-logger session cgroups, via eBPF LSM hooks.
 type sandboxSubsystem struct {
-	objs  *SandboxObjects
-	links []link.Link
+	objs       *SandboxObjects
+	links      []link.Link
+	mu         sync.Mutex
+	pathInodes map[string]inodeKey // protected path → inode key currently in BPF map
+	watcher    *fsnotify.Watcher
 }
 
 var sandboxSys *sandboxSubsystem
@@ -81,6 +86,8 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	}
 	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill}
 
+	s.startWatcher(res.PathInodes)
+
 	log.Printf("sandbox: LSM hooks attached (%d protected inodes, %d protected processes)",
 		len(res.Inodes), len(res.Processes))
 	return nil
@@ -113,6 +120,9 @@ func (s *sandboxSubsystem) unregisterCgroup(cgroupID uint64) {
 func (s *sandboxSubsystem) stop() {
 	if s == nil {
 		return
+	}
+	if s.watcher != nil {
+		s.watcher.Close()
 	}
 	for _, l := range s.links {
 		l.Close()

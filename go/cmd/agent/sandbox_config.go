@@ -27,8 +27,9 @@ type inodeKey struct {
 }
 
 type resolvedSandbox struct {
-	Inodes    []inodeKey
-	Processes []string
+	Inodes     []inodeKey
+	PathInodes map[string]inodeKey // protected path → its current inode key
+	Processes  []string
 }
 
 func loadSandboxConfig(path string) (*resolvedSandbox, error) {
@@ -41,7 +42,9 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 		return nil, fmt.Errorf("parse sandbox config: %w", err)
 	}
 
-	res := &resolvedSandbox{}
+	res := &resolvedSandbox{
+		PathInodes: make(map[string]inodeKey),
+	}
 	seen := make(map[inodeKey]bool)
 
 	allPaths := make([]string, 0,
@@ -59,6 +62,7 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 			continue
 		}
 		key := inodeKey{Ino: st.Ino, Dev: uint32(st.Dev)}
+		res.PathInodes[p] = key
 		if !seen[key] {
 			seen[key] = true
 			res.Inodes = append(res.Inodes, key)

@@ -67,15 +67,10 @@ struct {
 	__type(value, __u8);
 } protected_procs SEC(".maps");
 
-static __always_inline __u64 sandbox_cgid(void)
-{
-	__u64 cgid = bpf_get_current_cgroup_id();
-	return bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) ? cgid : 0;
-}
-
 static __always_inline int in_sandbox(void)
 {
-	return sandbox_cgid() != 0;
+	__u64 cgid = bpf_get_current_cgroup_id();
+	return bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL;
 }
 
 static __always_inline int inode_protected(struct inode *inode)
@@ -94,17 +89,12 @@ static __always_inline int inode_protected(struct inode *inode)
 SEC("lsm/file_permission")
 int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 {
-	__u64 cgid = sandbox_cgid();
-	if (!cgid)
+	if (!in_sandbox())
 		return 0;
 	if (!(mask & (MAY_WRITE | MAY_APPEND)))
 		return 0;
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
-	__u64 ino = BPF_CORE_READ(inode, i_ino);
-	__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
-	int blocked = inode_protected(inode);
-	bpf_printk("sandbox cgid=%llu ino=%llu dev=%u blocked=%d\n", cgid, ino, dev, blocked);
-	if (blocked)
+	if (inode_protected(inode))
 		return -EPERM;
 	return 0;
 }
