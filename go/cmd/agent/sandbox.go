@@ -156,6 +156,19 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach lsm/inode_symlink: %w", err)
 	}
+	lsmSetattr, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeSetattr})
+	if err != nil {
+		lsmFile.Close()
+		lsmUnlink.Close()
+		lsmRename.Close()
+		lsmKill.Close()
+		lsmMkdir.Close()
+		lsmCreate.Close()
+		lsmMknod.Close()
+		lsmSymlink.Close()
+		objs.Close()
+		return fmt.Errorf("attach lsm/inode_setattr: %w", err)
+	}
 	tpFork, err := link.AttachTracing(link.TracingOptions{Program: objs.SandboxProcessFork})
 	if err != nil {
 		lsmFile.Close()
@@ -166,6 +179,7 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		lsmCreate.Close()
 		lsmMknod.Close()
 		lsmSymlink.Close()
+		lsmSetattr.Close()
 		objs.Close()
 		return fmt.Errorf("attach tp/sched_process_fork: %w", err)
 	}
@@ -179,11 +193,12 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		lsmCreate.Close()
 		lsmMknod.Close()
 		lsmSymlink.Close()
+		lsmSetattr.Close()
 		tpFork.Close()
 		objs.Close()
 		return fmt.Errorf("attach tp/sched_process_exit: %w", err)
 	}
-	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink, tpFork, tpExit}
+	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink, lsmSetattr, tpFork, tpExit}
 
 	s.startWatcher(res.PathInodes)
 

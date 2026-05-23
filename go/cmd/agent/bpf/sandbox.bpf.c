@@ -124,10 +124,25 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 {
 	if (!(mask & (MAY_WRITE | MAY_APPEND)))
 		return 0;
-	if (!in_sandbox_cgroup())
+	if (!in_sandbox_pid())
 		return 0;
 
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
+	if (inode_protected(inode))
+		return -EPERM;
+
+	return 0;
+}
+
+// Deny truncation and other attribute changes to protected inodes.
+// This prevents 'echo > /etc/passwd' from zeroing out the file.
+SEC("lsm/inode_setattr")
+int BPF_PROG(sandbox_inode_setattr, struct dentry *dentry, struct iattr *attr)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
 	if (inode_protected(inode))
 		return -EPERM;
 
@@ -138,7 +153,7 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 SEC("lsm/inode_unlink")
 int BPF_PROG(sandbox_inode_unlink, struct inode *dir, struct dentry *dentry)
 {
-	if (!in_sandbox_cgroup())
+	if (!in_sandbox_pid())
 		return 0;
 	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
 	if (inode_protected(inode))
@@ -153,7 +168,7 @@ SEC("lsm/inode_rename")
 int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_dentry,
 	     struct inode *new_dir, struct dentry *new_dentry, unsigned int flags)
 {
-	if (!in_sandbox_cgroup())
+	if (!in_sandbox_pid())
 		return 0;
 	struct inode *old_inode = BPF_CORE_READ(old_dentry, d_inode);
 	if (inode_protected(old_inode))
@@ -173,7 +188,7 @@ int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_den
 SEC("lsm/inode_mkdir")
 int BPF_PROG(sandbox_inode_mkdir, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
-	if (!in_sandbox_cgroup())
+	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;
@@ -183,7 +198,7 @@ int BPF_PROG(sandbox_inode_mkdir, struct inode *dir, struct dentry *dentry, umod
 SEC("lsm/inode_create")
 int BPF_PROG(sandbox_inode_create, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
-	if (!in_sandbox_cgroup())
+	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;
@@ -193,7 +208,7 @@ int BPF_PROG(sandbox_inode_create, struct inode *dir, struct dentry *dentry, umo
 SEC("lsm/inode_mknod")
 int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
-	if (!in_sandbox_cgroup())
+	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;
@@ -203,7 +218,7 @@ int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umod
 SEC("lsm/inode_symlink")
 int BPF_PROG(sandbox_inode_symlink, struct inode *dir, struct dentry *dentry, const char *old_name)
 {
-	if (!in_sandbox_cgroup())
+	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;

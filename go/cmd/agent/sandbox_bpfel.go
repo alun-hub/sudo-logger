@@ -67,6 +67,7 @@ type SandboxProgramSpecs struct {
 	SandboxInodeMkdir     *ebpf.ProgramSpec `ebpf:"sandbox_inode_mkdir"`
 	SandboxInodeMknod     *ebpf.ProgramSpec `ebpf:"sandbox_inode_mknod"`
 	SandboxInodeRename    *ebpf.ProgramSpec `ebpf:"sandbox_inode_rename"`
+	SandboxInodeSetattr   *ebpf.ProgramSpec `ebpf:"sandbox_inode_setattr"`
 	SandboxInodeSymlink   *ebpf.ProgramSpec `ebpf:"sandbox_inode_symlink"`
 	SandboxInodeUnlink    *ebpf.ProgramSpec `ebpf:"sandbox_inode_unlink"`
 	SandboxProcessExit    *ebpf.ProgramSpec `ebpf:"sandbox_process_exit"`
@@ -140,6 +141,7 @@ type SandboxPrograms struct {
 	SandboxInodeMkdir     *ebpf.Program `ebpf:"sandbox_inode_mkdir"`
 	SandboxInodeMknod     *ebpf.Program `ebpf:"sandbox_inode_mknod"`
 	SandboxInodeRename    *ebpf.Program `ebpf:"sandbox_inode_rename"`
+	SandboxInodeSetattr   *ebpf.Program `ebpf:"sandbox_inode_setattr"`
 	SandboxInodeSymlink   *ebpf.Program `ebpf:"sandbox_inode_symlink"`
 	SandboxInodeUnlink    *ebpf.Program `ebpf:"sandbox_inode_unlink"`
 	SandboxProcessExit    *ebpf.Program `ebpf:"sandbox_process_exit"`
@@ -154,6 +156,7 @@ func (p *SandboxPrograms) Close() error {
 		p.SandboxInodeMkdir,
 		p.SandboxInodeMknod,
 		p.SandboxInodeRename,
+		p.SandboxInodeSetattr,
 		p.SandboxInodeSymlink,
 		p.SandboxInodeUnlink,
 		p.SandboxProcessExit,
