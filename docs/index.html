@@ -1085,7 +1085,7 @@ body::after {
 <div class="corner c-tr"></div>
 <div class="corner c-bl"></div>
 <div class="corner c-br"></div>
-<div id="counter">01 / 15</div>
+<div id="counter">01 / 19</div>
 <div id="progress"></div>
 <div class="nav-hint">← → navigate</div>
 
@@ -1469,7 +1469,7 @@ body::after {
         <div class="cgroup-steps">
           <div class="cg-step s-ok">
             <div class="cg-step-label">① session starts</div>
-            <div class="cg-step-text">Shipper creates cgroup and adds the sudo PID. All child processes inherit the cgroup. Plugin calls <code>unshare(CLONE_NEWCGROUP)</code> — child processes see the session cgroup as their <code>/sys/fs/cgroup</code> root and cannot migrate to a parent cgroup to escape the freeze, even with <code>CAP_SYS_ADMIN</code>. Shipper polls every 10 ms to catch GUI apps that systemd moves out.</div>
+            <div class="cg-step-text">Shipper creates cgroup and adds the sudo PID. All child processes inherit the cgroup. The agent uses a `readyToFork` barrier to ensure `sudo` remains in the restricted cgroup until the server is ready, guaranteeing children are born inside the sandbox. Plugin calls <code>unshare(CLONE_NEWCGROUP)</code> — child processes see the session cgroup as their <code>/sys/fs/cgroup</code> root and cannot migrate to a parent cgroup to escape the freeze, even with <code>CAP_SYS_ADMIN</code>. Shipper polls every 10 ms to catch GUI apps that systemd moves out.</div>
           </div>
           <div class="cg-step">
             <div class="cg-step-label">② normal operation</div>
@@ -2114,8 +2114,103 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 16: READY TO DEPLOY ░░ -->
+  <!-- ░░ SLIDE 16: PROCESS SANDBOX ░░ -->
   <div class="slide" id="s16">
+    <div class="s-features" style="max-width:920px">
+      <h2>PROCESS<br>SANDBOX</h2>
+      <div class="sub">▸ 13 eBPF hooks · kernel-enforced deny-list · blocks root · Btrfs-safe · PAM-race-proof</div>
+
+      <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:28px;font-size:13px">
+
+        <div style="border-left:2px solid var(--green-dim);padding-left:16px">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">13 HOOKS — KERNEL LEVEL</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/file_open</code> — deny write-mode opens on protected inodes</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/file_permission</code> — deny write/append to protected inodes</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/path_truncate · inode_setattr</code> — deny truncation attacks</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_unlink</code> — deny deletion of protected inodes</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_rename</code> — deny atomic rename-over attacks</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_create · mkdir · mknod · symlink</code> — deny file creation inside protected dirs</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/task_kill</code> — deny signals to named system daemons</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">tp_btf/sched_process_fork</code> — propagate sandbox to all child processes at fork</div>
+          <div style="color:var(--amber);font-weight:700;margin-top:14px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PROPERTIES</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> Dual scoping: cgroup-based + PID-tracked from fork — catches PAM scope migration race</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> Inode + mountinfo device ID — correct on Btrfs, XFS, ext4, tmpfs</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> Cannot be bypassed by root within the session</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> CONFIG_BPF_LSM=y · kernel ≥ 5.7 · active by default on Fedora 38+</div>
+        </div>
+
+        <div style="border-left:2px solid var(--amber);padding-left:16px">
+          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">SANDBOX.YAML</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:11px 14px;line-height:1.9;white-space:pre;">
+<span style="color:var(--green-dim)">protect:</span>
+  <span style="color:var(--green-dim)">files:</span>
+    <span style="color:var(--text)">- /etc/sudoers</span>
+    <span style="color:var(--text)">- /etc/shadow</span>
+    <span style="color:var(--text)">- /etc/pam.d</span>
+    <span style="color:var(--text)">- /var/log/audit</span>
+  <span style="color:var(--green-dim)">devices:</span>
+    <span style="color:var(--text)">- /dev/mem</span>
+    <span style="color:var(--text)">- /dev/nvme0n1</span>
+  <span style="color:var(--green-dim)">proc:</span>
+    <span style="color:var(--text)">- /proc/sysrq-trigger</span>
+    <span style="color:var(--text)">- /proc/sys/kernel/modules_disabled</span>
+  <span style="color:var(--green-dim)">sockets:</span>
+    <span style="color:var(--text)">- /run/sudo-logger/plugin.sock</span>
+  <span style="color:var(--green-dim)">processes:</span>
+    <span style="color:var(--text)">- auditd</span>
+    <span style="color:var(--text)">- systemd</span>
+    <span style="color:var(--text)">- sshd</span></div>
+          <div style="margin-top:10px;font-size:10px;color:var(--text-dim);line-height:1.7;">
+            Paths resolved to <strong style="color:var(--text)">inodes</strong> via <code style="font-size:9px">mountinfo</code> at startup — Btrfs, XFS, ext4 all work correctly.<br>
+            List a <em>directory</em> to also block file creation inside it.<br>
+            Enable with <code style="font-size:9px">sandbox_config = /etc/sudo-logger/sandbox.yaml</code> in <code style="font-size:9px">agent.conf</code>.
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 17: EBPF AGENT ░░ -->
+  <div class="slide" id="s17">
+    <div class="s-features" style="max-width:920px">
+      <h2>EBPF<br>AGENT</h2>
+      <div class="sub">▸ Unified daemon · divergence detection · outage buffering</div>
+
+      <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:28px;font-size:13px">
+
+        <div style="border-left:2px solid var(--green-dim);padding-left:16px">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">DIVERGENCE DETECTION</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> eBPF tracepoints record every exec independently of the plugin</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Cross-validates kernel observations against plugin-logged events</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Mismatch within 5 s window → alert log + optional webhook</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Detects plugin tampering, sudo binary replacement, bypasses</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Divergence badge shown in replay UI only when mismatch detected</div>
+          <div style="margin-top:12px;font-family:'JetBrains Mono',monospace;font-size:9.5px;border:1px solid rgba(255,95,109,0.3);border-radius:4px;padding:10px 13px;line-height:1.9;background:rgba(255,95,109,0.04);">
+            <span style="color:#ff5f6d">ALERT:</span> <span style="color:var(--text-dim)">divergence detected</span><br>
+            <span style="color:var(--text-dim)">user=alice host=prod01</span><br>
+            <span style="color:var(--text-dim)">comm="bash" — no plugin event</span>
+          </div>
+        </div>
+
+        <div style="border-left:2px solid var(--amber);padding-left:16px">
+          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">OUTAGE BUFFERING</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Session chunks queued in-memory when TLS server unreachable</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Session continues uninterrupted — freeze delayed until limit exceeded</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Buffer flushed in-order on reconnect — zero data loss</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Configurable limit via <code style="font-size:10px">buffer_chunks</code> in <code style="font-size:10px">agent.conf</code></div>
+          <div style="color:var(--amber);font-weight:700;margin-top:16px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">UNIFIED DAEMON</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Plugin handler + eBPF recorder merged into one binary</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Auto-detects BTF — falls back to plugin-only on older kernels</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Single RPM · single systemd unit · plugin+eBPF or plugin-only mode</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 18: READY TO DEPLOY ░░ -->
+  <div class="slide" id="s18">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
       <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
@@ -2136,6 +2231,8 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Wayland screen capture — GUI sessions recorded, image slideshow replay</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Process sandbox — 13 eBPF hooks · blocks writes, opens, truncations, deletes, creates, signals · root-proof</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> eBPF agent — divergence detection · outage buffering · unified daemon</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
@@ -2149,7 +2246,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 17;
+  const N = 19;
   let cur = 0, busy = false;
 
   /* cursor */

@@ -1,46 +1,60 @@
 # sudo-logger build targets
 #
-# Typical first-time setup for ebpf-recorder on Fedora:
+# Typical first-time setup on Fedora:
 #   sudo dnf install clang llvm libbpf-devel bpftool linux-headers-$(uname -r)
-#   make vmlinux
-#   make generate
-#   make ebpf-recorder
+#   make vmlinux-agent
+#   make generate-agent
+#   make agent
 
 GOPATH  ?= $(shell go env GOPATH)
 KERNEL  ?= $(shell uname -r)
 ARCH    ?= $(shell uname -m | sed 's/x86_64/x86_64/;s/aarch64/arm64/')
 
-.PHONY: all ebpf-recorder vmlinux generate tidy test clean
+.PHONY: all agent ebpf-recorder vmlinux vmlinux-agent generate generate-agent tidy test clean
 
-all: ebpf-recorder
+all: agent
 
-# Generate vmlinux.h from the running kernel's BTF data.
-# Must be re-run after a kernel upgrade before rebuilding ebpf-recorder.
+# ── sudo-logger-agent (merged shipper + eBPF recorder) ───────────────────────
+
+vmlinux-agent: go/cmd/agent/bpf/vmlinux.h
+
+go/cmd/agent/bpf/vmlinux.h: /sys/kernel/btf/vmlinux
+	bpftool btf dump file $< format c > $@
+	@echo "vmlinux.h generated for kernel $(KERNEL)"
+
+generate-agent: go/cmd/agent/bpf/vmlinux.h
+	cd go && go generate ./cmd/agent/
+
+agent: generate-agent
+	cd go && go build -o ../bin/sudo-logger-agent ./cmd/agent/
+
+# ── Legacy ebpf-recorder (kept for reference, not installed) ─────────────────
+
 vmlinux: go/cmd/ebpf-recorder/bpf/vmlinux.h
 
 go/cmd/ebpf-recorder/bpf/vmlinux.h: /sys/kernel/btf/vmlinux
 	bpftool btf dump file $< format c > $@
 	@echo "vmlinux.h generated for kernel $(KERNEL)"
 
-# Compile BPF C → Go bindings (bpf2go).
-# Requires vmlinux.h to exist first.
 generate: go/cmd/ebpf-recorder/bpf/vmlinux.h
 	cd go && go generate ./cmd/ebpf-recorder/
 
-# Build the ebpf-recorder binary.
 ebpf-recorder: generate
 	cd go && go build -o ../bin/ebpf-recorder ./cmd/ebpf-recorder/
 
-# Tidy and verify module dependencies.
+# ── Common ────────────────────────────────────────────────────────────────────
+
 tidy:
 	cd go && go mod tidy
 
-# Run tests (all packages that have them).
 test:
 	cd go && go test ./...
 
 clean:
+	rm -f go/cmd/agent/recorder_bpf*.go
+	rm -f go/cmd/agent/recorder_bpf*.o
+	rm -f go/cmd/agent/bpf/vmlinux.h
 	rm -f go/cmd/ebpf-recorder/recorder_bpf*.go
 	rm -f go/cmd/ebpf-recorder/recorder_bpf*.o
 	rm -f go/cmd/ebpf-recorder/bpf/vmlinux.h
-	rm -f bin/ebpf-recorder
+	rm -f bin/sudo-logger-agent bin/ebpf-recorder

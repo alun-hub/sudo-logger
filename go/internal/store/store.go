@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"sudo-logger/internal/iolog"
+	"sudo-logger/internal/protocol"
 )
 
 // ScreenFrameWriter is an optional capability of SessionWriter implementations
@@ -146,6 +147,20 @@ type SessionStore interface {
 	// limit caps the number of entries (max 1000).
 	ListAccessLog(ctx context.Context, viewer string, limit int) ([]AccessLogEntry, error)
 
+	// UpdateDivergenceStatus sets the divergence_status and optionally the
+	// matched_session_id for a session identified by tsid.
+	// matchedTSID may be empty when no counterpart session exists.
+	// Returns nil if the session is not found (idempotent).
+	UpdateDivergenceStatus(ctx context.Context, tsid, status, matchedTSID string) error
+
+	// RecordSandboxViolation persists a kernel LSM sandbox alert beside
+	// the session identified by sid (session_id).
+	RecordSandboxViolation(ctx context.Context, sid string, alert protocol.SandboxAlert) error
+
+	// HasSandboxViolation reports whether any sandbox alerts were recorded
+	// for the session identified by tsid.
+	HasSandboxViolation(ctx context.Context, tsid string) (bool, error)
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }
@@ -180,6 +195,13 @@ type SessionRecord struct {
 	Incomplete    bool
 	NetworkOutage bool // true when terminated by network loss (not a shipper kill)
 	InProgress    bool
+	// Agent v2+ fields (zero value = backward-compatible defaults).
+	Source           string // "plugin" | "ebpf-tty" | "ebpf-pkexec"; empty = "plugin"
+	ParentSessionID  string // links ebpf-pkexec to its parent session
+	HasIO            bool   // false for pkexec background services with no TTY
+	DivergenceStatus string // "pending" | "confirmed" | "unwitnessed" | "missing_plugin"
+	MatchedSessionID string // TSID of the matched counterpart stream
+	CallerProcess    string // process name or service that triggered polkit (dbus-polkit only)
 }
 
 // ScreenFrameInfo describes one stored screen frame.

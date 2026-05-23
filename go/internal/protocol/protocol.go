@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 )
 
 const (
@@ -54,9 +55,12 @@ const (
 	MsgSessionDenied  = uint8(0x0c) // server→shipper AND shipper→plugin: policy denial
 	MsgFreezeTimeout  = uint8(0x0d) // shipper→plugin: server unreachable for too long, session will be terminated
 	MsgSessionAbandon  = uint8(0x0e) // shipper→server (new conn): freeze-timeout fired; payload = session_id UTF-8
-	MsgSessionFreezing = uint8(0x0f) // shipper→server (new conn): session frozen due to network loss; payload = session_id UTF-8
+	MsgSessionFreezing  = uint8(0x0f) // shipper→server (new conn): session frozen due to network loss; payload = session_id UTF-8
+	MsgDivergenceAlert  = uint8(0x10) // agent→server: sudo execve seen but no plugin SESSION_START within 30s
+	MsgSandboxAlert     = uint8(0x11) // agent→server: sandbox violation blocked by kernel LSM
 
 	StreamStdin   = uint8(0x00)
+
 	StreamStdout  = uint8(0x01)
 	StreamStderr  = uint8(0x02)
 	StreamTtyIn   = uint8(0x03)
@@ -87,6 +91,46 @@ type SessionStart struct {
 	XdgRuntimeDir   string `json:"xdg_runtime_dir,omitempty"`  // $XDG_RUNTIME_DIR from the invoking user's env
 	UserUID         int    `json:"user_uid,omitempty"`         // invoking user's UID from user_info[]
 	UserGID         int    `json:"user_gid,omitempty"`         // invoking user's primary GID from user_info[]
+	// Source identifies the recording path (added by agent v2+).
+	// "plugin" = sudo C plugin (default, omitempty means old shippers look the same).
+	// "ebpf-tty" = eBPF TTY session (SSH/su/screen without sudo).
+	// "ebpf-pkexec" = polkit/pkexec privilege elevation.
+	// Receivers must tolerate an empty value (treat as "plugin").
+	Source          string `json:"source,omitempty"`
+	// ParentSessionID links an ebpf-pkexec session to its parent SSH/TTY session.
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	// HasIO is false for pkexec background services that produce no TTY output.
+	// Omitted (false) for all plugin sessions (backward compatible).
+	HasIO           bool   `json:"has_io,omitempty"`
+	// DivergenceStatus is set by the agent before forwarding to the server.
+	// "confirmed" = eBPF witnessed the sudo execve; "unwitnessed" = eBPF was
+	// not running or did not see the execve (plugin-only mode).
+	// Empty is treated as "unwitnessed" for backward compatibility.
+	DivergenceStatus string `json:"divergence_status,omitempty"`
+	// CallerProcess is the process name that triggered the polkit authorization
+	// (for dbus-polkit: process comm or inferred service name like "firewalld").
+	// Empty for plugin and ebpf-tty sessions.
+	CallerProcess string `json:"caller_process,omitempty"`
+}
+
+// DivergenceAlert is the JSON payload for MsgDivergenceAlert.
+// Sent by the agent when eBPF sees a sudo/pkexec execve but no plugin
+// SESSION_START arrives within 30 seconds — indicating tampered sudo.conf.
+type DivergenceAlert struct {
+	User    string `json:"user"`
+	Host    string `json:"host"`
+	Comm    string `json:"comm"`    // "sudo" or "pkexec"
+	Ts      int64  `json:"ts"`      // Unix timestamp of the execve event
+}
+
+// SandboxAlert is the JSON payload for MsgSandboxAlert.
+// Sent by the agent when the kernel LSM blocks an operation.
+type SandboxAlert struct {
+	SessionID string `json:"session_id,omitempty"` // mapped from cgroup_id in userspace
+	Pid       uint32 `json:"pid"`
+	Comm      string `json:"comm"`
+	Type      uint32 `json:"type"`
+	Ts        int64  `json:"ts"`
 }
 
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.
@@ -281,4 +325,26 @@ func EncodeAckResponse(lastTs int64, lastSeq uint64) []byte {
 	binary.BigEndian.PutUint64(buf[0:], uint64(lastTs))
 	binary.BigEndian.PutUint64(buf[8:], lastSeq)
 	return buf
+}
+
+// Writer provides synchronized access to a server connection.
+type Writer struct {
+	mu *sync.Mutex
+	w  *bufio.Writer
+}
+
+func NewWriter(w *bufio.Writer, mu *sync.Mutex) *Writer {
+	return &Writer{w: w, mu: mu}
+}
+
+func (w *Writer) WriteMessage(msgType uint8, payload []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return WriteMessage(w.w, msgType, payload)
+}
+
+func (w *Writer) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Flush()
 }

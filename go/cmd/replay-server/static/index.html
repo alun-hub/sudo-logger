@@ -33,18 +33,18 @@
     }
 
     [data-theme="light"] {
-      --bg:          #f5f6fa;
-      --surface:     #ffffff;
-      --card:        #f0f1f5;
-      --card-hover:  #e8eaf0;
-      --card-active: #dce8ff;
-      --border:      #dde0ea;
-      --border-mid:  #c8ccd8;
+      --bg:          #e8eaf4;
+      --surface:     #dfe2ef;
+      --card:        #d4d8e8;
+      --card-hover:  #c8cde0;
+      --card-active: #bccaf5;
+      --border:      #c8ccdb;
+      --border-mid:  #b4b9cc;
       --text:        #1e2030;
       --text-sub:    #5a5f72;
       --text-dim:    #9298aa;
       --green:       #0d9f58;
-      --green-dim:   #e6f7ee;
+      --green-dim:   #d8f0e6;
       --green-glow:  rgba(13, 159, 88, 0.12);
       --blue:        #3874d8;
       --red:         #d93f50;
@@ -158,6 +158,7 @@
       border: 1px solid var(--border); padding: 1px 6px; border-radius: 3px;
       flex-shrink: 0; font-family: var(--font-ui); }
     .session-card.active .sc-dur { border-color: var(--green-dim); color: var(--green); }
+    .sc-exit { font-size: 11px; color: var(--text-dim); padding: 1px 0; font-family: var(--font-ui); flex-shrink: 0; }
     .sc-screen { font-size: 11px; color: var(--blue); background: rgba(80,160,255,0.10);
       border: 1px solid rgba(80,160,255,0.3); padding: 1px 5px; border-radius: 3px; }
     .sc-incomplete { font-size: 11px; color: var(--red); background: rgba(255,80,80,0.08);
@@ -178,6 +179,45 @@
       animation: live-pulse 1.4s ease-in-out infinite; }
     @keyframes live-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
     .session-card.in-progress { border-left-color: #4caf50 !important; }
+    .session-card.ebpf-pkexec { border-left-color: #8b6fff !important; }
+    .session-card.dbus-polkit { border-left-color: #17a2b8 !important; }
+    .session-card.missing-plugin { border-left-color: var(--red) !important;
+      background: rgba(255,95,109,0.04); }
+    /* divergence status badges */
+    .sc-div { font-size: 11px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+      font-family: var(--font-ui); border: 1px solid; }
+    .sc-div.missing-plugin { color: var(--red); border-color: rgba(255,95,109,0.45); background: rgba(255,95,109,0.10); font-weight: 600; }
+    /* polkit session group */
+    .session-group { border-bottom: 1px solid var(--border); }
+    .sg-header { padding: 10px 14px; cursor: pointer; display: flex; flex-direction: column;
+      gap: 4px; transition: background 0.1s; border-left: 2px solid #17a2b8; }
+    .sg-header:hover { background: var(--card-hover); }
+    .sg-top { display: flex; align-items: center; gap: 7px; }
+    .sg-caller { font-size: 13px; font-weight: 600; color: var(--text); font-family: var(--font);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sg-count { font-size: 11px; padding: 1px 7px; border-radius: 10px; flex-shrink: 0;
+      color: #17a2b8; border: 1px solid rgba(23,162,184,0.35); background: rgba(23,162,184,0.07);
+      font-family: var(--font-ui); }
+    .sg-toggle { margin-left: auto; font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+    .sg-meta { display: flex; align-items: center; gap: 6px; }
+    .sg-user { font-size: 11px; color: var(--text-sub); font-family: var(--font-ui); }
+    .sg-date { font-size: 11px; color: var(--text-sub); font-family: var(--font-ui); }
+    .sg-children { display: none; }
+    .sg-children.open { display: block; }
+    .sg-children .session-card { border-left: none; padding-left: 28px;
+      border-top: 1px solid var(--border); border-bottom: none; }
+    .sg-children .session-card:last-child { border-bottom: none; }
+    /* source / event-type badges */
+    .sc-source { font-size: 11px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+      font-family: var(--font-ui); border: 1px solid;
+      color: #8b6fff; border-color: rgba(139,111,255,0.35); background: rgba(139,111,255,0.07); }
+    .sc-source.dbus-polkit { color: #17a2b8; border-color: rgba(23,162,184,0.35); background: rgba(23,162,184,0.07); }
+    /* pkexec event card (no TTY playback) */
+    .session-card.event-card { opacity: 0.88; }
+    .session-card.event-card .sc-cmd { font-style: italic; }
+    .sc-event-label { font-size: 11px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+      font-family: var(--font-ui); border: 1px solid;
+      color: #8b6fff; border-color: rgba(139,111,255,0.35); background: rgba(139,111,255,0.07); }
     .info-bar { display: flex; align-items: center; gap: 6px; padding: 6px 16px;
       background: rgba(76,175,80,0.07); border-bottom: 1px solid rgba(76,175,80,0.2);
       font-size: 12px; color: #4caf50; font-family: var(--font-ui); }
@@ -192,6 +232,48 @@
     mark { background: rgba(0,232,122,0.18); color: var(--green);
       border-radius: 2px; padding: 0 1px; font-style: normal; }
     [data-theme="light"] mark { background: rgba(0, 122, 64, 0.14); }
+
+    /* Light mode: explicit card background so cards stand out from sidebar */
+    [data-theme="light"] .session-card { background: var(--card); }
+
+    /* Light mode: navy chrome for topbar and controls */
+    [data-theme="light"] .topbar {
+      background: #1a2a50; border-bottom-color: #253763;
+    }
+    [data-theme="light"] .topbar .logo { color: #2ecc71; }
+    [data-theme="light"] .topbar .badge {
+      background: rgba(0,0,0,0.22); border-color: rgba(255,255,255,0.12); color: #8898c0;
+    }
+    [data-theme="light"] .topbar .tab-btn { color: #8898c0; }
+    [data-theme="light"] .topbar .tab-btn:hover { color: #b0bcd8; border-color: rgba(255,255,255,0.2); }
+    [data-theme="light"] .topbar .tab-btn.active {
+      color: #2ecc71; border-color: #2ecc71; background: rgba(46,204,113,0.15);
+    }
+    [data-theme="light"] .topbar .theme-btn {
+      border-color: rgba(255,255,255,0.18); color: #8898c0;
+    }
+    [data-theme="light"] .topbar .theme-btn:hover { color: #b0bcd8; border-color: rgba(255,255,255,0.3); }
+    [data-theme="light"] .topbar .autoplay-label { color: #8898c0; }
+    [data-theme="light"] .topbar .user-chip { color: #8898c0; }
+    [data-theme="light"] .topbar .user-chip .user-name { color: #c8d4e8; }
+    [data-theme="light"] .topbar .logout-btn {
+      border-color: rgba(255,255,255,0.18); color: #8898c0;
+    }
+    [data-theme="light"] .topbar .logout-btn:hover { color: var(--red); border-color: var(--red); }
+    [data-theme="light"] .controls {
+      background: #1a2a50; border-top-color: #253763;
+    }
+    [data-theme="light"] .controls .btn-play {
+      background: rgba(46,204,113,0.18); border-color: #2ecc71; color: #2ecc71;
+    }
+    [data-theme="light"] .controls .btn-icon {
+      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: #94a8cc;
+    }
+    [data-theme="light"] .controls .time-cur { color: #2ecc71; }
+    [data-theme="light"] .controls .time-tot { color: #8898c0; }
+    [data-theme="light"] .controls .speed-select {
+      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: #94a8cc;
+    }
 
     .load-more { flex-shrink: 0; display: none; width: 100%; background: none;
       border: none; border-top: 1px solid var(--border); padding: 10px;
@@ -861,6 +943,65 @@
     <div class="help-body">
 
       <div class="help-section">
+        <h3>Session indicators</h3>
+        <p class="help-intro" style="margin-bottom:12px">
+          Badges shown on session cards. Hover a badge for extra detail where available.
+        </p>
+        <table class="help-table">
+          <thead><tr><th style="width:140px">Badge</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="sc-source">ebpf</span></td>
+              <td>Session captured by the eBPF TTY recorder instead of the sudo plugin. Appears for
+                  privilege escalations via <code>su</code>, <code>screen</code>, <code>tmux</code>
+                  or other programs that bypass sudo. The session is fully recorded — the capture
+                  path is just different.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-source">pkexec</span></td>
+              <td>Privilege escalation via <code>pkexec</code>, captured by the eBPF
+                  <code>execve</code> tracepoint. pkexec does not go through the sudo plugin so
+                  eBPF is the only capture mechanism for these events.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-live" style="pointer-events:none">live</span></td>
+              <td>Session is currently running. The recording is still in progress; the replay
+                  shows whatever has been captured so far.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-screen">▣ screen</span></td>
+              <td>Session contains a terminal recording with full frame history (screen or tmux).
+                  The player renders these as a video-like replay rather than a plain text stream.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-event-label">⚡ event</span></td>
+              <td>pkexec run with no attached TTY — a background privilege escalation with no
+                  interactive I/O. The record shows metadata (user, command, exit code, timestamp)
+                  but there is no terminal replay.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-network-outage">⏱ network outage</span></td>
+              <td>The agent lost contact with the log server during this session. Session processes
+                  were frozen until connectivity was restored so that no activity went unrecorded.
+                  The recording is complete but was delayed.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-incomplete">⚠ incomplete</span></td>
+              <td>The session ended without a clean close — the agent was killed or crashed before
+                  sending <code>SESSION_END</code>. The recording may be truncated.</td>
+            </tr>
+            <tr>
+              <td><span class="sc-div missing-plugin">⚠ no plugin</span></td>
+              <td>eBPF detected a sudo execution on this host but the audit plugin never logged a
+                  matching session. This can mean the plugin is not installed, was bypassed, or
+                  the binary was invoked directly. There is no full audit trail — investigate
+                  immediately.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="help-section">
         <h3>How risk scoring works</h3>
         <p class="help-intro">
           Every session is evaluated against all rules in
@@ -1432,6 +1573,69 @@ function renderScreenFrame(idx) {
   }
 }
 
+// ── Polkit action lookup ───────────────────────────────────────────────────────
+// Maps action ID prefixes to { desc, risk }.  risk: 'critical'|'high'|'medium'|'low'
+const POLKIT_ACTIONS = [
+  // pkexec — arbitrary execution as root
+  { prefix: 'org.freedesktop.policykit.exec',                     desc: 'Execute program as root (pkexec)',                   risk: 'critical' },
+  // systemd
+  { prefix: 'org.freedesktop.systemd1.manage-units',              desc: 'Start / stop / restart system services',             risk: 'high'     },
+  { prefix: 'org.freedesktop.systemd1.manage-unit-files',         desc: 'Enable / disable / mask service unit files',         risk: 'high'     },
+  { prefix: 'org.freedesktop.systemd1.reload-daemon',             desc: 'Reload systemd daemon configuration',                risk: 'medium'   },
+  { prefix: 'org.freedesktop.systemd1',                           desc: 'Systemd privileged action',                          risk: 'high'     },
+  // NetworkManager
+  { prefix: 'org.freedesktop.NetworkManager.settings.modify.system', desc: 'Modify system-wide network settings',             risk: 'high'     },
+  { prefix: 'org.freedesktop.NetworkManager.network-control',     desc: 'Control active network connections',                  risk: 'medium'   },
+  { prefix: 'org.freedesktop.NetworkManager.wifi.share',          desc: 'Share Wi-Fi connection as hotspot',                  risk: 'medium'   },
+  { prefix: 'org.freedesktop.NetworkManager',                     desc: 'NetworkManager privileged action',                   risk: 'medium'   },
+  // Firewall
+  { prefix: 'org.fedoraproject.FirewallD1.manage',                desc: 'Modify firewall rules / zones',                      risk: 'high'     },
+  { prefix: 'org.fedoraproject.FirewallD1.config',                desc: 'Change persistent firewall configuration',            risk: 'high'     },
+  { prefix: 'org.fedoraproject.FirewallD1',                       desc: 'Firewall privileged action',                         risk: 'high'     },
+  // PackageKit / software
+  { prefix: 'org.freedesktop.packagekit.package-install',         desc: 'Install software package',                           risk: 'high'     },
+  { prefix: 'org.freedesktop.packagekit.package-remove',          desc: 'Remove software package',                            risk: 'high'     },
+  { prefix: 'org.freedesktop.packagekit.trigger-offline-update',  desc: 'Apply offline system update',                        risk: 'high'     },
+  { prefix: 'org.freedesktop.packagekit',                         desc: 'Package management action',                          risk: 'high'     },
+  // Apt (Debian/Ubuntu)
+  { prefix: 'org.debian.apt.install-or-remove-packages',          desc: 'Install or remove packages (apt)',                   risk: 'high'     },
+  { prefix: 'org.debian.apt',                                      desc: 'APT package management action',                      risk: 'high'     },
+  // fwupd
+  { prefix: 'org.freedesktop.fwupd.update-hotplug',               desc: 'Update device firmware',                             risk: 'high'     },
+  { prefix: 'org.freedesktop.fwupd',                              desc: 'Firmware update action',                             risk: 'high'     },
+  // Login / power
+  { prefix: 'org.freedesktop.login1.reboot',                      desc: 'Reboot the system',                                  risk: 'high'     },
+  { prefix: 'org.freedesktop.login1.power-off',                   desc: 'Power off the system',                               risk: 'high'     },
+  { prefix: 'org.freedesktop.login1.hibernate',                   desc: 'Hibernate the system',                               risk: 'low'      },
+  { prefix: 'org.freedesktop.login1.suspend',                     desc: 'Suspend the system',                                 risk: 'low'      },
+  { prefix: 'org.freedesktop.login1',                             desc: 'Session / login management action',                  risk: 'medium'   },
+  // Storage
+  { prefix: 'org.freedesktop.UDisks2.encrypted-unlock',           desc: 'Unlock encrypted storage device',                    risk: 'high'     },
+  { prefix: 'org.freedesktop.UDisks2.filesystem-mount',           desc: 'Mount filesystem',                                   risk: 'medium'   },
+  { prefix: 'org.freedesktop.UDisks2.filesystem-unmount-others',  desc: "Unmount another user's filesystem",                  risk: 'medium'   },
+  { prefix: 'org.freedesktop.UDisks2',                            desc: 'Storage / disk management action',                   risk: 'medium'   },
+  // Time / hostname
+  { prefix: 'org.freedesktop.timedate1.set-time',                 desc: 'Set system clock',                                   risk: 'medium'   },
+  { prefix: 'org.freedesktop.timedate1',                          desc: 'System time / NTP configuration',                    risk: 'low'      },
+  { prefix: 'org.freedesktop.hostname1.set-hostname',             desc: 'Change system hostname',                             risk: 'medium'   },
+  { prefix: 'org.freedesktop.hostname1',                          desc: 'Hostname / machine-info action',                     risk: 'low'      },
+];
+
+const RISK_COLORS = {
+  critical: '\x1b[1;31m',  // bold red
+  high:     '\x1b[33m',    // yellow
+  medium:   '\x1b[36m',    // cyan
+  low:      '\x1b[2m',     // dim
+};
+
+function polkitActionInfo(actionID) {
+  if (!actionID) return null;
+  for (const a of POLKIT_ACTIONS) {
+    if (actionID.startsWith(a.prefix)) return a;
+  }
+  return null;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let allSessions      = [];
@@ -1440,6 +1644,7 @@ let totalDuration    = 0;
 let currentTSID      = null;
 let currentSession   = null;
 let autoplay         = true;
+const expandedGroups = new Set(); // group keys of expanded polkit session groups
 let liveRefreshTimer = null;
 
 const fetchState = {
@@ -1569,6 +1774,125 @@ async function fetchSessions(reset = true) {
 
 // ── Session list render ───────────────────────────────────────────────────────
 
+const RISK_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
+
+function worstRisk(sessions) {
+  let best = 0, level = '';
+  for (const s of sessions) {
+    const info = polkitActionInfo(s.command);
+    const r = info ? (RISK_ORDER[info.risk] || 0) : 0;
+    if (r > best) { best = r; level = info.risk; }
+  }
+  return level;
+}
+
+// Group consecutive dbus-polkit sessions with the same caller_process and user
+// that start within GROUP_WINDOW_S seconds of the first in the group.
+const GROUP_WINDOW_S = 3;
+
+function groupSessions(sessions) {
+  const out = [];
+  let i = 0;
+  while (i < sessions.length) {
+    const s = sessions[i];
+    if (s.source === 'dbus-polkit' && s.caller_process) {
+      const grp = [s];
+      let j = i + 1;
+      while (j < sessions.length) {
+        const t = sessions[j];
+        if (t.source === 'dbus-polkit' &&
+            t.caller_process === s.caller_process &&
+            t.user === s.user &&
+            t.host === s.host &&
+            Math.abs(t.start_time - s.start_time) <= GROUP_WINDOW_S) {
+          grp.push(t);
+          j++;
+        } else {
+          break;
+        }
+      }
+      if (grp.length > 1) {
+        const key = s.caller_process + '|' + s.user + '|' + s.host + '|' + s.start_time;
+        out.push({ type: 'group', key, sessions: grp });
+        i = j;
+        continue;
+      }
+    }
+    out.push({ type: 'single', session: s });
+    i++;
+  }
+  return out;
+}
+
+function buildSessionCard(s, q) {
+  const isMissingPlugin = s.divergence_status === 'missing_plugin';
+  const isEbpfPkexec   = s.source === 'ebpf-pkexec';
+  const isDbusPolkit   = s.source === 'dbus-polkit';
+  const isEventCard    = (isEbpfPkexec && !s.has_io) || isDbusPolkit;
+  let cardCls = 'session-card';
+  if (s.tsid === currentTSID)  cardCls += ' active';
+  if (s.in_progress)           cardCls += ' in-progress';
+  else if (isMissingPlugin)    cardCls += ' missing-plugin';
+  else if (s.network_outage)   cardCls += ' network-outage';
+  else if (s.incomplete)       cardCls += ' incomplete';
+  if (isEbpfPkexec)            cardCls += ' ebpf-pkexec';
+  if (isDbusPolkit)            cardCls += ' dbus-polkit';
+  if (isEventCard)             cardCls += ' event-card';
+
+  const card = el('div', cardCls);
+  card.dataset.tsid = s.tsid;
+
+  const userRow = el('div', 'sc-user');
+  const userText = el('span', 'sc-user-text');
+  applyHighlight(userText, `${s.user}@${s.host}`, q);
+  userRow.appendChild(userText);
+  if (s.runas) {
+    const isRoot = s.runas === 'root';
+    userRow.appendChild(el('span', 'sc-runas' + (isRoot ? '' : ' nonroot'), `→ ${s.runas}`));
+  }
+  if (s.source && s.source !== 'plugin') {
+    const label = s.source === 'ebpf-pkexec' ? 'pkexec'
+                : s.source === 'ebpf-tty'    ? 'ebpf'
+                : s.source === 'dbus-polkit'  ? 'polkit'
+                : s.source;
+    const badgeCls = s.source === 'dbus-polkit' ? 'sc-source dbus-polkit' : 'sc-source';
+    userRow.appendChild(el('span', badgeCls, label));
+  }
+
+  const cmd = el('div', 'sc-cmd');
+  applyHighlight(cmd, s.command, q);
+
+  const meta = el('div', 'sc-meta');
+  meta.appendChild(el('span', 'sc-date', fmtDate(s.start_time)));
+  meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
+  if (isEventCard && s.exit_code != null) meta.appendChild(el('span', 'sc-exit', 'exit: ' + s.exit_code));
+  if (s.risk_level && s.risk_level !== 'low') {
+    meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
+  }
+  if (s.in_progress) meta.appendChild(el('span', 'sc-live', 'live'));
+  if (s.has_frames)  meta.appendChild(el('span', 'sc-screen', '▣ screen'));
+  if (isEventCard)   meta.appendChild(el('span', 'sc-event-label', '⚡ event'));
+  if (s.network_outage) meta.appendChild(el('span', 'sc-network-outage', '⏱ network outage'));
+  else if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
+  if (s.divergence_status === 'missing_plugin') {
+    meta.appendChild(el('span', 'sc-div missing-plugin', '⚠ no plugin'));
+  }
+  if (s.parent_session_id) {
+    const link = el('span', 'sc-source', `↑ parent`);
+    link.title = s.parent_session_id;
+    link.style.cursor = 'pointer';
+    link.addEventListener('click', e => { e.stopPropagation(); selectSession(s.parent_session_id); });
+    meta.appendChild(link);
+  }
+
+  card.appendChild(userRow);
+  card.appendChild(cmd);
+  if (s.cwd && s.cwd !== '/') card.appendChild(el('div', 'sc-cwd', s.cwd));
+  card.appendChild(meta);
+  card.addEventListener('click', () => selectSession(s.tsid));
+  return card;
+}
+
 function renderSessionList(sessions) {
   elSessionList.textContent = '';
   if (!sessions.length) {
@@ -1577,41 +1901,62 @@ function renderSessionList(sessions) {
   }
   const q = fetchState.q;
   const frag = document.createDocumentFragment();
-  for (const s of sessions) {
-    const card = el('div', 'session-card' + (s.tsid === currentTSID ? ' active' : '') + (s.network_outage ? ' network-outage' : s.incomplete ? ' incomplete' : '') + (s.in_progress ? ' in-progress' : ''));
-    card.dataset.tsid = s.tsid;
+  const items = groupSessions(sessions);
 
-    // user@host row with runas badge
-    const userRow = el('div', 'sc-user');
-    const userText = el('span', 'sc-user-text');
-    applyHighlight(userText, `${s.user}@${s.host}`, q);
-    userRow.appendChild(userText);
-    if (s.runas) {
-      const isRoot = s.runas === 'root';
-      const badge = el('span', 'sc-runas' + (isRoot ? '' : ' nonroot'), `→ ${s.runas}`);
-      userRow.appendChild(badge);
+  for (const item of items) {
+    if (item.type === 'single') {
+      frag.appendChild(buildSessionCard(item.session, q));
+      continue;
     }
 
-    const cmd = el('div', 'sc-cmd');
-    applyHighlight(cmd, s.command, q);
+    // Group of dbus-polkit events from same caller
+    const grp = item.sessions;
+    const first = grp[0];
+    const risk = worstRisk(grp);
+    const isExpanded = expandedGroups.has(item.key);
 
-    const meta = el('div', 'sc-meta');
-    meta.appendChild(el('span', 'sc-date', fmtDate(s.start_time)));
-    meta.appendChild(el('span', 'sc-dur', fmt(s.duration)));
-    if (s.risk_level && s.risk_level !== 'low') {
-      meta.appendChild(el('span', `risk-badge risk-${s.risk_level}`, s.risk_level.toUpperCase()));
+    const groupEl = el('div', 'session-group');
+
+    const header = el('div', 'sg-header');
+    const top = el('div', 'sg-top');
+
+    const callerSpan = el('span', 'sg-caller', first.caller_process || 'polkit');
+    const countBadge = el('span', 'sg-count', grp.length + ' auth.');
+    top.appendChild(callerSpan);
+    top.appendChild(countBadge);
+    if (risk && risk !== 'low') {
+      top.appendChild(el('span', `risk-badge risk-${risk} sg-risk`, risk.toUpperCase()));
     }
-    if (s.in_progress) meta.appendChild(el('span', 'sc-live', 'live'));
-    if (s.has_frames)  meta.appendChild(el('span', 'sc-screen', '▣ screen'));
-    if (s.network_outage) meta.appendChild(el('span', 'sc-network-outage', '⏱ network outage'));
-    else if (s.incomplete) meta.appendChild(el('span', 'sc-incomplete', '⚠ incomplete'));
+    top.appendChild(el('span', 'sg-toggle', isExpanded ? '▼' : '▶'));
 
-    card.appendChild(userRow);
-    card.appendChild(cmd);
-    if (s.cwd && s.cwd !== '/') card.appendChild(el('div', 'sc-cwd', s.cwd));
-    card.appendChild(meta);
-    card.addEventListener('click', () => selectSession(s.tsid));
-    frag.appendChild(card);
+    const sgMeta = el('div', 'sg-meta');
+    sgMeta.appendChild(el('span', 'sg-user', `${first.user}@${first.host}`));
+    sgMeta.appendChild(el('span', 'sg-date', fmtDate(first.start_time)));
+
+    header.appendChild(top);
+    header.appendChild(sgMeta);
+
+    const children = el('div', 'sg-children' + (isExpanded ? ' open' : ''));
+    for (const s of grp) {
+      children.appendChild(buildSessionCard(s, q));
+    }
+
+    header.addEventListener('click', () => {
+      const nowExpanded = expandedGroups.has(item.key);
+      if (nowExpanded) {
+        expandedGroups.delete(item.key);
+        children.classList.remove('open');
+        header.querySelector('.sg-toggle').textContent = '▶';
+      } else {
+        expandedGroups.add(item.key);
+        children.classList.add('open');
+        header.querySelector('.sg-toggle').textContent = '▼';
+      }
+    });
+
+    groupEl.appendChild(header);
+    groupEl.appendChild(children);
+    frag.appendChild(groupEl);
   }
   elSessionList.appendChild(frag);
 }
@@ -1705,6 +2050,53 @@ async function selectSession(tsid, initialSeek = 0) {
 
   const playerEl = document.querySelector('.player');
   playerEl.classList.remove('split-view');
+
+  // Divergence alert: sudo ran but plugin never logged it.
+  if (sess && sess.divergence_status === 'missing_plugin') {
+    hideScreenPlayer();
+    term.write('\r\n');
+    term.write('  \x1b[1;31m⚠  SUDO RAN WITHOUT PLUGIN LOGGING\x1b[0m\r\n');
+    term.write('\r\n');
+    term.write('  \x1b[2mcommand:\x1b[0m  ' + (sess.command || 'sudo') + '\r\n');
+    term.write('  \x1b[2muser:\x1b[0m     ' + (sess.user || '?') + '\r\n');
+    term.write('  \x1b[2mhost:\x1b[0m     ' + (sess.host || '?') + '\r\n');
+    term.write('\r\n');
+    term.write('  \x1b[2mThe sudo plugin did not log this session.\x1b[0m\r\n');
+    term.write('  \x1b[2mCheck that the Plugin line is present in /etc/sudo.conf.\x1b[0m\r\n');
+    return;
+  }
+
+  // Event-only sessions (pkexec background or D-Bus polkit): show structured event info.
+  if (sess && ((sess.source === 'ebpf-pkexec' && !sess.has_io) || sess.source === 'dbus-polkit')) {
+    hideScreenPlayer();
+    const info = polkitActionInfo(sess.command);
+    const resultCode = sess.exit_code;
+    const resultLabel = resultCode === 0 ? '\x1b[32m✓ AUTHORIZED\x1b[0m'
+                      : resultCode === 2 ? '\x1b[33m⚡ CHALLENGE — password required\x1b[0m'
+                      :                   '\x1b[31m✗ DENIED\x1b[0m';
+    const riskColor  = info ? (RISK_COLORS[info.risk] || '\x1b[0m') : '\x1b[0m';
+    const riskLabel  = info ? riskColor + info.risk.toUpperCase() + '\x1b[0m' : '';
+    const srcLabel   = sess.source === 'dbus-polkit' ? 'polkit/D-Bus' : 'pkexec/eBPF';
+    term.write('\r\n');
+    term.write('  ' + resultLabel + (riskLabel ? '    \x1b[2mrisk:\x1b[0m ' + riskLabel : '') + '\r\n');
+    term.write('\r\n');
+    if (info) {
+      term.write('  \x1b[2maction:\x1b[0m  \x1b[1m' + sess.command + '\x1b[0m\r\n');
+      term.write('           \x1b[2m' + info.desc + '\x1b[0m\r\n');
+    } else {
+      term.write('  \x1b[2maction:\x1b[0m  \x1b[1m' + (sess.command || '(unknown)') + '\x1b[0m\r\n');
+    }
+    if (sess.caller_process) {
+      const callerType = sess.source === 'dbus-polkit' && sess.user === 'polkit'
+                       ? 'system daemon' : 'process';
+      term.write('  \x1b[2mcaller:\x1b[0m  ' + sess.caller_process + '  \x1b[2m(' + callerType + ')\x1b[0m\r\n');
+    }
+    if (sess.user && sess.user !== 'polkit') {
+      term.write('  \x1b[2muser:\x1b[0m    ' + sess.user + '\r\n');
+    }
+    term.write('  \x1b[2msource:\x1b[0m  ' + srcLabel + '\r\n');
+    return;
+  }
 
   const termTask = selectTerminalSession(tsid, sess, initialSeek);
 
@@ -1942,6 +2334,37 @@ function renderInfoBar(sess) {
       row2.appendChild(w);
     }
     elInfoBar.appendChild(row2);
+  }
+
+  // Row 3: event metadata for event cards (pkexec background or D-Bus polkit)
+  const isInfoEvent = (sess.source === 'ebpf-pkexec' && !sess.has_io) || sess.source === 'dbus-polkit';
+  if (isInfoEvent) {
+    const evRow = el('div', 'info-row');
+    if (sess.source === 'dbus-polkit') {
+      const resultLabel = sess.exit_code === 0 ? '✓ authorized'
+                        : sess.exit_code === 2 ? '⚡ challenge'
+                        : '✗ denied';
+      const resultColor = sess.exit_code === 0 ? '' : 'red';
+      addItem(evRow, 'result', resultLabel, resultColor, '');
+      addItem(evRow, 'source', 'polkit / D-Bus', 'dim', '');
+    } else {
+      addItem(evRow, 'source', 'polkit / eBPF', 'dim', '');
+    }
+    if (sess.duration) addItem(evRow, 'duration', fmt(sess.duration), 'dim', '');
+    if (sess.source !== 'dbus-polkit' && sess.exit_code != null) {
+      addItem(evRow, 'exit', String(sess.exit_code), sess.exit_code === 0 ? '' : 'red', '');
+    }
+    if (sess.parent_session_id) {
+      const w = el('div', 'info-item');
+      w.appendChild(el('span', 'il', 'from'));
+      const link = el('span', 'iv blue', '↑ parent session');
+      link.style.cursor = 'pointer';
+      link.title = sess.parent_session_id;
+      link.addEventListener('click', () => selectSession(sess.parent_session_id));
+      w.appendChild(link);
+      evRow.appendChild(w);
+    }
+    elInfoBar.appendChild(evRow);
   }
 }
 

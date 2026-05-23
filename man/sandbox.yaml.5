@@ -1,0 +1,78 @@
+.TH SANDBOX.YAML 5 "2026-05-23" "sudo-logger" "Sudo-logger Configuration"
+.SH NAME
+sandbox.yaml \- Configuration file for the sudo-logger eBPF LSM process sandbox
+.SH DESCRIPTION
+.B sandbox.yaml
+defines a deny-list of files, devices, and processes that are protected against
+modification or interference by processes running inside a \fBsudo-logger\fR session.
+
+The restrictions are enforced at the kernel level using \fBeBPF LSM\fR hooks,
+making them effective even against the root user within a sandboxed session.
+.SH FILE FORMAT
+The file uses YAML format with a single top-level \fBprotect\fR key.
+.PP
+.RS
+.nf
+\fBprotect:\fR
+  \fBfiles:\fR
+    \- /etc/sudoers
+    \- /etc/sudo-logger
+  \fBdevices:\fR
+    \- /dev/nvme0n1
+  \fBproc:\fR
+    \- /proc/sysrq-trigger
+  \fBsockets:\fR
+    \- /run/sudo-logger/plugin.sock
+  \fBprocesses:\fR
+    \- auditd
+    \- sshd
+.fi
+.RE
+.SH SECTIONS
+.TP
+.B files
+A list of absolute paths to regular files or directories.
+Protected files cannot be opened for writing, truncated, deleted, or renamed.
+Protected directories cannot have new files or subdirectories created inside them.
+Protection is recursive for all existing files found inside a directory at agent startup.
+.TP
+.B devices
+A list of device nodes (e.g., \fB/dev/sda\fR). Prevents raw hardware access.
+.TP
+.B proc
+A list of entries in the \fB/proc\fR filesystem. Prevents modification of sensitive kernel parameters.
+.TP
+.B sockets
+A list of Unix domain socket files. Prevents deletion or replacement of the socket file.
+Does \fBnot\fR block \fBconnect(2)\fR or data transmission to the socket.
+.TP
+.B processes
+A list of process names (\fBcomm\fR). Processes in the sandbox are forbidden
+from sending \fBany\fR signal (including \fBSIGKILL\fR and \fBSIGTERM\fR)
+to these processes.
+.IP
+This effectively prevents a sandboxed root user from stopping protected systemd
+services using \fBsystemctl stop\fR or \fBkill\fR.
+.IP
+\fBNOTE:\fR Linux process names are limited to 15 characters. Longer names are
+truncated. Use \fBcat /proc/<pid>/comm\fR to verify the exact name.
+.SH SCOPE
+Restrictions only apply to processes that are:
+.IP 1.
+Members of a \fBsudo-logger\fR session cgroup.
+.IP 2.
+Descendants of a \fBsudo\fR process tracked by the agent since session start.
+.PP
+Processes outside of active \fBsudo-logger\fR sessions are completely unaffected.
+.SH REQUIREMENTS
+Requires \fBCONFIG_BPF_LSM=y\fR and \fBbpf\fR present in the active LSM list
+(verify with \fBgrep bpf /sys/kernel/security/lsm\fR).
+On Fedora\ 38 and later \fBbpf\fR is active by default; no boot parameter
+changes are needed.
+On older or non-Fedora kernels add \fBlsm=bpf\fR to \fBGRUB_CMDLINE_LINUX\fR
+and run \fBgrub2-mkconfig\fR.
+.SH FILES
+.I /etc/sudo-logger/sandbox.yaml
+.SH SEE ALSO
+.BR sudo-logger-agent (8),
+.BR sudo_logger_plugin (8)

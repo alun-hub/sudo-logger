@@ -22,6 +22,12 @@ go/cmd/ebpf-recorder/recorder_bpfel.go
 go/cmd/ebpf-recorder/recorder_bpfel.o
 bin/
 
+# agent: vmlinux.h är systemspecifik (3.4 MB) och genereras av bpftool vid byggdags.
+# De genererade Go-bindningarna (recorder_bpf*.go/.o) committas däremot så att
+# "go build ./..." fungerar utan att clang/bpf2go behöver installeras.
+go/cmd/agent/bpf/vmlinux.h
+go/agent
+
 # PKI files — certificates and private keys must never be committed
 pki/
 .gitnexus

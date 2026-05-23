@@ -259,6 +259,13 @@ type SessionInfo struct {
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
 	RiskReasons     []string `json:"risk_reasons,omitempty"`
 	HasFrames       bool     `json:"has_frames,omitempty"` // true for GUI sessions with screen capture
+	// eBPF / divergence fields (agent v2+)
+	Source           string `json:"source,omitempty"`            // "plugin" | "ebpf-tty" | "ebpf-pkexec"
+	ParentSessionID  string `json:"parent_session_id,omitempty"` // for ebpf-pkexec → parent session
+	HasIO            bool   `json:"has_io,omitempty"`            // false for pkexec background services
+	DivergenceStatus string `json:"divergence_status,omitempty"` // "confirmed" | "unwitnessed" | "missing_plugin"
+	MatchedSessionID string `json:"matched_session_id,omitempty"` // TSID of matched counterpart
+	CallerProcess    string `json:"caller_process,omitempty"`    // process/service that triggered polkit (dbus-polkit only)
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -349,6 +356,11 @@ type Rule struct {
 	Incomplete     *bool         `yaml:"incomplete"       json:"incomplete,omitempty"`
 	AfterHours     *bool         `yaml:"after_hours"      json:"after_hours,omitempty"`
 	MinDuration    float64       `yaml:"min_duration"     json:"min_duration,omitempty"`
+	// Source filters by session source ("plugin", "ebpf-tty", "ebpf-pkexec", "dbus-polkit").
+	// Empty means the rule applies to all sources.
+	Source   string `yaml:"source"    json:"source,omitempty"`
+	// ExitCode, when non-nil, requires an exact exit-code match.
+	ExitCode *int32 `yaml:"exit_code" json:"exit_code,omitempty"`
 }
 
 // RuleSet is the top-level structure of the risk-rules YAML file.
@@ -465,24 +477,34 @@ func (c *sessionCache) invalidate() {
 
 // recordToInfo converts a store.SessionRecord to a SessionInfo (without risk fields).
 func recordToInfo(r store.SessionRecord) SessionInfo {
+	src := r.Source
+	if src == "" {
+		src = "plugin"
+	}
 	return SessionInfo{
-		TSID:            r.TSID,
-		SessionID:       r.SessionID,
-		User:            r.User,
-		Host:            r.Host,
-		Runas:           r.Runas,
-		RunasUID:        r.RunasUID,
-		RunasGID:        r.RunasGID,
-		Command:         r.Command,
-		ResolvedCommand: r.ResolvedCommand,
-		Cwd:             r.Cwd,
-		Flags:           r.Flags,
-		StartTime:       r.StartTime,
-		Duration:        r.Duration,
-		ExitCode:        r.ExitCode,
-		Incomplete:      r.Incomplete,
-		NetworkOutage:   r.NetworkOutage,
-		InProgress:      r.InProgress,
+		TSID:             r.TSID,
+		SessionID:        r.SessionID,
+		User:             r.User,
+		Host:             r.Host,
+		Runas:            r.Runas,
+		RunasUID:         r.RunasUID,
+		RunasGID:         r.RunasGID,
+		Command:          r.Command,
+		ResolvedCommand:  r.ResolvedCommand,
+		Cwd:              r.Cwd,
+		Flags:            r.Flags,
+		StartTime:        r.StartTime,
+		Duration:         r.Duration,
+		ExitCode:         r.ExitCode,
+		Incomplete:       r.Incomplete,
+		NetworkOutage:    r.NetworkOutage,
+		InProgress:       r.InProgress,
+		Source:           src,
+		ParentSessionID:  r.ParentSessionID,
+		HasIO:            r.HasIO,
+		DivergenceStatus: r.DivergenceStatus,
+		MatchedSessionID: r.MatchedSessionID,
+		CallerProcess:    r.CallerProcess,
 	}
 }
 
@@ -1126,6 +1148,12 @@ func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, 
 
 	sessions := make([]SessionInfo, 0, len(all))
 	for _, s := range all {
+		// Hide eBPF TTY sessions that are matched to a plugin session — the
+		// plugin session already appears in the list with full detail.
+		// Unmatched eBPF sessions (su, screen, SSH without sudo) are shown.
+		if s.Source == "ebpf-tty" && s.MatchedSessionID != "" {
+			continue
+		}
 		if from > 0 && s.StartTime < from {
 			continue
 		}
@@ -1890,6 +1918,12 @@ func matchPattern(p *MatchPattern, text string) bool {
 // to catch both "sudo visudo" (command_base_any matches) and "sudo bash →
 // type visudo" (content matches) without requiring separate rules.
 func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func() string) bool {
+	if rule.Source != "" && s.Source != rule.Source {
+		return false
+	}
+	if rule.ExitCode != nil && s.ExitCode != *rule.ExitCode {
+		return false
+	}
 	if rule.Incomplete != nil {
 		// A freeze-timeout is a network event, not a security incident — treat
 		// it as "not unexpectedly terminated" for risk scoring purposes so it
@@ -2005,6 +2039,11 @@ func parseTtyOut(r io.Reader) string {
 }
 
 
+func hasViolation(ctx context.Context, tsid string) bool {
+	violation, _ := sessionStore.HasSandboxViolation(ctx, tsid)
+	return violation
+}
+
 // scoreSession computes a risk score (0–100) for a session using the globally
 // loaded rules.  Results are cached via sessionStore so ttyout is only read
 // once per session per rules version.
@@ -2015,6 +2054,13 @@ func scoreSession(s *SessionInfo) (int, []string) {
 	rulesMu.RUnlock()
 
 	ctx := context.Background()
+
+	// Sandbox violation check must run before the cache — a violation can be
+	// recorded after the session was first scored and cached.
+	if s.TSID != "" && hasViolation(ctx, s.TSID) {
+		return 100, []string{"Sandbox Violation"}
+	}
+
 	if cached, _ := sessionStore.GetRiskCache(ctx, s.TSID, rulesHash); cached != nil {
 		return cached.Score, cached.Reasons
 	}
@@ -2035,6 +2081,7 @@ func scoreSession(s *SessionInfo) (int, []string) {
 
 	score := 0
 	var reasons []string
+
 	for _, rule := range rules {
 		if score >= 100 {
 			break

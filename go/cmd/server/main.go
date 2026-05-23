@@ -12,6 +12,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -34,6 +35,9 @@ import (
 // validName matches safe directory name components: alphanumeric plus .-_
 // Maximum 64 characters. Rejects empty strings, dots-only, and path separators.
 var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
+
+// nonIDChar matches characters not allowed in a session ID.
+var nonIDChar = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
 // validSessionID is a looser check for the full session ID, which includes
 // host, user, PID, nanosecond timestamp and a random hex suffix — and is
@@ -572,6 +576,58 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			return
 
+		case protocol.MsgSandboxAlert:
+			// Kernel LSM blocked an operation in a sandboxed session.
+			// Must NOT return here — the session connection is still active.
+			var alert protocol.SandboxAlert
+			if err := json.Unmarshal(payload, &alert); err != nil {
+				log.Printf("parse SANDBOX_ALERT from %s: %v", remote, err)
+				continue
+			}
+			log.Printf("SECURITY ALERT: SANDBOX_VIOLATION from %s — process %q (PID %d) blocked (type %d) in session %s",
+				remote, alert.Comm, alert.Pid, alert.Type, alert.SessionID)
+
+			if alert.SessionID != "" {
+				if err := srv.sessionStore.RecordSandboxViolation(context.Background(), alert.SessionID, alert); err != nil {
+					log.Printf("[%s] record violation: %v", alert.SessionID, err)
+				}
+			}
+
+		case protocol.MsgDivergenceAlert:
+			// Agent detected a sudo/pkexec execve with no plugin SESSION_START.
+			// This indicates sudo.conf was tampered with (Plugin line removed).
+			var alert protocol.DivergenceAlert
+			if err := json.Unmarshal(payload, &alert); err != nil {
+				log.Printf("parse DIVERGENCE_ALERT from %s: %v", remote, err)
+				return
+			}
+			log.Printf("SECURITY ALERT: DIVERGENCE_ALERT from %s — %s ran %q on %s at %s but plugin did not log it",
+				remote, alert.User, alert.Comm, alert.Host,
+				time.Unix(alert.Ts, 0).Format(time.RFC3339))
+			// Create a session record so the alert appears in the replay UI.
+			safeUser := nonIDChar.ReplaceAllLiteralString(alert.User, "-")
+			safeHost := nonIDChar.ReplaceAllLiteralString(alert.Host, "-")
+			synthID := fmt.Sprintf("div.%s.%s.%d", safeHost, safeUser, alert.Ts)
+			if len(synthID) > 255 {
+				synthID = synthID[:255]
+			}
+			synthSess, sErr := srv.openSession(&protocol.SessionStart{
+				SessionID:        synthID,
+				User:             alert.User,
+				Host:             alert.Host,
+				Command:          alert.Comm,
+				Ts:               alert.Ts,
+				Source:           "plugin",
+				HasIO:            false,
+				DivergenceStatus: "missing_plugin",
+			})
+			if sErr != nil {
+				log.Printf("DIVERGENCE_ALERT: store synthetic session: %v", sErr)
+			} else {
+				srv.closeSession(synthSess)
+			}
+			return
+
 		default:
 			log.Printf("unknown msg 0x%02x len=%d from %s", msgType, plen, remote)
 		}
@@ -602,21 +658,33 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 		cwd = "/"
 	}
 
+	divStatus := start.DivergenceStatus
+	// Only default to "unwitnessed" for plugin sessions (or old clients that
+	// don't set Source).  eBPF-sourced sessions (ebpf-pkexec, ebpf-tty) have no
+	// plugin counterpart by design, so divergence is not applicable.
+	if divStatus == "" && (start.Source == "" || start.Source == "plugin") {
+		divStatus = "unwitnessed"
+	}
 	w, err := srv.sessionStore.CreateSession(
 		context.Background(),
 		iolog.SessionMeta{
-			SessionID:       start.SessionID,
-			User:            user,
-			Host:            host,
-			RunasUser:       runasUser,
-			RunasUID:        start.RunasUID,
-			RunasGID:        start.RunasGID,
-			Cwd:             cwd,
-			Command:         start.Command,
-			ResolvedCommand: start.ResolvedCommand,
-			Flags:           start.Flags,
-			Rows:            start.Rows,
-			Cols:            start.Cols,
+			SessionID:        start.SessionID,
+			User:             user,
+			Host:             host,
+			RunasUser:        runasUser,
+			RunasUID:         start.RunasUID,
+			RunasGID:         start.RunasGID,
+			Cwd:              cwd,
+			Command:          start.Command,
+			ResolvedCommand:  start.ResolvedCommand,
+			Flags:            start.Flags,
+			Rows:             start.Rows,
+			Cols:             start.Cols,
+			Source:           start.Source,
+			ParentSessionID:  start.ParentSessionID,
+			HasIO:            start.HasIO,
+			DivergenceStatus: divStatus,
+			CallerProcess:    start.CallerProcess,
 		},
 		startTime,
 	)

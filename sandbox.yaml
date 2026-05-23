@@ -1,0 +1,180 @@
+# /etc/sudo-logger/sandbox.yaml
+#
+# Comprehensive process sandbox deny-list for Fedora systems.
+# Protect security-critical files, devices, proc entries, sockets and daemons
+# from being tampered with by processes running inside sudo sessions.
+#
+# Enforcement is kernel-level via eBPF LSM — cannot be bypassed by root
+# within a session. The agent must be running and BPF must be active in the
+# kernel LSM list (verify: grep bpf /sys/kernel/security/lsm).
+# Fedora 38+: active by default, no boot parameters needed.
+# Older/non-Fedora: add lsm=bpf to GRUB_CMDLINE_LINUX, run grub2-mkconfig.
+#
+# IMPORTANT — what this protects and what it does not:
+#   PROTECTS:  writing to, opening for write, truncating, deleting, and renaming listed paths.
+#   PROTECTS:  creating new files, dirs, symlinks, or device nodes INSIDE a listed directory.
+#   DOES NOT:  prevent reading listed paths.
+#   DOES NOT:  block IPC via connect()+send() to listed sockets (only file replacement).
+#   NOTE:      paths are resolved to inodes at agent startup — restart the agent
+#              after adding entries for new paths.
+#
+# Adapt device paths (sda/nvme) to match your hardware before deploying.
+
+protect:
+
+  # ── Files and directories ────────────────────────────────────────────────────
+  files:
+
+    # sudo-logger itself — the audit trail must not be tampered with
+    - /etc/sudo-logger
+    - /var/log/sudo-logger
+    - /usr/bin/sudo-logger-agent          # agent binary — replacement affects future sessions
+    - /usr/libexec/sudo/sudo_logger_plugin.so  # plugin — replacement silences future sessions
+
+    # sudo policy
+    - /etc/sudoers
+    - /etc/sudoers.d
+    - /etc/sudo.conf
+
+    # Local user and password databases
+    - /etc/passwd
+    - /etc/shadow
+    - /etc/group
+    - /etc/gshadow
+    - /etc/login.defs
+
+    # PAM — authentication stack for all system services
+    - /etc/pam.d
+    - /etc/security
+
+    # SSH server — key material and daemon config
+    - /etc/ssh
+    - /etc/ssh/sshd_config
+
+    # SSSD — central auth broker for AD/LDAP/Kerberos
+    - /etc/sssd
+    - /etc/sssd/sssd.conf
+    - /var/lib/sss               # SSSD state, keytab cache and pipes
+    - /var/lib/sss/db            # SSSD on-disk cache
+
+    # Kerberos — keytab is a root-equivalent credential
+    - /etc/krb5.conf
+    - /etc/krb5.keytab
+
+    # auditd — audit policy and the audit log itself
+    - /etc/audit
+    - /var/log/audit
+
+    # System logging — rsyslog and syslog-ng
+    - /etc/rsyslog.conf
+    - /etc/rsyslog.d
+    - /etc/syslog-ng
+    - /var/log/secure            # auth/sudo log (Fedora/RHEL)
+    - /var/log/messages
+    - /var/log/journal           # systemd journal on-disk store
+
+    # SELinux — policy tampering would disable MAC enforcement
+    - /etc/selinux
+    - /etc/selinux/config
+
+    # System-wide crypto policies (TLS cipher suites, key lengths)
+    - /etc/crypto-policies
+
+    # PKI — CA bundles, system certificates, sudo-logger TLS material
+    - /etc/pki
+
+    # authselect — controls which auth stack (SSSD/winbind/etc.) is active
+    - /etc/authselect
+
+    # PolicyKit — governs privilege escalation outside sudo
+    - /etc/polkit-1
+
+    # D-Bus policy — controls inter-process communication rights
+    - /etc/dbus-1
+
+    # Cron — classic persistence vector
+    - /etc/cron.d
+    - /etc/cron.daily
+    - /etc/cron.hourly
+    - /etc/cron.weekly
+    - /etc/cron.monthly
+    - /etc/crontab
+    - /var/spool/cron
+
+    # systemd units — prevent installing persistent backdoor services
+    - /etc/systemd/system
+    - /usr/lib/systemd/system
+
+    # root home — prevent planting shell hooks or SSH backdoors
+    - /root/.bashrc
+    - /root/.bash_profile
+    - /root/.bash_logout
+    - /root/.ssh
+    - /root/.ssh/authorized_keys
+
+  # ── Device nodes ─────────────────────────────────────────────────────────────
+  devices:
+    # Raw memory access — bypass any in-kernel protection
+    - /dev/mem
+    - /dev/kmem
+    - /dev/port                  # raw x86 I/O port access
+
+    # Raw disk — read/write partition tables, bypass filesystem permissions
+    # Adapt to your hardware: sda/sdb for SCSI/SATA, nvme0n1 for NVMe
+    - /dev/sda
+    - /dev/sdb
+    - /dev/nvme0n1
+    - /dev/nvme0n1p1             # EFI system partition
+
+  # ── /proc entries ────────────────────────────────────────────────────────────
+  proc:
+    # Immediate system impact
+    - /proc/sysrq-trigger        # trigger panic, reboot, kill all, OOM
+
+    # Kernel memory exposure
+    - /proc/kcore                # full kernel memory image
+    - /proc/kallsyms             # symbol→address map, KASLR bypass aid
+
+    # sysctl — security-relevant kernel parameters
+    - /proc/sys/kernel/core_pattern          # redirect core dumps to execute code
+    - /proc/sys/kernel/randomize_va_space   # disable ASLR
+    - /proc/sys/kernel/dmesg_restrict       # loosen kernel log restrictions
+    - /proc/sys/kernel/kptr_restrict        # expose kernel pointers
+    - /proc/sys/kernel/perf_event_paranoid  # loosen perf event access
+    - /proc/sys/kernel/modules_disabled     # lock out module loading changes
+    - /proc/sys/kernel/unprivileged_userns_clone  # user namespace restrictions
+    - /proc/sys/fs/suid_dumpable            # enable setuid core dumps
+    - /proc/sys/net/ipv4/ip_forward         # turn host into a router
+    - /proc/sys/net/ipv4/conf/all/accept_redirects  # ICMP redirect acceptance
+    - /proc/sys/net/ipv6/conf/all/forwarding
+
+  # ── Unix domain sockets ──────────────────────────────────────────────────────
+  # Note: file_permission/MAY_WRITE prevents open()-for-write and deletion/rename
+  # of the socket file. It does NOT block connect()+send() IPC.
+  sockets:
+    - /run/sudo-logger/plugin.sock       # audit pipeline — must not be replaced
+    - /run/dbus/system_bus_socket        # D-Bus system bus
+    - /run/systemd/journal/socket        # journald ingestion socket
+    - /run/systemd/journal/stdout        # journald stdout forwarder
+    - /run/systemd/private               # systemd private comms
+
+  # ── Process names ────────────────────────────────────────────────────────────
+  # Sessions cannot send ANY signal (including SIGKILL) to these processes.
+  # Linux stores comm in task_struct->comm[16], so names are capped at 15 chars.
+  # Verify the truncated name with: cat /proc/<pid>/comm
+  processes:
+    - auditd             # audit daemon
+    - rsyslogd           # rsyslog
+    - syslog-ng          # syslog-ng
+    - systemd-journal    # systemd-journald truncates to 15 chars
+    - systemd            # PID 1 — init
+    - sssd               # System Security Services Daemon
+    - sshd               # OpenSSH server
+    - dbus-daemon        # D-Bus
+    - polkitd            # PolicyKit
+    - chronyd            # time sync — audit timestamps depend on this
+    - NetworkManager     # network (14 chars — fits)
+    - firewalld          # firewalld
+    - gssproxy           # Kerberos GSS proxy
+    - crond              # crond
+    - sudo-logger-age    # sudo-logger-agent (16 chars → truncated to 15)

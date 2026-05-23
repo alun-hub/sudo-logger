@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"sudo-logger/internal/protocol"
+
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -134,7 +136,10 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	2 — added network_outage column to sudo_sessions
 //	3 — added sudo_schema_version table; schema version tracking
 //	4 — added FOREIGN KEY ON DELETE CASCADE to sudo_access_log
-const currentSchemaVersion = 4
+//	5 — added source, parent_session_id, has_io, divergence_status, matched_session_id
+//	6 — added caller_process (polkit/dbus calling process name or service)
+//	7 — added sandbox_violation column to sudo_sessions
+const currentSchemaVersion = 7
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -222,6 +227,26 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS sudo_access_log_viewer    ON sudo_access_log(viewer);
 CREATE INDEX IF NOT EXISTS sudo_access_log_viewed_at ON sudo_access_log(viewed_at DESC);
+
+-- migration v5: eBPF source tracking + divergence status
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS source             TEXT DEFAULT 'plugin';
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS parent_session_id  TEXT;
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS has_io             BOOLEAN DEFAULT TRUE;
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS divergence_status  TEXT DEFAULT 'pending';
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS matched_session_id TEXT;
+
+CREATE INDEX IF NOT EXISTS sudo_sessions_source
+    ON sudo_sessions(source);
+CREATE INDEX IF NOT EXISTS sudo_sessions_parent
+    ON sudo_sessions(parent_session_id)
+    WHERE parent_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS sudo_sessions_div_pending
+    ON sudo_sessions(divergence_status)
+    WHERE divergence_status != 'confirmed';
+
+-- migration v6: caller_process for polkit/D-Bus events
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS caller_process TEXT DEFAULT '';
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS sandbox_violation BOOLEAN DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
 `); err != nil {
@@ -332,16 +357,22 @@ func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.Session
 	}
 	tsid := filepath.ToSlash(rel)
 
+	divStatus := meta.DivergenceStatus
+	if divStatus == "" && (meta.Source == "" || meta.Source == "plugin") {
+		divStatus = "unwitnessed"
+	}
 	_, err = d.db.Exec(ctx, `
 INSERT INTO sudo_sessions
   (tsid, session_id, "user", host, runas, runas_uid, runas_gid,
-   command, resolved_command, cwd, flags, start_time, in_progress)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE)
+   command, resolved_command, cwd, flags, start_time, in_progress,
+   source, parent_session_id, has_io, divergence_status, caller_process)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,$13,$14,$15,$16,$17)
 ON CONFLICT (tsid) DO NOTHING`,
 		tsid, meta.SessionID, meta.User, meta.Host,
 		meta.RunasUser, meta.RunasUID, meta.RunasGID,
 		meta.Command, meta.ResolvedCommand, meta.Cwd, meta.Flags,
 		startTime.Unix(),
+		meta.Source, meta.ParentSessionID, meta.HasIO, divStatus, meta.CallerProcess,
 	)
 	if err != nil {
 		_ = w.Close()
@@ -357,7 +388,10 @@ func (d *DistributedStore) ListSessions(ctx context.Context) ([]SessionRecord, e
 SELECT tsid, session_id, "user", host, runas, runas_uid, runas_gid,
        command, resolved_command, cwd, flags, start_time,
        COALESCE(duration, 0), COALESCE(exit_code, 0),
-       incomplete, network_outage, in_progress
+       incomplete, network_outage, in_progress,
+       COALESCE(source, 'plugin'), COALESCE(parent_session_id, ''),
+       COALESCE(has_io, TRUE), COALESCE(divergence_status, 'unwitnessed'),
+       COALESCE(matched_session_id, ''), COALESCE(caller_process, '')
 FROM sudo_sessions
 ORDER BY start_time DESC`)
 	if err != nil {
@@ -373,6 +407,8 @@ ORDER BY start_time DESC`)
 			&r.RunasUID, &r.RunasGID, &r.Command, &r.ResolvedCommand,
 			&r.Cwd, &r.Flags, &r.StartTime, &r.Duration, &r.ExitCode,
 			&r.Incomplete, &r.NetworkOutage, &r.InProgress,
+			&r.Source, &r.ParentSessionID, &r.HasIO,
+			&r.DivergenceStatus, &r.MatchedSessionID, &r.CallerProcess,
 		); err != nil {
 			return nil, fmt.Errorf("scan session row: %w", err)
 		}
@@ -469,6 +505,37 @@ func (d *DistributedStore) MarkSessionNetworkOutage(ctx context.Context, session
 		`UPDATE sudo_sessions SET network_outage=TRUE, updated_at=NOW() WHERE session_id=$1`,
 		sessionID)
 	return err
+}
+
+// UpdateDivergenceStatus implements SessionStore.
+func (d *DistributedStore) UpdateDivergenceStatus(ctx context.Context, tsid, status, matchedTSID string) error {
+	_, err := d.db.Exec(ctx,
+		`UPDATE sudo_sessions
+		    SET divergence_status=$2,
+		        matched_session_id=NULLIF($3,''),
+		        updated_at=NOW()
+		  WHERE tsid=$1`,
+		tsid, status, matchedTSID)
+	return err
+}
+
+func (d *DistributedStore) RecordSandboxViolation(ctx context.Context, sid string, alert protocol.SandboxAlert) error {
+	_, err := d.db.Exec(ctx,
+		`UPDATE sudo_sessions SET sandbox_violation=TRUE, updated_at=NOW() WHERE session_id=$1`,
+		sid)
+	return err
+}
+
+func (d *DistributedStore) HasSandboxViolation(ctx context.Context, tsid string) (bool, error) {
+	var violation bool
+	err := d.db.QueryRow(ctx, `SELECT sandbox_violation FROM sudo_sessions WHERE tsid=$1`, tsid).Scan(&violation)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return violation, nil
 }
 
 // IsBlocked implements SessionStore.

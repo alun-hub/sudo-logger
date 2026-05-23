@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"sudo-logger/internal/protocol"
+
 	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
 
@@ -439,6 +441,40 @@ func (ls *LocalStore) MarkSessionNetworkOutage(_ context.Context, sessionID stri
 		[]byte("session terminated by freeze-timeout watchdog\n"), 0o640)
 }
 
+// UpdateDivergenceStatus implements SessionStore.
+// LocalStore has no DB — divergence status is not persisted to disk.
+func (ls *LocalStore) UpdateDivergenceStatus(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
+func (ls *LocalStore) RecordSandboxViolation(_ context.Context, sid string, alert protocol.SandboxAlert) error {
+	v, ok := ls.sessionDirs.Load(sid)
+	if !ok {
+		log.Printf("sandbox: RecordSandboxViolation: session %q not in sessionDirs — violation not stored", sid)
+		return nil
+	}
+	dir := v.(string)
+	path := filepath.Join(dir, "SANDBOX_VIOLATION")
+	data, _ := json.Marshal(alert)
+	if err := os.WriteFile(path, data, 0o640); err != nil {
+		return err
+	}
+	log.Printf("sandbox: violation recorded: %s", path)
+	return nil
+}
+
+func (ls *LocalStore) HasSandboxViolation(_ context.Context, tsid string) (bool, error) {
+	dir, err := ls.resolveSessionDir(tsid)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(filepath.Join(dir, "SANDBOX_VIOLATION"))
+	if err == nil {
+		return true, nil
+	}
+	return false, nil
+}
+
 // resolveSessionDir converts tsid to an absolute directory path and checks
 // that it stays within logDir (path-traversal guard).
 func (ls *LocalStore) resolveSessionDir(tsid string) (string, error) {
@@ -677,6 +713,10 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 		Command         string `json:"command"`
 		ResolvedCommand string `json:"resolved_command"`
 		Flags           string `json:"flags"`
+		Source          string `json:"source"`
+		ParentSessionID string `json:"parent_session_id"`
+		HasIO           bool   `json:"has_io"`
+		CallerProcess   string `json:"caller_process"`
 	}
 	if err := json.Unmarshal(scanner.Bytes(), &hdr); err != nil {
 		return nil, fmt.Errorf("parse cast header: %w", err)
@@ -696,6 +736,10 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 		Flags:           hdr.Flags,
 		StartTime:       hdr.Timestamp,
 		Duration:        castLastTime(sessDir),
+		Source:          hdr.Source,
+		ParentSessionID: hdr.ParentSessionID,
+		HasIO:           hdr.HasIO,
+		CallerProcess:   hdr.CallerProcess,
 	}
 
 	if _, err := os.Stat(filepath.Join(sessDir, "INCOMPLETE")); err == nil {

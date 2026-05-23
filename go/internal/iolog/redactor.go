@@ -106,7 +106,10 @@ func (r *Redactor) Redact(data []byte, stream uint8) []byte {
 
 	// ── 2. Prompt detection in Output ──────────────────────────────────────
 	if stream == protocol.StreamTtyOut || stream == protocol.StreamStdout {
-		if r.promptRegex.Match(data) {
+		// Only activate masking if the prompt chunk has no trailing newline.
+		// Real password prompts (sudo, ssh, su) wait inline without a newline;
+		// `echo "password: "` always appends \n and must not trigger masking.
+		if r.promptRegex.Match(data) && !bytes.ContainsAny(data, "\r\n") {
 			r.maskingActive = true
 		}
 	}

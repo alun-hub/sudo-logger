@@ -1,7 +1,7 @@
 Name:           sudo-logger-client
-Version:        1.17.36
+Version:        1.20.50
 Release:        1%{?dist}
-Summary:        Sudo I/O plugin and shipper for remote session logging
+Summary:        Sudo I/O plugin and agent for remote session logging
 
 License:        MIT
 Source0:        sudo-logger-%{version}.tar.gz
@@ -19,9 +19,12 @@ Requires:       systemd
 Requires:       selinux-policy
 
 %description
-Sudo I/O plugin (sudo_logger_plugin.so) and local shipper daemon
-(sudo-shipper) that together record all sudo sessions and ship them
-in real-time to a remote sudo-logger-server instance over mutual TLS.
+Sudo I/O plugin (sudo_logger_plugin.so) and local agent daemon
+(sudo-logger-agent) that together record all sudo sessions and ship
+them in real-time to a remote sudo-logger-server instance over
+mutual TLS.  The agent also uses eBPF tracepoints (when available)
+to capture su, screen, tmux, and pkexec privilege escalations
+and to detect attempts to bypass the plugin.
 
 Input is frozen if the log server stops acknowledging, preventing
 users from running sudo commands without a verified log trail.
@@ -38,9 +41,11 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
     -o sudo_logger_plugin.so \
     plugin.c -lpthread
 
-# Build the shipper daemon and Wayland proxy
+# Build the agent daemon and Wayland proxy.
+# The eBPF Go bindings (recorder_bpf*.go / *.o) are pre-generated and
+# included in the source tarball, so clang/bpf2go are not needed here.
 cd ../go
-/usr/lib/golang/bin/go build -mod=vendor -o sudo-shipper ./cmd/shipper
+/usr/lib/golang/bin/go build -mod=vendor -o sudo-logger-agent ./cmd/agent
 /usr/lib/golang/bin/go build -mod=vendor -o wayland-proxy ./cmd/wayland-proxy
 
 # Build the SELinux policy module
@@ -52,25 +57,29 @@ make -f /usr/share/selinux/devel/Makefile sudo_logger.pp
 install -D -m 0755 plugin/sudo_logger_plugin.so \
     %{buildroot}%{_libexecdir}/sudo/sudo_logger_plugin.so
 
-# Shipper binary
-install -D -m 0755 go/sudo-shipper \
-    %{buildroot}%{_bindir}/sudo-shipper
+# Agent binary (replaces sudo-shipper)
+install -D -m 0755 go/sudo-logger-agent \
+    %{buildroot}%{_bindir}/sudo-logger-agent
 
-# Wayland proxy binary (used by shipper for GUI screen capture)
+# Wayland proxy binary (used by agent for GUI screen capture)
 install -d -m 0755 %{buildroot}%{_libexecdir}/sudo-logger
 install -D -m 0755 go/wayland-proxy \
     %{buildroot}%{_libexecdir}/sudo-logger/wayland-proxy
 
 # Systemd service
-install -D -m 0644 sudo-shipper.service \
-    %{buildroot}%{_unitdir}/sudo-shipper.service
+install -D -m 0644 sudo-logger-agent.service \
+    %{buildroot}%{_unitdir}/sudo-logger-agent.service
 
 # Config directory (certs placed here by admin)
 install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
 
 # Default client config (LOGSERVER address)
-install -D -m 0640 shipper.conf \
-    %{buildroot}%{_sysconfdir}/sudo-logger/shipper.conf
+install -D -m 0640 agent.conf \
+    %{buildroot}%{_sysconfdir}/sudo-logger/agent.conf
+
+# Example sandbox deny-list (not enabled by default)
+install -D -m 0640 sandbox.yaml \
+    %{buildroot}%{_sysconfdir}/sudo-logger/sandbox.yaml
 
 # Sudoers drop-in: preserve WAYLAND_DISPLAY so the proxy reaches GUI commands
 install -D -m 0440 sudo-logger-wayland.sudoers \
@@ -81,16 +90,27 @@ install -D -m 0644 selinux/sudo_logger.pp \
     %{buildroot}%{_datadir}/selinux/packages/sudo_logger.pp
 
 # Man pages
-install -D -m 0644 man/sudo-shipper.8 \
-    %{buildroot}%{_mandir}/man8/sudo-shipper.8
+install -D -m 0644 man/sudo-logger-agent.8 \
+    %{buildroot}%{_mandir}/man8/sudo-logger-agent.8
 install -D -m 0644 man/sudo_logger_plugin.8 \
     %{buildroot}%{_mandir}/man8/sudo_logger_plugin.8
+install -D -m 0644 man/sandbox.yaml.5 \
+    %{buildroot}%{_mandir}/man5/sandbox.yaml.5
 
 %pre
+# Migrate legacy shipper.conf → agent.conf BEFORE RPM installs new files.
+# Must run in %pre so the file exists when RPM processes %config(noreplace),
+# causing RPM to keep the user's migrated config instead of overwriting it.
+if [ ! -f %{_sysconfdir}/sudo-logger/agent.conf ] && \
+   [ -f %{_sysconfdir}/sudo-logger/shipper.conf ]; then
+    cp -p %{_sysconfdir}/sudo-logger/shipper.conf \
+          %{_sysconfdir}/sudo-logger/agent.conf
+fi
 # Remove immutable flag from our binaries before RPM writes new files.
 # This is needed for upgrades — on first install the files don't exist yet
 # so the commands silently fail (|| true).
 chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
+chattr -i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
 chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 
@@ -101,16 +121,16 @@ if ! grep -q 'Plugin sudo_logger_plugin sudo_logger_plugin.so' /etc/sudo.conf 2>
 fi
 # Load SELinux policy module
 semodule -i %{_datadir}/selinux/packages/sudo_logger.pp 2>/dev/null || true
-%systemd_post sudo-shipper.service
+%systemd_post sudo-logger-agent.service
 
 %posttrans
-# Make plugin binary and shipper immutable so they cannot be silently replaced
+# Make plugin binary and agent immutable so they cannot be silently replaced
 # or removed without first running chattr -i (which requires root intent).
 chattr +i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
-chattr +i %{_bindir}/sudo-shipper                         2>/dev/null || true
+chattr +i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr +i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 # Relabel installed files with correct SELinux contexts
-restorecon -R %{_bindir}/sudo-shipper \
+restorecon -R %{_bindir}/sudo-logger-agent \
               %{_libexecdir}/sudo/sudo_logger_plugin.so \
               %{_libexecdir}/sudo-logger/wayland-proxy \
               %{_sysconfdir}/sudo-logger 2>/dev/null || true
@@ -118,46 +138,365 @@ restorecon -R %{_bindir}/sudo-shipper \
 %preun
 # Remove immutable flag so RPM can delete the files on uninstall.
 chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
-chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
+chattr -i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
-%systemd_preun sudo-shipper.service
+# Cannot use %%systemd_preun because it calls systemctl stop, which is blocked
+# by RefuseManualStop=yes.  On uninstall: disable the unit (removes symlinks)
+# then kill the running process via systemctl kill (not blocked).
+if [ $1 -eq 0 ]; then
+    systemctl disable sudo-logger-agent.service >/dev/null 2>&1 || true
+    systemctl kill sudo-logger-agent.service    >/dev/null 2>&1 || true
+fi
 # Remove SELinux policy module on full uninstall (not on upgrade)
 if [ $1 -eq 0 ]; then
     semodule -r sudo_logger 2>/dev/null || true
 fi
 # Remove plugin line from sudo.conf on uninstall
 if [ $1 -eq 0 ]; then
-    sed -i '/Plugin sudo_logger_plugin sudo_logger_plugin\.so/d' /etc/sudo.conf
+    sed -i '/Plugin sudo_logger_plugin sudo_logger_plugin\.so/d' /etc/sudo.conf \
+        2>/dev/null || true
 fi
 
 %postun
-# On upgrade: reload unit and signal the running shipper to restart.
+# On upgrade: reload unit and signal the running agent to restart.
 # We cannot use %%systemd_postun_with_restart / systemctl try-restart because
 # RefuseManualStop=yes blocks those operations.  Instead, send SIGTERM via
 # systemctl kill (not blocked by RefuseManualStop) and let Restart=always
 # pick up the new binary after daemon-reload.
 if [ $1 -ge 1 ]; then
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl kill sudo-shipper.service >/dev/null 2>&1 || true
+    systemctl kill sudo-logger-agent.service >/dev/null 2>&1 || true
 else
     systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 
 %files
 %{_libexecdir}/sudo/sudo_logger_plugin.so
-%{_bindir}/sudo-shipper
+%{_bindir}/sudo-logger-agent
 %dir %{_libexecdir}/sudo-logger
 %{_libexecdir}/sudo-logger/wayland-proxy
-%{_unitdir}/sudo-shipper.service
+%{_unitdir}/sudo-logger-agent.service
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
-%config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/shipper.conf
+%config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/agent.conf
+%config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/sandbox.yaml
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 %config(noreplace) %attr(0440, root, root) %{_sysconfdir}/sudoers.d/sudo-logger-wayland
 %{_datadir}/selinux/packages/sudo_logger.pp
-%{_mandir}/man8/sudo-shipper.8*
+%{_mandir}/man8/sudo-logger-agent.8*
 %{_mandir}/man8/sudo_logger_plugin.8*
+%{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Sat May 23 2026 sudo-logger 1.20.50-1
+- chore: demote noisy startup logs to debugLog (stat-skipping per missing
+  path, inotify directory count, alert-listener-started)
+
+* Sat May 23 2026 sudo-logger 1.20.49-1
+- chore: demote verbose-but-normal log lines to debugLog (protecting inodes,
+  aux cgroup registration, cgroupInodeOf diagnostics)
+
+* Sat May 23 2026 sudo-logger 1.20.48-1
+- debug: add explicit error logging to cgroupInodeOf to diagnose aux-cgroup
+  registration failures in direct-sudo sandbox alert path
+
+* Sat May 23 2026 sudo-logger 1.20.47-1
+- fix(sandbox): forward alerts from processes that escaped their session cgroup
+  (direct sudo commands: child escapes via PAM before exec, BPF blocks via
+  sandboxed_pids — alert retry + aux-cgroup map now finds the session)
+
+* Sat May 23 2026 sudo-logger 1.20.46-1
+- debug: log when cgroup lookup misses in reportViolation (serverW nil)
+- debug: log when sessionDirs lookup misses in RecordSandboxViolation
+
+* Sat May 23 2026 sudo-logger 1.20.45-1
+- fix(replay): sandbox violation check now runs before risk score cache;
+  sessions scored before a violation arrived now show correctly in the UI
+
+* Sat May 23 2026 sudo-logger 1.20.44-1
+- fix(sandbox): server no longer closes session on MsgSandboxAlert; `return`
+  replaced with `continue` so subsequent chunks and SESSION_END are preserved
+- fix(sandbox): remove redundant Flush() after WriteMessage in reportViolation
+- fix(sandbox): replace alert type magic numbers with named constants;
+  use binary.NativeEndian instead of hardcoded LittleEndian
+- fix(redactor): prevent echo-based recording bypass — prompt masking only
+  activates when output chunk has no trailing newline (real prompts never do)
+- docs: lsm=bpf not required on Fedora 38+; active by default in CONFIG_LSM
+
+* Fri May 23 2026 sudo-logger 1.20.43-1
+- fix(sandbox): add lsm/file_open and lsm/path_truncate hooks; blocks
+  write-mode opens and truncate() syscalls on protected inodes
+- fix(sandbox): add lsm/inode_setattr hook; prevents echo > /protected zeroing
+  files via O_TRUNC before any write permission check fires
+- fix(sandbox): use in_sandbox_pid() in all hooks including task_kill;
+  ensures signals from short-lived sudo commands (sudo pkill) are blocked
+- fix(sandbox): remove dead dev=0 wildcard inode entries; mountDev() already
+  returns the correct s_dev for all filesystems including Btrfs
+- fix(verify-sandbox.sh): use systemctl MainPID for reliable agent PID lookup
+
+* Fri May 23 2026 sudo-logger 1.20.42-1
+- fix(spec): replace %%systemd_preun with manual systemctl disable + kill;
+  %%systemd_preun calls systemctl stop which is blocked by RefuseManualStop=yes
+
+* Fri May 23 2026 sudo-logger 1.20.41-1
+- fix(sandbox): raise MAX_PROTECTED_INODES from 1024 to 4096 — fixes E2BIG
+  on agent start when sandbox.yaml resolves >1024 inodes via directory traversal
+- fix(sandbox): add sandboxed_pids BPF map + sched_process_fork/exit hooks;
+  PID tracking propagated atomically at fork time from sudo root to descendants;
+  fixes task_kill not blocking signals from short-lived commands (sudo pkill)
+  where pam_systemd migrates sudo to a new session scope cgroup before fork
+- fix(sandbox): split in_sandbox into cgroup-only (file/inode hooks) and
+  pid+cgroup (task_kill only) — prevents PID tracking from blocking sudo rpm
+  upgrades by restricting the broader pid scope to kill operations only
+- fix(sandbox): use link.AttachTracing instead of link.Tracepoint for tp_btf
+  programs (BPF_PROG_TYPE_TRACING, not BPF_PROG_TYPE_TRACEPOINT)
+
+* Thu May 22 2026 sudo-logger 1.20.40-1
+- fix(sandbox): use bpf2go-generated SandboxInodeKey instead of hand-crafted
+  inodeKey to eliminate possible E2BIG key-size mismatch in ProtectedInodes map
+- diag(cgroup): log sudo's actual cgroup after move, children that trigger
+  moveSudoOut, and escaped process cgroup paths for debugging kill-protection race
+
+* Thu May 22 2026 sudo-logger 1.20.39-1
+- fix(sandbox): remove BPF wildcard dev=0 fallback — caused devpts false
+  positives (major=0 anonymous devices) that intermittently blocked terminal
+  writes and hung sudo; replace with exact i_sb->s_dev match using mountDev()
+  from /proc/self/mountinfo which returns the Btrfs superblock dev correctly
+- fix(sandbox): refreshInode now uses mountDev() for exact dev on atomic replace
+
+* Thu May 22 2026 sudo-logger 1.20.38-1
+- fix(sandbox): refreshInode now syncs wildcard dev=0 entries on atomic replace
+  (visudo etc.) — old wildcard removed, new wildcard added, matching
+  loadSandboxConfig behaviour so inode_protected() keeps working after rename
+- fix(sandbox): add readyToFork gate to prevent premature moveSudoOut race
+- feat(sandbox): wildcard dev=0 fallback in BPF for anonymous-device filesystems
+  (Btrfs) — stores both exact and wildcard entry in protected_inodes; BPF
+  tries exact i_sb->s_dev first then dev=0 if major==0
+- feat(sandbox): recursive directory traversal in loadSandboxConfig
+- feat(sandbox): new LSM hooks inode_mkdir/create/mknod/symlink to block file
+  creation inside protected directories
+- chore(sandbox): fix indentation in sandbox.go, remove unused MAX_RESOLVED_DEVS
+
+* Thu May 22 2026 sudo-logger 1.20.37-1
+- fix(sandbox): use mountinfo MKDEV(major,minor) for protected inode dev field
+  instead of stat().st_dev; on Btrfs stat returns the subvolume anon_dev while
+  the BPF LSM hook reads i_sb->s_dev (superblock dev) — the mismatch caused
+  inode_protected() to never match, letting sandboxed writes through
+- fix(sandbox): remove debug bpf_printk from sandbox_file_permission
+
+* Thu May 22 2026 sudo-logger 1.20.36-1
+- debug(agent): log ino/dev for all sandboxed writes to diagnose why
+  inode_protected() returns false despite the inode being in the map
+
+* Thu May 22 2026 sudo-logger 1.20.35-1
+- debug(agent): add targeted bpf_printk to sandbox_file_permission — logs
+  comm, cgid and sandboxed status for bash/python3 writes to diagnose why
+  in_sandbox() does not match the registered cgroup IDs
+
+* Thu May 22 2026 sudo-logger 1.20.34-1
+- fix(agent): keep protected_inodes BPF map fresh via inotify — watches
+  parent directories of all protected paths; on IN_MOVED_TO (atomic rename
+  by editors, cp, install) re-stats the path and swaps the old inode key
+  for the new one so sandbox enforcement survives file replacement
+- fix(agent): remove debug bpf_printk from sandbox LSM hooks
+
+* Wed May 21 2026 sudo-logger 1.20.33-1
+- debug(agent): narrow sandbox bpf_printk to sandboxed processes only —
+  logs cgid/ino/dev/blocked once per write attempt inside a session cgroup
+
+* Wed May 21 2026 sudo-logger 1.20.32-1
+- debug(agent): add bpf_printk tracing to sandbox LSM hooks — logs cgid,
+  inode and dev for every in_sandbox/inode_protected check; read via
+  /sys/kernel/debug/tracing/trace_pipe
+
+* Wed May 21 2026 sudo-logger 1.20.31-1
+- feat(agent): add eBPF LSM process sandbox — deny-list for files, devices,
+  sockets, /proc entries and process names; enforced at kernel level via
+  lsm/file_permission, inode_unlink, inode_rename and task_kill hooks;
+  scoped to session cgroup so only sudo processes are restricted
+- feat(agent): install /etc/sudo-logger/sandbox.yaml example config
+  covering Fedora security-critical paths; enable with sandbox_config
+  in agent.conf
+
+* Tue May 05 2026 sudo-logger 1.20.30-1
+- fix(agent): wrap cgroup remove() in sync.Once — prevents double-remove
+  when SIGTERM cleanupAllCgs() races with the linger goroutine defer
+- fix(agent): log dropped chunk count in markAlive() when session closes
+  mid-drain of the server-outage buffer
+- fix(agent): propagate context to waitForPID so pkexec goroutines exit
+  cleanly on agent shutdown instead of polling until process death
+- fix(agent): prune stale pendingPkexec entries in resolvePkexecScope()
+  to prevent unbounded slice growth over long uptimes
+- fix(agent): guard inotify fd close with sync.Once preventing double-
+  close race between defer and the ctx-cancel goroutine in watch()
+- fix(agent): remove dead callerProcess field from ebpfSession
+
+* Tue May 05 2026 sudo-logger 1.20.29-1
+- fix(agent): buffer up to 500 session chunks while server unreachable;
+  replayed when connection recovers — prevents data loss during brief
+  outages where TLS connection remains intact but heartbeats time out
+- fix(agent): silence accept-loop log spam on SIGTERM by checking
+  context cancellation before logging the error
+
+* Tue May 05 2026 sudo-logger 1.20.28-1
+- fix(agent): exclude dbus-daemon from linger-mode exit detection; GUI
+  apps (e.g. gvim) spawn a private dbus-daemon that kept sessions stuck
+  in live state indefinitely after the main app exited
+
+* Tue May 05 2026 sudo-logger 1.20.27-1
+- remove(agent): drop D-Bus polkit monitoring subsystem; too noisy from
+  system daemons (PowerDevil, logind, NetworkManager); pkexec sessions
+  already captured via eBPF; removes godbus/dbus dependency
+
+* Sat May 03 2026 sudo-logger 1.20.26-1
+- fix(agent/ebpf): buffer failed hasIO=false pkexec sessions and retry
+  every 30s (same mechanism as D-Bus polkit events); also preserve
+  original event timestamp across retries for both eBPF and D-Bus paths
+
+* Sat May 03 2026 sudo-logger 1.20.25-1
+- feat(agent/dbus): buffer failed polkit events and retry every 30s;
+  events are kept up to 10 minutes and then discarded if server remains
+  unreachable; queue capped at 200 events
+
+* Sat May 03 2026 sudo-logger 1.20.24-1
+- fix(server): create session record for divergence alerts so they appear
+  in the replay UI with red "⚠ no plugin" badge and a warning message
+  in the output panel when the Plugin line is missing from sudo.conf
+
+* Sat May 03 2026 sudo-logger 1.20.23-1
+- fix(agent/ebpf): capture pkexec target command in BPF at tracepoint time
+  instead of reading /proc/<pid>/cmdline from Go; the process can die
+  before Go reads it (race condition), causing fallback to "pkexec"
+
+* Sat May 03 2026 sudo-logger 1.20.22-1
+- fix(spec): move shipper.conf → agent.conf migration from %%post to %%pre
+  so it runs before RPM installs new files; %%config(noreplace) then
+  preserves the migrated config instead of overwriting it with the example
+
+* Sat May 03 2026 sudo-logger 1.20.21-1
+- rename config file from shipper.conf to agent.conf; upgrade migrates
+  existing shipper.conf automatically via %post cp; agent falls back to
+  shipper.conf with a deprecation warning if agent.conf is missing
+- document dbus option in agent.conf (disable polkit D-Bus logging with
+  dbus = false)
+
+* Sat May 03 2026 sudo-logger 1.20.20-1
+- fix(agent/ebpf): timestamp pkexec sessions using Go reception time instead
+  of BPF ktime conversion; bpf_ktime_get_ns() (CLOCK_MONOTONIC) and
+  /proc/uptime (CLOCK_BOOTTIME) diverge after suspend/resume, causing all
+  event timestamps to be before session startTime and clamped to 0,
+  resulting in all output appearing at once in replay
+
+* Sat May 02 2026 sudo-logger 1.20.19-1
+- feat(agent/ebpf): read actual command from /proc/<pid>/cmdline for pkexec
+  events instead of hardcoding "pkexec"
+- feat(replay): group consecutive dbus-polkit events from the same caller
+  within 3 seconds into a collapsible group header showing caller, count,
+  and worst risk level
+
+* Sat May 02 2026 sudo-logger 1.20.18-1
+- feat(agent/dbus): capture calling process name from /proc/<pid>/comm for
+  unix-process polkit subjects; infer service name (firewalld, NetworkManager,
+  systemd, etc.) from action ID prefix for system-bus-name subjects
+- feat(replay): output panel now shows action description, risk level (critical/
+  high/medium/low), caller process/service, and user for polkit event sessions;
+  adds JS-side lookup table covering ~35 common polkit action ID prefixes
+- feat(store): add caller_process field to protocol, iolog, store (schema v6)
+
+* Sat May 02 2026 sudo-logger 1.20.17-1
+- feat(replay): show polkit action ID, result, and user in output panel for
+  dbus-polkit and pkexec event-only sessions instead of generic placeholder text
+
+* Sat May 02 2026 sudo-logger 1.20.16-1
+- fix(agent/dbus): skip auto-authorized polkit events (exitCode=0);
+  only record challenge (exitCode=2) and denied (exitCode=1) events
+
+* Sat May 02 2026 sudo-logger 1.20.15-1
+- fix(agent/dbus): resolve real username from /proc/<pid>/status for
+  unix-process polkit subjects instead of using the raw D-Bus subject
+  string (e.g. "bus::1.1474") — server's sanitizeName rejects colons,
+  causing all dbus-polkit sessions to be silently dropped
+
+* Sat May 02 2026 sudo-logger 1.20.14-1
+- fix(agent/ebpf): route short-lived pkexec scopes to waiter; query
+  loginctlSession before cgroupInode in sessionStarted so polkit PAM sessions
+  with < 50ms scope lifetime still notify the pkexec waiter
+- fix(agent/ebpf): stat scope before session connect; set hasIO=false when
+  scope is gone to avoid sending hasIO=true sessions with no content
+
+* Sat May 02 2026 sudo-logger 1.20.13-1
+- feat(agent): add D-Bus polkit monitoring subsystem (dbus.go); agent now
+  connects to the system bus as a BecomeMonitor and captures polkit
+  CheckAuthorization calls, emitting dbus-polkit source events for each
+  authorization request (authorized/denied/challenge) to the log server
+- feat(selinux): allow sudo_shipper_t to connect to system_dbusd_t socket
+  and send D-Bus messages for the polkit monitor
+- feat(replay): add source/exit_code conditions to risk rules; D-Bus polkit
+  rules added (dbus_polkit, dbus_polkit_high_value, dbus_polkit_denied)
+- feat(replay/ui): teal card border and badge for dbus-polkit sessions;
+  authorized/denied/challenge result shown in info bar
+
+* Thu May 01 2026 sudo-logger 1.20.12-1
+- fix(agent/ebpf): reduce inotify scope-detection delay from 200ms/100ms to
+  50ms, narrowing the window where early PTY writes are missed before the
+  cgroup is registered in the BPF tracked_cgroups map
+- fix(agent/ebpf): log monoToWallNS boot time at startup for diagnostics
+
+* Thu May 01 2026 sudo-logger 1.20.11-1
+- debug: log monoToWallNS at startup and first IO event per pkexec session
+
+* Thu May 01 2026 sudo-logger 1.20.10-1
+- fix(agent/ebpf): convert BPF ktime (CLOCK_MONOTONIC) to wall-clock Unix ns
+  using boot time from /proc/uptime; fixes all eBPF I/O events appearing at
+  t=0 in replay instead of at their correct relative timestamps
+
+* Thu May 01 2026 sudo-logger 1.20.9-1
+- fix(agent/ebpf): add scopeToCgroup reverse map so sessionEnded() can close
+  pkexec sessions even after the scope directory is already deleted by inotify
+
+* Thu May 01 2026 sudo-logger 1.20.8-1
+- fix(agent/ebpf): route empty-type session scopes (polkit PAM root sessions)
+  to pkexec waiter instead of dropping them; fixes I/O capture for pkexec bash
+
+* Thu May 01 2026 sudo-logger 1.20.7-1
+- fix(agent/ebpf): fast-path pkexec cgroup registration — polkit moves pkexec
+  into a new session scope almost immediately; read /proc/<pid>/cgroup at
+  goroutine start and register it instantly rather than waiting 2 s
+
+* Thu May 01 2026 sudo-logger 1.20.6-1
+- fix(agent/ebpf): capture pkexec bash I/O via invoking cgroup when polkit
+  creates no dedicated scope (common on Fedora); exit detected by polling
+  pkexec PID via /proc
+
+* Thu May 01 2026 sudo-logger 1.20.5-1
+- feat(agent/ebpf): track pkexec invocations as ebpf-pkexec sessions in replay
+- fix(agent/ebpf): stop false divergence alerts for pkexec (polkit, not sudo plugin)
+
+* Thu May 01 2026 sudo-logger 1.20.4-1
+- fix(agent/ebpf): replace cgroup-based execve filter with PID-parent check in BPF
+- fix(agent/divergence): discard stale pending execve entries (>10s) before FIFO match
+
+* Thu May 01 2026 sudo-logger 1.20.3-1
+- debug(agent/ebpf): log inode when trackPluginCgroup adds/removes cgroup from BPF map
+
+* Thu Apr 30 2026 sudo-logger 1.19.2-1
+- fix(agent/divergence): suppress late-arriving duplicate execve via grace window (lastConfirmed)
+- fix(agent): downgrade transient scope stat errors to debug (race between inotify and scope deletion)
+
+* Thu Apr 30 2026 sudo-logger 1.19.1-1
+- fix(agent): read parent process uid to identify invoking user (sudo setuid(0) before exec caused uid=0 mismatch)
+- fix(agent): drain all execve events within 5s on plugin confirm (sudo fires 2 execve per invocation)
+- fix(agent): tolerate loginctl returning partial data for system sessions
+- fix(agent): remove ProtectHome to allow Wayland proxy socket in /run/user/<uid>
+
+* Thu Apr 30 2026 sudo-logger 1.19.0-1
+- feat: merge sudo-shipper and ebpf-recorder into sudo-logger-agent
+- feat: eBPF tracepoints for PTY I/O, sudo/pkexec execve, and process exit
+- feat: divergence detection — alerts when sudo runs without plugin logging
+- feat: graceful degradation to plugin-only mode on kernels without BTF
+- feat: BPF program pinning to /sys/fs/bpf/sudo-logger for crash resilience
+- protocol: add source, parent_session_id, has_io fields to SESSION_START
+- store: add source, divergence_status, matched_session_id to SessionRecord
+
 * Sat Apr 25 2026 sudo-logger 1.17.36-1
 - fix(shipper): restore heartbeat dead-declaration to 2 missed (800 ms); Gemini had raised it to 5 missed (2000 ms) as a workaround for false freezes now resolved by plugin mutex fix
 
