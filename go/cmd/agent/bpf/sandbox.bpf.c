@@ -34,10 +34,10 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
-#define MAX_SANDBOXED_CGROUPS  256
-#define MAX_SANDBOXED_PIDS     4096
-#define MAX_PROTECTED_INODES   4096
-#define MAX_PROTECTED_PROCS    64
+#define MAX_SANDBOXED_CGROUPS  512
+#define MAX_SANDBOXED_PIDS     16384
+#define MAX_PROTECTED_INODES   16384
+#define MAX_PROTECTED_PROCS    256
 #define TASK_COMM_LEN          16
 
 // Kernel MAY_* permission bits (from linux/fs.h).
