@@ -34,7 +34,7 @@ func (s *sandboxSubsystem) startWatcher(pathInodes map[string]SandboxInodeKey) {
 			log.Printf("sandbox: watch %s: %v", dir, err)
 		}
 	}
-	log.Printf("sandbox: watching %d parent directories for inode changes", len(dirs))
+	debugLog("sandbox: watching %d parent directories for inode changes", len(dirs))
 	go s.watchLoop()
 }
 

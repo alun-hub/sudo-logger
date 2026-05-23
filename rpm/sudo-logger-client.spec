@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.49
+Version:        1.20.50
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -187,6 +187,10 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Sat May 23 2026 sudo-logger 1.20.50-1
+- chore: demote noisy startup logs to debugLog (stat-skipping per missing
+  path, inotify directory count, alert-listener-started)
+
 * Sat May 23 2026 sudo-logger 1.20.49-1
 - chore: demote verbose-but-normal log lines to debugLog (protecting inodes,
   aux cgroup registration, cgroupInodeOf diagnostics)

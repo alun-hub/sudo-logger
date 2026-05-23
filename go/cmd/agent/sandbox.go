@@ -61,7 +61,7 @@ func (s *sandboxSubsystem) pollAlerts() {
 	}
 	defer rd.Close()
 
-	log.Printf("sandbox: alert listener started")
+	debugLog("sandbox: alert listener started")
 
 	for {
 		record, err := rd.Read()

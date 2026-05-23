@@ -98,7 +98,7 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 		p := queue[i]
 		fi, err := os.Stat(p)
 		if err != nil {
-			log.Printf("sandbox: stat %s: %v (skipping)", p, err)
+			debugLog("sandbox: stat %s: %v (skipping)", p, err)
 			continue
 		}
 
