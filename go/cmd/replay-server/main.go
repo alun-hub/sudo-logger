@@ -2054,6 +2054,13 @@ func scoreSession(s *SessionInfo) (int, []string) {
 	rulesMu.RUnlock()
 
 	ctx := context.Background()
+
+	// Sandbox violation check must run before the cache — a violation can be
+	// recorded after the session was first scored and cached.
+	if s.TSID != "" && hasViolation(ctx, s.TSID) {
+		return 100, []string{"Sandbox Violation"}
+	}
+
 	if cached, _ := sessionStore.GetRiskCache(ctx, s.TSID, rulesHash); cached != nil {
 		return cached.Score, cached.Reasons
 	}
@@ -2074,14 +2081,6 @@ func scoreSession(s *SessionInfo) (int, []string) {
 
 	score := 0
 	var reasons []string
-
-	// Sandbox violation check (LSM block) — instant score 100.
-	if s.TSID != "" {
-		if hasViolation(ctx, s.TSID) {
-			score = 100
-			reasons = append(reasons, "Sandbox Violation")
-		}
-	}
 
 	for _, rule := range rules {
 		if score >= 100 {
