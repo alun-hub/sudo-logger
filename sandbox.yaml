@@ -9,8 +9,10 @@
 # lsm=bpf (add to GRUB_CMDLINE_LINUX, run grub2-mkconfig).
 #
 # IMPORTANT — what this protects and what it does not:
-#   PROTECTS:  writing to / deleting / renaming listed paths.
-#   DOES NOT:  prevent reading, or creating new files inside a listed directory.
+#   PROTECTS:  writing to, opening for write, truncating, deleting, and renaming listed paths.
+#   PROTECTS:  creating new files, dirs, symlinks, or device nodes INSIDE a listed directory.
+#   DOES NOT:  prevent reading listed paths.
+#   DOES NOT:  block IPC via connect()+send() to listed sockets (only file replacement).
 #   NOTE:      paths are resolved to inodes at agent startup — restart the agent
 #              after adding entries for new paths.
 #
@@ -24,7 +26,8 @@ protect:
     # sudo-logger itself — the audit trail must not be tampered with
     - /etc/sudo-logger
     - /var/log/sudo-logger
-    - /usr/libexec/sudo/sudo_logger_plugin.so
+    - /usr/bin/sudo-logger-agent          # agent binary — replacement affects future sessions
+    - /usr/libexec/sudo/sudo_logger_plugin.so  # plugin — replacement silences future sessions
 
     # sudo policy
     - /etc/sudoers
