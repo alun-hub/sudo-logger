@@ -177,16 +177,18 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
-* Thu May 22 2026 sudo-logger 1.20.41-1
+* Fri May 23 2026 sudo-logger 1.20.41-1
 - fix(sandbox): raise MAX_PROTECTED_INODES from 1024 to 4096 — fixes E2BIG
   on agent start when sandbox.yaml resolves >1024 inodes via directory traversal
-- fix(sandbox): add sandboxed_pids BPF map + sched_process_fork/exit hooks —
-  PID-based tracking propagated from sudo root to all descendants atomically at
-  fork time; fixes task_kill not blocking signals from short-lived sudo commands
-  (sudo pkill auditd) where pam_systemd moves sudo out of session cgroup before
-  the command is forked (PAM session scope migration race)
-- fix(sandbox): register sudo root PID in sandboxed_pids at session start so
-  in_sandbox() returns true even when cgroup membership is not yet set
+- fix(sandbox): add sandboxed_pids BPF map + sched_process_fork/exit hooks;
+  PID tracking propagated atomically at fork time from sudo root to descendants;
+  fixes task_kill not blocking signals from short-lived commands (sudo pkill)
+  where pam_systemd migrates sudo to a new session scope cgroup before fork
+- fix(sandbox): split in_sandbox into cgroup-only (file/inode hooks) and
+  pid+cgroup (task_kill only) — prevents PID tracking from blocking sudo rpm
+  upgrades by restricting the broader pid scope to kill operations only
+- fix(sandbox): use link.AttachTracing instead of link.Tracepoint for tp_btf
+  programs (BPF_PROG_TYPE_TRACING, not BPF_PROG_TYPE_TRACEPOINT)
 
 * Thu May 22 2026 sudo-logger 1.20.40-1
 - fix(sandbox): use bpf2go-generated SandboxInodeKey instead of hand-crafted
