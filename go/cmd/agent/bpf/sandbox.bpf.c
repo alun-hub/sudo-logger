@@ -211,13 +211,11 @@ int BPF_PROG(sandbox_inode_symlink, struct inode *dir, struct dentry *dentry, co
 }
 
 // Deny signals to processes whose name is in the protected_procs deny-list.
-// Uses PID-based scoping so short-lived commands (sudo pkill auditd) are caught
-// even after pam_systemd migrates the sudo process to a new session scope cgroup.
 SEC("lsm/task_kill")
 int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 	     struct kernel_siginfo *info, int sig, const struct cred *cred)
 {
-	if (!in_sandbox_pid())
+	if (!in_sandbox())
 		return 0;
 	char comm[TASK_COMM_LEN] = {};
 	// bpf_probe_read_kernel_str avoids a clang-21 bpfeb codegen crash that
