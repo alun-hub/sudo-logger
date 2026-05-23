@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 )
 
 const (
@@ -56,8 +57,10 @@ const (
 	MsgSessionAbandon  = uint8(0x0e) // shipper→server (new conn): freeze-timeout fired; payload = session_id UTF-8
 	MsgSessionFreezing  = uint8(0x0f) // shipper→server (new conn): session frozen due to network loss; payload = session_id UTF-8
 	MsgDivergenceAlert  = uint8(0x10) // agent→server: sudo execve seen but no plugin SESSION_START within 30s
+	MsgSandboxAlert     = uint8(0x11) // agent→server: sandbox violation blocked by kernel LSM
 
 	StreamStdin   = uint8(0x00)
+
 	StreamStdout  = uint8(0x01)
 	StreamStderr  = uint8(0x02)
 	StreamTtyIn   = uint8(0x03)
@@ -118,6 +121,16 @@ type DivergenceAlert struct {
 	Host    string `json:"host"`
 	Comm    string `json:"comm"`    // "sudo" or "pkexec"
 	Ts      int64  `json:"ts"`      // Unix timestamp of the execve event
+}
+
+// SandboxAlert is the JSON payload for MsgSandboxAlert.
+// Sent by the agent when the kernel LSM blocks an operation.
+type SandboxAlert struct {
+	SessionID string `json:"session_id,omitempty"` // mapped from cgroup_id in userspace
+	Pid       uint32 `json:"pid"`
+	Comm      string `json:"comm"`
+	Type      uint32 `json:"type"`
+	Ts        int64  `json:"ts"`
 }
 
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.
@@ -312,4 +325,26 @@ func EncodeAckResponse(lastTs int64, lastSeq uint64) []byte {
 	binary.BigEndian.PutUint64(buf[0:], uint64(lastTs))
 	binary.BigEndian.PutUint64(buf[8:], lastSeq)
 	return buf
+}
+
+// Writer provides synchronized access to a server connection.
+type Writer struct {
+	mu *sync.Mutex
+	w  *bufio.Writer
+}
+
+func NewWriter(w *bufio.Writer, mu *sync.Mutex) *Writer {
+	return &Writer{w: w, mu: mu}
+}
+
+func (w *Writer) WriteMessage(msgType uint8, payload []byte) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return WriteMessage(w.w, msgType, payload)
+}
+
+func (w *Writer) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Flush()
 }

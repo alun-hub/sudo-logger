@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"sudo-logger/internal/iolog"
+	"sudo-logger/internal/protocol"
 )
 
 // ScreenFrameWriter is an optional capability of SessionWriter implementations
@@ -151,6 +152,14 @@ type SessionStore interface {
 	// matchedTSID may be empty when no counterpart session exists.
 	// Returns nil if the session is not found (idempotent).
 	UpdateDivergenceStatus(ctx context.Context, tsid, status, matchedTSID string) error
+
+	// RecordSandboxViolation persists a kernel LSM sandbox alert beside
+	// the session identified by sid (session_id).
+	RecordSandboxViolation(ctx context.Context, sid string, alert protocol.SandboxAlert) error
+
+	// HasSandboxViolation reports whether any sandbox alerts were recorded
+	// for the session identified by tsid.
+	HasSandboxViolation(ctx context.Context, tsid string) (bool, error)
 
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error

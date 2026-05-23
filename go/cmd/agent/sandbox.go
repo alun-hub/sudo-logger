@@ -1,13 +1,112 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
+	"time"
+
+	"sudo-logger/internal/protocol"
 
 	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/fsnotify/fsnotify"
 )
+
+// bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c
+type bpfSandboxAlert struct {
+	CgroupID uint64
+	Pid      uint32
+	Type     uint32
+	Comm     [16]byte
+}
+
+func (s *sandboxSubsystem) pollAlerts() {
+	rd, err := ringbuf.NewReader(s.objs.SandboxAlerts)
+	if err != nil {
+		log.Printf("sandbox: alert reader: %v", err)
+		return
+	}
+	defer rd.Close()
+
+	log.Printf("sandbox: alert listener started")
+
+	for {
+		record, err := rd.Read()
+		if err != nil {
+			log.Printf("sandbox: alert read: %v", err)
+			return
+		}
+
+		var bpfAlert bpfSandboxAlert
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &bpfAlert); err != nil {
+			continue
+		}
+
+		comm := string(bytes.TrimRight(bpfAlert.Comm[:], "\x00"))
+		s.reportViolation(bpfAlert.CgroupID, bpfAlert.Pid, bpfAlert.Type, comm)
+	}
+}
+
+func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType uint32, comm string) {
+	typeName := "UNKNOWN"
+	switch alertType {
+	case 1:
+		typeName = "FILE_OPEN"
+	case 2:
+		typeName = "FILE_WRITE"
+	case 3:
+		typeName = "FILE_TRUNCATE"
+	case 4:
+		typeName = "FILE_SETATTR"
+	case 5:
+		typeName = "FILE_UNLINK"
+	case 6:
+		typeName = "FILE_RENAME"
+	case 7:
+		typeName = "DIR_MKDIR"
+	case 8:
+		typeName = "DIR_CREATE"
+	case 9:
+		typeName = "DIR_MKNOD"
+	case 10:
+		typeName = "DIR_SYMLINK"
+	case 11:
+		typeName = "PROCESS_KILL"
+	}
+
+	log.Printf("SANDBOX VIOLATION: Process %q (PID %d) blocked by %s [cgid=%d]",
+		comm, pid, typeName, cgid)
+
+	// Forward to log server
+	alert := protocol.SandboxAlert{
+		Pid:  pid,
+		Comm: comm,
+		Type: alertType,
+		Ts:   time.Now().Unix(),
+	}
+
+	// Find the session and send the alert via its server connection
+	activeCgsMu.Lock()
+	var serverW *protocol.Writer
+	for _, cg := range activeCgs {
+		if cg.cgroupID == cgid {
+			alert.SessionID = cg.cgName
+			serverW = cg.serverW
+			break
+		}
+	}
+	activeCgsMu.Unlock()
+
+	if serverW != nil {
+		payload, _ := json.Marshal(alert)
+		_ = serverW.WriteMessage(protocol.MsgSandboxAlert, payload)
+		_ = serverW.Flush()
+	}
+}
 
 // registerPID marks a PID (tgid) as sandboxed in the BPF map.
 // The sched_process_fork hook propagates membership to all descendants.
@@ -233,6 +332,7 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	}
 	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink, lsmSetattr, lsmOpen, lsmTrunc, tpFork, tpExit}
 
+	go s.pollAlerts()
 	s.startWatcher(res.PathInodes)
 
 	log.Printf("sandbox: LSM hooks attached (%d protected inodes, %d protected processes)",

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"sudo-logger/internal/protocol"
 )
 
 var validCgroupName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
@@ -46,6 +48,8 @@ type cgroupSession struct {
 	mu          sync.Mutex
 	frozen      bool
 	readyToFork bool // Set to true when plugin sends SESSION_READY
+
+	serverW *protocol.Writer // Used to send sandbox/divergence alerts
 
 	escapedMu sync.Mutex
 	escaped   map[int]bool

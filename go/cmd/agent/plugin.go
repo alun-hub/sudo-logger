@@ -422,6 +422,10 @@ func handlePluginConn(pluginConn net.Conn) {
 	sessionAckMu.Unlock()
 
 	serverBuf := bufio.NewWriterSize(serverConn, 8*1024)
+	sw := protocol.NewWriter(serverBuf, &serverWriteMu)
+	if cg != nil {
+		cg.serverW = sw
+	}
 
 	start.Command = redactor.RedactString(start.Command)
 	start.ResolvedCommand = redactor.RedactString(start.ResolvedCommand)

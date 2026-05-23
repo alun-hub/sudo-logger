@@ -83,6 +83,7 @@ type SandboxProgramSpecs struct {
 type SandboxMapSpecs struct {
 	ProtectedInodes  *ebpf.MapSpec `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.MapSpec `ebpf:"protected_procs"`
+	SandboxAlerts    *ebpf.MapSpec `ebpf:"sandbox_alerts"`
 	SandboxedCgroups *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
 	SandboxedPids    *ebpf.MapSpec `ebpf:"sandboxed_pids"`
 }
@@ -115,6 +116,7 @@ func (o *SandboxObjects) Close() error {
 type SandboxMaps struct {
 	ProtectedInodes  *ebpf.Map `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.Map `ebpf:"protected_procs"`
+	SandboxAlerts    *ebpf.Map `ebpf:"sandbox_alerts"`
 	SandboxedCgroups *ebpf.Map `ebpf:"sandboxed_cgroups"`
 	SandboxedPids    *ebpf.Map `ebpf:"sandboxed_pids"`
 }
@@ -123,6 +125,7 @@ func (m *SandboxMaps) Close() error {
 	return _SandboxClose(
 		m.ProtectedInodes,
 		m.ProtectedProcs,
+		m.SandboxAlerts,
 		m.SandboxedCgroups,
 		m.SandboxedPids,
 	)

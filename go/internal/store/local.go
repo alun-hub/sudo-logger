@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"sudo-logger/internal/protocol"
+
 	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
 
@@ -443,6 +445,28 @@ func (ls *LocalStore) MarkSessionNetworkOutage(_ context.Context, sessionID stri
 // LocalStore has no DB — divergence status is not persisted to disk.
 func (ls *LocalStore) UpdateDivergenceStatus(_ context.Context, _, _, _ string) error {
 	return nil
+}
+
+func (ls *LocalStore) RecordSandboxViolation(_ context.Context, sid string, alert protocol.SandboxAlert) error {
+	v, ok := ls.sessionDirs.Load(sid)
+	if !ok {
+		return nil
+	}
+	dir := v.(string)
+	data, _ := json.Marshal(alert)
+	return os.WriteFile(filepath.Join(dir, "SANDBOX_VIOLATION"), data, 0o640)
+}
+
+func (ls *LocalStore) HasSandboxViolation(_ context.Context, tsid string) (bool, error) {
+	dir, err := ls.resolveSessionDir(tsid)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(filepath.Join(dir, "SANDBOX_VIOLATION"))
+	if err == nil {
+		return true, nil
+	}
+	return false, nil
 }
 
 // resolveSessionDir converts tsid to an absolute directory path and checks

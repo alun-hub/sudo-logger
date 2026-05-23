@@ -2039,6 +2039,11 @@ func parseTtyOut(r io.Reader) string {
 }
 
 
+func hasViolation(ctx context.Context, tsid string) bool {
+	violation, _ := sessionStore.HasSandboxViolation(ctx, tsid)
+	return violation
+}
+
 // scoreSession computes a risk score (0–100) for a session using the globally
 // loaded rules.  Results are cached via sessionStore so ttyout is only read
 // once per session per rules version.
@@ -2069,6 +2074,15 @@ func scoreSession(s *SessionInfo) (int, []string) {
 
 	score := 0
 	var reasons []string
+
+	// Sandbox violation check (LSM block) — instant score 100.
+	if s.TSID != "" {
+		if hasViolation(ctx, s.TSID) {
+			score = 100
+			reasons = append(reasons, "Sandbox Violation")
+		}
+	}
+
 	for _, rule := range rules {
 		if score >= 100 {
 			break

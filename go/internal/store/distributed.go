@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"sudo-logger/internal/protocol"
+
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -136,7 +138,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	4 — added FOREIGN KEY ON DELETE CASCADE to sudo_access_log
 //	5 — added source, parent_session_id, has_io, divergence_status, matched_session_id
 //	6 — added caller_process (polkit/dbus calling process name or service)
-const currentSchemaVersion = 6
+//	7 — added sandbox_violation column to sudo_sessions
+const currentSchemaVersion = 7
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -243,6 +246,7 @@ CREATE INDEX IF NOT EXISTS sudo_sessions_div_pending
 
 -- migration v6: caller_process for polkit/D-Bus events
 ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS caller_process TEXT DEFAULT '';
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS sandbox_violation BOOLEAN DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
 `); err != nil {
@@ -513,6 +517,25 @@ func (d *DistributedStore) UpdateDivergenceStatus(ctx context.Context, tsid, sta
 		  WHERE tsid=$1`,
 		tsid, status, matchedTSID)
 	return err
+}
+
+func (d *DistributedStore) RecordSandboxViolation(ctx context.Context, sid string, alert protocol.SandboxAlert) error {
+	_, err := d.db.Exec(ctx,
+		`UPDATE sudo_sessions SET sandbox_violation=TRUE, updated_at=NOW() WHERE session_id=$1`,
+		sid)
+	return err
+}
+
+func (d *DistributedStore) HasSandboxViolation(ctx context.Context, tsid string) (bool, error) {
+	var violation bool
+	err := d.db.QueryRow(ctx, `SELECT sandbox_violation FROM sudo_sessions WHERE tsid=$1`, tsid).Scan(&violation)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return violation, nil
 }
 
 // IsBlocked implements SessionStore.
