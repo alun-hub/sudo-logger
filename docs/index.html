@@ -2118,21 +2118,25 @@ body::after {
   <div class="slide" id="s16">
     <div class="s-features" style="max-width:920px">
       <h2>PROCESS<br>SANDBOX</h2>
-      <div class="sub">▸ eBPF LSM · kernel-enforced deny-list · blocks root · config-driven</div>
+      <div class="sub">▸ 13 eBPF hooks · kernel-enforced deny-list · blocks root · Btrfs-safe · PAM-race-proof</div>
 
       <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:28px;font-size:13px">
 
         <div style="border-left:2px solid var(--green-dim);padding-left:16px">
-          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">LSM HOOKS — KERNEL LEVEL</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> <code style="font-size:10px">lsm/file_permission</code> — deny writes to protected files, devices, sockets, /proc</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_unlink</code> — deny deletion of protected inodes</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_rename</code> — deny atomic rename-over attacks on protected paths</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> <code style="font-size:10px">lsm/task_kill</code> — deny signals to named system daemons</div>
-          <div style="color:var(--amber);font-weight:700;margin-top:16px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PROPERTIES</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Scoped to session cgroup — only sudo-spawned processes restricted</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Inode-based — stable across bind mounts and renames</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Cannot be bypassed by root within the session</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Requires <code style="font-size:10px">lsm=bpf</code> in kernel boot parameters · CONFIG_BPF_LSM=y</div>
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">13 HOOKS — KERNEL LEVEL</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/file_open</code> — deny write-mode opens on protected inodes</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/file_permission</code> — deny write/append to protected inodes</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/path_truncate · inode_setattr</code> — deny truncation attacks</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_unlink</code> — deny deletion of protected inodes</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_rename</code> — deny atomic rename-over attacks</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/inode_create · mkdir · mknod · symlink</code> — deny file creation inside protected dirs</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">lsm/task_kill</code> — deny signals to named system daemons</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr">→</span> <code style="font-size:10px">tp_btf/sched_process_fork</code> — propagate sandbox to all child processes at fork</div>
+          <div style="color:var(--amber);font-weight:700;margin-top:14px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PROPERTIES</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> Dual scoping: cgroup-based + PID-tracked from fork — catches PAM scope migration race</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> Inode + mountinfo device ID — correct on Btrfs, XFS, ext4, tmpfs</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> Cannot be bypassed by root within the session</div>
+          <div class="feat" style="font-size:11.5px"><span class="arr" style="color:var(--amber)">★</span> Requires <code style="font-size:10px">lsm=bpf</code> · CONFIG_BPF_LSM=y · kernel ≥ 5.7</div>
         </div>
 
         <div style="border-left:2px solid var(--amber);padding-left:16px">
@@ -2157,8 +2161,8 @@ body::after {
     <span style="color:var(--text)">- systemd</span>
     <span style="color:var(--text)">- sshd</span></div>
           <div style="margin-top:10px;font-size:10px;color:var(--text-dim);line-height:1.7;">
-            Paths resolved to <strong style="color:var(--text)">inodes</strong> at agent startup —
-            restart agent after adding entries.<br>
+            Paths resolved to <strong style="color:var(--text)">inodes</strong> via <code style="font-size:9px">mountinfo</code> at startup — Btrfs, XFS, ext4 all work correctly.<br>
+            List a <em>directory</em> to also block file creation inside it.<br>
             Enable with <code style="font-size:9px">sandbox_config = /etc/sudo-logger/sandbox.yaml</code> in <code style="font-size:9px">agent.conf</code>.
           </div>
         </div>
@@ -2227,7 +2231,7 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Wayland screen capture — GUI sessions recorded, image slideshow replay</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
-        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Process sandbox — eBPF LSM deny-list · blocks writes, deletes, signals · root-proof</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Process sandbox — 13 eBPF hooks · blocks writes, opens, truncations, deletes, creates, signals · root-proof</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> eBPF agent — divergence detection · outage buffering · unified daemon</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>

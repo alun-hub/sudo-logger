@@ -154,13 +154,15 @@ One goroutine per sudo session:
 in the replay UI, indicating sudo ran without the plugin logging it.
 
 **Process sandbox** — optional eBPF LSM subsystem that enforces kernel-level
-write, delete, rename, and kill restrictions on all processes running inside
-sudo session cgroups. Four LSM hooks (`file_permission`, `inode_unlink`,
-`inode_rename`, `task_kill`) are loaded at startup; each hook checks whether
-the calling process belongs to a sandboxed session cgroup before applying a
-deny-list of protected inodes and process names configured by the operator.
-Session cgroups are registered with the sandbox on creation and removed on
-session end. See [Process sandbox](#process-sandbox).
+write, open-for-write, truncate, setattr, delete, rename, directory-create, and
+kill restrictions on all processes running inside sudo session cgroups. Thirteen
+hooks (11 LSM + 2 tracepoints) are loaded at startup. Each hook checks whether
+the calling process is in a sandboxed cgroup (`sandboxed_cgroups` BPF map) or
+has been PID-tracked since session start (`sandboxed_pids` map, propagated to
+all descendants via `sched_process_fork`), then applies a deny-list of protected
+inodes and process names configured by the operator. Session cgroups and root
+PIDs are registered on session start and removed on session end. See
+[Process sandbox](#process-sandbox).
 
 Reads all settings from `/etc/sudo-logger/agent.conf` (key = value format).
 
@@ -231,7 +233,7 @@ migrate-sessions \
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
-| **Process sandbox (optional)** | eBPF LSM hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot write to, delete, rename, or kill — not bypassable even by root. Supports Btrfs subvolumes via wildcard device ID matching. Requires `lsm=bpf`. See [Process sandbox](#process-sandbox). |
+| **Process sandbox (optional)** | 13 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Requires `lsm=bpf`. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 
@@ -320,13 +322,13 @@ migrate-sessions \
 
 - **Requires sudo 1.9+**: uses the sudo 1.9 I/O plugin API.
 
-- **Process sandbox does not protect directory contents**: the sandbox
-  restricts writing to, deleting, and renaming the specific inodes listed in
-  `sandbox.yaml`. It does not prevent creating new files *inside* a protected
-  directory — doing so would require additional `inode_create` and `inode_mkdir`
-  LSM hooks (not yet implemented). For example, listing `/etc/sudoers.d`
-  prevents modification of that directory inode, but a new file can still be
-  created inside it.
+- **To protect directory contents, list the directory itself**: the sandbox
+  blocks creating new files, subdirectories, symlinks, and device nodes inside a
+  protected directory via `lsm/inode_create`, `lsm/inode_mkdir`,
+  `lsm/inode_mknod`, and `lsm/inode_symlink` hooks. You must list the *directory*
+  inode (e.g. `/etc/sudoers.d`) in `sandbox.yaml` — listing individual files
+  inside it does not prevent creation of new siblings. The directory inode itself
+  is also protected against write, deletion, and rename.
 
 - **Process sandbox does not block Unix socket IPC**: `file_permission` with
   `MAY_WRITE` prevents open-for-write and deletion/rename of socket files, but
@@ -829,24 +831,49 @@ daemons) is included in `sandbox.yaml` in the repository root.
 #### How enforcement works
 
 At agent startup, each configured path is resolved to its inode number and
-block device ID using `stat(2)`. These `{inode, device}` pairs (and `dev=0` wildcards for Btrfs) are loaded into
-a BPF hash map (`protected_inodes`). Process names are loaded into a second
-map (`protected_procs`).
+block device ID. Device IDs are obtained via `/proc/self/mountinfo` field 3
+(`MAJOR(sb->s_dev):MINOR(sb->s_dev)`), which matches exactly what the kernel
+reports in BPF via `inode->i_sb->s_dev` — this works correctly for Btrfs
+subvolumes where `stat().st_dev` returns the subvolume's anonymous device
+rather than the superblock device. The resulting `{inode, device}` pairs are
+loaded into a BPF hash map (`protected_inodes`). Process names are loaded into
+a second map (`protected_procs`).
 
-Four eBPF LSM hooks are then attached to the kernel:
+Thirteen hooks are then attached to the kernel:
 
 | Hook | What it blocks |
 |------|---------------|
-| `lsm/file_permission` | Writing or appending to a protected inode |
+| `lsm/file_open` | Opening a protected inode for writing (O_WRONLY / O_RDWR) |
+| `lsm/file_permission` | Write or append access to a protected inode |
+| `lsm/path_truncate` | Truncating a protected path via `truncate()` or `open(O_TRUNC)` |
+| `lsm/inode_setattr` | Attribute changes (chmod, chown, truncate) on a protected inode |
 | `lsm/inode_unlink` | Deleting a protected file |
 | `lsm/inode_rename` | Renaming a protected file, or renaming onto one |
+| `lsm/inode_mkdir` | Creating a directory inside a protected directory |
+| `lsm/inode_create` | Creating a regular file inside a protected directory |
+| `lsm/inode_mknod` | Creating a device node inside a protected directory |
+| `lsm/inode_symlink` | Creating a symlink inside a protected directory |
 | `lsm/task_kill` | Sending any signal to a process whose name is in `protected_procs` |
+| `tp_btf/sched_process_fork` | Propagates PID sandbox membership from parent to child at fork time |
+| `tp_btf/sched_process_exit` | Removes PID from the sandbox tracking map on process exit |
 
-Each hook first checks whether the calling process belongs to a sandboxed
-session cgroup. The agent registers each new session's cgroup ID (= the inode
-of the cgroup v2 directory) in a `sandboxed_cgroups` BPF map when the session
-starts, and removes it when the session ends. Processes outside a sandboxed
-cgroup are unaffected — the hooks are global but effectively scoped.
+Each hook checks whether the calling process is in a sandboxed cgroup or PID
+set before applying any restriction. Two complementary scoping mechanisms are
+used:
+
+- **`sandboxed_cgroups`** — the agent registers each session's cgroup ID (=
+  the inode of the cgroup v2 directory) at session start and removes it at
+  session end. This covers the normal case where processes remain in the
+  session cgroup.
+- **`sandboxed_pids`** — the agent registers the sudo root PID at session
+  start. The `sched_process_fork` hook propagates this membership to every
+  descendant process atomically at fork time (before the child runs any
+  userspace code). This catches short-lived commands like `sudo pkill auditd`
+  where `pam_systemd` moves the process to a new session scope cgroup before
+  the command forks — the PAM scope migration race.
+
+Processes outside both sets are unaffected — the hooks are global but
+effectively scoped to active sessions.
 
 When a blocked operation is attempted, the kernel returns `EPERM` to the
 calling process. The session continues; only the specific operation is denied.
@@ -871,9 +898,11 @@ The agent also logs a warning when loading a name that exceeds 15 characters.
 
 #### Limitations
 
-- **Directory contents not protected**: the sandbox protects the listed
-  inodes. It does not prevent creating new files *inside* a protected
-  directory — only modification and deletion of the directory entry itself.
+- **List the directory to protect its contents**: listing a directory in
+  `sandbox.yaml` prevents creating new files, subdirectories, symlinks, and
+  device nodes inside it (`lsm/inode_create`, `lsm/inode_mkdir`,
+  `lsm/inode_mknod`, `lsm/inode_symlink`). Listing individual files inside a
+  directory does not prevent siblings from being created next to them.
 
 - **Unix socket IPC not blocked**: listing a socket path prevents its
   deletion and replacement, but does not intercept `connect()` + `send()`.
@@ -1427,11 +1456,12 @@ sudo-logger/
 │   │   │   ├── divergence.go    # eBPF vs plugin divergence detection
 │   │   │   ├── cgroup.go        # Per-session cgroup management + freeze
 │   │   │   ├── config.go        # Config file parser
-│   │   │   ├── sandbox.go       # eBPF LSM sandbox: load, attach, cgroup registration
-│   │   │   ├── sandbox_config.go # sandbox.yaml parser + inode resolver
+│   │   │   ├── sandbox.go       # eBPF LSM sandbox: load, attach, cgroup + PID registration
+│   │   │   ├── sandbox_config.go # sandbox.yaml parser + inode resolver (mountinfo-based dev ID)
+│   │   │   ├── sandbox_watch.go  # inotify watcher: refreshes protected inodes on file replace
 │   │   │   └── bpf/
 │   │   │       ├── recorder.c   # eBPF tracepoint hooks (compiled via bpf2go)
-│   │   │       └── sandbox.bpf.c # eBPF LSM hooks: file_permission, inode_unlink/rename, task_kill
+│   │   │       └── sandbox.bpf.c # eBPF LSM: 11 file/inode/kill hooks + sched_process_fork/exit
 │   │   ├── server/
 │   │   │   └── main.go          # Remote log server
 │   │   ├── replay-server/
