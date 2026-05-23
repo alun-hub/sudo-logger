@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.43
+Version:        1.20.44
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -187,6 +187,16 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Sat May 23 2026 sudo-logger 1.20.44-1
+- fix(sandbox): server no longer closes session on MsgSandboxAlert; `return`
+  replaced with `continue` so subsequent chunks and SESSION_END are preserved
+- fix(sandbox): remove redundant Flush() after WriteMessage in reportViolation
+- fix(sandbox): replace alert type magic numbers with named constants;
+  use binary.NativeEndian instead of hardcoded LittleEndian
+- fix(redactor): prevent echo-based recording bypass — prompt masking only
+  activates when output chunk has no trailing newline (real prompts never do)
+- docs: lsm=bpf not required on Fedora 38+; active by default in CONFIG_LSM
+
 * Fri May 23 2026 sudo-logger 1.20.43-1
 - fix(sandbox): add lsm/file_open and lsm/path_truncate hooks; blocks
   write-mode opens and truncate() syscalls on protected inodes
