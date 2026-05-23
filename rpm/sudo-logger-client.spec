@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.44
+Version:        1.20.45
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -187,6 +187,10 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Sat May 23 2026 sudo-logger 1.20.45-1
+- fix(replay): sandbox violation check now runs before risk score cache;
+  sessions scored before a violation arrived now show correctly in the UI
+
 * Sat May 23 2026 sudo-logger 1.20.44-1
 - fix(sandbox): server no longer closes session on MsgSandboxAlert; `return`
   replaced with `continue` so subsequent chunks and SESSION_END are preserved
