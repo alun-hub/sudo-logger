@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.42
+Version:        1.20.43
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -184,6 +184,17 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri May 23 2026 sudo-logger 1.20.43-1
+- fix(sandbox): add lsm/file_open and lsm/path_truncate hooks; blocks
+  write-mode opens and truncate() syscalls on protected inodes
+- fix(sandbox): add lsm/inode_setattr hook; prevents echo > /protected zeroing
+  files via O_TRUNC before any write permission check fires
+- fix(sandbox): use in_sandbox_pid() in all hooks including task_kill;
+  ensures signals from short-lived sudo commands (sudo pkill) are blocked
+- fix(sandbox): remove dead dev=0 wildcard inode entries; mountDev() already
+  returns the correct s_dev for all filesystems including Btrfs
+- fix(verify-sandbox.sh): use systemctl MainPID for reliable agent PID lookup
+
 * Fri May 23 2026 sudo-logger 1.20.42-1
 - fix(spec): replace %%systemd_preun with manual systemctl disable + kill;
   %%systemd_preun calls systemctl stop which is blocked by RefuseManualStop=yes
