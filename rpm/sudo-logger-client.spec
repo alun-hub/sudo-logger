@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.41
+Version:        1.20.42
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -138,14 +138,21 @@ restorecon -R %{_bindir}/sudo-logger-agent \
 chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
 chattr -i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
-%systemd_preun sudo-logger-agent.service
+# Cannot use %%systemd_preun because it calls systemctl stop, which is blocked
+# by RefuseManualStop=yes.  On uninstall: disable the unit (removes symlinks)
+# then kill the running process via systemctl kill (not blocked).
+if [ $1 -eq 0 ]; then
+    systemctl disable sudo-logger-agent.service >/dev/null 2>&1 || true
+    systemctl kill sudo-logger-agent.service    >/dev/null 2>&1 || true
+fi
 # Remove SELinux policy module on full uninstall (not on upgrade)
 if [ $1 -eq 0 ]; then
     semodule -r sudo_logger 2>/dev/null || true
 fi
 # Remove plugin line from sudo.conf on uninstall
 if [ $1 -eq 0 ]; then
-    sed -i '/Plugin sudo_logger_plugin sudo_logger_plugin\.so/d' /etc/sudo.conf
+    sed -i '/Plugin sudo_logger_plugin sudo_logger_plugin\.so/d' /etc/sudo.conf \
+        2>/dev/null || true
 fi
 
 %postun
@@ -177,6 +184,10 @@ fi
 %{_mandir}/man8/sudo_logger_plugin.8*
 
 %changelog
+* Fri May 23 2026 sudo-logger 1.20.42-1
+- fix(spec): replace %%systemd_preun with manual systemctl disable + kill;
+  %%systemd_preun calls systemctl stop which is blocked by RefuseManualStop=yes
+
 * Fri May 23 2026 sudo-logger 1.20.41-1
 - fix(sandbox): raise MAX_PROTECTED_INODES from 1024 to 4096 — fixes E2BIG
   on agent start when sandbox.yaml resolves >1024 inodes via directory traversal
