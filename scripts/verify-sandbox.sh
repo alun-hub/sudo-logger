@@ -87,8 +87,8 @@ else
 fi
 
 # Try to kill the agent
-AGENT_PID=$(pgrep -f sudo-logger-age | head -n 1)
-if [ -n "$AGENT_PID" ]; then
+AGENT_PID=$(systemctl show -p MainPID sudo-logger-agent.service | cut -d= -f2)
+if [ -n "$AGENT_PID" ] && [ "$AGENT_PID" != "0" ]; then
     assert_blocked "kill -TERM $AGENT_PID" "SIGTERM to sudo-logger-agent (PID $AGENT_PID)"
 fi
 

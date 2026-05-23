@@ -6,9 +6,16 @@
 // sudo-logger session cgroups, based on operator-configured deny lists.
 //
 // Hooks:
-//   lsm/file_permission      — deny writes to protected inodes (files, sockets, devices, proc)
+//   lsm/file_open            — deny opening protected inodes for writing (O_WRONLY/O_RDWR)
+//   lsm/file_permission      — deny write/append access to protected inodes
+//   lsm/path_truncate        — deny truncation of protected paths (truncate() + open O_TRUNC)
+//   lsm/inode_setattr        — deny attribute changes (chmod, chown, truncate) on protected inodes
 //   lsm/inode_unlink         — deny deletion of protected inodes
 //   lsm/inode_rename         — deny rename of/onto protected inodes (prevents atomic replacement)
+//   lsm/inode_mkdir          — deny creating directories inside protected directories
+//   lsm/inode_create         — deny creating files inside protected directories
+//   lsm/inode_mknod          — deny creating device nodes inside protected directories
+//   lsm/inode_symlink        — deny creating symlinks inside protected directories
 //   lsm/task_kill            — deny signals to protected process names
 //   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
 //   tp_btf/sched_process_exit — clean up PID tracking when a process exits

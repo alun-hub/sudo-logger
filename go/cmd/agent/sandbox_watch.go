@@ -99,21 +99,12 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 	}
 	if !shared {
 		_ = s.objs.ProtectedInodes.Delete(old)
-		if (old.Dev >> 20) == 0 {
-			_ = s.objs.ProtectedInodes.Delete(SandboxInodeKey{Ino: old.Ino, Dev: 0})
-		}
 	}
 
 	marker := uint8(1)
 	if err := s.objs.ProtectedInodes.Put(newKey, marker); err != nil {
 		log.Printf("sandbox: refresh inode for %s: %v", path, err)
 		return
-	}
-	if (newKey.Dev >> 20) == 0 {
-		wildcard := SandboxInodeKey{Ino: newKey.Ino, Dev: 0}
-		if err := s.objs.ProtectedInodes.Put(wildcard, marker); err != nil {
-			log.Printf("sandbox: refresh wildcard inode for %s: %v", path, err)
-		}
 	}
 
 	s.pathInodes[path] = newKey
