@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.50
+Version:        1.20.51
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -187,6 +187,15 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Sat May 23 2026 sudo-logger 1.20.51-1
+- fix(wayland): restore screen recording for apps that fork immediately (gvim);
+  added 2s grace period to agent linger-mode check to allow descendant detection
+- fix(wayland): robust proxy socket permissions; use os.Chmod on path instead
+  of fchmod on FD (more reliable kernel node update)
+- fix(plugin): robust WAYLAND_DISPLAY injection; overwrite SUDO_COMMAND in
+  user_env[] if WAYLAND_DISPLAY is missing to ensure it reaches child process
+- feat(sudoers): include DISPLAY and XAUTHORITY in env_keep for XWayland support
+
 * Sat May 23 2026 sudo-logger 1.20.50-1
 - chore: demote noisy startup logs to debugLog (stat-skipping per missing
   path, inotify directory count, alert-listener-started)

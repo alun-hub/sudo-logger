@@ -1021,14 +1021,32 @@ static int plugin_open(unsigned int        version,
                                     break;
                                 }
                             }
+                            if (!found) {
+                                /* If WAYLAND_DISPLAY was stripped by env_reset, we
+                                 * cannot grow the user_env[] array.  Try to find
+                                 * an unused or spare variable to overwrite.
+                                 * SUDO_COMMAND is a good candidate because we
+                                 * already logged it and the child doesn't need it. */
+                                for (int i = 0; menv[i]; i++) {
+                                    if (strncmp(menv[i], "SUDO_COMMAND=", 13) == 0) {
+                                        menv[i] = entry;
+                                        found = 1;
+                                        syslog(LOG_WARNING,
+                                            "sudo-logger: WAYLAND_DISPLAY not in user_env[], "
+                                            "overwriting SUDO_COMMAND to inject it");
+                                        break;
+                                    }
+                                }
+                            }
                             if (found) {
                                 syslog(LOG_DEBUG,
                                     "sudo-logger: patched WAYLAND_DISPLAY -> %s",
                                     entry);
                             } else {
                                 syslog(LOG_WARNING,
-                                    "sudo-logger: WAYLAND_DISPLAY not in user_env[], "
-                                    "falling back to setenv(%s)", entry);
+                                    "sudo-logger: WAYLAND_DISPLAY not in user_env[] "
+                                    "and no spare slot found; falling back to setenv(%s). "
+                                    "GUI apps may fail — add WAYLAND_DISPLAY to env_keep.", entry);
                                 setenv("WAYLAND_DISPLAY", proxy, 1);
                                 free(entry);
                             }

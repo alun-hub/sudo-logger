@@ -706,6 +706,11 @@ loop:
 		}
 	}
 
+	// Give the descendant tracker a moment to catch the first child fork
+	// before we decide whether to enter linger mode. This is crucial for
+	// commands like 'gvim' where the parent exits immediately after forking.
+	time.Sleep(2 * time.Second)
+
 	if cg.hasPids() || cg.hasEscapedRunning() {
 		log.Printf("[%s] sudo exited but GUI processes remain; entering linger mode", start.SessionID)
 		for cg.hasPids() || cg.hasEscapedRunning() {
@@ -894,13 +899,9 @@ func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("wayland-proxy: listen %s: %w", proxySocket, err)
 	}
-	if f, err := ln.(*net.UnixListener).File(); err == nil {
-		if err := f.Chmod(0666); err != nil {
-			f.Close()
-			ln.Close()
-			return "", nil, nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
-		}
-		f.Close()
+	if err := os.Chmod(proxySocket, 0666); err != nil {
+		ln.Close()
+		return "", nil, nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
 	}
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	lnFile, err := ln.(*net.UnixListener).File()
