@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.47
+Version:        1.20.48
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -187,6 +187,10 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Sat May 23 2026 sudo-logger 1.20.48-1
+- debug: add explicit error logging to cgroupInodeOf to diagnose aux-cgroup
+  registration failures in direct-sudo sandbox alert path
+
 * Sat May 23 2026 sudo-logger 1.20.47-1
 - fix(sandbox): forward alerts from processes that escaped their session cgroup
   (direct sudo commands: child escapes via PAM before exec, BPF blocks via

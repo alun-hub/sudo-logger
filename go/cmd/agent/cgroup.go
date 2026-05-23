@@ -174,17 +174,22 @@ func (cg *cgroupSession) inOurCgroup(pid int) bool {
 func cgroupInodeOf(pid int) uint64 {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 	if err != nil {
+		log.Printf("sandbox: cgroupInodeOf(%d): read cgroup: %v", pid, err)
 		return 0
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "0::") {
-			path := "/sys/fs/cgroup" + strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+			rel := strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+			path := "/sys/fs/cgroup" + rel
 			var st syscall.Stat_t
-			if err := syscall.Stat(path, &st); err == nil {
-				return st.Ino
+			if err := syscall.Stat(path, &st); err != nil {
+				log.Printf("sandbox: cgroupInodeOf(%d): stat %q: %v", pid, path, err)
+				return 0
 			}
+			return st.Ino
 		}
 	}
+	log.Printf("sandbox: cgroupInodeOf(%d): no '0::' line in %q", pid, strings.TrimSpace(string(data)))
 	return 0
 }
 

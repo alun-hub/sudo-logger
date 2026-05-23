@@ -210,7 +210,7 @@ func (s *sandboxSubsystem) registerAuxCgroup(cgid uint64, cg *cgroupSession) {
 	auxCgroupMu.Lock()
 	auxCgroupMap[cgid] = cg
 	auxCgroupMu.Unlock()
-	debugLog("sandbox: aux cgroup %d registered for session %s", cgid, cg.cgName)
+	log.Printf("sandbox: aux cgroup %d registered for session %s", cgid, cg.cgName)
 }
 
 func (s *sandboxSubsystem) unregisterAuxCgroups(cg *cgroupSession) {
