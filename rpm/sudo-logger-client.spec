@@ -94,6 +94,8 @@ install -D -m 0644 man/sudo-logger-agent.8 \
     %{buildroot}%{_mandir}/man8/sudo-logger-agent.8
 install -D -m 0644 man/sudo_logger_plugin.8 \
     %{buildroot}%{_mandir}/man8/sudo_logger_plugin.8
+install -D -m 0644 man/sandbox.yaml.5 \
+    %{buildroot}%{_mandir}/man5/sandbox.yaml.5
 
 %pre
 # Migrate legacy shipper.conf → agent.conf BEFORE RPM installs new files.
@@ -182,6 +184,7 @@ fi
 %{_datadir}/selinux/packages/sudo_logger.pp
 %{_mandir}/man8/sudo-logger-agent.8*
 %{_mandir}/man8/sudo_logger_plugin.8*
+%{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
 * Fri May 23 2026 sudo-logger 1.20.43-1

@@ -815,13 +815,18 @@ protect:
     - /run/sudo-logger/plugin.sock
 
   # Process names — sessions cannot send any signal to these processes,
-  # including SIGKILL. Names are capped at 15 characters (Linux TASK_COMM_LEN).
+  # including SIGKILL. This effectively prevents users from stopping
+  # or restarting protected systemd services (e.g. systemctl stop auditd).
+  # Names are capped at 15 characters (Linux TASK_COMM_LEN).
   # Verify the exact truncated name with: cat /proc/<pid>/comm
   processes:
-    - auditd
-    - sssd
-    - sshd
-    - systemd-journal    # systemd-journald truncates to 15 chars
+    - sudo-logger-age  # Our agent
+    - auditd           # Audit daemon
+    - sssd             # System Security Services Daemon
+    - sshd             # OpenSSH server
+    - systemd-journal  # systemd-journald truncates to 15 chars
+    - firewalld        # Firewall daemon
+
 ```
 
 A comprehensive example for Fedora systems (covering sudo, PAM, SSH, SSSD,
