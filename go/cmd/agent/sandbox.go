@@ -156,7 +156,7 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach lsm/inode_symlink: %w", err)
 	}
-	tpFork, err := link.Tracepoint("sched", "sched_process_fork", objs.SandboxProcessFork, nil)
+	tpFork, err := link.AttachTracing(link.TracingOptions{Program: objs.SandboxProcessFork})
 	if err != nil {
 		lsmFile.Close()
 		lsmUnlink.Close()
@@ -169,7 +169,7 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach tp/sched_process_fork: %w", err)
 	}
-	tpExit, err := link.Tracepoint("sched", "sched_process_exit", objs.SandboxProcessExit, nil)
+	tpExit, err := link.AttachTracing(link.TracingOptions{Program: objs.SandboxProcessExit})
 	if err != nil {
 		lsmFile.Close()
 		lsmUnlink.Close()
