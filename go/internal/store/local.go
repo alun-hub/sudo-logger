@@ -450,11 +450,17 @@ func (ls *LocalStore) UpdateDivergenceStatus(_ context.Context, _, _, _ string) 
 func (ls *LocalStore) RecordSandboxViolation(_ context.Context, sid string, alert protocol.SandboxAlert) error {
 	v, ok := ls.sessionDirs.Load(sid)
 	if !ok {
+		log.Printf("sandbox: RecordSandboxViolation: session %q not in sessionDirs — violation not stored", sid)
 		return nil
 	}
 	dir := v.(string)
+	path := filepath.Join(dir, "SANDBOX_VIOLATION")
 	data, _ := json.Marshal(alert)
-	return os.WriteFile(filepath.Join(dir, "SANDBOX_VIOLATION"), data, 0o640)
+	if err := os.WriteFile(path, data, 0o640); err != nil {
+		return err
+	}
+	log.Printf("sandbox: violation recorded: %s", path)
+	return nil
 }
 
 func (ls *LocalStore) HasSandboxViolation(_ context.Context, tsid string) (bool, error) {

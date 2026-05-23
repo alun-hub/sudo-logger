@@ -106,12 +106,17 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 			break
 		}
 	}
+	nSessions := len(activeCgs)
 	activeCgsMu.Unlock()
 
-	if serverW != nil {
-		payload, _ := json.Marshal(alert)
-		// WriteMessage flushes internally; no separate Flush needed.
-		_ = serverW.WriteMessage(protocol.MsgSandboxAlert, payload)
+	if serverW == nil {
+		log.Printf("sandbox: no session found for cgid=%d (active sessions: %d) — alert not forwarded to server", cgid, nSessions)
+		return
+	}
+
+	payload, _ := json.Marshal(alert)
+	if err := serverW.WriteMessage(protocol.MsgSandboxAlert, payload); err != nil {
+		log.Printf("sandbox: send alert to server: %v", err)
 	}
 }
 
