@@ -86,10 +86,21 @@ struct {
 	__type(value, __u8);
 } protected_procs SEC(".maps");
 
-static __always_inline int in_sandbox(void)
+// in_sandbox_cgroup: cgroup-only scoping, used for file/inode hooks.
+// PAM scope migration moves short-lived commands out of the session cgroup
+// before they can write, so this correctly exempts rpm/dnf etc.
+static __always_inline int in_sandbox_cgroup(void)
 {
 	__u64 cgid = bpf_get_current_cgroup_id();
-	if (bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL)
+	return bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL;
+}
+
+// in_sandbox_pid: checks both cgroups and sandboxed_pids, used for task_kill.
+// Catches short-lived commands (e.g. sudo pkill auditd) that escape the
+// session cgroup via the PAM scope migration race.
+static __always_inline int in_sandbox_pid(void)
+{
+	if (in_sandbox_cgroup())
 		return 1;
 	__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
 	return bpf_map_lookup_elem(&sandboxed_pids, &tgid) != NULL;
@@ -113,7 +124,7 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 {
 	if (!(mask & (MAY_WRITE | MAY_APPEND)))
 		return 0;
-	if (!in_sandbox())
+	if (!in_sandbox_cgroup())
 		return 0;
 
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
@@ -127,7 +138,7 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 SEC("lsm/inode_unlink")
 int BPF_PROG(sandbox_inode_unlink, struct inode *dir, struct dentry *dentry)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_cgroup())
 		return 0;
 	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
 	if (inode_protected(inode))
@@ -142,7 +153,7 @@ SEC("lsm/inode_rename")
 int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_dentry,
 	     struct inode *new_dir, struct dentry *new_dentry, unsigned int flags)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_cgroup())
 		return 0;
 	struct inode *old_inode = BPF_CORE_READ(old_dentry, d_inode);
 	if (inode_protected(old_inode))
@@ -162,7 +173,7 @@ int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_den
 SEC("lsm/inode_mkdir")
 int BPF_PROG(sandbox_inode_mkdir, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_cgroup())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;
@@ -172,7 +183,7 @@ int BPF_PROG(sandbox_inode_mkdir, struct inode *dir, struct dentry *dentry, umod
 SEC("lsm/inode_create")
 int BPF_PROG(sandbox_inode_create, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_cgroup())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;
@@ -182,7 +193,7 @@ int BPF_PROG(sandbox_inode_create, struct inode *dir, struct dentry *dentry, umo
 SEC("lsm/inode_mknod")
 int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_cgroup())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;
@@ -192,7 +203,7 @@ int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umod
 SEC("lsm/inode_symlink")
 int BPF_PROG(sandbox_inode_symlink, struct inode *dir, struct dentry *dentry, const char *old_name)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_cgroup())
 		return 0;
 	if (inode_protected(dir))
 		return -EPERM;
@@ -200,11 +211,13 @@ int BPF_PROG(sandbox_inode_symlink, struct inode *dir, struct dentry *dentry, co
 }
 
 // Deny signals to processes whose name is in the protected_procs deny-list.
+// Uses PID-based scoping so short-lived commands (sudo pkill auditd) are caught
+// even after pam_systemd migrates the sudo process to a new session scope cgroup.
 SEC("lsm/task_kill")
 int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 	     struct kernel_siginfo *info, int sig, const struct cred *cred)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_pid())
 		return 0;
 	char comm[TASK_COMM_LEN] = {};
 	// bpf_probe_read_kernel_str avoids a clang-21 bpfeb codegen crash that
