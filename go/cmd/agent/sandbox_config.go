@@ -126,7 +126,7 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 			log.Printf("sandbox: mountDev %s: %v (falling back to stat dev)", p, devErr)
 			dev = uint32(st.Dev)
 		}
-		log.Printf("sandbox: protecting %s {ino=%d dev=%d}", p, st.Ino, dev)
+		debugLog("sandbox: protecting %s {ino=%d dev=%d}", p, st.Ino, dev)
 		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
 		if !seen[key] {
