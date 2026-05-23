@@ -215,7 +215,7 @@ SEC("lsm/task_kill")
 int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 	     struct kernel_siginfo *info, int sig, const struct cred *cred)
 {
-	if (!in_sandbox())
+	if (!in_sandbox_pid())
 		return 0;
 	char comm[TASK_COMM_LEN] = {};
 	// bpf_probe_read_kernel_str avoids a clang-21 bpfeb codegen crash that
