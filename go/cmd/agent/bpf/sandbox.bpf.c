@@ -117,6 +117,42 @@ static __always_inline int inode_protected(struct inode *inode)
 	return bpf_map_lookup_elem(&protected_inodes, &key) != NULL;
 }
 
+// Kernel FMODE_* bits (from linux/fs.h).
+#define FMODE_WRITE  0x2
+
+// Deny opening protected inodes for writing.
+SEC("lsm/file_open")
+int BPF_PROG(sandbox_file_open, struct file *file)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	// Check if file is opened for writing.
+	if (!(BPF_CORE_READ(file, f_mode) & FMODE_WRITE))
+		return 0;
+
+	struct inode *inode = BPF_CORE_READ(file, f_inode);
+	if (inode_protected(inode))
+		return -EPERM;
+
+	return 0;
+}
+
+// Deny truncation of protected paths.
+// Specifically targets open(..., O_TRUNC) and truncate() syscalls.
+SEC("lsm/path_truncate")
+int BPF_PROG(sandbox_path_truncate, const struct path *path)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
+	if (inode_protected(inode))
+		return -EPERM;
+
+	return 0;
+}
+
 // Deny write access to protected inodes.
 // Covers regular files, device nodes (/dev/*), proc entries, and Unix sockets.
 SEC("lsm/file_permission")

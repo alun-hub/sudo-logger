@@ -62,6 +62,7 @@ type SandboxSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxProgramSpecs struct {
+	SandboxFileOpen       *ebpf.ProgramSpec `ebpf:"sandbox_file_open"`
 	SandboxFilePermission *ebpf.ProgramSpec `ebpf:"sandbox_file_permission"`
 	SandboxInodeCreate    *ebpf.ProgramSpec `ebpf:"sandbox_inode_create"`
 	SandboxInodeMkdir     *ebpf.ProgramSpec `ebpf:"sandbox_inode_mkdir"`
@@ -70,6 +71,7 @@ type SandboxProgramSpecs struct {
 	SandboxInodeSetattr   *ebpf.ProgramSpec `ebpf:"sandbox_inode_setattr"`
 	SandboxInodeSymlink   *ebpf.ProgramSpec `ebpf:"sandbox_inode_symlink"`
 	SandboxInodeUnlink    *ebpf.ProgramSpec `ebpf:"sandbox_inode_unlink"`
+	SandboxPathTruncate   *ebpf.ProgramSpec `ebpf:"sandbox_path_truncate"`
 	SandboxProcessExit    *ebpf.ProgramSpec `ebpf:"sandbox_process_exit"`
 	SandboxProcessFork    *ebpf.ProgramSpec `ebpf:"sandbox_process_fork"`
 	SandboxTaskKill       *ebpf.ProgramSpec `ebpf:"sandbox_task_kill"`
@@ -136,6 +138,7 @@ type SandboxVariables struct {
 //
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxPrograms struct {
+	SandboxFileOpen       *ebpf.Program `ebpf:"sandbox_file_open"`
 	SandboxFilePermission *ebpf.Program `ebpf:"sandbox_file_permission"`
 	SandboxInodeCreate    *ebpf.Program `ebpf:"sandbox_inode_create"`
 	SandboxInodeMkdir     *ebpf.Program `ebpf:"sandbox_inode_mkdir"`
@@ -144,6 +147,7 @@ type SandboxPrograms struct {
 	SandboxInodeSetattr   *ebpf.Program `ebpf:"sandbox_inode_setattr"`
 	SandboxInodeSymlink   *ebpf.Program `ebpf:"sandbox_inode_symlink"`
 	SandboxInodeUnlink    *ebpf.Program `ebpf:"sandbox_inode_unlink"`
+	SandboxPathTruncate   *ebpf.Program `ebpf:"sandbox_path_truncate"`
 	SandboxProcessExit    *ebpf.Program `ebpf:"sandbox_process_exit"`
 	SandboxProcessFork    *ebpf.Program `ebpf:"sandbox_process_fork"`
 	SandboxTaskKill       *ebpf.Program `ebpf:"sandbox_task_kill"`
@@ -151,6 +155,7 @@ type SandboxPrograms struct {
 
 func (p *SandboxPrograms) Close() error {
 	return _SandboxClose(
+		p.SandboxFileOpen,
 		p.SandboxFilePermission,
 		p.SandboxInodeCreate,
 		p.SandboxInodeMkdir,
@@ -159,6 +164,7 @@ func (p *SandboxPrograms) Close() error {
 		p.SandboxInodeSetattr,
 		p.SandboxInodeSymlink,
 		p.SandboxInodeUnlink,
+		p.SandboxPathTruncate,
 		p.SandboxProcessExit,
 		p.SandboxProcessFork,
 		p.SandboxTaskKill,
