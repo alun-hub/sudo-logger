@@ -65,7 +65,12 @@ Descendants of a \fBsudo\fR process tracked by the agent since session start.
 .PP
 Processes outside of active \fBsudo-logger\fR sessions are completely unaffected.
 .SH REQUIREMENTS
-Requires \fBlsm=bpf\fR in the kernel boot parameters and \fBCONFIG_BPF_LSM=y\fR.
+Requires \fBCONFIG_BPF_LSM=y\fR and \fBbpf\fR present in the active LSM list
+(verify with \fBgrep bpf /sys/kernel/security/lsm\fR).
+On Fedora\ 38 and later \fBbpf\fR is active by default; no boot parameter
+changes are needed.
+On older or non-Fedora kernels add \fBlsm=bpf\fR to \fBGRUB_CMDLINE_LINUX\fR
+and run \fBgrub2-mkconfig\fR.
 .SH FILES
 .I /etc/sudo-logger/sandbox.yaml
 .SH SEE ALSO

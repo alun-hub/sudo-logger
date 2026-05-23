@@ -578,10 +578,11 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 		case protocol.MsgSandboxAlert:
 			// Kernel LSM blocked an operation in a sandboxed session.
+			// Must NOT return here — the session connection is still active.
 			var alert protocol.SandboxAlert
 			if err := json.Unmarshal(payload, &alert); err != nil {
 				log.Printf("parse SANDBOX_ALERT from %s: %v", remote, err)
-				return
+				continue
 			}
 			log.Printf("SECURITY ALERT: SANDBOX_VIOLATION from %s — process %q (PID %d) blocked (type %d) in session %s",
 				remote, alert.Comm, alert.Pid, alert.Type, alert.SessionID)
@@ -591,7 +592,6 @@ func (srv *server) handleConn(conn *tls.Conn) {
 					log.Printf("[%s] record violation: %v", alert.SessionID, err)
 				}
 			}
-			return
 
 		case protocol.MsgDivergenceAlert:
 			// Agent detected a sudo/pkexec execve with no plugin SESSION_START.

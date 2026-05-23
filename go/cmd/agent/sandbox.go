@@ -16,6 +16,35 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// Alert type constants — must match enum sandbox_alert_type in sandbox.bpf.c.
+const (
+	alertFileOpen     = 1
+	alertFileWrite    = 2
+	alertFileTruncate = 3
+	alertFileSetattr  = 4
+	alertFileUnlink   = 5
+	alertFileRename   = 6
+	alertDirMkdir     = 7
+	alertDirCreate    = 8
+	alertDirMknod     = 9
+	alertDirSymlink   = 10
+	alertProcessKill  = 11
+)
+
+var alertNames = map[uint32]string{
+	alertFileOpen:     "FILE_OPEN",
+	alertFileWrite:    "FILE_WRITE",
+	alertFileTruncate: "FILE_TRUNCATE",
+	alertFileSetattr:  "FILE_SETATTR",
+	alertFileUnlink:   "FILE_UNLINK",
+	alertFileRename:   "FILE_RENAME",
+	alertDirMkdir:     "DIR_MKDIR",
+	alertDirCreate:    "DIR_CREATE",
+	alertDirMknod:     "DIR_MKNOD",
+	alertDirSymlink:   "DIR_SYMLINK",
+	alertProcessKill:  "PROCESS_KILL",
+}
+
 // bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c
 type bpfSandboxAlert struct {
 	CgroupID uint64
@@ -42,7 +71,8 @@ func (s *sandboxSubsystem) pollAlerts() {
 		}
 
 		var bpfAlert bpfSandboxAlert
-		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &bpfAlert); err != nil {
+		if err := binary.Read(bytes.NewReader(record.RawSample), binary.NativeEndian, &bpfAlert); err != nil {
+			log.Printf("sandbox: decode alert: %v", err)
 			continue
 		}
 
@@ -52,36 +82,14 @@ func (s *sandboxSubsystem) pollAlerts() {
 }
 
 func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType uint32, comm string) {
-	typeName := "UNKNOWN"
-	switch alertType {
-	case 1:
-		typeName = "FILE_OPEN"
-	case 2:
-		typeName = "FILE_WRITE"
-	case 3:
-		typeName = "FILE_TRUNCATE"
-	case 4:
-		typeName = "FILE_SETATTR"
-	case 5:
-		typeName = "FILE_UNLINK"
-	case 6:
-		typeName = "FILE_RENAME"
-	case 7:
-		typeName = "DIR_MKDIR"
-	case 8:
-		typeName = "DIR_CREATE"
-	case 9:
-		typeName = "DIR_MKNOD"
-	case 10:
-		typeName = "DIR_SYMLINK"
-	case 11:
-		typeName = "PROCESS_KILL"
+	typeName := alertNames[alertType]
+	if typeName == "" {
+		typeName = "UNKNOWN"
 	}
 
 	log.Printf("SANDBOX VIOLATION: Process %q (PID %d) blocked by %s [cgid=%d]",
 		comm, pid, typeName, cgid)
 
-	// Forward to log server
 	alert := protocol.SandboxAlert{
 		Pid:  pid,
 		Comm: comm,
@@ -89,7 +97,6 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 		Ts:   time.Now().Unix(),
 	}
 
-	// Find the session and send the alert via its server connection
 	activeCgsMu.Lock()
 	var serverW *protocol.Writer
 	for _, cg := range activeCgs {
@@ -103,8 +110,8 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 
 	if serverW != nil {
 		payload, _ := json.Marshal(alert)
+		// WriteMessage flushes internally; no separate Flush needed.
 		_ = serverW.WriteMessage(protocol.MsgSandboxAlert, payload)
-		_ = serverW.Flush()
 	}
 }
 

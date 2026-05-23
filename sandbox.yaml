@@ -5,8 +5,10 @@
 # from being tampered with by processes running inside sudo sessions.
 #
 # Enforcement is kernel-level via eBPF LSM — cannot be bypassed by root
-# within a session. The agent must be running and the kernel must boot with
-# lsm=bpf (add to GRUB_CMDLINE_LINUX, run grub2-mkconfig).
+# within a session. The agent must be running and BPF must be active in the
+# kernel LSM list (verify: grep bpf /sys/kernel/security/lsm).
+# Fedora 38+: active by default, no boot parameters needed.
+# Older/non-Fedora: add lsm=bpf to GRUB_CMDLINE_LINUX, run grub2-mkconfig.
 #
 # IMPORTANT — what this protects and what it does not:
 #   PROTECTS:  writing to, opening for write, truncating, deleting, and renaming listed paths.

@@ -233,7 +233,7 @@ migrate-sessions \
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
-| **Process sandbox (optional)** | 13 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Requires `lsm=bpf`. See [Process sandbox](#process-sandbox). |
+| **Process sandbox (optional)** | 13 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Active by default on Fedora 38+; older or non-Fedora kernels may need `lsm=bpf`. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 
@@ -335,12 +335,15 @@ migrate-sessions \
   it does not intercept `connect()` + `send()` — normal IPC to a listed socket
   still works. The protection is against socket file replacement, not data injection.
 
-- **Process sandbox requires `lsm=bpf` kernel boot parameter**: BPF LSM hooks
-  are only active when `bpf` appears in the kernel's `lsm=` parameter. On
-  Fedora, add `lsm=bpf` (or append it to an existing list) to
-  `GRUB_CMDLINE_LINUX` in `/etc/default/grub` and run `grub2-mkconfig -o
-  /boot/grub2/grub.cfg`. If the parameter is missing, `AttachLSM` will fail
-  and the agent logs a warning; all other agent functions continue normally.
+- **Process sandbox requires BPF LSM to be active**: BPF LSM hooks are only
+  enforced when `bpf` appears in the kernel's active LSM list. On Fedora 38
+  and later `bpf` is included in the default `CONFIG_LSM` list and active
+  without any boot parameter changes — verify with
+  `grep bpf /sys/kernel/security/lsm`. On older or non-Fedora kernels, add
+  `lsm=bpf` (appending to any existing list) to `GRUB_CMDLINE_LINUX` in
+  `/etc/default/grub` and run `grub2-mkconfig -o /boot/grub2/grub.cfg`. If
+  BPF LSM is absent, `AttachLSM` fails and the agent logs a warning; all
+  other agent functions continue normally.
 
 ---
 
@@ -749,20 +752,26 @@ because they are enforced by the Linux kernel's LSM framework via eBPF.
 |-------------|--------|
 | Kernel ≥ 5.7 | `lsm/` eBPF program type introduced in 5.7 |
 | `CONFIG_BPF_LSM=y` | Kernel compiled with BPF LSM support |
-| `lsm=bpf` boot parameter | BPF must appear in the active LSM list |
+| BPF active in LSM list | `bpf` must appear in `/sys/kernel/security/lsm` |
 | `CONFIG_DEBUG_INFO_BTF=y` | Required for CO-RE (Compile Once, Run Everywhere) |
 
-Enable on Fedora:
+**Fedora 38 and later**: `bpf` is included in the default `CONFIG_LSM` list
+and is active out of the box — no GRUB changes needed. Verify:
 
 ```bash
-# Add lsm=bpf to GRUB_CMDLINE_LINUX in /etc/default/grub, for example:
-# GRUB_CMDLINE_LINUX="... lsm=selinux,bpf"
+grep bpf /sys/kernel/security/lsm   # should print a line containing "bpf"
+```
+
+**Older or non-Fedora kernels**: add `lsm=bpf` to `GRUB_CMDLINE_LINUX` in
+`/etc/default/grub` (append to any existing `lsm=` value), then:
+
+```bash
 grub2-mkconfig -o /boot/grub2/grub.cfg
 reboot
 ```
 
-If the parameter is absent, the agent logs a warning at startup and continues
-without sandbox enforcement — all other functionality is unaffected.
+If BPF LSM is absent at runtime, the agent logs a warning at startup and
+continues without sandbox enforcement — all other functionality is unaffected.
 
 #### Enabling the sandbox
 
