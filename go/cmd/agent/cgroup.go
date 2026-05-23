@@ -169,6 +169,25 @@ func (cg *cgroupSession) inOurCgroup(pid int) bool {
 	return strings.Contains(string(data), cg.cgName)
 }
 
+// cgroupInodeOf returns the inode of pid's cgroup v2 directory.
+// This matches what bpf_get_current_cgroup_id() returns for the same process.
+func cgroupInodeOf(pid int) uint64 {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "0::") {
+			path := "/sys/fs/cgroup" + strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+			var st syscall.Stat_t
+			if err := syscall.Stat(path, &st); err == nil {
+				return st.Ino
+			}
+		}
+	}
+	return 0
+}
+
 func (cg *cgroupSession) moveSudoOut() {
 	parentProcs := filepath.Join(filepath.Dir(cg.path), "cgroup.procs")
 	if err := os.WriteFile(parentProcs, []byte(strconv.Itoa(cg.sudoPid)+"\n"), 0644); err != nil {
@@ -247,6 +266,7 @@ func (cg *cgroupSession) trackDescendants() {
 					); err == nil {
 						debugLog("cgroup %s: pid %d escaped (shell), reclaimed", cg.cgName, pid)
 					} else {
+						sandboxSys.registerAuxCgroup(cgroupInodeOf(pid), cg)
 						cg.escapedMu.Lock()
 						if _, already := cg.escaped[pid]; !already {
 							cg.escaped[pid] = false
@@ -267,6 +287,7 @@ func (cg *cgroupSession) trackDescendants() {
 						continue
 					}
 				}
+				sandboxSys.registerAuxCgroup(cgroupInodeOf(pid), cg)
 				shouldSIGSTOP := pgidErr == nil && pgid == pid
 				cg.escapedMu.Lock()
 				if _, already := cg.escaped[pid]; !already {
@@ -420,6 +441,7 @@ func (cg *cgroupSession) remove() {
 			}
 		}
 		sandboxSys.unregisterCgroup(cg.cgroupID)
+		sandboxSys.unregisterAuxCgroups(cg)
 		if err := os.Remove(cg.path); err != nil {
 			log.Printf("cgroup remove %s: %v", cg.cgName, err)
 		} else {

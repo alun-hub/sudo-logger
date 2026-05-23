@@ -110,13 +110,52 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 	activeCgsMu.Unlock()
 
 	if serverW == nil {
-		log.Printf("sandbox: no session found for cgid=%d (active sessions: %d) — alert not forwarded to server", cgid, nSessions)
+		// Primary lookup by session cgroup failed. The alerting process may have
+		// escaped its session cgroup before being blocked (e.g. sudo forks a child
+		// that moves itself via PAM/namespace before exec-ing the command). Retry
+		// after 150 ms — enough for trackDescendants (50 ms poll) to detect the
+		// escape and register the aux cgroup entry.
+		go s.retryViolation(cgid, alert, nSessions)
 		return
 	}
 
 	payload, _ := json.Marshal(alert)
 	if err := serverW.WriteMessage(protocol.MsgSandboxAlert, payload); err != nil {
 		log.Printf("sandbox: send alert to server: %v", err)
+	}
+}
+
+func (s *sandboxSubsystem) retryViolation(cgid uint64, alert protocol.SandboxAlert, nSessions int) {
+	time.Sleep(150 * time.Millisecond)
+
+	var serverW *protocol.Writer
+	activeCgsMu.Lock()
+	for _, cg := range activeCgs {
+		if cg.cgroupID == cgid {
+			alert.SessionID = cg.cgName
+			serverW = cg.serverW
+			break
+		}
+	}
+	activeCgsMu.Unlock()
+
+	if serverW == nil {
+		auxCgroupMu.Lock()
+		if cg, ok := auxCgroupMap[cgid]; ok {
+			alert.SessionID = cg.cgName
+			serverW = cg.serverW
+		}
+		auxCgroupMu.Unlock()
+	}
+
+	if serverW == nil {
+		log.Printf("sandbox: no session found for cgid=%d (active sessions: %d) — alert dropped", cgid, nSessions)
+		return
+	}
+
+	payload, _ := json.Marshal(alert)
+	if err := serverW.WriteMessage(protocol.MsgSandboxAlert, payload); err != nil {
+		log.Printf("sandbox: send alert to server (retry): %v", err)
 	}
 }
 
@@ -154,6 +193,38 @@ type sandboxSubsystem struct {
 }
 
 var sandboxSys *sandboxSubsystem
+
+// auxCgroupMap maps cgroup IDs of escaped session processes to their sessions.
+// Populated by cgroup.go when trackDescendants detects a PID that has escaped
+// to a different cgroup, so that children of the escaped PID (which inherit
+// that cgroup) can still be attributed to the correct session.
+var (
+	auxCgroupMu  sync.Mutex
+	auxCgroupMap = map[uint64]*cgroupSession{}
+)
+
+func (s *sandboxSubsystem) registerAuxCgroup(cgid uint64, cg *cgroupSession) {
+	if s == nil || cgid == 0 {
+		return
+	}
+	auxCgroupMu.Lock()
+	auxCgroupMap[cgid] = cg
+	auxCgroupMu.Unlock()
+	debugLog("sandbox: aux cgroup %d registered for session %s", cgid, cg.cgName)
+}
+
+func (s *sandboxSubsystem) unregisterAuxCgroups(cg *cgroupSession) {
+	if s == nil {
+		return
+	}
+	auxCgroupMu.Lock()
+	for id, sess := range auxCgroupMap {
+		if sess == cg {
+			delete(auxCgroupMap, id)
+		}
+	}
+	auxCgroupMu.Unlock()
+}
 
 func startSandbox(configPath string) {
 	s := &sandboxSubsystem{}
