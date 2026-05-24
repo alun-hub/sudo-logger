@@ -4,6 +4,4 @@
 # WAYLAND_DISPLAY/XDG_RUNTIME_DIR: required for native Wayland apps.
 # DISPLAY/XAUTHORITY: required for X11/XWayland fallback apps.
 # NO_AT_BRIDGE/SPI: suppresses accessibility warnings from GTK apps.
-# DBUS_SESSION_BUS_ADDRESS: required for xdg-desktop-portal (GTK4 settings,
-#   file chooser, etc.) to work correctly in sudo GUI sessions.
-Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY XAUTHORITY NO_AT_BRIDGE NO_AT_SPI DBUS_SESSION_BUS_ADDRESS"
+Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY XAUTHORITY NO_AT_BRIDGE NO_AT_SPI"
