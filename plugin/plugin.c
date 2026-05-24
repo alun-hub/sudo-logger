@@ -1053,40 +1053,21 @@ static int plugin_open(unsigned int        version,
                         }
                     }
                 }
-            }
-        }
-    }
-
-    /* On Fedora 44+, pam_systemd creates a systemd --user session for root
-     * which exposes a D-Bus session bus at /run/user/0/bus.  GTK4 finds this
-     * bus, connects to it, and then fails to activate org.freedesktop.portal
-     * .Desktop.  That activation failure triggers a g_warning() on stderr
-     * which sudo-logger captures as TTY output, polluting the session replay
-     * with a spurious text pane alongside the Wayland window capture.
-     *
-     * If DBUS_SESSION_BUS_ADDRESS is already in user_env (preserved via
-     * env_keep), leave it alone.  Otherwise inject a non-existent socket path:
-     * GTK4 then fails at *connection* level, which only emits a silent DEBUG
-     * message rather than a visible g_warning(). */
-    if (user_env) {
-        char **menv  = (char **)user_env;
-        int    found = 0;
-        for (int i = 0; menv[i]; i++) {
-            if (strncmp(menv[i], "DBUS_SESSION_BUS_ADDRESS=", 25) == 0) {
-                found = 1;
-                break;
-            }
-        }
-        if (!found) {
-            static const char dbus_dummy[] =
-                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/sudo-logger-nosession";
-            for (int i = 0; menv[i]; i++) {
-                if (strncmp(menv[i], "SUDO_GID=", 9) == 0) {
-                    menv[i] = (char *)dbus_dummy;
-                    syslog(LOG_DEBUG,
-                        "sudo-logger: set dummy DBUS_SESSION_BUS_ADDRESS "
-                        "to suppress GTK4 portal warning");
-                    break;
+                /* This is a Wayland GUI session.  Redirect stderr to
+                 * /dev/null so that GTK4 portal warnings (which changed
+                 * from silent to g_warning in Fedora 44) do not appear as
+                 * TTY output in the session replay alongside the window
+                 * capture.  GUI applications report errors in their windows,
+                 * not on stderr, so this does not lose meaningful output. */
+                {
+                    int dn = open("/dev/null", O_WRONLY | O_CLOEXEC);
+                    if (dn >= 0) {
+                        dup2(dn, STDERR_FILENO);
+                        close(dn);
+                        syslog(LOG_DEBUG,
+                            "sudo-logger: redirected stderr to /dev/null "
+                            "for Wayland GUI session");
+                    }
                 }
             }
         }
