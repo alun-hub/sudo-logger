@@ -708,15 +708,25 @@ the replay interface shows these as an image slideshow.
 
 **Requirements:**
 - A running Wayland compositor (KDE, GNOME, …)
-- `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` preserved through sudo — add to
-  `/etc/sudoers` (use `visudo`):
+- Environment variables preserved through sudo — the client RPM installs
+  `/etc/sudoers.d/sudo-logger-wayland` with the full set:
 
 ```
-Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR"
+Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY XAUTHORITY NO_AT_BRIDGE NO_AT_SPI"
 ```
 
-This is included in the sudoers snippet installed by the client RPM
-(`/etc/sudoers.d/sudo-logger-wayland`).
+**GTK4 on Fedora 44+ (and other distributions shipping GTK4 ≥ 4.20):**
+GTK4 defaults to a Vulkan renderer and attempts to initialise GPU acceleration
+when launched as root. This causes the process to hang before the window
+appears. Add the following to `/etc/environment` to force the Cairo renderer:
+
+```
+GDK_DISABLE=vulkan
+GSK_RENDERER=cairo
+```
+
+This affects all GTK4 applications system-wide, which is intentional — the
+hang occurs whenever any GTK4 app runs as root, not only through sudo-logger.
 
 **Disable Wayland capture** (e.g. on headless or X11-only machines):
 
