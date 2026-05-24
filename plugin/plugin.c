@@ -1053,22 +1053,6 @@ static int plugin_open(unsigned int        version,
                         }
                     }
                 }
-                /* This is a Wayland GUI session.  Redirect stderr to
-                 * /dev/null so that GTK4 portal warnings (which changed
-                 * from silent to g_warning in Fedora 44) do not appear as
-                 * TTY output in the session replay alongside the window
-                 * capture.  GUI applications report errors in their windows,
-                 * not on stderr, so this does not lose meaningful output. */
-                {
-                    int dn = open("/dev/null", O_WRONLY | O_CLOEXEC);
-                    if (dn >= 0) {
-                        dup2(dn, STDERR_FILENO);
-                        close(dn);
-                        syslog(LOG_DEBUG,
-                            "sudo-logger: redirected stderr to /dev/null "
-                            "for Wayland GUI session");
-                    }
-                }
             }
         }
     }
@@ -1159,6 +1143,20 @@ static void plugin_close(int exit_status, int error)
  * Input typed during a freeze is buffered in the pty; bash cannot process it
  * until the cgroup unfreezes.
  */
+/* Returns 1 if buf contains a GTK4 portal/session-bus warning that should be
+ * suppressed from the session recording.  On Fedora 44+, GTK4 apps started as
+ * root emit these via g_warning() to stderr because xdg-desktop-portal is not
+ * reachable from root's systemd --user session.  They are noise: no GTK3 app
+ * or shell ever produces these strings. */
+static int is_gtk4_portal_noise(const char *buf, unsigned int len)
+{
+    if (memmem(buf, len, "Gdk-WARNING", 11) && memmem(buf, len, "portal", 6))
+        return 1;
+    if (memmem(buf, len, "Gtk-WARNING", 11) && memmem(buf, len, "session bus", 11))
+        return 1;
+    return 0;
+}
+
 static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
@@ -1173,6 +1171,8 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_shipper_dead))
+        return 0;
+    if (is_gtk4_portal_noise(buf, len))
         return 0;
     ship_chunk(STREAM_TTYOUT, buf, len);
     return 1;
@@ -1203,6 +1203,8 @@ static int log_stderr(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_shipper_dead))
+        return 0;
+    if (is_gtk4_portal_noise(buf, len))
         return 0;
     ship_chunk(STREAM_STDERR, buf, len);
     return 1;
