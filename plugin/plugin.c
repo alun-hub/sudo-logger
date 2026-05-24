@@ -1057,6 +1057,50 @@ static int plugin_open(unsigned int        version,
         }
     }
 
+    /* Inject DBUS_SESSION_BUS_ADDRESS so GTK4 apps launched under sudo can
+     * reach xdg-desktop-portal.  Without it, GTK4 tries to activate the
+     * portal on a session bus that doesn't exist for root, prints a warning,
+     * and may create a fallback window that contaminates the Wayland capture.
+     * The socket path is predictable on systemd systems. */
+    if (user_env && user_uid >= 0) {
+        char dbus_val[128];
+        int dlen = snprintf(dbus_val, sizeof(dbus_val),
+                            "unix:path=/run/user/%d/bus", user_uid);
+        if (dlen > 0 && dlen < (int)sizeof(dbus_val)) {
+            char **menv = (char **)user_env;
+            int found = 0;
+            for (int i = 0; menv[i]; i++) {
+                if (strncmp(menv[i], "DBUS_SESSION_BUS_ADDRESS=", 25) == 0) {
+                    found = 1; /* env_keep already preserved it */
+                    break;
+                }
+            }
+            if (!found) {
+                char *dentry = malloc(25 + dlen + 1);
+                if (dentry) {
+                    memcpy(dentry, "DBUS_SESSION_BUS_ADDRESS=", 25);
+                    memcpy(dentry + 25, dbus_val, dlen + 1);
+                    for (int i = 0; menv[i]; i++) {
+                        if (strncmp(menv[i], "SUDO_GID=", 9) == 0) {
+                            menv[i] = dentry;
+                            found = 1;
+                            syslog(LOG_DEBUG,
+                                "sudo-logger: injected DBUS_SESSION_BUS_ADDRESS "
+                                "via SUDO_GID slot -> %s", dbus_val);
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        syslog(LOG_WARNING,
+                            "sudo-logger: no spare slot for "
+                            "DBUS_SESSION_BUS_ADDRESS; portal may fail");
+                        free(dentry);
+                    }
+                }
+            }
+        }
+    }
+
     g_last_ack_query = now_sec();
     /* Seed ack time so the freeze window starts from now */
     g_last_ack_time = now_sec();
