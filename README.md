@@ -1728,7 +1728,7 @@ INCOMPLETE (the agent cannot contact an unreachable server).
 
 | Termination cause | Badge | Risk score | Server sees |
 |-------------------|-------|-----------|-------------|
-| Shipper killed/crashed | ⚠ incomplete (red) | +15 | EOF/RST on active conn |
+| Agent killed/crashed | ⚠ incomplete (red) | +15 | EOF/RST on active conn |
 | Freeze-timeout (network outage) | ⏱ freeze-timeout (amber) | +0 | SESSION_ABANDON on new conn |
 | Freeze-timeout (server still down) | ⚠ incomplete (red) | +15 | EOF/RST, no ABANDON |
 

@@ -48,13 +48,13 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 
 `sudo-logsrvd` records all I/O verbatim.
 
-`sudo-logger` implements **Surgical Redaction** in the local shipper. It uses a stateful redactor that detects interactive password prompts (e.g., `[sudo] password for ...`) and masks subsequent input until a newline. It also uses a high-performance "trigger regex" fast-path to identify and mask AWS access keys, API tokens, Bearer headers, JWT tokens, and IBAN/SWIFT numbers before they reach the network.
+`sudo-logger` implements **Surgical Redaction** in the local agent. It uses a stateful redactor that detects interactive password prompts (e.g., `[sudo] password for ...`) and masks subsequent input until a newline. It also uses a high-performance "trigger regex" fast-path to identify and mask AWS access keys, API tokens, Bearer headers, JWT tokens, and IBAN/SWIFT numbers before they reach the network.
 
 ### 6. Wayland screen capture and Linger Mode
 
 `sudo-logsrvd` records terminal I/O only.
 
-`sudo-logger` additionally records GUI programs started under sudo on Wayland desktops by intercepting `wl_surface_commit` via a transparent compositor proxy. Uniquely, it features a **Linger Mode**: if the main `sudo` process exits but backgrounded GUI processes (e.g., `sudo gvim &`) are still running, the shipper continues to track and log their screen updates until the entire process group is empty.
+`sudo-logger` additionally records GUI programs started under sudo on Wayland desktops by intercepting `wl_surface_commit` via a transparent compositor proxy. Uniquely, it features a **Linger Mode**: if the main `sudo` process exits but backgrounded GUI processes (e.g., `sudo gvim &`) are still running, the agent continues to track and log their screen updates until the entire process group is empty.
 
 ### 7. Host identity binding
 
@@ -109,7 +109,7 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 | **Process sandboxing (eBPF LSM)** | ✗ | ✅ |
 | **eBPF divergence detection** | ✗ | ✅ |
 | **Distributed storage (S3 + PG)** | ✗ | ✅ |
-| **SELinux policy (shipper)** | ✗ | ✅ |
+| **SELinux policy (agent)** | ✗ | ✅ |
 | **Relay / hierarchical logging** | ✅ | ✗ |
 | **Ships with sudo** | ✅ | ✗ |
 | **sudoreplay CLI compatible** | ✅ | ✗ (asciinema v2) |

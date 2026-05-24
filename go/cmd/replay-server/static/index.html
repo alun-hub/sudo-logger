@@ -1096,7 +1096,7 @@
           <tbody>
             <tr><td>Runas user</td><td>Only match sessions where sudo ran as this user. Leave blank to match any. Default is <code>root</code>.</td></tr>
             <tr><td>Min duration</td><td>Only match sessions that lasted at least this many seconds. Useful for flagging unusually long interactive shells.</td></tr>
-            <tr><td>Incomplete session</td><td>Only match sessions that ended without a clean <code>SESSION_END</code> — e.g. the shipper was killed.</td></tr>
+            <tr><td>Incomplete session</td><td>Only match sessions that ended without a clean <code>SESSION_END</code> — e.g. the agent was killed.</td></tr>
             <tr><td>After business hours</td><td>Only match sessions started between 23:00 and 05:59.</td></tr>
           </tbody>
         </table>
@@ -2303,7 +2303,7 @@ function renderInfoBar(sess) {
     const warn = el('div', 'warn-bar-timeout', '⏱ Session terminated by network outage — client lost connectivity to log server. Recording up to the network loss is intact.');
     elInfoBar.appendChild(warn);
   } else if (sess.incomplete) {
-    const warn = el('div', 'warn-bar', '⚠ Session incomplete — shipper was killed or crashed before session_end. Recording may be truncated.');
+    const warn = el('div', 'warn-bar', '⚠ Session incomplete — agent was killed or crashed before session_end. Recording may be truncated.');
     elInfoBar.appendChild(warn);
   }
 

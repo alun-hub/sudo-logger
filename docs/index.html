@@ -1103,7 +1103,7 @@ body::after {
         Real-time sudo session recording with mandatory remote acknowledgement.<br>
         If the log server goes dark — so does your terminal.
       </div>
-      <div class="title-prompt">$ sudo-shipper -server logserver:9876&nbsp;<span style="color:var(--green);animation:blink 1s step-end infinite;display:inline-block">█</span></div>
+      <div class="title-prompt">$ sudo-logger-agent -server logserver:9876&nbsp;<span style="color:var(--green);animation:blink 1s step-end infinite;display:inline-block">█</span></div>
     </div>
   </div>
 
@@ -1158,7 +1158,7 @@ body::after {
           <div class="a-desc">
             Loaded by sudo for every invocation.<br>
             Captures all I/O streams.<br>
-            <span style="color:var(--red)">Blocks sudo entirely</span> if shipper is unreachable at start.
+            <span style="color:var(--red)">Blocks sudo entirely</span> if agent is unreachable at start.
           </div>
         </div>
 
@@ -1172,7 +1172,7 @@ body::after {
 
         <div class="a-box glow">
           <div class="a-label">Go Daemon</div>
-          <div class="a-name">SHIPPER</div>
+          <div class="a-name">AGENT</div>
           <div class="a-desc">
             Local bridge running as root.<br>
             ACK state per session.<br>
@@ -1290,8 +1290,8 @@ body::after {
         <div class="sec-card">
           <div class="sec-icon">⚡</div>
           <div>
-            <div class="sec-title">Session terminated if shipper is killed</div>
-            <div class="sec-desc">If the shipper socket drops mid-session (EPIPE / ECONNRESET), the plugin sends SIGTERM to sudo within 150 ms. The attacker's shell is terminated — they cannot continue unlogged. The kill command itself is already in the log.</div>
+            <div class="sec-title">Session terminated if agent is killed</div>
+            <div class="sec-desc">If the agent socket drops mid-session (EPIPE / ECONNRESET), the plugin sends SIGTERM to sudo within 150 ms. The attacker's shell is terminated — they cannot continue unlogged. The kill command itself is already in the log.</div>
           </div>
         </div>
 
@@ -1299,7 +1299,7 @@ body::after {
           <div class="sec-icon">⚠️</div>
           <div>
             <div class="sec-title">Incomplete session detection</div>
-            <div class="sec-desc">If the shipper is killed mid-session, the server writes an <code>INCOMPLETE</code> marker and logs a <code>SECURITY:</code> warning. The replay UI flags the session with a red border and warning badge.</div>
+            <div class="sec-desc">If the agent is killed mid-session, the server writes an <code>INCOMPLETE</code> marker and logs a <code>SECURITY:</code> warning. The replay UI flags the session with a red border and warning badge.</div>
           </div>
         </div>
 
@@ -1333,7 +1333,7 @@ body::after {
           <div class="pc-label">Unix socket</div>
         </div>
         <div class="proto-actor-box">
-          <div class="pa-name">SHIPPER</div>
+          <div class="pa-name">AGENT</div>
           <div class="pa-sub">Go · local daemon</div>
         </div>
         <div class="proto-conn">
@@ -1348,22 +1348,22 @@ body::after {
 
       <div class="proto-messages">
         <div class="proto-row">
-          <div class="pr-dir">plugin → shipper → server</div>
+          <div class="pr-dir">plugin → agent → server</div>
           <div class="pr-msg">SESSION_START / tty_output (seq=N)</div>
           <div class="pr-note">chunk + sequence number</div>
         </div>
         <div class="proto-row ack">
-          <div class="pr-dir">server → shipper → plugin</div>
+          <div class="pr-dir">server → agent → plugin</div>
           <div class="pr-msg">ACK (seq=N · 64-byte ed25519 sig)</div>
           <div class="pr-note">server signs; plugin verifies</div>
         </div>
         <div class="proto-row hb">
-          <div class="pr-dir">shipper → server &nbsp; every 400 ms</div>
+          <div class="pr-dir">agent → server &nbsp; every 400 ms</div>
           <div class="pr-msg">HEARTBEAT</div>
           <div class="pr-note">liveness probe</div>
         </div>
         <div class="proto-row hba">
-          <div class="pr-dir">server → shipper</div>
+          <div class="pr-dir">server → agent</div>
           <div class="pr-msg">HEARTBEAT_ACK</div>
           <div class="pr-note">missing &gt; 800 ms → freeze</div>
         </div>
@@ -1396,8 +1396,8 @@ body::after {
         <div class="crypto-panel">
           <div class="crypto-title">🔐 &nbsp; Mutual TLS (mTLS)</div>
           <div class="crypto-item">A private CA issues certificates for both server and all clients.</div>
-          <div class="crypto-item">TLS handshake requires a valid <code>client cert</code> — unknown shippers are rejected before any data is exchanged.</div>
-          <div class="crypto-item">Client certificate CN is verified against the <code>host</code> field in SESSION_START — a compromised shipper on host A cannot forge logs for host B.</div>
+          <div class="crypto-item">TLS handshake requires a valid <code>client cert</code> — unknown agents are rejected before any data is exchanged.</div>
+          <div class="crypto-item">Client certificate CN is verified against the <code>host</code> field in SESSION_START — a compromised agent on host A cannot forge logs for host B.</div>
           <div class="crypto-item">All session I/O is encrypted in transit — no plaintext on the wire.</div>
           <div class="crypto-payload">
             <span class="cp-label">server cert</span>  CN=sudo-logserver <span class="cp-comment">← signed by shared CA</span><br>
@@ -1410,8 +1410,8 @@ body::after {
           <div class="crypto-title">✍ &nbsp; ed25519 ACK Signing</div>
           <div class="crypto-item">Server holds the <code>ed25519 private key</code> — never distributed to clients.</div>
           <div class="crypto-item">Each ACK is signed over a payload binding session ID, sequence number, and nanosecond timestamp — prevents replay of old ACKs.</div>
-          <div class="crypto-item">Shipper holds only the <code>public key</code> (ack-verify.key): can verify but cannot forge.</div>
-          <div class="crypto-item">Even a fully compromised shipper cannot generate valid ACKs fleet-wide.</div>
+          <div class="crypto-item">Agent holds only the <code>public key</code> (ack-verify.key): can verify but cannot forge.</div>
+          <div class="crypto-item">Even a fully compromised agent cannot generate valid ACKs fleet-wide.</div>
           <div class="crypto-payload">
             <span class="cp-label">ACK payload signed by server</span><br>
             &nbsp; <span class="cp-field">session_id</span>   <span class="cp-bytes">variable  </span> <span class="cp-comment">← ties ACK to session</span><br>
@@ -1434,7 +1434,7 @@ body::after {
 
         <div>
           <div class="cgroup-tree">
-            <span class="ct-comment"># shipper creates one cgroup per session</span><br>
+            <span class="ct-comment"># agent creates one cgroup per session</span><br>
             /sys/fs/cgroup/<br>
             &nbsp;&nbsp;<span class="ct-path">sudo_logger/&lt;session_id&gt;/</span><br>
             &nbsp;&nbsp;&nbsp;&nbsp;<span class="ct-file">cgroup.procs</span> <span class="ct-dim">←</span> <span class="ct-val">PID</span><span class="ct-comment"> # sudo pid; children inherit</span><br>
@@ -1459,7 +1459,7 @@ body::after {
               <div class="cpt-body">
                 systemd/GNOME <em>moves</em> them to <code>app-*.scope</code>
                 — outside our cgroup. No controlling TTY →
-                shipper sends <code>SIGSTOP</code> directly (freeze, not kill).
+                agent sends <code>SIGSTOP</code> directly (freeze, not kill).
                 On resume: <code>SIGCONT</code>.
               </div>
             </div>
@@ -1469,7 +1469,7 @@ body::after {
         <div class="cgroup-steps">
           <div class="cg-step s-ok">
             <div class="cg-step-label">① session starts</div>
-            <div class="cg-step-text">Shipper creates cgroup and adds the sudo PID. All child processes inherit the cgroup. The agent uses a `readyToFork` barrier to ensure `sudo` remains in the restricted cgroup until the server is ready, guaranteeing children are born inside the sandbox. Plugin calls <code>unshare(CLONE_NEWCGROUP)</code> — child processes see the session cgroup as their <code>/sys/fs/cgroup</code> root and cannot migrate to a parent cgroup to escape the freeze, even with <code>CAP_SYS_ADMIN</code>. Shipper polls every 10 ms to catch GUI apps that systemd moves out.</div>
+            <div class="cg-step-text">Agent creates cgroup and adds the sudo PID. All child processes inherit the cgroup. The agent uses a `readyToFork` barrier to ensure `sudo` remains in the restricted cgroup until the server is ready, guaranteeing children are born inside the sandbox. Plugin calls <code>unshare(CLONE_NEWCGROUP)</code> — child processes see the session cgroup as their <code>/sys/fs/cgroup</code> root and cannot migrate to a parent cgroup to escape the freeze, even with <code>CAP_SYS_ADMIN</code>. Agent polls every 10 ms to catch GUI apps that systemd moves out.</div>
           </div>
           <div class="cg-step">
             <div class="cg-step-label">② normal operation</div>
@@ -1477,7 +1477,7 @@ body::after {
           </div>
           <div class="cg-step s-danger">
             <div class="cg-step-label">③ ACK timeout — 800 ms</div>
-            <div class="cg-step-text">Shipper writes <code>1</code> to <code>cgroup.freeze</code> — kernel suspends all tasks. GUI apps outside the cgroup receive <code>SIGSTOP</code>. Banner shown on <code>/dev/tty</code>.</div>
+            <div class="cg-step-text">Agent writes <code>1</code> to <code>cgroup.freeze</code> — kernel suspends all tasks. GUI apps outside the cgroup receive <code>SIGSTOP</code>. Banner shown on <code>/dev/tty</code>.</div>
           </div>
           <div class="cg-step s-warn">
             <div class="cg-step-label">④ frozen — input blocked</div>
@@ -2013,7 +2013,7 @@ body::after {
 
         <div style="border-left:2px solid var(--amber);padding-left:16px">
           <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">CONFIGURABLE</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Custom regex via <code style="font-size:10px">mask_pattern</code> in shipper.conf</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Custom regex via <code style="font-size:10px">mask_pattern</code> in agent.conf</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Command arguments redacted in session metadata</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Surgical replacement — key names preserved, only value masked</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Applied to stdin, stdout, tty in/out streams</div>
@@ -2026,7 +2026,7 @@ body::after {
         <span style="color:var(--text)">export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY</span><br>
         <span style="color:var(--green-dim)"># After redaction (stored in log)</span><br>
         <span style="color:var(--text)">export AWS_SECRET_ACCESS_KEY=<span style="color:var(--amber)">***</span></span><br><br>
-        <span style="color:var(--green-dim)"># shipper.conf — add custom patterns</span><br>
+        <span style="color:var(--green-dim)"># agent.conf — add custom patterns</span><br>
         <span style="color:var(--text)">mask_pattern = [0-9a-f]{32}</span><br>
         <span style="color:var(--text)">mask_pattern = (?i)acme-token-[a-z0-9]{16}</span>
       </div>
@@ -2116,8 +2116,8 @@ body::after {
           <div class="feat" style="font-size:12px"><span class="arr">→</span> <code style="font-size:10px">wayland-proxy</code> sits between app and compositor</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> Intercepts <code style="font-size:10px">wl_surface.commit</code> — reads SHM pixel data</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> JPEG-encodes frames at ≤ 300 ms intervals</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Streams frames to shipper via stdout pipe</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Shipper forwards as <code style="font-size:10px">STREAM_SCREEN</code> chunks</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Streams frames to agent via stdout pipe</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Agent forwards as <code style="font-size:10px">STREAM_SCREEN</code> chunks</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> Replay shows image slideshow instead of xterm.js</div>
         </div>
 
@@ -2127,14 +2127,14 @@ body::after {
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Linger mode — holds session open until GUI exits</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Force-captures last frame on client disconnect</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Configurable interval via <code style="font-size:10px">proxy_period</code></div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Disable with <code style="font-size:10px">wayland = false</code> in shipper.conf</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Disable with <code style="font-size:10px">wayland = false</code> in agent.conf</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> SELinux policy covers all proxy socket operations</div>
         </div>
 
       </div>
 
       <div style="margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:12px 16px;text-align:left;max-width:760px">
-        <span style="color:var(--green-dim)"># sudo gvim → shipper log</span><br>
+        <span style="color:var(--green-dim)"># sudo gvim → agent log</span><br>
         <span style="color:var(--text)">wayland-proxy started, socket=/run/user/1000/sudo-wayland-…sock</span><br>
         <span style="color:var(--text)">sudo-logger: patched WAYLAND_DISPLAY → …sock</span><br>
         <span style="color:var(--text)">wayland-proxy: client connected</span><br>
@@ -2257,7 +2257,7 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> SIEM forwarding — JSON/CEF/OCSF · HTTPS · Syslog</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Summary / Anomalies / Settings tabs</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if shipper killed (&lt;150 ms)</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if agent killed (&lt;150 ms)</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt;30 s propagation</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Wayland screen capture — GUI sessions recorded, image slideshow replay</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
