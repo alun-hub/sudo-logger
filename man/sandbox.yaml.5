@@ -8,6 +8,21 @@ modification or interference by processes running inside a \fBsudo-logger\fR ses
 
 The restrictions are enforced at the kernel level using \fBeBPF LSM\fR hooks,
 making them effective even against the root user within a sandboxed session.
+The following hooks are used for enforcement:
+.IP \(bu 2
+\fBlsm/file_open\fR, \fBlsm/file_permission\fR: Deny write-mode opens on protected inodes.
+.IP \(bu 2
+\fBlsm/path_truncate\fR, \fBlsm/inode_setattr\fR: Prevent truncation attacks.
+.IP \(bu 2
+\fBlsm/inode_unlink\fR, \fBlsm/inode_rename\fR: Deny deletion or renaming of protected files.
+.IP \(bu 2
+\fBlsm/inode_create\fR, \fBlsm/inode_mkdir\fR, \fBlsm/inode_mknod\fR, \fBlsm/inode_symlink\fR: Prevent file creation inside protected directories.
+.IP \(bu 2
+\fBlsm/task_kill\fR: Prevent sending signals to protected processes.
+.IP \(bu 2
+\fBlsm/socket_bind\fR: Prevent binding to protected Unix sockets.
+.IP \(bu 2
+\fBtp_btf/sched_process_fork\fR: Propagate sandbox state to all child processes.
 .SH FILE FORMAT
 The file uses YAML format with a single top-level \fBprotect\fR key.
 .PP

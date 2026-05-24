@@ -195,6 +195,58 @@ For processes that escape to foreign cgroups before the namespace is established
 
 ---
 
+## eBPF Subsystem
+
+The agent includes a unified eBPF subsystem that provides kernel-level observability and divergence detection. It requires BTF support (`/sys/kernel/btf/vmlinux`) and kernel ≥ 5.8.
+
+### Divergence detection
+
+The agent uses the `sys_enter_execve` tracepoint to record every execution of `sudo` and `pkexec` on the system. When an execution is detected:
+
+1. The agent starts a **30-second timer**.
+2. It waits for a matching `SESSION_START` message from the sudo plugin.
+3. If the timer expires without a match, a **divergence alert** is generated.
+
+This detects plugin tampering, binary replacement, or cases where `sudo` was compiled without plugin support.
+
+### pkexec tracking
+
+Unlike `sudo`, `pkexec` does not support I/O plugins. The eBPF subsystem captures TTY input and output for `pkexec` sessions by tracking the process hierarchy and intercepting `write` syscalls to TTY devices.
+
+### Outage buffering
+
+When the log server is unreachable, the eBPF subsystem buffers session chunks in memory. Once the connection is re-established, the buffer is flushed in-order to ensure zero data loss for short network blips.
+
+---
+
+## Process Sandbox (eBPF LSM)
+
+For high-security environments, the agent can enforce a kernel-level sandbox on sudo sessions. This is implemented using **eBPF LSM hooks** and is effective even against a root user.
+
+The sandbox is configured via `/etc/sudo-logger/sandbox.yaml` and enforces:
+
+- **File Immutability**: Blocks writes, truncations, and deletions of protected files (e.g., `/etc/shadow`).
+- **Directory Protection**: Prevents file creation inside protected directories (e.g., `/etc/pam.d`).
+- **Process Protection**: Prevents sending signals (SIGKILL, etc.) to protected system daemons.
+- **Socket Protection**: Prevents deletion or replacement of critical Unix sockets.
+
+The sandbox is automatically propagated to all child processes via the `sched_process_fork` tracepoint.
+
+---
+
+## Wayland screen capture
+
+For graphical sudo sessions (e.g., `sudo gvim`), the agent spawns a `wayland-proxy` subprocess.
+
+1. The proxy creates a private Unix socket and patches the `WAYLAND_DISPLAY` environment variable for the sudo session.
+2. It intercepts `wl_surface.commit` calls from the application.
+3. It captures SHM pixel data, encodes it as **JPEG**, and streams it to the agent.
+4. The agent forwards these as `STREAM_SCREEN` chunks to the server.
+
+The replay UI renders these frames as a slideshow, providing visual context for GUI-based root activity.
+
+---
+
 ## Session storage
 
 Two storage backends are supported, selected with the `-storage` flag on both the log server and the replay server.

@@ -74,7 +74,15 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 
 `sudo-logger` supports **Distributed Storage** using S3-compatible object storage (AWS, MinIO, NetApp) and PostgreSQL. This enables a stateless log-server tier that scales horizontally in Kubernetes without requiring shared volumes (ReadWriteMany).
 
-### 10. Relay topology
+### 10. Process sandboxing (eBPF LSM)
+
+`sudo-logger` includes an optional kernel-level sandbox enforced via eBPF LSM hooks. It can block a root user from modifying critical files (e.g., `/etc/sudoers`), killing protected daemons, or deleting audit logs during their session. `sudo-logsrvd` provides no such enforcement.
+
+### 11. eBPF divergence detection
+
+`sudo-logger` uses kernel tracepoints to monitor all executions of `sudo` and `pkexec`. It correlates these kernel events with plugin activity; if a `sudo` command is executed but the plugin is bypassed (e.g., by tampering with `sudo.conf`), the agent larmar centrally. `sudo-logsrvd` relies entirely on the plugin being loaded.
+
+### 12. Relay topology
 
 `sudo-logsrvd` supports hierarchical relay chains (client → relay → relay → server). This allows sudo to log even when the central server is temporarily unreachable by queuing at an intermediate relay.
 
@@ -98,6 +106,8 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 | **SIEM forwarding** | ✗ | ✅ CEF / OCSF / syslog |
 | **Secret redaction** | ✗ | ✅ |
 | **Wayland screen capture** | ✗ | ✅ |
+| **Process sandboxing (eBPF LSM)** | ✗ | ✅ |
+| **eBPF divergence detection** | ✗ | ✅ |
 | **Distributed storage (S3 + PG)** | ✗ | ✅ |
 | **SELinux policy (shipper)** | ✗ | ✅ |
 | **Relay / hierarchical logging** | ✅ | ✗ |

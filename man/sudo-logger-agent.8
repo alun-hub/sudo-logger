@@ -4,6 +4,7 @@ sudo\-logger\-agent \- audit agent for sudo session recording and privilege esca
 .SH SYNOPSIS
 .B sudo\-logger\-agent
 [\fB\-config\fR \fIfile\fR]
+[\fB\-health\-listen\fR \fIaddr\fR]
 .SH DESCRIPTION
 .B sudo\-logger\-agent
 is a systemd daemon that runs as root on each client machine.
@@ -78,6 +79,10 @@ If
 is absent and the legacy
 .B /etc/sudo-logger/shipper.conf
 exists, it is used automatically with a warning.
+.TP
+.BI \-health\-listen " addr"
+Specify an address (e.g. \fI:9877\fR) to listen on for HTTP health checks
+on \fB/healthz\fR.
 .SH CONFIGURATION
 Configuration is read from the file specified by
 .BR \-config .

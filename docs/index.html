@@ -1542,7 +1542,7 @@ body::after {
         <!-- topbar -->
         <div class="ui-topbar">
           <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
-          <div class="ui-ver">v1.13.0</div>
+          <div class="ui-ver">v1.20.0</div>
           <div class="ui-sp"></div>
           <div class="ui-tabs">
             <div class="ui-tab on">Sessions</div>
@@ -1681,7 +1681,7 @@ body::after {
         <!-- topbar -->
         <div class="ui-topbar">
           <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
-          <div class="ui-ver">v1.13.0</div>
+          <div class="ui-ver">v1.20.0</div>
           <div class="ui-sp"></div>
           <div class="ui-tabs">
             <div class="ui-tab">Sessions</div>
@@ -2073,8 +2073,38 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 15: WAYLAND SCREEN CAPTURE ░░ -->
+  <!-- ░░ SLIDE 15: ENTERPRISE SCALE ░░ -->
   <div class="slide" id="s15">
+    <div class="s-security" style="max-width:920px">
+      <div class="slide-heading">ENTERPRISE SCALE</div>
+      <div class="sec-grid">
+        <div class="sec-card full">
+          <div class="sec-icon">🚀</div>
+          <div>
+            <div class="sec-title">High-Performance Pipeline</div>
+            <div class="sec-desc">Engineered for 500+ simultaneous sessions. Uses an asynchronous <strong>Batch Disk Writer</strong> that bundles up to 100 chunks into a single atomic write, reducing I/O syscall overhead by 99%.</div>
+          </div>
+        </div>
+        <div class="sec-card">
+          <div class="sec-icon">⚙️</div>
+          <div>
+            <div class="sec-title">Non-Blocking Ingestion</div>
+            <div class="sec-desc">Network loop remains hot even under heavy disk load. Secondary memory queues and overflow goroutines ensure Heartbeats and ACKs are never delayed by I/O wait.</div>
+          </div>
+        </div>
+        <div class="sec-card">
+          <div class="sec-icon">⚖️</div>
+          <div>
+            <div class="sec-title">Horizontal Scaling</div>
+            <div class="sec-desc">Leader election via PostgreSQL advisory locks ensures exactly-one replica handles SIEM forwarding, while all replicas serve replay traffic and ingestion.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 16: WAYLAND SCREEN CAPTURE ░░ -->
+  <div class="slide" id="s16">
     <div class="s-features" style="max-width:900px">
       <h2>WAYLAND<br>SCREEN CAPTURE</h2>
       <div class="sub">▸ GUI sudo sessions recorded without compositor patches</div>
@@ -2114,8 +2144,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 16: PROCESS SANDBOX ░░ -->
-  <div class="slide" id="s16">
+  <!-- ░░ SLIDE 17: PROCESS SANDBOX ░░ -->
+  <div class="slide" id="s17">
     <div class="s-features" style="max-width:920px">
       <h2>PROCESS<br>SANDBOX</h2>
       <div class="sub">▸ 13 eBPF hooks · kernel-enforced deny-list · blocks root · Btrfs-safe · PAM-race-proof</div>
@@ -2171,11 +2201,11 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 17: EBPF AGENT ░░ -->
-  <div class="slide" id="s17">
+  <!-- ░░ SLIDE 18: EBPF AGENT ░░ -->
+  <div class="slide" id="s18">
     <div class="s-features" style="max-width:920px">
       <h2>EBPF<br>AGENT</h2>
-      <div class="sub">▸ Unified daemon · divergence detection · outage buffering</div>
+      <div class="sub">▸ Unified daemon · divergence detection · pkexec tracking · outage buffering</div>
 
       <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:28px;font-size:13px">
 
@@ -2183,7 +2213,7 @@ body::after {
           <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">DIVERGENCE DETECTION</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> eBPF tracepoints record every exec independently of the plugin</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> Cross-validates kernel observations against plugin-logged events</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Mismatch within 5 s window → alert log + optional webhook</div>
+          <div class="feat" style="font-size:12px"><span class="arr">→</span> Mismatch within 30 s window → alert log + optional webhook</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> Detects plugin tampering, sudo binary replacement, bypasses</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> Divergence badge shown in replay UI only when mismatch detected</div>
           <div style="margin-top:12px;font-family:'JetBrains Mono',monospace;font-size:9.5px;border:1px solid rgba(255,95,109,0.3);border-radius:4px;padding:10px 13px;line-height:1.9;background:rgba(255,95,109,0.04);">
@@ -2198,19 +2228,20 @@ body::after {
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Session chunks queued in-memory when TLS server unreachable</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Session continues uninterrupted — freeze delayed until limit exceeded</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Buffer flushed in-order on reconnect — zero data loss</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Configurable limit via <code style="font-size:10px">buffer_chunks</code> in <code style="font-size:10px">agent.conf</code></div>
+          <div style="color:var(--amber);font-weight:700;margin-top:16px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PKEXEC TRACKING</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Natively records <code>pkexec</code> sessions (no plugin support)</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Captures interactive shells and commands via kernel tracepoints</div>
           <div style="color:var(--amber);font-weight:700;margin-top:16px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">UNIFIED DAEMON</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Plugin handler + eBPF recorder merged into one binary</div>
           <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Auto-detects BTF — falls back to plugin-only on older kernels</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Single RPM · single systemd unit · plugin+eBPF or plugin-only mode</div>
         </div>
 
       </div>
     </div>
   </div>
 
-  <!-- ░░ SLIDE 18: READY TO DEPLOY ░░ -->
-  <div class="slide" id="s18">
+  <!-- ░░ SLIDE 19: READY TO DEPLOY ░░ -->
+  <div class="slide" id="s19">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
       <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
@@ -2232,7 +2263,7 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Process sandbox — 13 eBPF hooks · blocks writes, opens, truncations, deletes, creates, signals · root-proof</div>
-        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> eBPF agent — divergence detection · outage buffering · unified daemon</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> eBPF agent — divergence detection · outage buffering · pkexec tracking</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
@@ -2246,7 +2277,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 19;
+  const N = 20;
   let cur = 0, busy = false;
 
   /* cursor */
