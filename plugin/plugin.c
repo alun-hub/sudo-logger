@@ -1057,6 +1057,41 @@ static int plugin_open(unsigned int        version,
         }
     }
 
+    /* On Fedora 44+, pam_systemd creates a systemd --user session for root
+     * which exposes a D-Bus session bus at /run/user/0/bus.  GTK4 finds this
+     * bus, connects to it, and then fails to activate org.freedesktop.portal
+     * .Desktop.  That activation failure triggers a g_warning() on stderr
+     * which sudo-logger captures as TTY output, polluting the session replay
+     * with a spurious text pane alongside the Wayland window capture.
+     *
+     * If DBUS_SESSION_BUS_ADDRESS is already in user_env (preserved via
+     * env_keep), leave it alone.  Otherwise inject a non-existent socket path:
+     * GTK4 then fails at *connection* level, which only emits a silent DEBUG
+     * message rather than a visible g_warning(). */
+    if (user_env) {
+        char **menv  = (char **)user_env;
+        int    found = 0;
+        for (int i = 0; menv[i]; i++) {
+            if (strncmp(menv[i], "DBUS_SESSION_BUS_ADDRESS=", 25) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            static const char dbus_dummy[] =
+                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/sudo-logger-nosession";
+            for (int i = 0; menv[i]; i++) {
+                if (strncmp(menv[i], "SUDO_GID=", 9) == 0) {
+                    menv[i] = (char *)dbus_dummy;
+                    syslog(LOG_DEBUG,
+                        "sudo-logger: set dummy DBUS_SESSION_BUS_ADDRESS "
+                        "to suppress GTK4 portal warning");
+                    break;
+                }
+            }
+        }
+    }
+
     g_last_ack_query = now_sec();
     /* Seed ack time so the freeze window starts from now */
     g_last_ack_time = now_sec();
