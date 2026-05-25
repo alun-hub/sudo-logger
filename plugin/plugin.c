@@ -993,6 +993,13 @@ static int plugin_open(unsigned int        version,
                     }
                 }
 
+                /* Force software rendering so Qt/Mesa skip DRM auth, which
+                 * fails for root on Fedora 44+.  LIBGL_ALWAYS_SOFTWARE=1 lets
+                 * Qt stay on the Wayland platform plugin (captured by the
+                 * proxy) instead of falling back to XCB.  overwrite=0 so the
+                 * caller can opt out by setting the variable before sudo. */
+                setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
+
                 /* Parse "proxy_display":"<value>" to patch WAYLAND_DISPLAY. */
                 const char *key = "\"proxy_display\":\"";
                 char *kp = strstr(rbuf, key);
