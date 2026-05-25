@@ -679,6 +679,40 @@ static void build_cmdline_json(char *buf, size_t bufsz,
 
 /* ---------- plugin API ---------- */
 
+/* Replace the first slot in menv[] whose key matches key= with key=val.
+ * If no existing slot is found, overwrite the first slot whose key starts
+ * with fallback_pfx (e.g. "SUDO_GID=").  Returns 1 on success, 0 if no
+ * suitable slot was found (caller should fall back to setenv).
+ * Memory: allocates a heap string; intentional leak — process execs next. */
+static int inject_env_slot(char **menv, const char *key, const char *val,
+                           const char *fallback_pfx)
+{
+    if (!menv) return 0;
+    size_t klen = strlen(key);
+    char *entry = malloc(klen + 1 + strlen(val) + 1);
+    if (!entry) return 0;
+    /* safe: both key and val are string literals, no user input involved */
+    int n = snprintf(entry, klen + 1 + strlen(val) + 1, "%s=%s", key, val);
+    if (n < 0) { free(entry); return 0; }
+    for (int i = 0; menv[i]; i++) {
+        if (strncmp(menv[i], key, klen) == 0 && menv[i][klen] == '=') {
+            menv[i] = entry;
+            return 1;
+        }
+    }
+    if (fallback_pfx) {
+        size_t flen = strlen(fallback_pfx);
+        for (int i = 0; menv[i]; i++) {
+            if (strncmp(menv[i], fallback_pfx, flen) == 0) {
+                menv[i] = entry;
+                return 1;
+            }
+        }
+    }
+    free(entry);
+    return 0;
+}
+
 /*
  * plugin_open — called once per sudo invocation before the command runs.
  *
@@ -960,6 +994,22 @@ static int plugin_open(unsigned int        version,
         return -1;
     }
 
+    /* Force software rendering for GUI apps started as root on Fedora 44+.
+     * Root lacks DRM authentication, causing Qt/Mesa EGL to fail and Konsole
+     * to not appear.  Injecting into user_env[] (not setenv) is required
+     * because sudo passes user_env[] explicitly to execve — setenv only
+     * modifies the current process env which execve does not inherit.
+     * SUDO_GID / SUDO_UID are safe fallback slots: the child command does
+     * not use these sudo-injected vars for normal operation. */
+    if (user_env) {
+        if (!inject_env_slot((char **)user_env,
+                             "LIBGL_ALWAYS_SOFTWARE", "1", "SUDO_GID="))
+            setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
+        if (!inject_env_slot((char **)user_env,
+                             "MESA_LOADER_DRIVER_OVERRIDE", "swrast", "SUDO_UID="))
+            setenv("MESA_LOADER_DRIVER_OVERRIDE", "swrast", 0);
+    }
+
     /* SESSION_READY may carry a JSON body with optional fields:
      *   "proxy_display" — Wayland proxy socket path; plugin patches WAYLAND_DISPLAY.
      *   "disclaimer"    — operator notice printed to the terminal before sudo proceeds.
@@ -992,16 +1042,6 @@ static int plugin_open(unsigned int        version,
                         }
                     }
                 }
-
-                /* Force software rendering so Qt/Mesa skip DRM auth, which
-                 * fails for root on Fedora 44+.  LIBGL_ALWAYS_SOFTWARE=1
-                 * covers GLX; MESA_LOADER_DRIVER_OVERRIDE=swrast covers EGL
-                 * (used by Qt Wayland) — it tells the Mesa loader to pick
-                 * swrast before probing the DRM device.  Together they keep
-                 * Qt on the Wayland platform plugin (captured by the proxy).
-                 * overwrite=0 lets the caller opt out by presetting the vars. */
-                setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
-                setenv("MESA_LOADER_DRIVER_OVERRIDE", "swrast", 0);
 
                 /* Parse "proxy_display":"<value>" to patch WAYLAND_DISPLAY. */
                 const char *key = "\"proxy_display\":\"";
