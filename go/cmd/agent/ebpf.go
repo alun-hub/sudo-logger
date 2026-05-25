@@ -237,6 +237,20 @@ func (s *ebpfSubsystem) readLoop(ctx context.Context) {
 	}
 }
 
+// isGTK4PortalNoise returns true for GTK4 xdg-desktop-portal warning lines that
+// appear when a GUI app runs as root (pam_systemd creates /run/user/0/bus in F44
+// but the portal service cannot be activated for root). These are noise — not
+// user-visible output — and would cause a spurious text pane in the replay.
+func isGTK4PortalNoise(data []byte) bool {
+	if bytes.Contains(data, []byte("Gdk-WARNING")) && bytes.Contains(data, []byte("portal")) {
+		return true
+	}
+	if bytes.Contains(data, []byte("Gtk-WARNING")) && bytes.Contains(data, []byte("session bus")) {
+		return true
+	}
+	return false
+}
+
 func (s *ebpfSubsystem) handleIO(raw []byte) {
 	if len(raw) < int(unsafe.Sizeof(ioEvent{})) {
 		return
@@ -252,6 +266,9 @@ func (s *ebpfSubsystem) handleIO(raw []byte) {
 		return
 	}
 	data := ev.Data[:ev.DataLen]
+	if isGTK4PortalNoise(data) {
+		return
+	}
 	// Use Go reception time rather than BPF ktime (CLOCK_MONOTONIC).
 	// bpf_ktime_get_ns() excludes suspend time but /proc/uptime includes it,
 	// causing all event timestamps to be before startTime after suspend/resume
