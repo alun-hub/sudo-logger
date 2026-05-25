@@ -1173,7 +1173,7 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
     if (atomic_load(&g_shipper_dead))
         return 0;
     if (is_gtk4_portal_noise(buf, len))
-        return 0;
+        return 1;
     ship_chunk(STREAM_TTYOUT, buf, len);
     return 1;
 }
@@ -1205,7 +1205,7 @@ static int log_stderr(const char *buf, unsigned int len, const char **errstr)
     if (atomic_load(&g_shipper_dead))
         return 0;
     if (is_gtk4_portal_noise(buf, len))
-        return 0;
+        return 1;
     ship_chunk(STREAM_STDERR, buf, len);
     return 1;
 }

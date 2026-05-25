@@ -694,6 +694,9 @@ loop:
 				chunk.Data = redactor.Redact(chunk.Data, chunk.Stream)
 				payload = protocol.EncodeChunk(chunk.Seq, chunk.Timestamp, chunk.Stream, chunk.Data)
 			}
+			if err == nil && isGTK4PortalNoise(chunk.Data) {
+				continue
+			}
 			if err == nil && (chunk.Stream == protocol.StreamStdin || chunk.Stream == protocol.StreamTtyIn) {
 				lastInputNs.Store(time.Now().UnixNano())
 			}
