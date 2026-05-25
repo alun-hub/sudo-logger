@@ -237,15 +237,34 @@ func (s *ebpfSubsystem) readLoop(ctx context.Context) {
 	}
 }
 
-// isGTK4PortalNoise returns true for GTK4 xdg-desktop-portal warning lines that
-// appear when a GUI app runs as root (pam_systemd creates /run/user/0/bus in F44
-// but the portal service cannot be activated for root). These are noise — not
-// user-visible output — and would cause a spurious text pane in the replay.
+// isGTK4PortalNoise returns true for GUI startup noise that appears when a GUI
+// app runs as root on Wayland/F44: GTK4 portal warnings, Qt/Mesa/AMD GPU driver
+// errors (root has no DRM auth), and Qt portal registration failures. These are
+// not user-visible output and would cause a spurious text pane in the replay.
 func isGTK4PortalNoise(data []byte) bool {
 	if bytes.Contains(data, []byte("Gdk-WARNING")) && bytes.Contains(data, []byte("portal")) {
 		return true
 	}
 	if bytes.Contains(data, []byte("Gtk-WARNING")) && bytes.Contains(data, []byte("session bus")) {
+		return true
+	}
+	// Qt/Mesa/AMD errors when root lacks DRM authentication (F44 XWayland fallback).
+	if bytes.Contains(data, []byte("amdgpu_get_auth")) {
+		return true
+	}
+	if bytes.Contains(data, []byte("MESA: error:")) {
+		return true
+	}
+	if bytes.Contains(data, []byte("glx: failed to create dri3 screen")) {
+		return true
+	}
+	if bytes.Contains(data, []byte("failed to load driver:")) {
+		return true
+	}
+	if bytes.Contains(data, []byte("TU: error:")) {
+		return true
+	}
+	if bytes.Contains(data, []byte("qt.qpa.services:")) && bytes.Contains(data, []byte("portal")) {
 		return true
 	}
 	return false
