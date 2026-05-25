@@ -994,11 +994,14 @@ static int plugin_open(unsigned int        version,
                 }
 
                 /* Force software rendering so Qt/Mesa skip DRM auth, which
-                 * fails for root on Fedora 44+.  LIBGL_ALWAYS_SOFTWARE=1 lets
-                 * Qt stay on the Wayland platform plugin (captured by the
-                 * proxy) instead of falling back to XCB.  overwrite=0 so the
-                 * caller can opt out by setting the variable before sudo. */
+                 * fails for root on Fedora 44+.  LIBGL_ALWAYS_SOFTWARE=1
+                 * covers GLX; MESA_LOADER_DRIVER_OVERRIDE=swrast covers EGL
+                 * (used by Qt Wayland) — it tells the Mesa loader to pick
+                 * swrast before probing the DRM device.  Together they keep
+                 * Qt on the Wayland platform plugin (captured by the proxy).
+                 * overwrite=0 lets the caller opt out by presetting the vars. */
                 setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
+                setenv("MESA_LOADER_DRIVER_OVERRIDE", "swrast", 0);
 
                 /* Parse "proxy_display":"<value>" to patch WAYLAND_DISPLAY. */
                 const char *key = "\"proxy_display\":\"";
