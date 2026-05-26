@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.68
+Version:        1.20.69
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,12 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.69-1
+- fix(selinux): add file_type:dir { open read getattr search watch } for
+  sudo_agent_t — dir:watch (kernel 5.x+ inotify permission) and dir:read/open
+  needed by sandbox config loader and inotify watcher across all directory types
+  (etc_t, cert_t, pam_etc_t, bin_t, var_log_t, sysctl_t, system_conf_t, etc.)
+
 * Tue May 26 2026 sudo-logger 1.20.68-1
 - fix(service): remove all systemd hardening flags that cause inotify_add_watch
   EACCES — PrivateTmp/PrivateDevices create private mount namespace; Landlock

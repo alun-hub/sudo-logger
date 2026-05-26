@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.3)
+policy_module(sudo_logger, 1.1.4)
 
 ########################################
 #
@@ -68,6 +68,18 @@ fs_rw_cgroup_files(sudo_agent_t)
 require { type cgroup_t; }
 allow sudo_agent_t cgroup_t:dir { write add_name remove_name create rmdir };
 allow sudo_agent_t cgroup_t:file { create };
+
+# Allow inotify watches on any directory — the sandbox watcher (fsnotify) calls
+# inotify_add_watch on parent directories of all protected paths, which span many
+# SELinux types (etc_t, cert_t, pam_etc_t, bin_t, var_log_t, sysctl_t, etc.).
+# The dir:watch permission (kernel 5.x+) is distinct from dir:read/search.
+# The sandbox config loader (loadSandboxConfig) recursively scans protected
+# directories, and the inotify watcher (startWatcher) adds watches on their
+# parent dirs.  These paths span many types: etc_t, cert_t, pam_etc_t, bin_t,
+# var_log_t, sysctl_t, system_conf_t, etc.
+# dir:watch is the kernel 5.x+ permission required by inotify_add_watch(2).
+require { attribute file_type; }
+allow sudo_agent_t file_type:dir { open read getattr search watch };
 
 # Read /proc/<pid> entries for tracked session processes.
 allow sudo_agent_t domain:dir { search getattr };
