@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.65
+Version:        1.20.66
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,16 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.66-1
+- fix(selinux): restore confined domain for sudo_agent_t; replace unconfined_domain
+  + permissive with targeted allow rules; add capability2 { bpf perfmon } and
+  self:bpf { map_create map_read map_write prog_load prog_run } for eBPF agent
+- fix(service): restore systemd hardening (ProtectSystem=strict, PrivateTmp,
+  PrivateDevices, ProtectKernelTunables, ProtectKernelModules, LockPersonality,
+  RestrictSUIDSGID) that was removed by incorrect SELinux troubleshooting
+- feat(sandbox): auto-protect newly created files in watched directories via
+  inotify + BPF inode map refresh (handles atomic rename by vi/cp/install)
+
 * Tue May 27 2026 sudo-logger 1.20.62-1
 - feat(spec): robust upgrade path for eBPF/Sandbox restoration
 - feat(spec): clear stale BPF pins in %%pre to prevent agent start failures
