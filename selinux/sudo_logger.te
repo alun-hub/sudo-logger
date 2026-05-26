@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.9)
+policy_module(sudo_logger, 1.1.10)
 
 ########################################
 #
@@ -143,6 +143,12 @@ allow sudo_agent_t domain:process { signal sigstop };
 
 # Execute wayland-proxy without domain transition — runs as sudo_agent_t.
 allow sudo_agent_t wayland_proxy_exec_t:file { read open execute execute_no_trans map getattr };
+
+# Execute loginctl (bin_t) to query session metadata for the eBPF session
+# tracker (loginctlSession in ebpf.go).  No domain transition: subprocess
+# inherits sudo_agent_t.
+require { type bin_t; }
+allow sudo_agent_t bin_t:file { read open execute execute_no_trans map getattr };
 
 # Wayland proxy socket operations in /run/user/<uid>/
 require { type user_tmp_t; }
