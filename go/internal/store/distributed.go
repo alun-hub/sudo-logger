@@ -340,7 +340,7 @@ SELECT tsid, session_id, "user", host, runas, runas_uid, runas_gid,
        COALESCE(source, 'plugin'), COALESCE(parent_session_id, ''),
        COALESCE(has_io, TRUE), COALESCE(divergence_status, 'unwitnessed'),
        COALESCE(matched_session_id, ''), COALESCE(caller_process, ''),
-       COALESCE(tty_cols, 0), COALESCE(tty_rows, 0)
+       COALESCE(NULLIF(tty_cols, 0), 220), COALESCE(NULLIF(tty_rows, 0), 50)
 FROM sudo_sessions
 ORDER BY start_time DESC`)
 	if err != nil {
