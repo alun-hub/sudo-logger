@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.51
+Version:        1.20.52
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -170,6 +170,12 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.52-1
+- chore: rename shipper → agent throughout (g_agent_fd, connect_agent(),
+  error messages); remove dead cmd/shipper package, sudo-shipper.service,
+  shipper.conf, ebpf-recorder.service
+- selinux: rename sudo_shipper_t → sudo_agent_t in policy module
+
 * Sat May 23 2026 sudo-logger 1.20.51-1
 - fix(wayland): restore screen recording for apps that fork immediately (gvim);
   added 2s grace period to agent linger-mode check to allow descendant detection

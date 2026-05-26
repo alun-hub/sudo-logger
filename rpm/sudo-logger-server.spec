@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.20.2
+Version:        1.20.3
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,9 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.3-1
+- chore: rename shipper → agent in comments and log messages
+
 * Tue May 26 2026 sudo-logger 1.20.2-1
 - fix(distributed): apply 220x50 defaults for tty_cols/tty_rows at INSERT
   (matches iolog.NewWriter cast header defaults; fixes 0 stored for sessions

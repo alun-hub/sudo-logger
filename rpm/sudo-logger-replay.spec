@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.20.4
+Version:        1.20.5
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,6 +68,9 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.5-1
+- chore: rename shipper → agent in comments and log messages
+
 * Tue May 26 2026 sudo-logger 1.20.4-1
 - fix(distributed): apply 220x50 defaults in ListSessions SELECT so existing
   sessions without stored dimensions always return a non-zero value to the API
