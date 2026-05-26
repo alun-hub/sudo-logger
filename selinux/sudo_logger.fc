@@ -1,24 +1,11 @@
-# File contexts for sudo-logger
-#
-# After changing this file, run:
-#   make -f /usr/share/selinux/devel/Makefile sudo_logger.pp
-#   semodule -i sudo_logger.pp
-#   restorecon -Rv /usr/bin/sudo-logger-agent \
-#                  /usr/libexec/sudo/sudo_logger_plugin.so \
-#                  /run/sudo-logger \
-#                  /etc/sudo-logger
+# File contexts for sudo-logger (REDUCED - Run as unconfined for now)
 
-# sudo-logger-agent daemon binary
-/usr/bin/sudo-logger-agent                   --  gen_context(system_u:object_r:sudo_agent_exec_t,s0)
-
-# Plugin shared library loaded by sudo
+# Plugin shared library loaded by sudo - MUST be labeled to be allowed by sudo_t
 /usr/libexec/sudo/sudo_logger_plugin\.so  --  gen_context(system_u:object_r:sudo_logger_plugin_t,s0)
 
-# Runtime directory and socket  (/run/sudo-logger/)
+# Runtime directory and socket (/run/sudo-logger/)
 /run/sudo-logger(/.*)?                  gen_context(system_u:object_r:sudo_agent_var_run_t,s0)
 
-# Configuration and key material  (/etc/sudo-logger/)
-/etc/sudo-logger(/.*)?                  gen_context(system_u:object_r:sudo_agent_etc_t,s0)
-
-# wayland-proxy helper binary
-/usr/libexec/sudo-logger/wayland-proxy  --  gen_context(system_u:object_r:wayland_proxy_exec_t,s0)
+# Note: /usr/bin/sudo-logger-agent is NOT labeled here.
+# This ensures it runs as unconfined_t when started by systemd,
+# matching the behavior that 'worked' earlier today.

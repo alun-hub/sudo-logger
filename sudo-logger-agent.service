@@ -1,10 +1,7 @@
 [Unit]
 Description=sudo-logger audit agent (plugin handler + eBPF recorder)
-# Must start after systemd-logind (cgroup session scopes) and network (logserver).
 After=systemd-logind.service network-online.target
 Wants=network-online.target
-# Prevent manual stop to close the attack vector where a user stops the agent
-# to avoid logging.
 RefuseManualStop=yes
 
 [Service]
@@ -14,21 +11,7 @@ Restart=always
 RestartSec=2
 
 User=root
-# eBPF/LSM requires broad privileges.
-# We must disable some systemd protections that interfere with eBPF/tracefs.
-
-# ProtectSystem=strict is too restrictive for an agent watching all config files.
-ProtectSystem=full
-# ProtectKernelTunables=yes hides /proc/sys which the sandbox needs to watch.
-ProtectKernelTunables=no
-ProtectKernelModules=yes
-LockPersonality=yes
-RestrictSUIDSGID=yes
-
-# eBPF CO-RE relocation needs access to /sys/kernel/btf/vmlinux.
-ReadOnlyPaths=/sys/kernel/btf
-# BPF program pinning and tracefs access.
-ReadWritePaths=/sys/fs/bpf /sys/kernel/debug /sys/kernel/tracing
+# No Protect* flags to ensure full visibility of the system for auditing and sandbox.
 
 [Install]
 WantedBy=multi-user.target
