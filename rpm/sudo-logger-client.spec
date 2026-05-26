@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.70
+Version:        1.20.71
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,12 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Wed May 27 2026 sudo-logger 1.20.71-1
+- fix(selinux): add file_type:file { getattr } and lnk_file { getattr read }
+  for sandbox config loader stat() calls on .service files and symlinks
+- fix(selinux): add debugfs_t and tracefs_t rules so cilium/ebpf can attach
+  kprobes and tracepoints via /sys/kernel/tracing and /sys/kernel/debug/tracing
+
 * Tue May 26 2026 sudo-logger 1.20.70-1
 - fix(selinux): add sysctl_type:dir { watch } — sysctl_net_t and sysctl_kernel_t
   lack the file_type attribute so must be covered by sysctl_type attribute

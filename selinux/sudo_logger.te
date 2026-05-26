@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.5)
+policy_module(sudo_logger, 1.1.6)
 
 ########################################
 #
@@ -78,10 +78,24 @@ allow sudo_agent_t cgroup_t:file { create };
 # parent dirs.  These paths span many types: etc_t, cert_t, pam_etc_t, bin_t,
 # var_log_t, sysctl_t, system_conf_t, etc.
 # dir:watch is the kernel 5.x+ permission required by inotify_add_watch(2).
-require { attribute file_type; attribute sysctl_type; }
+require { attribute file_type; attribute sysctl_type;
+          type debugfs_t; type tracefs_t; }
+# Dir: open/read for recursive sandbox config scan; watch for inotify watcher.
 allow sudo_agent_t file_type:dir { open read getattr search watch };
-# sysctl_t and related proc types lack the file_type attribute.
+# File/symlink: getattr (stat) needed when sandbox config loader enumerates
+# protected paths recursively — e.g. .service files in /etc/systemd/system/.
+allow sudo_agent_t file_type:file { getattr };
+allow sudo_agent_t file_type:lnk_file { getattr read };
+# sysctl types lack file_type — cover explicitly.
 allow sudo_agent_t sysctl_type:dir { open read getattr search watch };
+allow sudo_agent_t sysctl_type:file { getattr };
+# debugfs/tracefs: needed by cilium/ebpf to attach kprobes and tracepoints.
+# The library probes /sys/kernel/tracing (tracefs_t) and
+# /sys/kernel/debug/tracing (debugfs_t) to find the events directory.
+allow sudo_agent_t debugfs_t:dir { search read open getattr };
+allow sudo_agent_t debugfs_t:file { read open getattr };
+allow sudo_agent_t tracefs_t:dir { search read open getattr write add_name remove_name };
+allow sudo_agent_t tracefs_t:file { read open getattr write create unlink };
 
 # Read /proc/<pid> entries for tracked session processes.
 allow sudo_agent_t domain:dir { search getattr };
