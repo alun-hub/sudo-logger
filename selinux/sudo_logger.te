@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.0.5)
+policy_module(sudo_logger, 1.0.6)
 
 ########################################
 #
@@ -30,9 +30,10 @@ allow sudo_agent_t self:tcp_socket create_stream_socket_perms;
 allow sudo_agent_t self:process { fork sigchld sigkill sigstop signull signal };
 
 # Capabilities
-# perfmon is needed for BPF on modern kernels
+# perfmon and bpf are essential for the eBPF recorder and sandbox.
+# checkpoint_restore is sometimes needed for certain BPF map operations.
 allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search };
-allow sudo_agent_t self:capability2 { bpf perfmon };
+allow sudo_agent_t self:capability2 { bpf perfmon checkpoint_restore };
 
 # BPF permissions
 allow sudo_agent_t self:bpf { map_create map_read map_write prog_load prog_run };
@@ -55,9 +56,10 @@ corenet_sendrecv_generic_client_packets(sudo_agent_t)
 sysnet_dns_name_resolve(sudo_agent_t)
 
 # Cgroup management
+# The agent creates per-session cgroups to monitor and freeze sudo sessions.
+fs_manage_cgroup_dirs(sudo_agent_t)
 fs_rw_cgroup_files(sudo_agent_t)
 require { type cgroup_t; }
-allow sudo_agent_t cgroup_t:dir { write add_name remove_name create rmdir };
 allow sudo_agent_t cgroup_t:file { create getattr open read write };
 
 # Process tracking and PTY access
@@ -67,37 +69,69 @@ allow sudo_agent_t domain:lnk_file { read getattr };
 allow sudo_agent_t domain:process { getpgid signal sigstop };
 
 require { type user_devpts_t; }
-allow sudo_agent_t user_devpts_t:chr_file { open write getattr };
+allow sudo_agent_t user_devpts_t:chr_file { open write getattr ioctl };
 
 # eBPF Tracing and CO-RE (BTF)
 require { type debugfs_t; type tracefs_t; type sysfs_t; }
-allow sudo_agent_t { debugfs_t tracefs_t }:dir { search read open };
+allow sudo_agent_t { debugfs_t tracefs_t }:dir { search read open getattr };
 allow sudo_agent_t { debugfs_t tracefs_t }:file { read open getattr };
 # Allow mapping BTF data in /sys/kernel/btf/
 allow sudo_agent_t sysfs_t:file { read open getattr map };
 dev_read_sysfs(sudo_agent_t)
 
 # Inode watching for sandbox (via fsnotify)
-# The agent needs to watch various config directories for changes
+# The agent needs wide read and watch access to enforce the sandbox policy.
 files_read_etc_files(sudo_agent_t)
 files_read_usr_files(sudo_agent_t)
+files_read_var_lib_files(sudo_agent_t)
+files_list_var_lib(sudo_agent_t)
 
-# Grant 'watch' permissions on common types protected by the sandbox
-# etc_t, bin_t, lib_t are covered by common interfaces, but watch is specific.
-require { type etc_t; type bin_t; type lib_t; type usr_t; }
-allow sudo_agent_t { etc_t bin_t lib_t usr_t }:dir { watch watch_reads };
-allow sudo_agent_t { etc_t bin_t lib_t usr_t }:file { watch watch_reads };
+# Watch permissions are required for fsnotify to work on system paths.
+# We grant watch to a wide range of types that might be in the sandbox config.
+require {
+    type etc_t; type bin_t; type lib_t; type usr_t; type var_log_t;
+    type sysctl_t; type sysctl_kernel_t; type sysctl_net_t;
+    type dbusd_etc_t; type cert_t; type pki_cert_t;
+    type systemd_unit_file_t; type selinux_config_t;
+    type init_var_run_t; type syslogd_var_run_t;
+}
+allow sudo_agent_t {
+    etc_t bin_t lib_t usr_t var_log_t
+    sysctl_t sysctl_kernel_t sysctl_net_t
+    dbusd_etc_t cert_t pki_cert_t
+    systemd_unit_file_t selinux_config_t
+    init_var_run_t syslogd_var_run_t
+}:dir { watch watch_reads watch_mount watch_with_perm };
+
+allow sudo_agent_t {
+    etc_t bin_t lib_t usr_t var_log_t
+    sysctl_t sysctl_kernel_t sysctl_net_t
+    dbusd_etc_t cert_t pki_cert_t
+    systemd_unit_file_t selinux_config_t
+    init_var_run_t syslogd_var_run_t
+}:file { watch watch_reads watch_mount watch_with_perm };
 
 # SSSD and local auth files (needed for user lookups)
 auth_read_passwd(sudo_agent_t)
 auth_read_shadow(sudo_agent_t)
+# Add generic auth file reading for SSSD etc
+auth_use_nsswitch(sudo_agent_t)
 
-# D-Bus and Logging
+# D-Bus system bus monitoring
 dbus_system_bus_client(sudo_agent_t)
+# Special permission to monitor the bus
+dbus_connect_system_bus(sudo_agent_t)
+
+# Logging
 logging_send_syslog_msg(sudo_agent_t)
+# Allow reading the journal for sandbox verification if needed
+logging_read_all_logs(sudo_agent_t)
+
+# System state and network state
 kernel_read_system_state(sudo_agent_t)
 kernel_read_network_state(sudo_agent_t)
 kernel_read_net_sysctls(sudo_agent_t)
+kernel_read_kernel_sysctls(sudo_agent_t)
 
 ########################################
 #
