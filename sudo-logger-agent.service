@@ -15,28 +15,17 @@ Restart=always
 RestartSec=2
 
 User=root
-# eBPF requires CAP_BPF (implicit when running as root on kernel ≥ 5.8).
+# The agent runs as root with full capabilities (CAP_BPF, CAP_SYS_PTRACE,
+# CAP_SYS_ADMIN, etc.) because eBPF tracing and the BPF LSM sandbox require
+# them. Systemd sandboxing flags that create private mount namespaces or add
+# seccomp/Landlock filters (PrivateTmp, PrivateDevices, ProtectKernelTunables,
+# ProtectKernelModules, LockPersonality, RestrictSUIDSGID) cause inotify_add_watch
+# to return EACCES for /etc and /proc/sys paths inside the service's namespace,
+# preventing the sandbox watcher from tracking atomic file replacements.
+# The BPF LSM sandbox (kernel-level) is the meaningful confinement boundary.
+#
 # BPF program pinning requires write access to /sys/fs/bpf.
-
-PrivateTmp=yes
-PrivateDevices=yes
-# ProtectSystem=strict is intentionally omitted: the sandbox watcher (inotify)
-# fails with EACCES on /etc and /usr paths inside strict's private mount
-# namespace, degrading protection for those directories.  The BPF LSM sandbox
-# already enforces write-protection on all critical paths at kernel level, which
-# is the stronger guarantee.
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-LockPersonality=yes
-RestrictSUIDSGID=yes
-# eBPF CO-RE relocation needs access to /sys/kernel/btf/vmlinux.
-ReadOnlyPaths=/sys/kernel/btf
-# BPF program pinning.
 ReadWritePaths=/sys/fs/bpf
-# /run/user/<uid> is a per-user tmpfs submount managed by systemd-logind.
-# ProtectHome would shadow it (making /run/user/1000 appear empty/read-only
-# inside the namespace).  We omit ProtectHome so the agent can create the
-# Wayland proxy socket in /run/user/<uid>/ without a bind-mount conflict.
 
 [Install]
 WantedBy=multi-user.target

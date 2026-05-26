@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.67
+Version:        1.20.68
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,13 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.68-1
+- fix(service): remove all systemd hardening flags that cause inotify_add_watch
+  EACCES — PrivateTmp/PrivateDevices create private mount namespace; Landlock
+  (ProtectKernelTunables) and seccomp (ProtectKernelModules, LockPersonality,
+  RestrictSUIDSGID) block watches on /etc and /proc/sys paths in kernel 6.x;
+  kernel-level BPF LSM sandbox is the meaningful confinement boundary
+
 * Tue May 26 2026 sudo-logger 1.20.67-1
 - fix(service): remove ProtectSystem=strict — incompatible with sandbox inotify
   watcher; inotify_add_watch fails with EACCES on /etc and /usr inside strict's
