@@ -297,6 +297,16 @@ func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.Session
 	if divStatus == "" && (meta.Source == "" || meta.Source == "plugin") {
 		divStatus = "unwitnessed"
 	}
+	// Apply the same defaults as iolog.NewWriter so the stored values match
+	// the cast file header (which defaults to 220x50 when sudo provides no PTY).
+	ttyC := meta.Cols
+	if ttyC <= 0 {
+		ttyC = 220
+	}
+	ttyR := meta.Rows
+	if ttyR <= 0 {
+		ttyR = 50
+	}
 	_, err = d.db.Exec(ctx, `
 INSERT INTO sudo_sessions
   (tsid, session_id, "user", host, runas, runas_uid, runas_gid,
@@ -310,7 +320,7 @@ ON CONFLICT (tsid) DO NOTHING`,
 		meta.Command, meta.ResolvedCommand, meta.Cwd, meta.Flags,
 		startTime.Unix(),
 		meta.Source, meta.ParentSessionID, meta.HasIO, divStatus, meta.CallerProcess,
-		meta.Cols, meta.Rows,
+		ttyC, ttyR,
 	)
 	if err != nil {
 		_ = w.Close()
