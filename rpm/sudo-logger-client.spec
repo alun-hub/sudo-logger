@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.66
+Version:        1.20.67
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,12 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.67-1
+- fix(service): remove ProtectSystem=strict — incompatible with sandbox inotify
+  watcher; inotify_add_watch fails with EACCES on /etc and /usr inside strict's
+  private mount namespace, causing sandbox to miss atomic file replacements
+  (BPF LSM still enforces write-protection at kernel level for all paths)
+
 * Tue May 26 2026 sudo-logger 1.20.66-1
 - fix(selinux): restore confined domain for sudo_agent_t; replace unconfined_domain
   + permissive with targeted allow rules; add capability2 { bpf perfmon } and

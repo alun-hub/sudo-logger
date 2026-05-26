@@ -18,9 +18,13 @@ User=root
 # eBPF requires CAP_BPF (implicit when running as root on kernel ≥ 5.8).
 # BPF program pinning requires write access to /sys/fs/bpf.
 
-ProtectSystem=strict
 PrivateTmp=yes
 PrivateDevices=yes
+# ProtectSystem=strict is intentionally omitted: the sandbox watcher (inotify)
+# fails with EACCES on /etc and /usr paths inside strict's private mount
+# namespace, degrading protection for those directories.  The BPF LSM sandbox
+# already enforces write-protection on all critical paths at kernel level, which
+# is the stronger guarantee.
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 LockPersonality=yes
