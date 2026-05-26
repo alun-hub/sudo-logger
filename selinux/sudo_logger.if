@@ -1,22 +1,22 @@
-## <summary>sudo-logger session recording plugin and shipper</summary>
+## <summary>sudo-logger session recording plugin and agent</summary>
 
 ########################################
 ## <summary>
-##   Allow a domain to connect to the sudo-shipper socket.
-##   Used by sudo when the plugin calls connect_shipper().
+##   Allow a domain to connect to the sudo-logger-agent socket.
+##   Used by sudo when the plugin calls connect_agent().
 ## </summary>
 ## <param name="domain">
 ##   <summary>Domain allowed to connect.</summary>
 ## </param>
 #
-interface(`sudo_logger_connect_shipper',`
+interface(`sudo_logger_connect_agent',`
     gen_require(`
-        type sudo_shipper_t;
-        type sudo_shipper_var_run_t;
+        type sudo_agent_t;
+        type sudo_agent_var_run_t;
     ')
-    allow $1 sudo_shipper_var_run_t:dir search;
-    allow $1 sudo_shipper_var_run_t:sock_file write;
-    allow $1 sudo_shipper_t:unix_stream_socket connectto;
+    allow $1 sudo_agent_var_run_t:dir search;
+    allow $1 sudo_agent_var_run_t:sock_file write;
+    allow $1 sudo_agent_t:unix_stream_socket connectto;
 ')
 
 ########################################

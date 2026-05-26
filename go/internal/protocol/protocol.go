@@ -1,5 +1,5 @@
 // Package protocol defines the wire format shared between the C plugin,
-// the local shipper daemon, and the remote log server.
+// the local agent daemon, and the remote log server.
 //
 // Frame format (all integers big-endian):
 //
@@ -7,19 +7,19 @@
 //
 // Message types:
 //
-//	0x01  SESSION_START   plugin→shipper→server  JSON payload (SessionStart)
-//	0x02  CHUNK           plugin→shipper→server  binary payload (Chunk)
-//	0x03  SESSION_END     plugin→shipper→server  binary payload (SessionEnd)
-//	0x04  ACK             server→shipper          binary payload (Ack)
-//	0x05  ACK_QUERY       plugin→shipper          empty
-//	0x06  ACK_RESPONSE    shipper→plugin          binary: last_ack_ts_ns(8) + last_seq(8)
-//	0x07  SESSION_READY   shipper→plugin          empty — server connection OK, sudo may proceed
-//	0x08  SESSION_ERROR   shipper→plugin          string error message — sudo blocked
-//	0x09  HEARTBEAT       shipper→server          empty — keepalive probe (every 400 ms)
-//	0x0a  HEARTBEAT_ACK   server→shipper          empty — immediate reply to HEARTBEAT
-//	0x0b  SERVER_READY    server→shipper          empty — session accepted, shipper may send SESSION_READY
-//	0x0c  SESSION_DENIED  server→shipper,         string block message — policy denial, sudo blocked
-//	                      shipper→plugin
+//	0x01  SESSION_START   plugin→agent→server  JSON payload (SessionStart)
+//	0x02  CHUNK           plugin→agent→server  binary payload (Chunk)
+//	0x03  SESSION_END     plugin→agent→server  binary payload (SessionEnd)
+//	0x04  ACK             server→agent          binary payload (Ack)
+//	0x05  ACK_QUERY       plugin→agent          empty
+//	0x06  ACK_RESPONSE    agent→plugin          binary: last_ack_ts_ns(8) + last_seq(8)
+//	0x07  SESSION_READY   agent→plugin          empty — server connection OK, sudo may proceed
+//	0x08  SESSION_ERROR   agent→plugin          string error message — sudo blocked
+//	0x09  HEARTBEAT       agent→server          empty — keepalive probe (every 400 ms)
+//	0x0a  HEARTBEAT_ACK   server→agent          empty — immediate reply to HEARTBEAT
+//	0x0b  SERVER_READY    server→agent          empty — session accepted, agent may send SESSION_READY
+//	0x0c  SESSION_DENIED  server→agent,         string block message — policy denial, sudo blocked
+//	                      agent→plugin
 //
 // CHUNK stream types map to sudo's iolog event types (see iolog/iolog.go):
 //
@@ -46,15 +46,15 @@ const (
 	MsgAck          = uint8(0x04)
 	MsgAckQuery     = uint8(0x05)
 	MsgAckResponse  = uint8(0x06)
-	MsgSessionReady  = uint8(0x07) // shipper→plugin: server connection OK
-	MsgSessionError  = uint8(0x08) // shipper→plugin: server connection failed
-	MsgHeartbeat     = uint8(0x09) // shipper→server: keepalive probe
-	MsgHeartbeatAck  = uint8(0x0a) // server→shipper: keepalive reply
-	MsgServerReady   = uint8(0x0b) // server→shipper: session accepted, proceed
-	MsgSessionDenied  = uint8(0x0c) // server→shipper AND shipper→plugin: policy denial
-	MsgFreezeTimeout  = uint8(0x0d) // shipper→plugin: server unreachable for too long, session will be terminated
-	MsgSessionAbandon  = uint8(0x0e) // shipper→server (new conn): freeze-timeout fired; payload = session_id UTF-8
-	MsgSessionFreezing  = uint8(0x0f) // shipper→server (new conn): session frozen due to network loss; payload = session_id UTF-8
+	MsgSessionReady  = uint8(0x07) // agent→plugin: server connection OK
+	MsgSessionError  = uint8(0x08) // agent→plugin: server connection failed
+	MsgHeartbeat     = uint8(0x09) // agent→server: keepalive probe
+	MsgHeartbeatAck  = uint8(0x0a) // server→agent: keepalive reply
+	MsgServerReady   = uint8(0x0b) // server→agent: session accepted, proceed
+	MsgSessionDenied  = uint8(0x0c) // server→agent AND agent→plugin: policy denial
+	MsgFreezeTimeout  = uint8(0x0d) // agent→plugin: server unreachable for too long, session will be terminated
+	MsgSessionAbandon  = uint8(0x0e) // agent→server (new conn): freeze-timeout fired; payload = session_id UTF-8
+	MsgSessionFreezing  = uint8(0x0f) // agent→server (new conn): session frozen due to network loss; payload = session_id UTF-8
 	MsgDivergenceAlert  = uint8(0x10) // agent→server: sudo execve seen but no plugin SESSION_START within 30s
 	MsgSandboxAlert     = uint8(0x11) // agent→server: sandbox violation blocked by kernel LSM
 
@@ -73,7 +73,7 @@ type SessionStart struct {
 	Host      string `json:"host"`
 	Command   string `json:"command"`
 	Ts        int64  `json:"ts"`  // unix seconds
-	Pid       int    `json:"pid"` // sudo process PID — used by the shipper for cgroup setup
+	Pid       int    `json:"pid"` // sudo process PID — used by the agent for cgroup setup
 	// Extended metadata — populated by plugin v1.7.0+.
 	// Older clients omit these fields; receivers must tolerate zero values.
 	ResolvedCommand string `json:"resolved_command,omitempty"` // full binary path from command_info[]
@@ -88,7 +88,7 @@ type SessionStart struct {
 	UserUID         int    `json:"user_uid,omitempty"`         // invoking user's UID from user_info[]
 	UserGID         int    `json:"user_gid,omitempty"`         // invoking user's primary GID from user_info[]
 	// Source identifies the recording path (added by agent v2+).
-	// "plugin" = sudo C plugin (default, omitempty means old shippers look the same).
+	// "plugin" = sudo C plugin (default, omitempty means old agents look the same).
 	// "ebpf-tty" = eBPF TTY session (SSH/su/screen without sudo).
 	// "ebpf-pkexec" = polkit/pkexec privilege elevation.
 	// Receivers must tolerate an empty value (treat as "plugin").
@@ -149,7 +149,7 @@ type SessionEnd struct {
 	ExitCode int32
 }
 
-// Ack is a decoded ACK message (server → shipper).
+// Ack is a decoded ACK message (server → agent).
 //
 // Payload layout: [8 seq][8 ts_ns][64 sig]
 // sig is an ed25519 signature over AckSignMessage(sessionID, seq, ts_ns).
@@ -200,7 +200,7 @@ const maxPayloadSize = uint32(1 * 1024 * 1024) // 1 MB
 // MaxSessionStartPayload is the per-type size limit for SESSION_START messages.
 // SESSION_START carries JSON metadata only — 64 KB is generous.
 // Callers must check this before calling ReadPayload to prevent a malicious
-// (mTLS-authenticated) shipper from triggering a 1 MB allocation per connection.
+// (mTLS-authenticated) agent from triggering a 1 MB allocation per connection.
 const MaxSessionStartPayload = uint32(64 * 1024) // 64 KB
 
 // ReadPayload reads exactly payloadLen bytes from r.
@@ -297,7 +297,7 @@ func EncodeAck(seq uint64, ts int64, sig [64]byte) []byte {
 }
 
 // AckSignMessage returns the canonical byte string signed by the server and
-// verified by the shipper for each ACK.  Including the session ID prevents a
+// verified by the agent for each ACK.  Including the session ID prevents a
 // valid ACK for one session from being replayed against a different session.
 //
 // Layout: sessionID || 0x00 || seq_be(8) || ts_ns_be(8)

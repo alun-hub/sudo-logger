@@ -1,6 +1,6 @@
 // plugin.go — Unix-socket plugin handler for sudo-logger-agent.
 // Receives connections from the sudo C plugin and forwards them to the log
-// server over TLS.  This is the same logic as the former sudo-shipper daemon.
+// server over TLS.  This is the same logic as the former sudo-logger-agent daemon.
 package main
 
 import (

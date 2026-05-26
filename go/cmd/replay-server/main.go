@@ -253,7 +253,7 @@ type SessionInfo struct {
 	Duration        float64  `json:"duration"`   // seconds
 	ExitCode        int32    `json:"exit_code"`
 	Incomplete      bool     `json:"incomplete,omitempty"`      // true if session ended without clean session_end
-	NetworkOutage   bool     `json:"network_outage,omitempty"`  // true when terminated by network loss (not a shipper kill)
+	NetworkOutage   bool     `json:"network_outage,omitempty"`  // true when terminated by network loss (not a agent kill)
 	InProgress      bool     `json:"in_progress,omitempty"`     // true if session is still being recorded
 	RiskScore       int      `json:"risk_score"`
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
@@ -1319,7 +1319,7 @@ func buildReport(ctx context.Context, from, to int64) (*ReportData, error) {
 			anomalies = append(anomalies, Anomaly{
 				Kind: "incomplete", TSID: s.TSID, User: s.User, Host: s.Host,
 				Command: s.Command, StartTime: s.StartTime, Duration: s.Duration,
-				Detail: "shipper killed mid-session", RiskScore: s.RiskScore,
+				Detail: "agent killed mid-session", RiskScore: s.RiskScore,
 			})
 			inAnomalies[s.TSID] = true
 		}
@@ -1859,7 +1859,7 @@ func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func
 	if rule.Incomplete != nil {
 		// A freeze-timeout is a network event, not a security incident — treat
 		// it as "not unexpectedly terminated" for risk scoring purposes so it
-		// doesn't accumulate the same score as a shipper-killed session.
+		// doesn't accumulate the same score as a agent-killed session.
 		incompleteForSecurity := s.Incomplete && !s.NetworkOutage
 		if *rule.Incomplete != incompleteForSecurity {
 			return false

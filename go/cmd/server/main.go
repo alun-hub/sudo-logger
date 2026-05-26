@@ -1,6 +1,6 @@
 // sudo-logserver: remote TLS server that receives sudo session recordings
-// from sudo-shipper instances, writes sudo I/O log directories compatible
-// with sudoreplay(8), and sends ed25519-signed ACKs back to the shipper.
+// from sudo-logger-agent instances, writes sudo I/O log directories compatible
+// with sudoreplay(8), and sends ed25519-signed ACKs back to the agent.
 //
 // Sessions are stored under -logdir/<user>/<host>_<timestamp>/
 // and replayed with: sudoreplay -d <logdir> <session-dir>
@@ -103,7 +103,7 @@ type session struct {
 	writer    store.SessionWriter
 	lastSeq   uint64
 	// freezeCandidate is set when SESSION_FREEZING is received for this session,
-	// meaning the shipper declared the network dead.  When the TCP connection
+	// meaning the agent declared the network dead.  When the TCP connection
 	// subsequently drops, MarkNetworkOutage is used instead of MarkIncomplete.
 	freezeCandidate bool
 }
@@ -399,7 +399,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 						sess.id, remote)
 					_ = sess.writer.MarkNetworkOutage()
 				} else {
-					log.Printf("SECURITY: [%s] %s dropped connection without session_end — session may be incomplete (shipper killed?): %v",
+					log.Printf("SECURITY: [%s] %s dropped connection without session_end — session may be incomplete (agent killed?): %v",
 						sess.id, remote, err)
 					_ = sess.writer.MarkIncomplete()
 				}
@@ -410,7 +410,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		}
 
 		// SESSION_START is JSON metadata — apply a tighter size limit to prevent
-		// a malicious (mTLS-authenticated) shipper from triggering a 1 MB allocation.
+		// a malicious (mTLS-authenticated) agent from triggering a 1 MB allocation.
 		if msgType == protocol.MsgSessionStart && plen > protocol.MaxSessionStartPayload {
 			log.Printf("SECURITY: SESSION_START payload too large from %s: %d bytes (max %d) — dropping connection",
 				remote, plen, protocol.MaxSessionStartPayload)
@@ -535,7 +535,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			return
 
 		case protocol.MsgSessionFreezing:
-			// Sent by the shipper on a NEW connection at markDead() time (~800 ms
+			// Sent by the agent on a NEW connection at markDead() time (~800 ms
 			// after network loss), while the server is likely still reachable.
 			// If the session is still active, set freezeCandidate so the TCP-drop
 			// handler calls MarkNetworkOutage instead of MarkIncomplete.
@@ -556,7 +556,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			return
 
 		case protocol.MsgSessionAbandon:
-			// Fallback: sent by the shipper on a NEW connection after freeze-timeout
+			// Fallback: sent by the agent on a NEW connection after freeze-timeout
 			// fires (5 min), only if network has recovered.  Upgrades the stored
 			// termination reason in case SESSION_FREEZING was not received earlier.
 			if sess != nil {

@@ -56,7 +56,7 @@ make -f /usr/share/selinux/devel/Makefile sudo_logger.pp
 install -D -m 0755 plugin/sudo_logger_plugin.so \
     %{buildroot}%{_libexecdir}/sudo/sudo_logger_plugin.so
 
-# Agent binary (replaces sudo-shipper)
+# Agent binary
 install -D -m 0755 go/sudo-logger-agent \
     %{buildroot}%{_bindir}/sudo-logger-agent
 

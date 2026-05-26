@@ -1,17 +1,17 @@
 /*
  * sudo-logger: I/O plugin for sudo that ships session recordings to a
- * remote log server via a local shipper daemon.
+ * remote log server via a local agent daemon.
  *
  * Architecture:
- *   plugin_open()  → connects to sudo-shipper (Unix socket), sends SESSION_START,
+ *   plugin_open()  → connects to sudo-logger-agent (Unix socket), sends SESSION_START,
  *                    waits for SESSION_READY, starts background monitor thread.
- *   log_ttyin/out  → called by sudo for every I/O chunk; forwards to shipper.
+ *   log_ttyin/out  → called by sudo for every I/O chunk; forwards to agent.
  *   plugin_close() → stops monitor thread, sends SESSION_END, closes socket.
  *
  * Freeze behaviour:
  *   The background monitor thread polls ACK state every 150 ms.  If no fresh
  *   ACK has arrived within ACK_TIMEOUT_SECS, it writes the freeze banner to
- *   /dev/tty.  The actual process freeze is performed by sudo-shipper via
+ *   /dev/tty.  The actual process freeze is performed by sudo-logger-agent via
  *   cgroup.freeze=1 on the kernel side — the plugin only shows the banner.
  *
  * Build:  see Makefile (or rpm/sudo-logger-client.spec)
@@ -48,9 +48,9 @@
 #endif
 
 /* ---------- tunables ---------- */
-#define SHIPPER_SOCK_PATH    "/run/sudo-logger/plugin.sock"
+#define AGENT_SOCK_PATH    "/run/sudo-logger/plugin.sock"
 #define ACK_TIMEOUT_SECS     2
-#define ACK_REFRESH_SECS     0      /* re-query shipper on every check */
+#define ACK_REFRESH_SECS     0      /* re-query agent on every check */
 #define ACK_QUERY_TIMEOUT_MS 100    /* max wait for ACK_RESPONSE */
 
 /* ---------- wire protocol (shared with Go) ---------- */
@@ -85,13 +85,13 @@
 #define BLOCKED_TAIL \
     "\033[0m\r\n"
 #define TERMINATE_MSG \
-    "\r\n\033[41;97;1m[ SUDO-LOGGER: shipper lost — session terminated ]\033[0m\r\n"
+    "\r\n\033[41;97;1m[ SUDO-LOGGER: agent lost — session terminated ]\033[0m\r\n"
 #define TIMEOUT_MSG \
     "\r\n\033[41;97;1m[ SUDO-LOGGER: gave up waiting for log server — session terminated ]\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
 static sudo_printf_t g_printf;
-static int           g_shipper_fd = -1;
+static int           g_agent_fd = -1;
 static int           g_tty_fd     = -1;
 static char          g_tty_path[64] = "";  /* actual device path, e.g. /dev/pts/3 */
 static char          g_session_id[320];
@@ -99,16 +99,16 @@ static uint64_t      g_seq        = 0;
 
 /* ACK cache */
 static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
-static time_t g_last_ack_query = 0;  /* when we last queried the shipper */
+static time_t g_last_ack_query = 0;  /* when we last queried the agent */
 
 /* Background monitor thread */
 static _Atomic int    g_monitor_stop   = 0;
-static _Atomic int    g_shipper_dead   = 0;  /* set when socket drops; triggers session termination */
-static _Atomic int    g_freeze_timeout = 0;  /* set when shipper sends MSG_FREEZE_TIMEOUT */
+static _Atomic int    g_agent_dead   = 0;  /* set when socket drops; triggers session termination */
+static _Atomic int    g_freeze_timeout = 0;  /* set when agent sends MSG_FREEZE_TIMEOUT */
 static int            g_monitor_started = 0;
 static pthread_t      g_monitor_thread;
 static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
-/* Serialises concurrent writes to g_shipper_fd (main thread vs monitor thread). */
+/* Serialises concurrent writes to g_agent_fd (main thread vs monitor thread). */
 static pthread_mutex_t g_send_mu      = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------- helpers ---------- */
@@ -124,7 +124,7 @@ static int write_all(int fd, const void *buf, size_t n)
         if (w < 0) {
             if (errno == EINTR) continue;
             if (errno == EPIPE || errno == ECONNRESET)
-                atomic_store(&g_shipper_dead, 1);
+                atomic_store(&g_agent_dead, 1);
             return -1;
         }
         sent += (size_t)w;
@@ -175,7 +175,7 @@ static int read_exact(int fd, void *buf, size_t n)
         ssize_t r = read(fd, (char *)buf + got, n - got);
         if (r <= 0) {
             if (r == 0)  /* EOF: peer closed connection */
-                atomic_store(&g_shipper_dead, 1);
+                atomic_store(&g_agent_dead, 1);
             return -1;
         }
         got += (size_t)r;
@@ -184,9 +184,9 @@ static int read_exact(int fd, void *buf, size_t n)
 }
 
 /*
- * Connect to shipper Unix socket. Returns fd or -1.
+ * Connect to agent Unix socket. Returns fd or -1.
  */
-static int connect_shipper(void)
+static int connect_agent(void)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0)
@@ -195,7 +195,7 @@ static int connect_shipper(void)
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, SHIPPER_SOCK_PATH, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, AGENT_SOCK_PATH, sizeof(addr.sun_path) - 1);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         close(fd);
@@ -205,16 +205,16 @@ static int connect_shipper(void)
 }
 
 /*
- * Query shipper for ACK state. Updates g_last_ack_time if fresh ACK found.
+ * Query agent for ACK state. Updates g_last_ack_time if fresh ACK found.
  * Uses a short select() timeout to avoid blocking the terminal.
  */
 static void refresh_ack_cache(void)
 {
-    if (g_shipper_fd < 0)
+    if (g_agent_fd < 0)
         return;
 
     /*
-     * Drain all pending unsolicited messages from the shipper before sending
+     * Drain all pending unsolicited messages from the agent before sending
      * ACK_QUERY.  Must loop until the socket has no more data; a single drain
      * would leave subsequent messages in the buffer and cause the ACK_RESPONSE
      * read below to misparse the stream.
@@ -224,13 +224,13 @@ static void refresh_ack_cache(void)
         struct timeval tv;
         for (;;) {
             FD_ZERO(&rfds);
-            FD_SET(g_shipper_fd, &rfds);
+            FD_SET(g_agent_fd, &rfds);
             tv.tv_sec  = 0;
             tv.tv_usec = 0;
-            if (select(g_shipper_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
+            if (select(g_agent_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
                 break;
             uint8_t hdr[5];
-            if (read_exact(g_shipper_fd, hdr, 5) != 0)
+            if (read_exact(g_agent_fd, hdr, 5) != 0)
                 return;
             uint32_t plen;
             memcpy(&plen, hdr + 1, 4);
@@ -241,7 +241,7 @@ static void refresh_ack_cache(void)
                 uint8_t drain[64];
                 uint32_t n = rem < (uint32_t)sizeof(drain)
                              ? rem : (uint32_t)sizeof(drain);
-                if (read_exact(g_shipper_fd, drain, n) < 0)
+                if (read_exact(g_agent_fd, drain, n) < 0)
                     return;
                 rem -= n;
             }
@@ -249,24 +249,24 @@ static void refresh_ack_cache(void)
     }
 
     pthread_mutex_lock(&g_send_mu);
-    int _rc = send_msg(g_shipper_fd, MSG_ACK_QUERY, NULL, 0);
+    int _rc = send_msg(g_agent_fd, MSG_ACK_QUERY, NULL, 0);
     pthread_mutex_unlock(&g_send_mu);
     if (_rc < 0)
         return;
 
     fd_set rfds;
     FD_ZERO(&rfds);
-    FD_SET(g_shipper_fd, &rfds);
+    FD_SET(g_agent_fd, &rfds);
     struct timeval tv = {
         .tv_sec  = 0,
         .tv_usec = ACK_QUERY_TIMEOUT_MS * 1000,
     };
 
-    if (select(g_shipper_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
+    if (select(g_agent_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
         return;
 
     uint8_t hdr[5];
-    if (read_exact(g_shipper_fd, hdr, 5) < 0)
+    if (read_exact(g_agent_fd, hdr, 5) < 0)
         return;
     if (hdr[0] != MSG_ACK_RESPONSE)
         return;
@@ -278,19 +278,19 @@ static void refresh_ack_cache(void)
         /* Drain undersized payload to keep the socket in sync. */
         uint8_t drain[16];
         if (plen > 0)
-            read_exact(g_shipper_fd, drain, plen);
+            read_exact(g_agent_fd, drain, plen);
         return;
     }
 
     /* Payload: [8 bytes last_ack_ts_ns BE][8 bytes last_seq BE] */
     uint8_t payload[16];
-    if (read_exact(g_shipper_fd, payload, 16) < 0)
+    if (read_exact(g_agent_fd, payload, 16) < 0)
         return;
     /* Drain any extra bytes beyond the 16 we consumed. */
     for (uint32_t rem = plen - 16; rem > 0; ) {
         uint8_t discard[64];
         uint32_t n = rem < (uint32_t)sizeof(discard) ? rem : (uint32_t)sizeof(discard);
-        if (read_exact(g_shipper_fd, discard, (size_t)n) < 0)
+        if (read_exact(g_agent_fd, discard, (size_t)n) < 0)
             return;
         rem -= n;
     }
@@ -299,7 +299,7 @@ static void refresh_ack_cache(void)
     memcpy(&last_ack_ts_ns, payload, 8);
     last_ack_ts_ns = (int64_t)be64toh((uint64_t)last_ack_ts_ns);
 
-    /* ts=0 means shipper explicitly reports dead connection — force stale.
+    /* ts=0 means agent explicitly reports dead connection — force stale.
      * Any positive value means server is alive; update the cache. */
     if (last_ack_ts_ns > 0) {
         g_last_ack_time = (time_t)(last_ack_ts_ns / 1000000000LL);
@@ -319,7 +319,7 @@ static int ack_is_fresh(void)
     if (now - g_last_ack_query >= ACK_REFRESH_SECS)
         refresh_ack_cache();
 
-    /* g_last_ack_time == 0 means shipper signalled dead connection */
+    /* g_last_ack_time == 0 means agent signalled dead connection */
     if (g_last_ack_time == 0)
         return 0;
 
@@ -330,7 +330,7 @@ static int ack_is_fresh(void)
 /*
  * Thread-safe wrapper around ack_is_fresh().
  * Both log_ttyin and the monitor thread call this; the mutex ensures
- * the shared shipper socket is not used concurrently.
+ * the shared agent socket is not used concurrently.
  */
 static int ack_is_fresh_locked(void)
 {
@@ -343,7 +343,7 @@ static int ack_is_fresh_locked(void)
 /*
  * unfreeze_session_cgroup — unfreeze the session cgroup and kill its processes.
  *
- * When the shipper dies unexpectedly, cgroup.freeze=1 remains set.  PTY
+ * When the agent dies unexpectedly, cgroup.freeze=1 remains set.  PTY
  * hangup (SIGHUP) from sudo's exit is queued but never delivered to frozen
  * bash, leaving it permanently stuck.  This function:
  *   1. Writes 0 to cgroup.freeze so pending signals can be delivered.
@@ -382,7 +382,7 @@ static void unfreeze_session_cgroup(void)
 
     /*
      * Two cases:
-     *   A) sudo was moved to parent cgroup — parent ends with the shipper's
+     *   A) sudo was moved to parent cgroup — parent ends with the agent's
      *      base dir, and g_session_id is a sub-directory of it.
      *   B) sudo is still in the session cgroup (moveSudoOut not yet called) —
      *      parent itself ends with g_session_id.
@@ -441,7 +441,7 @@ static void unfreeze_session_cgroup(void)
  * "[1]+ Stopped", and reclaims the terminal — making g_tty_fd inaccessible
  * for writes and forcing the user to use "fg" to see anything.
  *
- * Instead we rely on the shipper's cgroup freeze (cgroup.freeze = 1), which
+ * Instead we rely on the agent's cgroup freeze (cgroup.freeze = 1), which
  * suspends the process without changing its job-control state.  The session
  * stays in the foreground, and the banner can be written immediately.
  */
@@ -461,8 +461,8 @@ static void *monitor_thread_fn(void *arg)
 
         int fresh = ack_is_fresh_locked();
 
-        /* Shipper socket dropped — terminate the session immediately. */
-        if (atomic_load(&g_shipper_dead)) {
+        /* Agent socket dropped — terminate the session immediately. */
+        if (atomic_load(&g_agent_dead)) {
             if (g_tty_fd >= 0) {
                 if (atomic_load(&g_freeze_timeout))
                     write(g_tty_fd, TIMEOUT_MSG, sizeof(TIMEOUT_MSG) - 1);
@@ -521,7 +521,7 @@ static void *monitor_thread_fn(void *arg)
  */
 static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
 {
-    if (g_shipper_fd < 0 || dlen == 0)
+    if (g_agent_fd < 0 || dlen == 0)
         return;
 
     size_t plen = 8 + 8 + 1 + 4 + dlen;
@@ -540,7 +540,7 @@ static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
     memcpy(p + 21, data,    dlen);
 
     pthread_mutex_lock(&g_send_mu);
-    send_msg(g_shipper_fd, MSG_CHUNK, p, (uint32_t)plen);
+    send_msg(g_agent_fd, MSG_CHUNK, p, (uint32_t)plen);
     pthread_mutex_unlock(&g_send_mu);
     free(p);
 }
@@ -685,8 +685,8 @@ static void build_cmdline_json(char *buf, size_t bufsz,
  * Responsibilities:
  *   1. Open /dev/tty for banner output (non-blocking; failure is non-fatal).
  *   2. Build a unique session ID from host + user + pid + nanosecond timestamp.
- *   3. Connect to sudo-shipper via Unix socket and send SESSION_START.
- *   4. Block until shipper replies SESSION_READY (server reachable) or
+ *   3. Connect to sudo-logger-agent via Unix socket and send SESSION_START.
+ *   4. Block until agent replies SESSION_READY (server reachable) or
  *      SESSION_ERROR (server unreachable) — sudo is blocked during this wait.
  *   5. Start the background monitor thread that polls ACK state every 150 ms
  *      and writes freeze/unfreeze banners to /dev/tty.
@@ -715,7 +715,7 @@ static int plugin_open(unsigned int        version,
     g_seq     = 0;
     g_last_ack_time  = 0;
     g_last_ack_query = 0;
-    atomic_store(&g_shipper_dead, 0);
+    atomic_store(&g_agent_dead, 0);
 
     g_tty_fd = open("/dev/tty", O_WRONLY | O_NOCTTY | O_CLOEXEC);
     if (g_tty_fd >= 0) {
@@ -817,18 +817,18 @@ static int plugin_open(unsigned int        version,
     char session_id_j[640];
     json_escape_into(session_id_j, sizeof(session_id_j), g_session_id);
 
-    g_shipper_fd = connect_shipper();
-    if (g_shipper_fd < 0) {
-        *errstr = "sudo-logger: cannot connect to shipper daemon "
-                  "(is sudo-shipper running?)";
+    g_agent_fd = connect_agent();
+    if (g_agent_fd < 0) {
+        *errstr = "sudo-logger: cannot connect to agent daemon "
+                  "(is sudo-logger-agent running?)";
         return -1;
     }
 
-    /* Prevent sudo from hanging indefinitely if the shipper stalls during
+    /* Prevent sudo from hanging indefinitely if the agent stalls during
      * the TLS handshake with the remote server.  30 s is generous; the
-     * shipper normally responds within a few hundred milliseconds. */
+     * agent normally responds within a few hundred milliseconds. */
     struct timeval rcv_timeout = { .tv_sec = 30, .tv_usec = 0 };
-    setsockopt(g_shipper_fd, SOL_SOCKET, SO_RCVTIMEO,
+    setsockopt(g_agent_fd, SOL_SOCKET, SO_RCVTIMEO,
                &rcv_timeout, sizeof(rcv_timeout));
 
     char payload[8192];
@@ -860,12 +860,12 @@ static int plugin_open(unsigned int        version,
     else if (plen >= (int)sizeof(payload))
         plen = (int)strlen(payload);
 
-    send_msg(g_shipper_fd, MSG_SESSION_START, payload, (uint32_t)plen);
+    send_msg(g_agent_fd, MSG_SESSION_START, payload, (uint32_t)plen);
 
-    /* Wait for shipper to confirm server connection before allowing sudo */
+    /* Wait for agent to confirm server connection before allowing sudo */
     uint8_t hdr[5];
-    if (read_exact(g_shipper_fd, hdr, 5) < 0) {
-        *errstr = "sudo-logger: no response from shipper";
+    if (read_exact(g_agent_fd, hdr, 5) < 0) {
+        *errstr = "sudo-logger: no response from agent";
         return -1;
     }
 
@@ -876,7 +876,7 @@ static int plugin_open(unsigned int        version,
         dlen = be32toh(dlen);
         if (dlen > 0 && dlen < 512) {
             char msgbuf[512] = {0};
-            read_exact(g_shipper_fd, msgbuf, dlen);
+            read_exact(g_agent_fd, msgbuf, dlen);
             if (g_tty_fd >= 0) {
                 write(g_tty_fd, DENIED_HDR,   sizeof(DENIED_HDR)   - 1);
                 write(g_tty_fd, msgbuf, dlen);
@@ -892,7 +892,7 @@ static int plugin_open(unsigned int        version,
     }
 
     if (hdr[0] == MSG_SESSION_ERROR) {
-        /* Drain the payload (technical detail — logged by the shipper, not
+        /* Drain the payload (technical detail — logged by the agent, not
          * shown to the user; DNS errors etc. are not actionable at the
          * terminal and would only confuse the end user). */
         uint32_t elen;
@@ -900,7 +900,7 @@ static int plugin_open(unsigned int        version,
         elen = be32toh(elen);
         if (elen > 0 && elen < 512) {
             char errbuf[512] = {0};
-            read_exact(g_shipper_fd, errbuf, elen);
+            read_exact(g_agent_fd, errbuf, elen);
         }
         if (g_tty_fd >= 0) {
             write(g_tty_fd, BLOCKED_HDR,  sizeof(BLOCKED_HDR)  - 1);
@@ -915,7 +915,7 @@ static int plugin_open(unsigned int        version,
     }
 
     if (hdr[0] != MSG_SESSION_READY) {
-        *errstr = "sudo-logger: unexpected response from shipper";
+        *errstr = "sudo-logger: unexpected response from agent";
         return -1;
     }
 
@@ -927,9 +927,9 @@ static int plugin_open(unsigned int        version,
         rlen = be32toh(rlen);
         if (rlen > 0 && rlen < 4096) {
             char rbuf[4096] = {0};
-            if (read_exact(g_shipper_fd, rbuf, rlen) == 0) {
+            if (read_exact(g_agent_fd, rbuf, rlen) == 0) {
                 /* Print disclaimer before the session begins.
-                 * The shipper embeds ANSI colour codes and CRLF sequences;
+                 * The agent embeds ANSI colour codes and CRLF sequences;
                  * json_unescape_into decodes JSON escapes to raw bytes. */
                 const char *dkey = "\"disclaimer\":\"";
                 char *dp = strstr(rbuf, dkey);
@@ -963,13 +963,13 @@ static int plugin_open(unsigned int        version,
      *
      * After unshare(CLONE_NEWCGROUP), /sys/fs/cgroup appears to all children
      * of this process as a private tree rooted at the session cgroup that the
-     * shipper just placed us in (SESSION_READY is the synchronisation point).
+     * agent just placed us in (SESSION_READY is the synchronisation point).
      * An attempt to write a PID to /sys/fs/cgroup/../../escape/cgroup.procs
      * resolves only within that subtree and fails with ENOENT.
      *
-     * The shipper itself remains in the host cgroup namespace and continues
+     * The agent itself remains in the host cgroup namespace and continues
      * to read and write cgroup.freeze / cgroup.procs via the full host path.
-     * The existing socket connection (g_shipper_fd) is unaffected: sockets
+     * The existing socket connection (g_agent_fd) is unaffected: sockets
      * are not part of the cgroup namespace.
      *
      * CAP_SYS_ADMIN is required; sudo always runs with full capabilities.
@@ -996,28 +996,28 @@ static int plugin_open(unsigned int        version,
  *
  * Stops the monitor thread (pthread_join guarantees it has exited before
  * g_tty_fd is closed — no race on the tty fd), sends SESSION_END with the
- * exit code, and closes the shipper socket and /dev/tty.
+ * exit code, and closes the agent socket and /dev/tty.
  */
 static void plugin_close(int exit_status, int error)
 {
     (void)error;
 
-    /* Stop the background monitor thread before closing the shipper socket. */
+    /* Stop the background monitor thread before closing the agent socket. */
     if (g_monitor_started) {
         atomic_store(&g_monitor_stop, 1);
         pthread_join(g_monitor_thread, NULL);
         g_monitor_started = 0;
     }
 
-    if (g_shipper_fd >= 0) {
+    if (g_agent_fd >= 0) {
         uint8_t payload[12];
         uint64_t seq_be  = htobe64(g_seq);
         int32_t  code_be = (int32_t)htobe32((uint32_t)exit_status);
         memcpy(payload,     &seq_be,  8);
         memcpy(payload + 8, &code_be, 4);
-        send_msg(g_shipper_fd, MSG_SESSION_END, payload, 12);
-        close(g_shipper_fd);
-        g_shipper_fd = -1;
+        send_msg(g_agent_fd, MSG_SESSION_END, payload, 12);
+        close(g_agent_fd);
+        g_agent_fd = -1;
     }
 
     if (g_tty_fd >= 0) {
@@ -1030,8 +1030,8 @@ static void plugin_close(int exit_status, int error)
  * log_ttyin — called for every byte typed by the user (terminal → child).
  *
  * Returns 1 (pass the input through) under normal operation; returns 0 only
- * when the shipper connection has died to prevent further I/O logging.  Freeze
- * enforcement is handled entirely by cgroup.freeze in sudo-shipper.  Returning
+ * when the agent connection has died to prevent further I/O logging.  Freeze
+ * enforcement is handled entirely by cgroup.freeze in sudo-logger-agent.  Returning
  * 0 during a freeze would permanently disable this hook rather than drop a
  * single byte, and caused sudo to send SIGHUP to the session on the first
  * keypress.
@@ -1068,7 +1068,7 @@ static int is_gtk4_portal_noise(const char *buf, unsigned int len)
 static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
-    if (atomic_load(&g_shipper_dead))
+    if (atomic_load(&g_agent_dead))
         return 0;
     ship_chunk(STREAM_TTYIN, buf, len);
     return 1;
@@ -1078,7 +1078,7 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
-    if (atomic_load(&g_shipper_dead))
+    if (atomic_load(&g_agent_dead))
         return 0;
     if (is_gtk4_portal_noise(buf, len))
         return 1;
@@ -1090,7 +1090,7 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 static int log_stdin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
-    if (atomic_load(&g_shipper_dead))
+    if (atomic_load(&g_agent_dead))
         return 0;
     ship_chunk(STREAM_STDIN, buf, len);
     return 1;
@@ -1100,7 +1100,7 @@ static int log_stdin(const char *buf, unsigned int len, const char **errstr)
 static int log_stdout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
-    if (atomic_load(&g_shipper_dead))
+    if (atomic_load(&g_agent_dead))
         return 0;
     ship_chunk(STREAM_STDOUT, buf, len);
     return 1;
@@ -1110,7 +1110,7 @@ static int log_stdout(const char *buf, unsigned int len, const char **errstr)
 static int log_stderr(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
-    if (atomic_load(&g_shipper_dead))
+    if (atomic_load(&g_agent_dead))
         return 0;
     if (is_gtk4_portal_noise(buf, len))
         return 1;

@@ -5,135 +5,135 @@ policy_module(sudo_logger, 1.0.2)
 # Declarations
 #
 
-## sudo-shipper daemon
-type sudo_shipper_t;
-type sudo_shipper_exec_t;
-init_daemon_domain(sudo_shipper_t, sudo_shipper_exec_t)
+## sudo-logger-agent daemon
+type sudo_agent_t;
+type sudo_agent_exec_t;
+init_daemon_domain(sudo_agent_t, sudo_agent_exec_t)
 
 ## Files under /run/sudo-logger/
-type sudo_shipper_var_run_t;
-files_pid_file(sudo_shipper_var_run_t)
+type sudo_agent_var_run_t;
+files_pid_file(sudo_agent_var_run_t)
 
 ## Files under /etc/sudo-logger/  (certs, keys, config)
-type sudo_shipper_etc_t;
-files_config_file(sudo_shipper_etc_t)
+type sudo_agent_etc_t;
+files_config_file(sudo_agent_etc_t)
 
 ## The plugin .so loaded by sudo
 type sudo_logger_plugin_t;
 files_type(sudo_logger_plugin_t)
 
-## The wayland-proxy helper executed by sudo-shipper
+## The wayland-proxy helper executed by sudo-logger-agent
 type wayland_proxy_exec_t;
 files_type(wayland_proxy_exec_t)
 
 ########################################
 #
-# sudo_shipper_t local policy
+# sudo_agent_t local policy
 #
 
 # Basic self permissions
-allow sudo_shipper_t self:fifo_file rw_fifo_file_perms;
-allow sudo_shipper_t self:unix_stream_socket create_stream_socket_perms;
-allow sudo_shipper_t self:tcp_socket create_stream_socket_perms;
-allow sudo_shipper_t self:process { fork sigchld sigkill sigstop signull signal };
-allow sudo_shipper_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search };
+allow sudo_agent_t self:fifo_file rw_fifo_file_perms;
+allow sudo_agent_t self:unix_stream_socket create_stream_socket_perms;
+allow sudo_agent_t self:tcp_socket create_stream_socket_perms;
+allow sudo_agent_t self:process { fork sigchld sigkill sigstop signull signal };
+allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search };
 
 # Manage the Unix socket and PID file in /run/sudo-logger/
-manage_dirs_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
-manage_files_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
-manage_sock_files_pattern(sudo_shipper_t, sudo_shipper_var_run_t, sudo_shipper_var_run_t)
-files_pid_filetrans(sudo_shipper_t, sudo_shipper_var_run_t, { dir file sock_file })
+manage_dirs_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
+manage_files_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
+manage_sock_files_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
+files_pid_filetrans(sudo_agent_t, sudo_agent_var_run_t, { dir file sock_file })
 
 # Read config files and TLS certificates
-list_dirs_pattern(sudo_shipper_t, sudo_shipper_etc_t, sudo_shipper_etc_t)
-read_files_pattern(sudo_shipper_t, sudo_shipper_etc_t, sudo_shipper_etc_t)
-read_lnk_files_pattern(sudo_shipper_t, sudo_shipper_etc_t, sudo_shipper_etc_t)
-files_search_etc(sudo_shipper_t)
+list_dirs_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
+read_files_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
+read_lnk_files_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
+files_search_etc(sudo_agent_t)
 
 # Outbound TLS connection to sudo-logserver
-corenet_tcp_connect_generic_port(sudo_shipper_t)
-corenet_sendrecv_generic_client_packets(sudo_shipper_t)
-sysnet_dns_name_resolve(sudo_shipper_t)
+corenet_tcp_connect_generic_port(sudo_agent_t)
+corenet_sendrecv_generic_client_packets(sudo_agent_t)
+sysnet_dns_name_resolve(sudo_agent_t)
 
 # Write to cgroup files for session freeze (Delegate=yes in service unit)
-# sudo-shipper suspends processes by writing to cgroup.freeze
-fs_rw_cgroup_files(sudo_shipper_t)
+# sudo-logger-agent suspends processes by writing to cgroup.freeze
+fs_rw_cgroup_files(sudo_agent_t)
 # Create and remove per-session sub-cgroups under the delegated subtree.
 # fs_rw_cgroup_files only grants dir { getattr open search }; mkdir/rmdir
 # require write, add_name, remove_name, create, and rmdir on cgroup_t dirs.
 # The kernel also auto-creates cgroup.procs/cgroup.freeze inside the new
 # sub-cgroup, which triggers a file create check attributed to this process.
 require { type cgroup_t; }
-allow sudo_shipper_t cgroup_t:dir { write add_name remove_name create rmdir };
-allow sudo_shipper_t cgroup_t:file { create };
+allow sudo_agent_t cgroup_t:dir { write add_name remove_name create rmdir };
+allow sudo_agent_t cgroup_t:file { create };
 
 # Read /proc/<pid> entries for tracked session processes.
-# The shipper polls /proc/<pid>/{cgroup,comm,stat,task/PID/children} to track
+# The agent polls /proc/<pid>/{cgroup,comm,stat,task/PID/children} to track
 # session processes (bash, GUI apps) for cgroup membership checks and freeze.
 # Processes in a sudo session run under various domains (typically unconfined_t);
 # allow search and getattr on any domain's /proc/<pid> directory.
-allow sudo_shipper_t domain:dir { search getattr };
-allow sudo_shipper_t domain:file { read open getattr };
+allow sudo_agent_t domain:dir { search getattr };
+allow sudo_agent_t domain:file { read open getattr };
 # Read /proc/<pid>/fd/* symlinks to resolve the actual PTY device path.
-# /dev/tty is process-relative; the shipper reads these symlinks to find the
+# /dev/tty is process-relative; the agent reads these symlinks to find the
 # concrete device (e.g. /dev/pts/3) for writing idle-timeout banners.
-allow sudo_shipper_t domain:lnk_file { read getattr };
+allow sudo_agent_t domain:lnk_file { read getattr };
 
 # Write to user PTY devices for session banner messages (freeze, idle warning,
-# idle termination).  The shipper writes directly to the terminal so banners
+# idle termination).  The agent writes directly to the terminal so banners
 # appear immediately, even when the sudo process is stopped by job control.
 require { type user_devpts_t; }
-allow sudo_shipper_t user_devpts_t:chr_file { open write getattr };
+allow sudo_agent_t user_devpts_t:chr_file { open write getattr };
 # getpgid: used by cgroup tracker to check if a process has its own process
 # group (pgid == pid) before deciding whether SIGSTOP is safe to send.
-allow sudo_shipper_t domain:process { getpgid };
+allow sudo_agent_t domain:process { getpgid };
 
 # Send signals (including SIGSTOP/SIGCONT) to session processes.
 # sigcont is not a separate SELinux permission — it is covered by signal.
-allow sudo_shipper_t domain:process { signal sigstop };
+allow sudo_agent_t domain:process { signal sigstop };
 
-# Execute wayland-proxy without domain transition — runs as sudo_shipper_t.
+# Execute wayland-proxy without domain transition — runs as sudo_agent_t.
 # wayland-proxy needs to connect to the user's Wayland socket (/run/user/<uid>/)
 # and create the proxy socket in /run/sudo-logger/.
-allow sudo_shipper_t wayland_proxy_exec_t:file { read open execute execute_no_trans map getattr };
+allow sudo_agent_t wayland_proxy_exec_t:file { read open execute execute_no_trans map getattr };
 
 # Wayland proxy socket operations in /run/user/<uid>/
 # user_tmp_t covers /run/user/<uid>/ on Fedora with systemd-logind
-# The proxy (running as the invoking user under sudo_shipper_t) must:
+# The proxy (running as the invoking user under sudo_agent_t) must:
 #   - search/stat the directory to locate the compositor socket
 #   - create its own proxy socket (write + add_name on dir, create on sock_file)
 #   - connect to the compositor socket (connectto + sock_file read/write)
 #   - remove its socket on exit (remove_name on dir, unlink on sock_file)
 require { type user_tmp_t; }
-allow sudo_shipper_t user_tmp_t:dir { search getattr write add_name remove_name };
-allow sudo_shipper_t user_tmp_t:sock_file { create read write unlink setattr };
+allow sudo_agent_t user_tmp_t:dir { search getattr write add_name remove_name };
+allow sudo_agent_t user_tmp_t:sock_file { create read write unlink setattr };
 # wayland-proxy mmaps SHM pool memfds passed by the client (memfd:gdk-wayland,
 # memfd:wayland-cursor); these land as user_tmp_t file objects.
-allow sudo_shipper_t user_tmp_t:file { map read open getattr write };
-allow sudo_shipper_t self:unix_stream_socket { connectto create_stream_socket_perms };
+allow sudo_agent_t user_tmp_t:file { map read open getattr write };
+allow sudo_agent_t self:unix_stream_socket { connectto create_stream_socket_perms };
 
 # Connect to the Wayland compositor socket (kwin/mutter run as unconfined_t).
 # SELinux suppresses this denial with dontaudit; the explicit allow is required.
 require { type unconfined_t; type dri_device_t; }
-allow sudo_shipper_t unconfined_t:unix_stream_socket connectto;
+allow sudo_agent_t unconfined_t:unix_stream_socket connectto;
 
 # Allow access to graphics hardware (DRI) for DMA-buf and hardware acceleration support.
-allow sudo_shipper_t dri_device_t:chr_file { read write open getattr ioctl };
+allow sudo_agent_t dri_device_t:chr_file { read write open getattr ioctl };
 
 # Connect to the D-Bus system bus for polkit CheckAuthorization monitoring.
 # The agent uses BecomeMonitor to receive copies of polkit calls without
 # interfering with bus traffic.  Requires D-Bus >= 1.9 (RHEL 8+, Fedora 23+).
-dbus_system_bus_client(sudo_shipper_t)
+dbus_system_bus_client(sudo_agent_t)
 
 # Logging
-logging_send_syslog_msg(sudo_shipper_t)
+logging_send_syslog_msg(sudo_agent_t)
 
 # Read /proc for process state (pids, cgroup membership)
-kernel_read_system_state(sudo_shipper_t)
-kernel_read_network_state(sudo_shipper_t)
+kernel_read_system_state(sudo_agent_t)
+kernel_read_network_state(sudo_agent_t)
 
 # Read /proc/sys/net/core/somaxconn (Go runtime reads this at startup)
-kernel_read_net_sysctls(sudo_shipper_t)
+kernel_read_net_sysctls(sudo_agent_t)
 
 ########################################
 #
@@ -154,7 +154,7 @@ optional_policy(`
     allow sudo_t sudo_logger_plugin_t:file { read open execute map getattr };
 
     # Allow sudo (running plugin) to connect to shipper socket
-    allow sudo_t sudo_shipper_var_run_t:dir search;
-    allow sudo_t sudo_shipper_var_run_t:sock_file write;
-    allow sudo_t sudo_shipper_t:unix_stream_socket connectto;
+    allow sudo_t sudo_agent_var_run_t:dir search;
+    allow sudo_t sudo_agent_var_run_t:sock_file write;
+    allow sudo_t sudo_agent_t:unix_stream_socket connectto;
 ')

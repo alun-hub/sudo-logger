@@ -24,7 +24,7 @@ repos:
       - id: golangci-lint
         name: golangci-lint (snabba linters)
         language: system
-        entry: bash -c 'cd go && PATH=/usr/lib/golang/bin:$PATH GOROOT=/usr/lib/golang golangci-lint run --enable-only=govet,ineffassign,staticcheck ./internal/... ./cmd/server/... ./cmd/replay-server/... ./cmd/shipper/... ./cmd/loadgen/...'
+        entry: bash -c 'cd go && PATH=/usr/lib/golang/bin:$PATH GOROOT=/usr/lib/golang golangci-lint run --enable-only=govet,ineffassign,staticcheck ./internal/... ./cmd/server/... ./cmd/replay-server/... ./cmd/agent/... ./cmd/loadgen/...'
         pass_filenames: false
         files: \.go$
 

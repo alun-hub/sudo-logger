@@ -42,7 +42,7 @@ type SessionWriter interface {
 	MarkIncomplete() error
 
 	// MarkNetworkOutage writes the NETWORK_OUTAGE marker when the session is
-	// known to have ended because of network loss (not a shipper kill).
+	// known to have ended because of network loss (not a agent kill).
 	// Called instead of MarkIncomplete when the server received SESSION_FREEZING
 	// on the existing connection before the TCP timeout fired.
 	MarkNetworkOutage() error
@@ -115,7 +115,7 @@ type SessionStore interface {
 
 	// MarkSessionNetworkOutage upgrades a session's termination reason from
 	// generic INCOMPLETE to NETWORK_OUTAGE.  Called by the log-server when it
-	// receives SESSION_FREEZING or SESSION_ABANDON from the shipper after the
+	// receives SESSION_FREEZING or SESSION_ABANDON from the agent after the
 	// session was already closed.
 	// Returns nil if the session is not found (idempotent).
 	MarkSessionNetworkOutage(ctx context.Context, sessionID string) error
@@ -183,7 +183,7 @@ type SessionRecord struct {
 	Duration        float64 // seconds; 0 while in progress
 	ExitCode        int32
 	Incomplete    bool
-	NetworkOutage bool // true when terminated by network loss (not a shipper kill)
+	NetworkOutage bool // true when terminated by network loss (not a agent kill)
 	InProgress    bool
 	// Agent v2+ fields (zero value = backward-compatible defaults).
 	Source           string // "plugin" | "ebpf-tty" | "ebpf-pkexec"; empty = "plugin"

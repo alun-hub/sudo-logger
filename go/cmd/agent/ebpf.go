@@ -439,7 +439,6 @@ func (s *ebpfSubsystem) drainRetryQueue() {
 
 	cutoff := time.Now().Add(-maxPendingAge)
 	var remaining []*ebpfSession
-	serverDown := false
 
 	for i, sess := range queue {
 		if sess.ts.Before(cutoff) {
@@ -447,13 +446,8 @@ func (s *ebpfSubsystem) drainRetryQueue() {
 				sess.id, time.Since(sess.ts).Round(time.Second))
 			continue
 		}
-		if serverDown {
-			remaining = append(remaining, queue[i:]...)
-			break
-		}
 		if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {
 			log.Printf("ebpf: pkexec retry failed (%d events remain queued): %v", len(queue)-i, err)
-			serverDown = true
 			remaining = append(remaining, queue[i:]...)
 			break
 		}

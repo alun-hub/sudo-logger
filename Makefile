@@ -14,7 +14,7 @@ ARCH    ?= $(shell uname -m | sed 's/x86_64/x86_64/;s/aarch64/arm64/')
 
 all: agent
 
-# ── sudo-logger-agent (merged shipper + eBPF recorder) ───────────────────────
+# ── sudo-logger-agent (plugin handler + eBPF recorder) ──────────────────────
 
 vmlinux-agent: go/cmd/agent/bpf/vmlinux.h
 

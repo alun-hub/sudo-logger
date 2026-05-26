@@ -228,7 +228,7 @@ migrate-sessions \
 | **All I/O captured** | stdin, stdout, stderr, tty input and tty output are all recorded |
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
-| **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_shipper_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
+| **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_agent_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
 | **Process sandbox (optional)** | 13 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Active by default on Fedora 38+; older or non-Fedora kernels may need `lsm=bpf`. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
@@ -659,7 +659,7 @@ After import, rules are served from the database and changes via the Settings UI
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `SHIPPER_SOCK_PATH` | `/run/sudo-logger/plugin.sock` | Unix socket path |
+| `AGENT_SOCK_PATH` | `/run/sudo-logger/plugin.sock` | Unix socket path |
 | `ACK_TIMEOUT_SECS` | `2` | Seconds without ACK before plugin-side freeze |
 | `ACK_REFRESH_SECS` | `0` | Re-query agent on every monitor poll (every 150 ms) |
 | `ACK_QUERY_TIMEOUT_MS` | `100` | Max wait for ACK_RESPONSE from agent |

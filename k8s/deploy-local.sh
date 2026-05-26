@@ -101,7 +101,7 @@ $KUBECTL apply -f "${SCRIPT_DIR}/postgresql.yaml"
 log "Deploying MinIO..."
 $KUBECTL apply -f "${SCRIPT_DIR}/minio.yaml"
 
-# ── logserver service (NodePort for shippers) ─────────────────────────────────
+# ── logserver service (NodePort for agents) ─────────────────────────────────
 log "Applying logserver service..."
 $KUBECTL apply -f "${SCRIPT_DIR}/service.yaml"
 
@@ -159,7 +159,7 @@ log ""
 log "Deployment complete!"
 log ""
 log "  Replay UI:   http://${NODE_IP}:30080"
-log "  Log server:  ${NODE_IP}:9876  (mTLS — use shippers with client certs)"
+log "  Log server:  ${NODE_IP}:9876  (mTLS — use agents with client certs)"
 log "  MinIO:       http://${NODE_IP}  (no NodePort — internal only)"
 log ""
 log "Useful commands:"

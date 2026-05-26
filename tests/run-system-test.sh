@@ -14,11 +14,11 @@ REPLAY_AUTH_PWD="Repl4yT3stPwd"  # pragma: allowlist secret
 pass() { echo "✅ $1 PASSED"; }
 fail() { echo "❌ $1 FAILED: ${2:-}"; exit 1; }
 
-# restart_shipper starts a fresh shipper inside the client container.
-restart_shipper() {
-    podman exec sudo-client-test pkill -x sudo-shipper 2>/dev/null || true
+# restart_agent starts a fresh agent inside the client container.
+restart_agent() {
+    podman exec sudo-client-test pkill -x sudo-logger-agent 2>/dev/null || true
     sleep 1
-    podman exec -d sudo-client-test /usr/local/bin/sudo-shipper \
+    podman exec -d sudo-client-test /usr/local/bin/sudo-logger-agent \
         -server=localhost:9876 \
         -socket=/run/sudo-logger/plugin.sock \
         -cert=/etc/sudo-logger/client.crt \
@@ -92,7 +92,7 @@ sleep 5
 
 # ── TEST 1: Grundflöde ─────────────────────────────────────────────────────────
 # Verifierar att hela kedjan fungerar end-to-end: plugin fångar kommandot,
-# shippern skickar det via mTLS till logservern, och logservern skriver det
+# agentn skickar det via mTLS till logservern, och logservern skriver det
 # till disk. En unik token söks i loggkatalogen efter kommandot körts.
 echo "==> TEST 1: Grundflöde — sudo-kommando loggas och syns i loggfilen..."
 TOKEN1="HAPPY_$(date +%s)"  # pragma: allowlist secret
@@ -105,10 +105,10 @@ pass "TEST 1"
 # ── TEST 2: Plugin-socket UID-kontroll ────────────────────────────────────────
 # Verifierar att plugin-sockeln är skyddad på två nivåer:
 #   1. OS-nivå: sockeln är mode 0600 ägd av root — icke-root kan inte ens ansluta.
-#   2. Applikationsnivå: shippern kontrollerar SO_PEERCRED och avvisar anslutningar
+#   2. Applikationsnivå: agentn kontrollerar SO_PEERCRED och avvisar anslutningar
 #      från icke-root även om socketfilen tillfälligt görs tillgänglig.
 # Testet vidgar tillfälligt rättigheter för att nå applikationslagret, och
-# kontrollerar sedan att shippern loggat en UID-avvisning.
+# kontrollerar sedan att agentn loggat en UID-avvisning.
 echo "==> TEST 2: Plugin-socket UID-kontroll — icke-root nekas åtkomst på OS- och applikationsnivå..."
 # Non-root must be denied at the OS level (socket is mode 0600 owned by root).
 if podman exec -u testuser sudo-client-test \
@@ -116,7 +116,7 @@ if podman exec -u testuser sudo-client-test \
     fail "TEST 2" "non-root connected to plugin socket"
 fi
 # Temporarily widen dir + socket so testuser can reach the socket,
-# then send garbage — shipper must reject via SO_PEERCRED UID check.
+# then send garbage — agent must reject via SO_PEERCRED UID check.
 podman exec sudo-client-test chmod 755 /run/sudo-logger
 podman exec sudo-client-test chmod 666 /run/sudo-logger/plugin.sock
 podman exec -u testuser sudo-client-test \
@@ -127,12 +127,12 @@ podman exec sudo-client-test chmod 750 /run/sudo-logger
 if podman logs sudo-client-test 2>&1 | grep -q "rejected non-root connection"; then
     pass "TEST 2"
 else
-    fail "TEST 2" "shipper did not log UID rejection"
+    fail "TEST 2" "agent did not log UID rejection"
 fi
 
 # ── TEST 3: Dataintegritet ────────────────────────────────────────────────────
 # Verifierar att kommandoutdata bevaras ord för ord i loggfilen — inga bytes
-# tappas eller skrivs om på vägen genom plugin → shipper → logserver → disk.
+# tappas eller skrivs om på vägen genom plugin → agent → logserver → disk.
 # En unik token echas via sudo och söks sedan i ttyout-loggen.
 echo "==> TEST 3: Dataintegritet — terminalutdata bevaras ord för ord i loggfilen..."
 TOKEN3="INTEGRITY_$(date +%s)"
@@ -172,30 +172,30 @@ fi
 pass "TEST 4"
 
 # ── TEST 5: Återanslutning efter logserver-omstart ────────────────────────────
-# Verifierar att shippern automatiskt återansluter till logservern efter att den
+# Verifierar att agentn automatiskt återansluter till logservern efter att den
 # startats om, och att loggningen återupptas utan att sudo-kommandon misslyckas.
-# Logservern stoppas och startas om; shippern förväntas återansluta inom 8 s,
+# Logservern stoppas och startas om; agentn förväntas återansluta inom 8 s,
 # varefter ett nytt kommando ska dyka upp i loggkatalogen.
-echo "==> TEST 5: Återanslutning — shippern återupptar loggning efter logserver-omstart..."
+echo "==> TEST 5: Återanslutning — agentn återupptar loggning efter logserver-omstart..."
 podman stop sudo-logserver-test >/dev/null
 sleep 3
 podman start sudo-logserver-test >/dev/null
-sleep 8  # let shipper reconnect
+sleep 8  # let agent reconnect
 TOKEN5="RECONNECT_$(date +%s)"
 podman exec sudo-client-test sudo sh -c "echo $TOKEN5" >/dev/null
 sleep 3
 podman exec sudo-logserver-test grep -r "$TOKEN5" /var/log/sudoreplay >/dev/null \
-    || fail "TEST 5" "shipper did not reconnect after logserver restart"
+    || fail "TEST 5" "agent did not reconnect after logserver restart"
 pass "TEST 5"
 
-# ── TEST 6: Sessionsterminering vid shipper-krasch ────────────────────────────
-# Verifierar att sudo-processen avslutas inom rimlig tid när shippern dör.
+# ── TEST 6: Sessionsterminering vid agent-krasch ────────────────────────────
+# Verifierar att sudo-processen avslutas inom rimlig tid när agentn dör.
 # I icke-interaktivt läge (exec_nopty, ingen TTY) vidarebefordrar sudo inte
 # SIGTERM till sina barn automatiskt. Plugin-monitortråden kompenserar genom att
 # skicka SIGTERM till hela processgruppen (kill(-pgrp)) istället för bara sudo.
 # "exec sleep 60" används så att sh ersätter sig med sleep — sudo får exakt ett
 # barn vars pipe-stängning häver sudo:s poll()-blockering.
-echo "==> TEST 6: Sessionsterminering — sudo-processen avslutas när shippern kraschar..."
+echo "==> TEST 6: Sessionsterminering — sudo-processen avslutas när agentn kraschar..."
 podman exec -d sudo-client-test sudo sh -c 'echo $PPID > /tmp/sudo_test_pid; exec sleep 60'
 sleep 3
 SUDO_TEST_PID=$(podman exec sudo-client-test cat /tmp/sudo_test_pid 2>/dev/null || echo "0")
@@ -203,23 +203,23 @@ SUDO_TEST_PID=$(podman exec sudo-client-test cat /tmp/sudo_test_pid 2>/dev/null 
     || fail "TEST 6" "could not read sudo PID (session did not start)"
 podman exec sudo-client-test kill -0 "$SUDO_TEST_PID" 2>/dev/null \
     || fail "TEST 6" "sudo PID $SUDO_TEST_PID not running (test setup broken)"
-# Kill the shipper — monitor thread detects EOF, calls kill(-pgrp, SIGTERM) to
+# Kill the agent — monitor thread detects EOF, calls kill(-pgrp, SIGTERM) to
 # terminate the whole process group (sudo + its children), then exits.
-podman exec sudo-client-test pkill -x sudo-shipper \
-    || fail "TEST 6" "sudo-shipper not found — cannot run test"
+podman exec sudo-client-test pkill -x sudo-logger-agent \
+    || fail "TEST 6" "sudo-logger-agent not found — cannot run test"
 sleep 10
 # The sudo process must have exited.  Zombie processes (State: Z) still appear
 # in kill -0 checks, so inspect /proc directly and treat zombies as terminated.
 PROC_STATE=$(podman exec sudo-client-test \
     sh -c "grep '^State:' /proc/$SUDO_TEST_PID/status 2>/dev/null || echo 'State: gone'")
 if echo "$PROC_STATE" | grep -qE "^State:[[:space:]]+(R|S|D)"; then
-    fail "TEST 6" "sudo (PID $SUDO_TEST_PID) still genuinely running ($PROC_STATE) after shipper was killed"
+    fail "TEST 6" "sudo (PID $SUDO_TEST_PID) still genuinely running ($PROC_STATE) after agent was killed"
 fi
 pass "TEST 6"
 
-# Restart shipper for subsequent tests.
-echo "   Startar om shipper..."
-restart_shipper
+# Restart agent for subsequent tests.
+echo "   Startar om agent..."
+restart_agent
 
 # ── TEST 7: Riskpoängsättning ─────────────────────────────────────────────────
 # Verifierar att replay-servern genererar en risk.json för sessioner som matchar
@@ -347,25 +347,25 @@ podman exec sudo-logserver-test grep -r "$TOKEN11" /var/log/sudoreplay >/dev/nul
 podman exec sudo-client-test tc qdisc del dev "$IFACE" root
 pass "TEST 11"
 
-# ── TEST 12: INCOMPLETE-markering vid shipper-avbrott ─────────────────────────
-# Verifierar att logservern flaggar en session som INCOMPLETE när shippern
+# ── TEST 12: INCOMPLETE-markering vid agent-avbrott ─────────────────────────
+# Verifierar att logservern flaggar en session som INCOMPLETE när agentn
 # kraschar mitt i en pågående session utan att skicka SESSION_END. En
-# långvarig sudo-session startas (sleep 60), shippern dödas, och logservern
+# långvarig sudo-session startas (sleep 60), agentn dödas, och logservern
 # förväntas ha skrivit en INCOMPLETE-markör i sessionskatalogen.
-echo "==> TEST 12: INCOMPLETE-markering — session flaggas om shippern dör mitt i sessionen..."
+echo "==> TEST 12: INCOMPLETE-markering — session flaggas om agentn dör mitt i sessionen..."
 # Start a long-running session.
 podman exec -d sudo-client-test sudo sh -c "sleep 60"
 sleep 3
 if ! podman exec sudo-client-test pgrep -x sleep >/dev/null 2>&1; then
     fail "TEST 12" "sleep process not started (test setup broken)"
 fi
-# Kill the shipper mid-session (no SESSION_END will be sent to logserver).
-podman exec sudo-client-test pkill -x sudo-shipper || true
+# Kill the agent mid-session (no SESSION_END will be sent to logserver).
+podman exec sudo-client-test pkill -x sudo-logger-agent || true
 sleep 5
 # Logserver must have written an INCOMPLETE marker.
 podman exec sudo-logserver-test find /var/log/sudoreplay -name INCOMPLETE \
     | grep -q INCOMPLETE \
-    || fail "TEST 12" "no INCOMPLETE marker found after shipper was killed mid-session"
+    || fail "TEST 12" "no INCOMPLETE marker found after agent was killed mid-session"
 pass "TEST 12"
 
 echo ""

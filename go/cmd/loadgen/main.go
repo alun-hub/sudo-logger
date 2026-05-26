@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	flagSocket   = flag.String("socket", "/run/sudo-logger/plugin.sock", "Path to sudo-shipper Unix socket")
+	flagSocket   = flag.String("socket", "/run/sudo-logger/plugin.sock", "Path to sudo-logger-agent Unix socket")
 	flagChunks   = flag.Int("chunks", 10000, "Number of 1KB chunks to send per session")
 	flagParallel = flag.Int("parallel", 1, "Number of parallel sessions to run")
 )
@@ -45,7 +45,7 @@ func main() {
 }
 
 func runSession(sessionID string, numChunks int) {
-	// 1. Anslut till shippern
+	// 1. Anslut till agenten
 	conn, err := net.Dial("unix", *flagSocket)
 	if err != nil {
 		log.Printf("[%s] Kunde inte ansluta: %v", sessionID, err)

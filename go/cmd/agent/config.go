@@ -44,7 +44,7 @@ func defaultConfig() agentConfig {
 	}
 }
 
-// loadConfig parses a key = value config file (agent.conf or legacy shipper.conf).
+// loadConfig parses a key = value config file (agent.conf or legacy agent.conf).
 // Unknown keys are silently ignored so the agent remains backward-compatible
 // when reading older configs.
 func loadConfig(path string) (agentConfig, error) {

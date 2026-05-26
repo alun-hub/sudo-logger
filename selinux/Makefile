@@ -10,7 +10,7 @@ $(NAME).pp: $(NAME).te $(NAME).fc $(NAME).if
 install: $(NAME).pp
 	semodule --priority=100 -i $(NAME).pp
 	restorecon -Rv \
-		/usr/bin/sudo-shipper \
+		/usr/bin/sudo-logger-agent \
 		/usr/libexec/sudo/sudo_logger_plugin.so \
 		/run/sudo-logger \
 		/etc/sudo-logger
@@ -23,15 +23,15 @@ status:
 
 # Switch this module to permissive (denials logged, not blocked)
 permissive:
-	semanage permissive -a sudo_shipper_t
+	semanage permissive -a sudo_agent_t
 
 # Switch this module to enforcing
 enforce:
-	semanage permissive -d sudo_shipper_t
+	semanage permissive -d sudo_agent_t
 
 # Collect AVC denials and show suggested rules
 audit:
-	ausearch -m avc -ts recent --comm sudo-shipper 2>/dev/null | audit2allow
+	ausearch -m avc -ts recent --comm sudo-logger-agent 2>/dev/null | audit2allow
 	ausearch -m avc -ts recent --comm sudo        2>/dev/null | audit2allow
 
 # Generate a refinement module from recent AVC denials

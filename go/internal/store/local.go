@@ -428,7 +428,7 @@ func (ls *LocalStore) SaveBlockedPolicy(_ context.Context, policy BlockedPolicy)
 
 // MarkSessionNetworkOutage implements SessionStore.
 // Writes a NETWORK_OUTAGE marker file to the session directory so the replay
-// UI can distinguish a freeze-timeout termination from a shipper crash.
+// UI can distinguish a freeze-timeout termination from an agent crash.
 func (ls *LocalStore) MarkSessionNetworkOutage(_ context.Context, sessionID string) error {
 	v, ok := ls.sessionDirs.Load(sessionID)
 	if !ok {

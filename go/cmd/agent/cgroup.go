@@ -1,5 +1,5 @@
 // cgroup.go — per-session cgroup management for sudo-logger-agent.
-// Identical logic to sudo-shipper/cgroup.go; moved here as part of the merge.
+// Identical logic to sudo-logger-agent/cgroup.go; moved here as part of the merge.
 package main
 
 import (
