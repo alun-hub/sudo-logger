@@ -882,8 +882,7 @@ loop:
 	//
 	// If the sudo process (the plugin client) has exited but the cgroup still
 	// has running processes, we enter linger mode. We keep the server
-	// connection open and continue to forward Wayland proxy frames until the
-	// cgroup is empty.
+	// connection open until the cgroup is empty.
 	if cg.hasPids() || cg.hasEscapedRunning() {
 		log.Printf("[%s] sudo exited but GUI processes remain; entering linger mode", start.SessionID)
 		const pollInterval = 1 * time.Second

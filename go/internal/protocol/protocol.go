@@ -28,7 +28,6 @@
 //	0x02  STREAM_STDERR   standard error
 //	0x03  STREAM_TTYIN    terminal input  (iolog EventTtyIn)
 //	0x04  STREAM_TTYOUT   terminal output (iolog EventTtyOut)
-//	0x05  STREAM_SCREEN   JPEG frame from Wayland proxy (GUI sessions)
 package protocol
 
 import (

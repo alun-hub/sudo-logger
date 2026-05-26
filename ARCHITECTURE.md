@@ -234,19 +234,6 @@ The sandbox is automatically propagated to all child processes via the `sched_pr
 
 ---
 
-## Wayland screen capture
-
-For graphical sudo sessions (e.g., `sudo gvim`), the agent spawns a `wayland-proxy` subprocess.
-
-1. The proxy creates a private Unix socket and patches the `WAYLAND_DISPLAY` environment variable for the sudo session.
-2. It intercepts `wl_surface.commit` calls from the application.
-3. It captures SHM pixel data, encodes it as **JPEG**, and streams it to the agent.
-4. The agent forwards these as `STREAM_SCREEN` chunks to the server.
-
-The replay UI renders these frames as a slideshow, providing visual context for GUI-based root activity.
-
----
-
 ## Session storage
 
 Two storage backends are supported, selected with the `-storage` flag on both the log server and the replay server.
