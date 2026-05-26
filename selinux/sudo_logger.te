@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.8)
+policy_module(sudo_logger, 1.1.9)
 
 ########################################
 #
@@ -43,6 +43,10 @@ allow sudo_agent_t self:capability2 { bpf perfmon };
 
 # BPF syscall operations: creating and using maps and programs.
 allow sudo_agent_t self:bpf { map_create map_read map_write prog_load prog_run };
+
+# perf_event_open(2) for tracepoint attachment (sys_enter_write kprobe).
+# cilium/ebpf opens a perf_event fd per-CPU to attach the tracepoint program.
+allow sudo_agent_t self:perf_event { open read write tracepoint cpu kernel };
 
 # Manage the Unix socket and PID file in /run/sudo-logger/
 manage_dirs_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
