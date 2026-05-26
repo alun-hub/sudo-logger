@@ -15,15 +15,12 @@ type agentConfig struct {
 	Key          string
 	CA           string
 	VerifyKey    string
-	ProxyBin     string
-	ProxyPeriod  int
 	MaskPatterns    []string
 	FreezeTimeout   time.Duration
 	IdleTimeout     time.Duration
 	Disclaimer      string
 	DisclaimerColor string
 	Debug           bool
-	Wayland         bool
 	// Ebpf controls whether the eBPF subsystem is enabled.
 	// Defaults to true; set to false on kernels without BTF support.
 	Ebpf bool
@@ -40,12 +37,9 @@ func defaultConfig() agentConfig {
 		Key:           "/etc/sudo-logger/client.key",
 		CA:            "/etc/sudo-logger/ca.crt",
 		VerifyKey:     "/etc/sudo-logger/ack-verify.key",
-		ProxyBin:      "/usr/libexec/sudo-logger/wayland-proxy",
-		ProxyPeriod:   300,
 		MaskPatterns:  []string{},
 		FreezeTimeout: 3 * time.Minute,
 		Debug:         false,
-		Wayland:       true,
 		Ebpf:          true,
 	}
 }
@@ -93,14 +87,6 @@ func loadConfig(path string) (agentConfig, error) {
 			cfg.CA = v
 		case "verify_key":
 			cfg.VerifyKey = v
-		case "proxy_bin":
-			cfg.ProxyBin = v
-		case "proxy_period":
-			var val int
-			if _, err := fmt.Sscanf(v, "%d", &val); err != nil {
-				return cfg, fmt.Errorf("%s:%d: proxy_period: %w", path, lineNum, err)
-			}
-			cfg.ProxyPeriod = val
 		case "mask_pattern":
 			cfg.MaskPatterns = append(cfg.MaskPatterns, v)
 		case "freeze_timeout":
@@ -117,8 +103,6 @@ func loadConfig(path string) (agentConfig, error) {
 			cfg.IdleTimeout = d
 		case "debug":
 			cfg.Debug = v == "true" || v == "1" || v == "yes"
-		case "wayland":
-			cfg.Wayland = v != "false" && v != "0" && v != "no"
 		case "disclaimer":
 			cfg.Disclaimer = expandEscapes(v)
 		case "disclaimer_color":

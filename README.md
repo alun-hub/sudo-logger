@@ -22,7 +22,6 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Server installation](#2-server-installation)
   - [Client installation](#3-client-installation)
 - [Configuration](#configuration)
-  - [Wayland screen capture](#wayland-screen-capture)
   - [Secret redaction](#secret-redaction)
   - [Process sandbox](#process-sandbox)
   - [Distributed storage (S3 + PostgreSQL)](#distributed-storage-s3--postgresql)
@@ -134,9 +133,6 @@ One goroutine per sudo session:
 - Creates a per-session cgroup subtree to freeze all child processes
 - Tracks processes that escape to foreign cgroups (moved by GNOME/systemd)
   and freezes them via SIGSTOP when safe (see [Freeze mechanism](#freeze-mechanism))
-- Spawns a `wayland-proxy` subprocess for GUI sessions (when `WAYLAND_DISPLAY`
-  is set); the proxy intercepts `wl_surface_commit` to capture JPEG frames
-  without any compositor patches (see [Wayland screen capture](#wayland-screen-capture))
 - Enters linger mode after `sudo` exits if GUI processes remain in the session
   cgroup — holds the server connection open until all GUI processes exit, then
   sends SESSION_END
@@ -242,7 +238,6 @@ migrate-sessions \
 ## Features
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
-- **Wayland screen capture**: GUI programs started with `sudo` on a Wayland desktop are screen-recorded via a transparent compositor proxy — no compositor patches required. The replay interface shows an image slideshow for GUI sessions. Multiple GUI applications can be recorded in sequence within the same session (e.g., run `konsole`, close it, then run `gvim`).
 - **Automatic secret redaction**: the agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `agent.conf`.
 - Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the agent was killed mid-recording
@@ -508,13 +503,6 @@ server = logserver.example.com:9876
 # Unix socket the sudo plugin connects to.
 #socket        = /run/sudo-logger/plugin.sock
 
-# Wayland screen capture via wayland-proxy.
-# Set to false to disable recording of GUI sessions entirely.
-#wayland       = true
-
-# Path to the wayland-proxy helper binary.
-#proxy_bin     = /usr/libexec/sudo-logger/wayland-proxy
-
 # eBPF session recording (requires kernel with BTF support).
 # Falls back to plugin-only mode on older kernels.
 #ebpf          = true
@@ -691,63 +679,9 @@ All of these go in `/etc/sudo-logger/agent.conf`:
 |-----|---------|-------------|
 | `freeze_timeout` | `3m` | Terminate a frozen session after this duration of server unreachability. Prevents permanent hangs when the TCP connection dies. Set to `0` to disable (not recommended). |
 | `idle_timeout` | `0` | Terminate a session that has received no user input (stdin/ttyin) for this duration. Sends SIGHUP to the sudo process and closes the session. Set to `0` to disable. Use Go duration syntax, e.g. `30m`, `2h`. |
-| `wayland` | `true` | Enable Wayland screen capture for GUI sessions. Set to `false` to disable. |
-| `proxy_bin` | `/usr/libexec/sudo-logger/wayland-proxy` | Path to the wayland-proxy helper binary. |
-| `proxy_period` | `300` | Capture interval for Wayland frames in milliseconds. Lower values give smoother replay at the cost of more storage. |
 | `ebpf` | `true` | Enable eBPF session recording. Requires kernel BTF support (`/sys/kernel/btf/vmlinux`). Degrades gracefully to plugin-only mode on older kernels. |
 | `mask_pattern` | — | Additional regex pattern to redact from terminal streams. Can be repeated for multiple patterns. See [Secret redaction](#secret-redaction). |
 | `sandbox_config` | — | Path to a YAML deny-list for the process sandbox. Empty (default) disables sandbox enforcement. See [Process sandbox](#process-sandbox). |
-
-### Wayland screen capture
-
-GUI programs started with `sudo` on a Wayland desktop produce no terminal I/O
-and therefore no xterm.js replay. sudo-logger handles this by spawning a
-transparent Wayland proxy between the sudo'd application and the compositor.
-The proxy intercepts `wl_surface_commit` calls and JPEG-encodes each frame;
-the replay interface shows these as an image slideshow.
-
-**Requirements:**
-- A running Wayland compositor (KDE, GNOME, …)
-- Environment variables preserved through sudo — the client RPM installs
-  `/etc/sudoers.d/sudo-logger-wayland` with the full set:
-
-```
-Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY XAUTHORITY NO_AT_BRIDGE NO_AT_SPI"
-```
-
-**GTK4 on Fedora 44+ (and other distributions shipping GTK4 ≥ 4.20):**
-GTK4 defaults to a Vulkan renderer and attempts to initialise GPU acceleration
-when launched as root. This causes the process to hang before the window
-appears. Add the following to `/etc/environment` to force the Cairo renderer:
-
-```
-GDK_DISABLE=vulkan
-GSK_RENDERER=cairo
-```
-
-This affects all GTK4 applications system-wide, which is intentional — the
-hang occurs whenever any GTK4 app runs as root, not only through sudo-logger.
-
-**Disable Wayland capture** (e.g. on headless or X11-only machines):
-
-```ini
-# /etc/sudo-logger/agent.conf
-wayland = false
-```
-
-When `wayland = false`, GUI sessions are still logged (start/end times,
-command name, cgroup freeze) but no screen frames are captured.
-
-#### Blocking X11 GUI applications (legacy / X11 deployments)
-
-On systems without Wayland or when Wayland capture is disabled, graphical
-applications produce empty session recordings. To prevent unrecorded GUI
-sessions entirely, remove `DISPLAY` from all sudo sessions so GUI programs
-fail immediately with *"cannot open display"*:
-
-```
-Defaults env_delete += DISPLAY
-```
 
 ### Process sandbox
 

@@ -23,16 +23,6 @@ import (
 	"sudo-logger/internal/protocol"
 )
 
-// ScreenFrameWriter is an optional capability of SessionWriter implementations
-// that support storing screen capture frames alongside terminal I/O.
-// Callers check via interface assertion: if sfw, ok := w.(ScreenFrameWriter); ok { … }
-type ScreenFrameWriter interface {
-	// WriteScreenFrame appends one JPEG-encoded screen frame.
-	// ts is the capture timestamp in nanoseconds since epoch.
-	// Implementations may drop frames silently if storage is unavailable.
-	WriteScreenFrame(data []byte, ts int64) error
-}
-
 // SessionWriter abstracts writing a single session's cast data and lifecycle
 // markers.  One writer is created per sudo session and used exclusively by the
 // goroutine that handles that connection.
@@ -202,27 +192,6 @@ type SessionRecord struct {
 	DivergenceStatus string // "pending" | "confirmed" | "unwitnessed" | "missing_plugin"
 	MatchedSessionID string // TSID of the matched counterpart stream
 	CallerProcess    string // process name or service that triggered polkit (dbus-polkit only)
-}
-
-// ScreenFrameInfo describes one stored screen frame.
-type ScreenFrameInfo struct {
-	Index int   `json:"index"` // zero-based frame index
-	Ts    int64 `json:"ts"`    // capture timestamp, nanoseconds since epoch
-	Size  int   `json:"size"`  // JPEG size in bytes
-}
-
-// ScreenFrameStore is an optional capability of SessionStore implementations
-// that can store and retrieve screen frames.
-type ScreenFrameStore interface {
-	// HasFrames reports whether any screen frames have been stored for tsid.
-	// Implementations should make this check cheap (single Stat / HeadObject).
-	HasFrames(ctx context.Context, tsid string) (bool, error)
-
-	// ListFrames returns metadata for all screen frames in the session tsid.
-	ListFrames(ctx context.Context, tsid string) ([]ScreenFrameInfo, error)
-
-	// OpenFrame returns a ReadCloser for the JPEG data of frame index n.
-	OpenFrame(ctx context.Context, tsid, sessionID string, n int) (io.ReadCloser, error)
 }
 
 // RawEvent is a single playback event read from a session cast file.

@@ -6,15 +6,11 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -222,14 +218,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	}()
 
 	const ackLagLimit = int64(5 * time.Second)
-	var guiFrames <-chan []byte
-	var killProxy func()
 	redactor := iolog.NewRedactor(cfg.MaskPatterns)
-	defer func() {
-		if killProxy != nil {
-			killProxy()
-		}
-	}()
 
 	const maxDeadBuf = 500 // max chunks buffered while server unreachable
 
@@ -463,23 +452,8 @@ func handlePluginConn(pluginConn net.Conn) {
 		return
 	case protocol.MsgServerReady:
 		_, _ = protocol.ReadPayload(sr, hsPlen)
-		if start.WaylandDisplay != "" && cfg.Wayland {
-			uid, gid := uint32(start.UserUID), uint32(start.UserGID)
-			proxySocket, frames, proxyKill, proxyErr := startWaylandProxy(
-				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir, uid, gid)
-			if proxyErr != nil {
-				log.Printf("[%s] wayland-proxy: %v", start.SessionID, proxyErr)
-				protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody("", cfg.Disclaimer))
-			} else {
-				guiFrames = frames
-				killProxy = proxyKill
-				cg.SetReady()
-				protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(proxySocket, cfg.Disclaimer))
-			}
-		} else {
-			cg.SetReady()
-			protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody("", cfg.Disclaimer))
-		}
+		cg.SetReady()
+		protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(cfg.Disclaimer))
 	default:
 		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
 		markDead()
@@ -655,17 +629,6 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 	}
 
-	if guiFrames != nil {
-		go func() {
-			var screenSeq uint64
-			for frame := range guiFrames {
-				screenSeq++
-				chunk := encodeScreenChunk(screenSeq, time.Now().UnixNano(), frame)
-				forward(protocol.MsgChunk, chunk)
-			}
-		}()
-	}
-
 	var savedSessionEnd []byte
 loop:
 	for {
@@ -781,14 +744,11 @@ func applyColor(text, color string) string {
 	return text
 }
 
-func sessionReadyBody(proxyDisplay, disclaimer string) []byte {
-	if proxyDisplay == "" && disclaimer == "" {
+func sessionReadyBody(disclaimer string) []byte {
+	if disclaimer == "" {
 		return nil
 	}
-	if disclaimer != "" {
-		disclaimer = applyColor(disclaimer, cfg.DisclaimerColor)
-	}
-	body, _ := json.Marshal(protocol.SessionReadyBody{ProxyDisplay: proxyDisplay, Disclaimer: disclaimer})
+	body, _ := json.Marshal(protocol.SessionReadyBody{Disclaimer: applyColor(disclaimer, cfg.DisclaimerColor)})
 	return body
 }
 
@@ -854,118 +814,7 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-func encodeScreenChunk(seq uint64, tsNS int64, data []byte) []byte {
-	buf := make([]byte, 21+len(data))
-	binary.BigEndian.PutUint64(buf[0:], seq)
-	binary.BigEndian.PutUint64(buf[8:], uint64(tsNS))
-	buf[16] = protocol.StreamScreen
-	binary.BigEndian.PutUint32(buf[17:], uint32(len(data)))
-	copy(buf[21:], data)
-	return buf
-}
-
 var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
-
-func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid uint32) (
-	proxySocket string, frames <-chan []byte, kill func(), err error,
-) {
-	realSocket := waylandDisplay
-	if !filepath.IsAbs(realSocket) {
-		if xdgRuntimeDir == "" {
-			return "", nil, nil, fmt.Errorf("wayland-proxy: WAYLAND_DISPLAY is relative but XDG_RUNTIME_DIR is empty")
-		}
-		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
-	}
-	if !validSessionID.MatchString(sessionID) {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid session ID")
-	}
-	if strings.Contains(waylandDisplay, "..") {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid WAYLAND_DISPLAY")
-	}
-	if !filepath.IsAbs(xdgRuntimeDir) || strings.Contains(xdgRuntimeDir, "..") {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid XDG_RUNTIME_DIR")
-	}
-	info, err := os.Stat(xdgRuntimeDir)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: cannot stat XDG_RUNTIME_DIR: %w", err)
-	}
-	if !info.IsDir() {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: XDG_RUNTIME_DIR is not a directory")
-	}
-	stat := info.Sys().(*syscall.Stat_t)
-	if stat.Uid != uid && stat.Uid != 0 {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: XDG_RUNTIME_DIR is not owned by the user (uid=%d)", uid)
-	}
-	proxySocket = filepath.Join(xdgRuntimeDir, "sudo-wayland-"+sessionID+".sock")
-	os.Remove(proxySocket)
-	ln, err := net.Listen("unix", proxySocket)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: listen %s: %w", proxySocket, err)
-	}
-	if err := os.Chmod(proxySocket, 0666); err != nil {
-		ln.Close()
-		return "", nil, nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	lnFile, err := ln.(*net.UnixListener).File()
-	ln.Close()
-	if err != nil {
-		os.Remove(proxySocket)
-		return "", nil, nil, fmt.Errorf("wayland-proxy: socket fd: %w", err)
-	}
-	cmd := exec.Command(cfg.ProxyBin,
-		"--real", realSocket,
-		"--fd", "3",
-		"--period", fmt.Sprintf("%d", cfg.ProxyPeriod),
-	)
-	cmd.Stderr = os.Stderr
-	cmd.ExtraFiles = []*os.File{lnFile}
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: uid, Gid: gid},
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		lnFile.Close()
-		os.Remove(proxySocket)
-		return "", nil, nil, fmt.Errorf("wayland-proxy: stdout pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		lnFile.Close()
-		os.Remove(proxySocket)
-		return "", nil, nil, fmt.Errorf("wayland-proxy: start: %w", err)
-	}
-	lnFile.Close()
-	killProxy := func() {
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-		}
-	}
-	ch := make(chan []byte, 32)
-	go func() {
-		defer close(ch)
-		defer os.Remove(proxySocket)
-		defer cmd.Wait()
-		var sizeBuf [4]byte
-		for {
-			if _, err := io.ReadFull(stdout, sizeBuf[:]); err != nil {
-				return
-			}
-			size := binary.BigEndian.Uint32(sizeBuf[:])
-			if size == 0 || size > 10*1024*1024 {
-				return
-			}
-			frame := make([]byte, size)
-			if _, err := io.ReadFull(stdout, frame); err != nil {
-				return
-			}
-			select {
-			case ch <- frame:
-			default:
-			}
-		}
-	}()
-	return proxySocket, ch, killProxy, nil
-}
 
 // sendDivergenceAlert sends a DIVERGENCE_ALERT to the log server with
 // exponential backoff retries.  Called as a goroutine by the divergence tracker.

@@ -65,7 +65,6 @@ const (
 	StreamStderr  = uint8(0x02)
 	StreamTtyIn   = uint8(0x03)
 	StreamTtyOut  = uint8(0x04)
-	StreamScreen  = uint8(0x05) // JPEG frame from Wayland proxy
 )
 
 // SessionStart is the JSON-encoded SESSION_START payload.
@@ -87,8 +86,6 @@ type SessionStart struct {
 	Rows            int    `json:"rows,omitempty"`             // terminal height from command_info[lines=]
 	Cols            int    `json:"cols,omitempty"`             // terminal width from command_info[cols=]
 	TtyPath         string `json:"tty_path,omitempty"`         // controlling terminal device, e.g. /dev/pts/3; empty for non-tty sessions
-	WaylandDisplay  string `json:"wayland_display,omitempty"`  // $WAYLAND_DISPLAY from the invoking user's env; empty when not set
-	XdgRuntimeDir   string `json:"xdg_runtime_dir,omitempty"`  // $XDG_RUNTIME_DIR from the invoking user's env
 	UserUID         int    `json:"user_uid,omitempty"`         // invoking user's UID from user_info[]
 	UserGID         int    `json:"user_gid,omitempty"`         // invoking user's primary GID from user_info[]
 	// Source identifies the recording path (added by agent v2+).
@@ -134,12 +131,9 @@ type SandboxAlert struct {
 }
 
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.
-// When the shipper starts a Wayland proxy for a GUI session it populates
-// ProxyDisplay so the plugin can patch WAYLAND_DISPLAY before exec.
 // Disclaimer, if non-empty, is printed to the user's terminal before sudo proceeds.
 type SessionReadyBody struct {
-	ProxyDisplay string `json:"proxy_display,omitempty"` // path to proxy Wayland socket
-	Disclaimer   string `json:"disclaimer,omitempty"`    // optional notice shown at session start
+	Disclaimer string `json:"disclaimer,omitempty"` // optional notice shown at session start
 }
 
 // Chunk is a decoded CHUNK message.

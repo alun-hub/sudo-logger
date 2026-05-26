@@ -258,7 +258,6 @@ type SessionInfo struct {
 	RiskScore       int      `json:"risk_score"`
 	RiskLevel       string   `json:"risk_level"`            // low | medium | high | critical
 	RiskReasons     []string `json:"risk_reasons,omitempty"`
-	HasFrames       bool     `json:"has_frames,omitempty"` // true for GUI sessions with screen capture
 	// eBPF / divergence fields (agent v2+)
 	Source           string `json:"source,omitempty"`            // "plugin" | "ebpf-tty" | "ebpf-pkexec"
 	ParentSessionID  string `json:"parent_session_id,omitempty"` // for ebpf-pkexec → parent session
@@ -442,17 +441,11 @@ func (c *sessionCache) rebuild(ctx context.Context) ([]SessionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	sfs, hasSFS := sessionStore.(store.ScreenFrameStore)
 	sessions := make([]SessionInfo, 0, len(records))
 	for _, rec := range records {
 		info := recordToInfo(rec)
 		info.RiskScore, info.RiskReasons = scoreSession(&info)
 		info.RiskLevel = store.RiskLevel(info.RiskScore)
-		if hasSFS && rec.TSID != "" {
-			if has, _ := sfs.HasFrames(ctx, rec.TSID); has {
-				info.HasFrames = true
-			}
-		}
 		sessions = append(sessions, info)
 	}
 
@@ -676,8 +669,6 @@ func main() {
 	})
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
-	mux.HandleFunc("/api/session/frames", handleSessionFrames)
-	mux.HandleFunc("/api/session/frame", handleSessionFrame)
 	mux.HandleFunc("/api/access-log", handleAccessLog)
 	mux.HandleFunc("/metrics", handleMetrics)
 	mux.HandleFunc("/api/report", handleReport)
@@ -978,69 +969,6 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if err := scanner.Err(); err != nil {
 		log.Printf("[%s] scan error during streaming: %v", tsid, err)
 	}
-}
-
-// handleSessionFrames returns a JSON list of screen frame metadata for a GUI session.
-// GET /api/session/frames?tsid=<tsid>
-func handleSessionFrames(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	tsid := r.URL.Query().Get("tsid")
-	if tsid == "" {
-		http.Error(w, "missing tsid", http.StatusBadRequest)
-		return
-	}
-	if err := validateTSID(tsid); err != nil {
-		http.Error(w, "invalid tsid", http.StatusBadRequest)
-		return
-	}
-	sfs, ok := sessionStore.(store.ScreenFrameStore)
-	if !ok {
-		http.Error(w, "screen frames not supported by storage backend", http.StatusNotImplemented)
-		return
-	}
-	frames, err := sfs.ListFrames(r.Context(), tsid)
-	if err != nil {
-		http.Error(w, "frames not found", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(frames)
-}
-
-// handleSessionFrame serves one JPEG screen frame.
-// GET /api/session/frame?tsid=<tsid>&n=<index>
-func handleSessionFrame(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	tsid := r.URL.Query().Get("tsid")
-	n, err := strconv.Atoi(r.URL.Query().Get("n"))
-	if err != nil || n < 0 {
-		http.Error(w, "invalid frame index", http.StatusBadRequest)
-		return
-	}
-	if err := validateTSID(tsid); err != nil {
-		http.Error(w, "invalid tsid", http.StatusBadRequest)
-		return
-	}
-	sfs, ok := sessionStore.(store.ScreenFrameStore)
-	if !ok {
-		http.Error(w, "not supported", http.StatusNotImplemented)
-		return
-	}
-	rc, err := sfs.OpenFrame(r.Context(), tsid, "", n)
-	if err != nil {
-		http.Error(w, "frame not found", http.StatusNotFound)
-		return
-	}
-	defer rc.Close()
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
-	io.Copy(w, rc)
 }
 
 // handleAccessLog returns the view audit log as JSON, newest entries first.

@@ -679,40 +679,6 @@ static void build_cmdline_json(char *buf, size_t bufsz,
 
 /* ---------- plugin API ---------- */
 
-/* Replace the first slot in menv[] whose key matches key= with key=val.
- * If no existing slot is found, overwrite the first slot whose key starts
- * with fallback_pfx (e.g. "SUDO_GID=").  Returns 1 on success, 0 if no
- * suitable slot was found (caller should fall back to setenv).
- * Memory: allocates a heap string; intentional leak — process execs next. */
-static int inject_env_slot(char **menv, const char *key, const char *val,
-                           const char *fallback_pfx)
-{
-    if (!menv) return 0;
-    size_t klen = strlen(key);
-    char *entry = malloc(klen + 1 + strlen(val) + 1);
-    if (!entry) return 0;
-    /* safe: both key and val are string literals, no user input involved */
-    int n = snprintf(entry, klen + 1 + strlen(val) + 1, "%s=%s", key, val);
-    if (n < 0) { free(entry); return 0; }
-    for (int i = 0; menv[i]; i++) {
-        if (strncmp(menv[i], key, klen) == 0 && menv[i][klen] == '=') {
-            menv[i] = entry;
-            return 1;
-        }
-    }
-    if (fallback_pfx) {
-        size_t flen = strlen(fallback_pfx);
-        for (int i = 0; menv[i]; i++) {
-            if (strncmp(menv[i], fallback_pfx, flen) == 0) {
-                menv[i] = entry;
-                return 1;
-            }
-        }
-    }
-    free(entry);
-    return 0;
-}
-
 /*
  * plugin_open — called once per sudo invocation before the command runs.
  *
@@ -743,7 +709,7 @@ static int plugin_open(unsigned int        version,
                        const char        **errstr)
 {
     (void)version; (void)conversation;
-    (void)plugin_options;
+    (void)plugin_options; (void)user_env;
 
     g_printf  = sudo_plugin_printf;
     g_seq     = 0;
@@ -815,55 +781,16 @@ static int plugin_open(unsigned int        version,
     if (flen > 0 && flags[flen - 1] == ',')
         flags[flen - 1] = '\0';
 
-    /* ── Extract Wayland env vars for GUI session detection ─────────────────
-     * sudo's env_reset strips WAYLAND_DISPLAY before user_env[] is passed to
-     * the I/O plugin.  Read /proc/self/environ instead — it holds the sudo
-     * process's own environment (inherited from the invoking shell) before
-     * any env_reset processing.
-     * Buffers are static so the pointers remain valid for the lifetime of the
-     * snprintf call below.  Kept as empty strings on any read error.        */
-    static char proc_wayland[256];
-    static char proc_xdgdir[256];
-    proc_wayland[0] = '\0';
-    proc_xdgdir[0]  = '\0';
-
-    int penv_fd = open("/proc/self/environ", O_RDONLY | O_CLOEXEC);
-    if (penv_fd >= 0) {
-        /* /proc/self/environ is NUL-delimited name=value pairs.
-         * Read up to 64 KB — more than enough for a typical environment. */
-        char envbuf[65536];
-        ssize_t envlen = read(penv_fd, envbuf, sizeof(envbuf) - 1);
-        close(penv_fd);
-        if (envlen > 0) {
-            envbuf[envlen] = '\0';
-            const char *p = envbuf;
-            while (p < envbuf + envlen) {
-                size_t len = strlen(p);
-                if (strncmp(p, "WAYLAND_DISPLAY=", 16) == 0)
-                    snprintf(proc_wayland, sizeof(proc_wayland), "%s", p + 16);
-                else if (strncmp(p, "XDG_RUNTIME_DIR=", 16) == 0)
-                    snprintf(proc_xdgdir,  sizeof(proc_xdgdir),  "%s", p + 16);
-                p += len + 1;
-            }
-        }
-    }
-    const char *wayland_display = proc_wayland;
-    const char *xdg_runtime_dir = proc_xdgdir;
-
     /* JSON-escape fields that may contain backslashes, quotes, or spaces */
     char resolved_j[512];
     char cwd_j[512];
     char runas_user_j[128];
-    char wayland_j[256];
-    char xdgruntime_j[256];
     char user_j[128];
     char host_j[256];
     char ttypath_j[128];
     json_escape_into(resolved_j,   sizeof(resolved_j),   raw_resolved);
     json_escape_into(cwd_j,        sizeof(cwd_j),        raw_cwd);
     json_escape_into(runas_user_j, sizeof(runas_user_j), runas_user);
-    json_escape_into(wayland_j,    sizeof(wayland_j),    wayland_display);
-    json_escape_into(xdgruntime_j, sizeof(xdgruntime_j), xdg_runtime_dir);
     json_escape_into(user_j,       sizeof(user_j),       user);
     json_escape_into(host_j,       sizeof(host_j),       host);
     json_escape_into(ttypath_j,    sizeof(ttypath_j),    g_tty_path);
@@ -913,7 +840,6 @@ static int plugin_open(unsigned int        version,
         "\"cwd\":\"%s\",\"flags\":\"%s\","
         "\"rows\":%d,\"cols\":%d,"
         "\"tty_path\":\"%s\","
-        "\"wayland_display\":\"%s\",\"xdg_runtime_dir\":\"%s\","
         "\"user_uid\":%d,\"user_gid\":%d,"
         "\"ts\":%lld,\"pid\":%d}",
         session_id_j, user_j, host_j, cmd,
@@ -922,7 +848,6 @@ static int plugin_open(unsigned int        version,
         cwd_j, flags,
         term_rows, term_cols,
         ttypath_j,
-        wayland_j, xdgruntime_j,
         user_uid, user_gid,
         (long long)now_sec(), (int)getpid());
 
@@ -994,27 +919,8 @@ static int plugin_open(unsigned int        version,
         return -1;
     }
 
-    /* Force software rendering for GUI apps started as root on Fedora 44+.
-     * Root lacks DRM authentication, causing Qt/Mesa EGL to fail and Konsole
-     * to not appear.  Injecting into user_env[] (not setenv) is required
-     * because sudo passes user_env[] explicitly to execve — setenv only
-     * modifies the current process env which execve does not inherit.
-     * SUDO_GID / SUDO_UID are safe fallback slots: the child command does
-     * not use these sudo-injected vars for normal operation. */
-    if (user_env) {
-        if (!inject_env_slot((char **)user_env,
-                             "LIBGL_ALWAYS_SOFTWARE", "1", "SUDO_GID="))
-            setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
-        if (!inject_env_slot((char **)user_env,
-                             "MESA_LOADER_DRIVER_OVERRIDE", "swrast", "SUDO_UID="))
-            setenv("MESA_LOADER_DRIVER_OVERRIDE", "swrast", 0);
-    }
-
-    /* SESSION_READY may carry a JSON body with optional fields:
-     *   "proxy_display" — Wayland proxy socket path; plugin patches WAYLAND_DISPLAY.
-     *   "disclaimer"    — operator notice printed to the terminal before sudo proceeds.
-     * rebuild_env() runs after plugin_open() returns and reads user_env[],
-     * so the WAYLAND_DISPLAY modification is picked up before the command is exec'd. */
+    /* SESSION_READY may carry an optional JSON body with a "disclaimer" field —
+     * an operator notice printed to the terminal before sudo proceeds. */
     {
         uint32_t rlen;
         memcpy(&rlen, hdr + 1, 4);
@@ -1043,66 +949,6 @@ static int plugin_open(unsigned int        version,
                     }
                 }
 
-                /* Parse "proxy_display":"<value>" to patch WAYLAND_DISPLAY. */
-                const char *key = "\"proxy_display\":\"";
-                char *kp = strstr(rbuf, key);
-                if (kp && user_env) {
-                    kp += strlen(key);
-                    const char *end = json_str_end(kp);
-                    if (end && end > kp) {
-                        char proxy[512] = {0};
-                        size_t vlen = json_unescape_into(proxy, sizeof(proxy),
-                                                         kp, (size_t)(end - kp));
-                        /* Build "WAYLAND_DISPLAY=<value>" in a heap buffer.
-                         * Intentional leak: this process exec()s immediately
-                         * after plugin_open() returns. */
-                        char *entry = malloc(16 + vlen + 1);
-                        if (entry) {
-                            memcpy(entry, "WAYLAND_DISPLAY=", 16);
-                            memcpy(entry + 16, proxy, vlen);
-                            entry[16 + vlen] = '\0';
-
-                            char **menv = (char **)user_env;
-                            int found = 0;
-                            for (int i = 0; menv[i]; i++) {
-                                if (strncmp(menv[i], "WAYLAND_DISPLAY=", 16) == 0) {
-                                    menv[i] = entry;
-                                    found = 1;
-                                    break;
-                                }
-                            }
-                            if (!found) {
-                                /* If WAYLAND_DISPLAY was stripped by env_reset, we
-                                 * cannot grow the user_env[] array.  Try to find
-                                 * an unused or spare variable to overwrite.
-                                 * SUDO_COMMAND is a good candidate because we
-                                 * already logged it and the child doesn't need it. */
-                                for (int i = 0; menv[i]; i++) {
-                                    if (strncmp(menv[i], "SUDO_COMMAND=", 13) == 0) {
-                                        menv[i] = entry;
-                                        found = 1;
-                                        syslog(LOG_WARNING,
-                                            "sudo-logger: WAYLAND_DISPLAY not in user_env[], "
-                                            "overwriting SUDO_COMMAND to inject it");
-                                        break;
-                                    }
-                                }
-                            }
-                            if (found) {
-                                syslog(LOG_DEBUG,
-                                    "sudo-logger: patched WAYLAND_DISPLAY -> %s",
-                                    entry);
-                            } else {
-                                syslog(LOG_WARNING,
-                                    "sudo-logger: WAYLAND_DISPLAY not in user_env[] "
-                                    "and no spare slot found; falling back to setenv(%s). "
-                                    "GUI apps may fail — add WAYLAND_DISPLAY to env_keep.", entry);
-                                setenv("WAYLAND_DISPLAY", proxy, 1);
-                                free(entry);
-                            }
-                        }
-                    }
-                }
             }
         }
     }

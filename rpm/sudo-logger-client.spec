@@ -41,12 +41,11 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
     -o sudo_logger_plugin.so \
     plugin.c -lpthread
 
-# Build the agent daemon and Wayland proxy.
+# Build the agent daemon.
 # The eBPF Go bindings (recorder_bpf*.go / *.o) are pre-generated and
 # included in the source tarball, so clang/bpf2go are not needed here.
 cd ../go
 /usr/lib/golang/bin/go build -mod=vendor -o sudo-logger-agent ./cmd/agent
-/usr/lib/golang/bin/go build -mod=vendor -o wayland-proxy ./cmd/wayland-proxy
 
 # Build the SELinux policy module
 cd ../selinux
@@ -60,11 +59,6 @@ install -D -m 0755 plugin/sudo_logger_plugin.so \
 # Agent binary (replaces sudo-shipper)
 install -D -m 0755 go/sudo-logger-agent \
     %{buildroot}%{_bindir}/sudo-logger-agent
-
-# Wayland proxy binary (used by agent for GUI screen capture)
-install -d -m 0755 %{buildroot}%{_libexecdir}/sudo-logger
-install -D -m 0755 go/wayland-proxy \
-    %{buildroot}%{_libexecdir}/sudo-logger/wayland-proxy
 
 # Systemd service
 install -D -m 0644 sudo-logger-agent.service \
@@ -80,10 +74,6 @@ install -D -m 0640 agent.conf \
 # Example sandbox deny-list (not enabled by default)
 install -D -m 0640 sandbox.yaml \
     %{buildroot}%{_sysconfdir}/sudo-logger/sandbox.yaml
-
-# Sudoers drop-in: preserve WAYLAND_DISPLAY so the proxy reaches GUI commands
-install -D -m 0440 sudo-logger-wayland.sudoers \
-    %{buildroot}%{_sysconfdir}/sudoers.d/sudo-logger-wayland
 
 # SELinux policy module
 install -D -m 0644 selinux/sudo_logger.pp \
@@ -112,7 +102,6 @@ fi
 chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
 chattr -i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
 chattr -i %{_bindir}/sudo-shipper                         2>/dev/null || true
-chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 
 %post
 # Add plugin line to sudo.conf if not already present
@@ -128,18 +117,15 @@ semodule -i %{_datadir}/selinux/packages/sudo_logger.pp 2>/dev/null || true
 # or removed without first running chattr -i (which requires root intent).
 chattr +i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
 chattr +i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
-chattr +i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 # Relabel installed files with correct SELinux contexts
 restorecon -R %{_bindir}/sudo-logger-agent \
               %{_libexecdir}/sudo/sudo_logger_plugin.so \
-              %{_libexecdir}/sudo-logger/wayland-proxy \
               %{_sysconfdir}/sudo-logger 2>/dev/null || true
 
 %preun
 # Remove immutable flag so RPM can delete the files on uninstall.
 chattr -i %{_libexecdir}/sudo/sudo_logger_plugin.so       2>/dev/null || true
 chattr -i %{_bindir}/sudo-logger-agent                    2>/dev/null || true
-chattr -i %{_libexecdir}/sudo-logger/wayland-proxy        2>/dev/null || true
 # Cannot use %%systemd_preun because it calls systemctl stop, which is blocked
 # by RefuseManualStop=yes.  On uninstall: disable the unit (removes symlinks)
 # then kill the running process via systemctl kill (not blocked).
@@ -173,14 +159,11 @@ fi
 %files
 %{_libexecdir}/sudo/sudo_logger_plugin.so
 %{_bindir}/sudo-logger-agent
-%dir %{_libexecdir}/sudo-logger
-%{_libexecdir}/sudo-logger/wayland-proxy
 %{_unitdir}/sudo-logger-agent.service
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/agent.conf
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/sandbox.yaml
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
-%config(noreplace) %attr(0440, root, root) %{_sysconfdir}/sudoers.d/sudo-logger-wayland
 %{_datadir}/selinux/packages/sudo_logger.pp
 %{_mandir}/man8/sudo-logger-agent.8*
 %{_mandir}/man8/sudo_logger_plugin.8*

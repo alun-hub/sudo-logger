@@ -1,7 +1,0 @@
-# sudo-logger: preserve Wayland and X11 environment variables so the
-# wayland-proxy can intercept GUI applications launched with sudo.
-#
-# WAYLAND_DISPLAY/XDG_RUNTIME_DIR: required for native Wayland apps.
-# DISPLAY/XAUTHORITY: required for X11/XWayland fallback apps.
-# NO_AT_BRIDGE/SPI: suppresses accessibility warnings from GTK apps.
-Defaults env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR DISPLAY XAUTHORITY NO_AT_BRIDGE NO_AT_SPI"

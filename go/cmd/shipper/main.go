@@ -13,18 +13,14 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -326,16 +322,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	// ── Step 3: per-session ACK tracking ──────────────────────────────────
 	const ackLagLimit = int64(5 * time.Second)
 
-	// guiFrames receives JPEG frames from the Wayland proxy for GUI sessions.
-	// Populated in the MsgServerReady case below; consumed after forward() is declared.
-	var guiFrames <-chan []byte
-	var killProxy func()
 	redactor := iolog.NewRedactor(cfg.MaskPatterns)
-	defer func() {
-		if killProxy != nil {
-			killProxy()
-		}
-	}()
 
 	var (
 		sessionAckMu    sync.Mutex
@@ -596,10 +583,9 @@ func handlePluginConn(pluginConn net.Conn) {
 	start.ResolvedCommand = redactor.RedactString(start.ResolvedCommand)
 	startPayload, _ = json.Marshal(start)
 
-	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v wayland=%q xdg=%q tty=%s",
+	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v tty=%s",
 		start.SessionID, start.User, start.Host, start.Pid,
-		truncate(start.Command, 60), cg != nil,
-		start.WaylandDisplay, start.XdgRuntimeDir, ttyPath)
+		truncate(start.Command, 60), cg != nil, ttyPath)
 	if err := protocol.WriteMessage(serverBuf, protocol.MsgSessionStart, startPayload); err != nil {
 		log.Printf("[%s] forward SESSION_START: %v", start.SessionID, err)
 		markDead()
@@ -633,29 +619,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		return
 	case protocol.MsgServerReady:
 		_, _ = protocol.ReadPayload(sr, hsPlen)
-
-		// Start Wayland proxy whenever WAYLAND_DISPLAY is set — even when a
-		// tty is present (e.g. "sudo gvim" from a terminal has both a pty
-		// and a Wayland display).  The proxy captures only surfaces that the
-		// sudo'd command actually creates; terminal-only commands produce no
-		// frames and the session falls through to normal terminal replay.
-		if start.WaylandDisplay != "" && cfg.Wayland {
-			uid, gid := uint32(start.UserUID), uint32(start.UserGID)
-			proxySocket, frames, proxyKill, proxyErr := startWaylandProxy(
-				start.SessionID, start.WaylandDisplay, start.XdgRuntimeDir, uid, gid)
-			if proxyErr != nil {
-				log.Printf("[%s] wayland-proxy: %v — GUI session without screen capture",
-					start.SessionID, proxyErr)
-				protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody("", cfg.Disclaimer))
-			} else {
-				guiFrames = frames
-				killProxy = proxyKill
-				protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(proxySocket, cfg.Disclaimer))
-				log.Printf("[%s] wayland-proxy started, socket=%s", start.SessionID, proxySocket)
-			}
-		} else {
-			protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody("", cfg.Disclaimer))
-		}
+		protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(cfg.Disclaimer))
 	default:
 		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
 		markDead()
@@ -869,18 +833,6 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 	}
 
-	// ── Step 6c: forward Wayland proxy frames to server ──────────────────
-	if guiFrames != nil {
-		go func() {
-			var screenSeq uint64
-			for frame := range guiFrames {
-				screenSeq++
-				chunk := encodeScreenChunk(screenSeq, time.Now().UnixNano(), frame)
-				forward(protocol.MsgChunk, chunk)
-			}
-		}()
-	}
-
 	// ── Step 7: main loop — SESSION_START already handled above ───────────
 	var savedSessionEnd []byte
 loop:
@@ -1026,14 +978,12 @@ func applyColor(text, color string) string {
 
 // sessionReadyBody encodes a SESSION_READY JSON payload. Returns nil when both
 // fields are empty so the plugin receives a zero-length body (backward compat).
-func sessionReadyBody(proxyDisplay, disclaimer string) []byte {
-	if proxyDisplay == "" && disclaimer == "" {
+func sessionReadyBody(disclaimer string) []byte {
+	if disclaimer == "" {
 		return nil
 	}
-	if disclaimer != "" {
-		disclaimer = applyColor(disclaimer, cfg.DisclaimerColor)
-	}
-	body, _ := json.Marshal(protocol.SessionReadyBody{ProxyDisplay: proxyDisplay, Disclaimer: disclaimer})
+	disclaimer = applyColor(disclaimer, cfg.DisclaimerColor)
+	body, _ := json.Marshal(protocol.SessionReadyBody{Disclaimer: disclaimer})
 	return body
 }
 
@@ -1175,160 +1125,8 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// encodeScreenChunk builds a CHUNK payload with STREAM_SCREEN.
-// Layout: [8 seq][8 ts_ns][1 stream=0x05][4 datalen][data]
-func encodeScreenChunk(seq uint64, tsNS int64, data []byte) []byte {
-	buf := make([]byte, 21+len(data))
-	binary.BigEndian.PutUint64(buf[0:], seq)
-	binary.BigEndian.PutUint64(buf[8:], uint64(tsNS))
-	buf[16] = protocol.StreamScreen
-	binary.BigEndian.PutUint32(buf[17:], uint32(len(data)))
-	copy(buf[21:], data)
-	return buf
-}
-
 // validSessionID restricts session IDs to safe characters.
 var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
-
-// startWaylandProxy starts the wayland-proxy subprocess for a GUI session.
-func startWaylandProxy(sessionID, waylandDisplay, xdgRuntimeDir string, uid, gid uint32) (
-	proxySocket string, frames <-chan []byte, kill func(), err error,
-) {
-	// Resolve the real compositor socket path.
-	realSocket := waylandDisplay
-	if !filepath.IsAbs(realSocket) {
-		if xdgRuntimeDir == "" {
-			return "", nil, nil, fmt.Errorf("wayland-proxy: WAYLAND_DISPLAY is relative but XDG_RUNTIME_DIR is empty")
-		}
-		realSocket = filepath.Join(xdgRuntimeDir, waylandDisplay)
-	}
-
-	// VULN-001 & VULN-004 Fix: Validate untrusted inputs from the plugin.
-	if !validSessionID.MatchString(sessionID) {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid session ID")
-	}
-	if strings.Contains(waylandDisplay, "..") {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid WAYLAND_DISPLAY")
-	}
-	if !filepath.IsAbs(xdgRuntimeDir) || strings.Contains(xdgRuntimeDir, "..") {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: invalid XDG_RUNTIME_DIR")
-	}
-
-	// Verify that the target directory is owned by the user (or root).
-	// This prevents the user from pointing to a directory they don't own
-	// to cause the shipper (root) to create files there.
-	info, err := os.Stat(xdgRuntimeDir)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: cannot stat XDG_RUNTIME_DIR: %w", err)
-	}
-	if !info.IsDir() {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: XDG_RUNTIME_DIR is not a directory")
-	}
-	stat := info.Sys().(*syscall.Stat_t)
-	if stat.Uid != uid && stat.Uid != 0 {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: XDG_RUNTIME_DIR is not owned by the user (uid=%d)", uid)
-	}
-
-	// Create the proxy socket in /run/user/<uid>/ so that the sudo'd command
-	// (running as unconfined_t) can connect to it. A socket in /run/sudo-logger/
-	// has SELinux type sudo_shipper_var_run_t; unconfined_t is silently denied
-	// connectto on that type and the GUI app falls back to X11. /run/user/<uid>/
-	// has type user_tmp_t which unconfined_t can freely connect to.
-	// The shipper can write here because ReadWritePaths=/run/user is set in the
-	// service unit (ProtectHome=read-only overrides /run/user but ReadWritePaths
-	// restores write access).
-	proxySocket = filepath.Join(xdgRuntimeDir, "sudo-wayland-"+sessionID+".sock")
-
-	// Create the listening socket as root before spawning the proxy.
-	os.Remove(proxySocket)
-	ln, err := net.Listen("unix", proxySocket)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("wayland-proxy: listen %s: %w", proxySocket, err)
-	}
-
-	// Securely set permissions on the socket file. By using Chmod on the
-	// file descriptor (File().Chmod), we avoid following symlinks that
-	// an attacker might have placed at proxySocket in the meantime.
-	if f, err := ln.(*net.UnixListener).File(); err == nil {
-		if err := f.Chmod(0666); err != nil {
-			f.Close()
-			ln.Close()
-			return "", nil, nil, fmt.Errorf("wayland-proxy: chmod socket: %w", err)
-		}
-		f.Close()
-	}
-
-	// Prevent Close() from removing the socket file — gvim needs the path.
-	// The shipper removes the socket when the session ends.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	// File() dups the fd; close the net.Listener (our original) immediately.
-	lnFile, err := ln.(*net.UnixListener).File()
-	ln.Close()
-	if err != nil {
-		os.Remove(proxySocket)
-		return "", nil, nil, fmt.Errorf("wayland-proxy: socket fd: %w", err)
-	}
-
-	// Pass the listener fd as fd 3 (ExtraFiles[0]).
-	cmd := exec.Command(cfg.ProxyBin,
-		"--real", realSocket,
-		"--fd", "3",
-		"--period", fmt.Sprintf("%d", cfg.ProxyPeriod),
-	)
-	cmd.Stderr = os.Stderr
-	cmd.ExtraFiles = []*os.File{lnFile}
-	// Run proxy as the invoking user so it can connect to the compositor socket.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: uid, Gid: gid},
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		lnFile.Close()
-		os.Remove(proxySocket)
-		return "", nil, nil, fmt.Errorf("wayland-proxy: stdout pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		lnFile.Close()
-		os.Remove(proxySocket)
-		return "", nil, nil, fmt.Errorf("wayland-proxy: start: %w", err)
-	}
-	lnFile.Close() // child inherited it via ExtraFiles; close our dup
-
-	killProxy := func() {
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-		}
-	}
-
-	ch := make(chan []byte, 32)
-	go func() {
-		defer close(ch)
-		defer os.Remove(proxySocket)
-		defer cmd.Wait()
-		var sizeBuf [4]byte
-		for {
-			if _, err := io.ReadFull(stdout, sizeBuf[:]); err != nil {
-				return
-			}
-			size := binary.BigEndian.Uint32(sizeBuf[:])
-			if size == 0 || size > 10*1024*1024 { // sanity: max 10 MB per frame
-				return
-			}
-			frame := make([]byte, size)
-			if _, err := io.ReadFull(stdout, frame); err != nil {
-				return
-			}
-			select {
-			case ch <- frame:
-			default:
-				// Drop frame if shipper is behind — prefer liveness over completeness.
-			}
-		}
-	}()
-
-	return proxySocket, ch, killProxy, nil
-}
 
 // Ack is re-declared here for the verifyAckHMAC helper so we don't
 // need a circular import. The actual type lives in protocol.
