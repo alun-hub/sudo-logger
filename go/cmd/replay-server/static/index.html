@@ -303,9 +303,8 @@
       font-family: var(--font-ui); }
     .no-sel { color: var(--text-dim); font-size: 13px; font-family: var(--font-ui); }
 
-    .terminal-wrap { flex: 1; min-height: 0; overflow-y: hidden; overflow-x: auto; padding: 10px; }
+    .terminal-wrap { flex: 1; min-height: 0; overflow: hidden; padding: 10px; }
     #terminal { width: 100%; height: 100%; }
-    .terminal-wrap .xterm { height: 100%; }
     .terminal-wrap .xterm-viewport { overflow-y: scroll; }
 
     /* ── Controls ────────────────────────────────────────────────────────────── */
@@ -1902,7 +1901,6 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
 
         term.reset();
         fitAddon.fit();
-        if (sess && sess.cols > 0 && sess.rows > 0) term.resize(sess.cols, sess.rows);
         setControlsEnabled(true);
         resetPlayer(); // Clears internal state but keeps our growing 'events' array
 
@@ -1925,7 +1923,6 @@ async function selectTerminalSession(tsid, sess, initialSeek) {
         elTimeTotal.textContent = fmt(totalDuration);
         term.reset();
         fitAddon.fit();
-        if (sess && sess.cols > 0 && sess.rows > 0) term.resize(sess.cols, sess.rows);
         setControlsEnabled(true);
         resetPlayer();
         if (initialSeek > 0) seekTo(Math.min(initialSeek, totalDuration));
@@ -2166,8 +2163,6 @@ function seekTo(targetSec) {
   const wasPlaying = player.playing;
   stopPlayer();
   term.reset();
-  if (currentSession && currentSession.cols > 0 && currentSession.rows > 0)
-    term.resize(currentSession.cols, currentSession.rows);
   player.currentIndex = 0;
   for (let i = 0; i < events.length; i++) {
     if (events[i].t > targetSec) { player.currentIndex = i; break; }
