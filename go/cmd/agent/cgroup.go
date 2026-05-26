@@ -77,11 +77,11 @@ func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 		[]byte(strconv.Itoa(sudoPid)+"\n"),
 		0644,
 	); err != nil {
-		log.Printf("cgroup: move sudo pid %d: %v", sudoPid, err)
+		debugLog("cgroup: move sudo pid %d: %v", sudoPid, err)
 	}
 	// Confirm sudo's actual cgroup after the write attempt.
 	if data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", sudoPid)); err == nil {
-		log.Printf("cgroup: sudo %d cgroup after move: %s", sudoPid, strings.TrimSpace(string(data)))
+		debugLog("cgroup: sudo %d cgroup after move: %s", sudoPid, strings.TrimSpace(string(data)))
 	}
 	debugLog("cgroup: session %s created, sudo pid %d", filepath.Base(path), sudoPid)
 	cg := &cgroupSession{
@@ -238,7 +238,7 @@ func (cg *cgroupSession) trackDescendants() {
 							children = append(children, pid)
 						}
 					}
-					log.Printf("cgroup %s: moveSudoOut triggered by children %v", cg.cgName, children)
+					debugLog("cgroup %s: moveSudoOut triggered by children %v", cg.cgName, children)
 					cg.moveSudoOut()
 					sudoMoved = true
 				}
@@ -261,7 +261,7 @@ func (cg *cgroupSession) trackDescendants() {
 					continue
 				}
 				if cgData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid)); err == nil {
-					log.Printf("cgroup %s: pid %d escaped, actual cgroup: %s", cg.cgName, pid, strings.TrimSpace(string(cgData)))
+					debugLog("cgroup %s: pid %d escaped, actual cgroup: %s", cg.cgName, pid, strings.TrimSpace(string(cgData)))
 				}
 				if hasControllingTTY(pid) && isShell(pid) {
 					if err := os.WriteFile(

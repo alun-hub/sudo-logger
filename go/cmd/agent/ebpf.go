@@ -916,9 +916,9 @@ func (s *ebpfSubsystem) sessionEnded(scopePath string) {
 func (s *ebpfSubsystem) trackSudoPID(sudoPid uint32, sessionID string) {
 	marker := uint8(1)
 	if err := s.objs.TrackedSudoPids.Put(sudoPid, marker); err != nil {
-		log.Printf("ebpf: trackSudoPID pid=%d session=%s: %v", sudoPid, sessionID, err)
+		debugLog("ebpf: trackSudoPID pid=%d session=%s: %v", sudoPid, sessionID, err)
 	} else {
-		log.Printf("ebpf: trackSudoPID: added pid=%d for session %s", sudoPid, sessionID)
+		debugLog("ebpf: trackSudoPID: added pid=%d for session %s", sudoPid, sessionID)
 	}
 }
 
@@ -926,7 +926,7 @@ func (s *ebpfSubsystem) trackSudoPID(sudoPid uint32, sessionID string) {
 // plugin session ends.
 func (s *ebpfSubsystem) untrackSudoPID(sudoPid uint32) {
 	if err := s.objs.TrackedSudoPids.Delete(sudoPid); err == nil {
-		log.Printf("ebpf: untrackSudoPID: removed pid=%d", sudoPid)
+		debugLog("ebpf: untrackSudoPID: removed pid=%d", sudoPid)
 	}
 }
 
@@ -935,15 +935,15 @@ func (s *ebpfSubsystem) untrackSudoPID(sudoPid uint32) {
 func (s *ebpfSubsystem) trackPluginCgroup(cgroupPath, sessionID string) {
 	id, err := cgroupInode(cgroupPath)
 	if err != nil {
-		log.Printf("ebpf: trackPluginCgroup %s: stat error: %v", cgroupPath, err)
+		debugLog("ebpf: trackPluginCgroup %s: stat error: %v", cgroupPath, err)
 		return
 	}
 	var key [64]byte
 	copy(key[:], sessionID)
 	if err := s.objs.TrackedCgroups.Put(id, key); err != nil {
-		log.Printf("ebpf: trackPluginCgroup put %s inode=%d: %v", cgroupPath, id, err)
+		debugLog("ebpf: trackPluginCgroup put %s inode=%d: %v", cgroupPath, id, err)
 	} else {
-		log.Printf("ebpf: trackPluginCgroup: added inode=%d for session %s", id, sessionID)
+		debugLog("ebpf: trackPluginCgroup: added inode=%d for session %s", id, sessionID)
 	}
 }
 
@@ -955,7 +955,7 @@ func (s *ebpfSubsystem) untrackPluginCgroup(cgroupPath string) {
 		return
 	}
 	if err := s.objs.TrackedCgroups.Delete(id); err == nil {
-		log.Printf("ebpf: untrackPluginCgroup: removed inode=%d", id)
+		debugLog("ebpf: untrackPluginCgroup: removed inode=%d", id)
 	}
 }
 
