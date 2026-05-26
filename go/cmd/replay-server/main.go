@@ -265,6 +265,8 @@ type SessionInfo struct {
 	DivergenceStatus string `json:"divergence_status,omitempty"` // "confirmed" | "unwitnessed" | "missing_plugin"
 	MatchedSessionID string `json:"matched_session_id,omitempty"` // TSID of matched counterpart
 	CallerProcess    string `json:"caller_process,omitempty"`    // process/service that triggered polkit (dbus-polkit only)
+	Cols             int    `json:"cols,omitempty"`              // terminal width from recording; 0 if unknown
+	Rows             int    `json:"rows,omitempty"`              // terminal height from recording; 0 if unknown
 }
 
 // PlaybackEvent is one timed chunk of terminal output or input.
@@ -498,6 +500,8 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 		DivergenceStatus: r.DivergenceStatus,
 		MatchedSessionID: r.MatchedSessionID,
 		CallerProcess:    r.CallerProcess,
+		Cols:             r.Cols,
+		Rows:             r.Rows,
 	}
 }
 

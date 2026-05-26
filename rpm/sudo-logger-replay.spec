@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.20.1
+Version:        1.20.2
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,6 +68,10 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.2-1
+- fix(replay): resize xterm.js terminal to match recorded session dimensions
+  (cols/rows now read from cast header and exposed via API)
+
 * Wed May 06 2026 sudo-logger 1.20.1-1
 - feat(replay): remove ✓ ebpf badge from normal sessions; only show
   ⚠ no plugin when eBPF detects a sudo run with no matching plugin record

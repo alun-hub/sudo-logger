@@ -625,6 +625,8 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 		RunasUser       string `json:"runas_user"`
 		RunasUID        int    `json:"runas_uid"`
 		RunasGID        int    `json:"runas_gid"`
+		Width           int    `json:"width"`
+		Height          int    `json:"height"`
 		Cwd             string `json:"cwd"`
 		Command         string `json:"command"`
 		ResolvedCommand string `json:"resolved_command"`
@@ -646,6 +648,8 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 		Runas:           hdr.RunasUser,
 		RunasUID:        hdr.RunasUID,
 		RunasGID:        hdr.RunasGID,
+		Cols:            hdr.Width,
+		Rows:            hdr.Height,
 		Command:         hdr.Command,
 		ResolvedCommand: hdr.ResolvedCommand,
 		Cwd:             hdr.Cwd,

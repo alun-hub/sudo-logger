@@ -192,6 +192,8 @@ type SessionRecord struct {
 	DivergenceStatus string // "pending" | "confirmed" | "unwitnessed" | "missing_plugin"
 	MatchedSessionID string // TSID of the matched counterpart stream
 	CallerProcess    string // process name or service that triggered polkit (dbus-polkit only)
+	Cols             int    // terminal width from cast header; 0 if unknown
+	Rows             int    // terminal height from cast header; 0 if unknown
 }
 
 // RawEvent is a single playback event read from a session cast file.
