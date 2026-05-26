@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.0.4)
+policy_module(sudo_logger, 1.0.5)
 
 ########################################
 #
@@ -28,38 +28,39 @@ allow sudo_agent_t self:fifo_file rw_fifo_file_perms;
 allow sudo_agent_t self:unix_stream_socket create_stream_socket_perms;
 allow sudo_agent_t self:tcp_socket create_stream_socket_perms;
 allow sudo_agent_t self:process { fork sigchld sigkill sigstop signull signal };
-allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search };
 
-# eBPF and LSM permissions (Critical for sandbox and recording)
-# capability2 bpf was introduced in kernel 5.8
-allow sudo_agent_t self:capability2 { bpf };
+# Capabilities
+# perfmon is needed for BPF on modern kernels
+allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search };
+allow sudo_agent_t self:capability2 { bpf perfmon };
+
+# BPF permissions
 allow sudo_agent_t self:bpf { map_create map_read map_write prog_load prog_run };
 
-# Manage the Unix socket and PID file in /run/sudo-logger/
+# Manage /run/sudo-logger/
 manage_dirs_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
 manage_files_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
 manage_sock_files_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
 files_pid_filetrans(sudo_agent_t, sudo_agent_var_run_t, { dir file sock_file })
 
-# Read config files and TLS certificates
+# Read /etc/sudo-logger/
 list_dirs_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
 read_files_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
 read_lnk_files_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
 files_search_etc(sudo_agent_t)
 
-# Outbound TLS connection to sudo-logserver
+# Outbound TLS
 corenet_tcp_connect_generic_port(sudo_agent_t)
 corenet_sendrecv_generic_client_packets(sudo_agent_t)
 sysnet_dns_name_resolve(sudo_agent_t)
 
-# Cgroup management (Delegate=yes in service unit)
+# Cgroup management
 fs_rw_cgroup_files(sudo_agent_t)
 require { type cgroup_t; }
 allow sudo_agent_t cgroup_t:dir { write add_name remove_name create rmdir };
 allow sudo_agent_t cgroup_t:file { create getattr open read write };
 
 # Process tracking and PTY access
-# The agent needs to interact with various domains during sudo sessions
 allow sudo_agent_t domain:dir { search getattr };
 allow sudo_agent_t domain:file { read open getattr };
 allow sudo_agent_t domain:lnk_file { read getattr };
@@ -68,15 +69,28 @@ allow sudo_agent_t domain:process { getpgid signal sigstop };
 require { type user_devpts_t; }
 allow sudo_agent_t user_devpts_t:chr_file { open write getattr };
 
-# eBPF Tracing access (required for sys_enter_write and execve hooks)
-require { type debugfs_t; type tracefs_t; }
+# eBPF Tracing and CO-RE (BTF)
+require { type debugfs_t; type tracefs_t; type sysfs_t; }
 allow sudo_agent_t { debugfs_t tracefs_t }:dir { search read open };
 allow sudo_agent_t { debugfs_t tracefs_t }:file { read open getattr };
+# Allow mapping BTF data in /sys/kernel/btf/
+allow sudo_agent_t sysfs_t:file { read open getattr map };
+dev_read_sysfs(sudo_agent_t)
 
 # Inode watching for sandbox (via fsnotify)
+# The agent needs to watch various config directories for changes
+files_read_etc_files(sudo_agent_t)
+files_read_usr_files(sudo_agent_t)
+
+# Grant 'watch' permissions on common types protected by the sandbox
+# etc_t, bin_t, lib_t are covered by common interfaces, but watch is specific.
 require { type etc_t; type bin_t; type lib_t; type usr_t; }
 allow sudo_agent_t { etc_t bin_t lib_t usr_t }:dir { watch watch_reads };
 allow sudo_agent_t { etc_t bin_t lib_t usr_t }:file { watch watch_reads };
+
+# SSSD and local auth files (needed for user lookups)
+auth_read_passwd(sudo_agent_t)
+auth_read_shadow(sudo_agent_t)
 
 # D-Bus and Logging
 dbus_system_bus_client(sudo_agent_t)
@@ -94,9 +108,7 @@ optional_policy(`
     gen_require(`
         type sudo_t;
     ')
-    # Allow sudo to read/mmap the plugin .so
     allow sudo_t sudo_logger_plugin_t:file { read open execute map getattr };
-    # Allow sudo (running plugin) to connect to agent socket
     allow sudo_t sudo_agent_var_run_t:dir search;
     allow sudo_t sudo_agent_var_run_t:sock_file write;
     allow sudo_t sudo_agent_t:unix_stream_socket connectto;
