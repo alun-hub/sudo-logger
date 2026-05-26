@@ -33,7 +33,8 @@ func main() {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			runSession(fmt.Sprintf("loadtest-p%d-%d", id, time.Now().Unix()), *flagChunks)
+			// End with ID so the last 6 chars (used for dir name) are unique.
+			runSession(fmt.Sprintf("loadtest-%d-%04d", time.Now().Unix(), id), *flagChunks)
 		}(i)
 	}
 

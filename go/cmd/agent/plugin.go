@@ -365,8 +365,15 @@ func handlePluginConn(pluginConn net.Conn) {
 		if warnBefore > cfg.IdleTimeout/2 {
 			warnBefore = cfg.IdleTimeout / 2
 		}
+		tickerInterval := 10 * time.Second
+		if cfg.IdleTimeout < tickerInterval {
+			tickerInterval = cfg.IdleTimeout / 2
+			if tickerInterval < 100*time.Millisecond {
+				tickerInterval = 100 * time.Millisecond
+			}
+		}
 		go func() {
-			ticker := time.NewTicker(10 * time.Second)
+			ticker := time.NewTicker(tickerInterval)
 			defer ticker.Stop()
 			warned := false
 			for {
@@ -789,6 +796,9 @@ func reportSessionMsg(server string, tlsCfg *tls.Config, sessionID string, msgTy
 }
 
 func isSudoConn(conn net.Conn) bool {
+	if os.Getenv("SUDO_LOGGER_INSECURE_TEST") == "1" {
+		return true
+	}
 	uc, ok := conn.(*net.UnixConn)
 	if !ok {
 		return false

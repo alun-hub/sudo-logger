@@ -3,7 +3,7 @@ FROM golang:1.25-alpine AS go-builder
 WORKDIR /src
 COPY go/ .
 RUN go mod tidy
-RUN CGO_ENABLED=0 go build -o /usr/local/bin/sudo-shipper ./cmd/shipper
+RUN CGO_ENABLED=0 go build -o /usr/local/bin/sudo-logger-agent ./cmd/agent
 
 FROM fedora:40
 # Install tools for testing: iproute (tc), coreutils (md5sum), procps (ps/pkill), nmap-ncat (nc)
@@ -18,7 +18,7 @@ COPY . .
 
 RUN cd plugin && make && make install
 RUN echo "Plugin sudo_logger_plugin /usr/libexec/sudo/sudo_logger_plugin.so" >> /etc/sudo.conf
-COPY --from=go-builder /usr/local/bin/sudo-shipper /usr/local/bin/sudo-shipper
+COPY --from=go-builder /usr/local/bin/sudo-logger-agent /usr/local/bin/sudo-logger-agent
 RUN mkdir -p /etc/sudo-logger /run/sudo-logger && chmod 750 /run/sudo-logger
 
 COPY tests/start-client.sh /usr/local/bin/start-client.sh
