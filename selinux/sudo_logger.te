@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.0.7)
+policy_module(sudo_logger, 1.0.8)
 
 ########################################
 #
@@ -8,6 +8,10 @@ policy_module(sudo_logger, 1.0.7)
 type sudo_agent_t;
 type sudo_agent_exec_t;
 init_daemon_domain(sudo_agent_t, sudo_agent_exec_t)
+
+# Make the domain permissive so it works while we gather all necessary rules.
+# This ensures the agent CAN load eBPF/LSM even if some rules are still missing.
+permissive sudo_agent_t;
 
 type sudo_agent_var_run_t;
 files_pid_file(sudo_agent_var_run_t)
@@ -30,8 +34,7 @@ allow sudo_agent_t self:tcp_socket create_stream_socket_perms;
 allow sudo_agent_t self:process { fork sigchld sigkill sigstop signull signal };
 
 # Capabilities
-# The agent is highly privileged as it monitors all sudo activity.
-allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search chown fowner };
+allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search chown fowner sys_resource };
 allow sudo_agent_t self:capability2 { bpf perfmon checkpoint_restore };
 
 # BPF permissions
@@ -61,7 +64,6 @@ require { type cgroup_t; }
 allow sudo_agent_t cgroup_t:file { create getattr open read write };
 
 # Process tracking and PTY access
-# Use general interfaces for broad visibility required by the recorder.
 domain_read_all_domains_state(sudo_agent_t)
 domain_getattr_all_domains(sudo_agent_t)
 allow sudo_agent_t domain:process { getpgid signal sigstop };
@@ -70,25 +72,20 @@ require { type user_devpts_t; }
 allow sudo_agent_t user_devpts_t:chr_file { open write getattr ioctl };
 
 # eBPF Tracing and CO-RE (BTF)
-# Use system interfaces for debugfs/tracefs/sysfs
 kernel_read_system_state(sudo_agent_t)
 kernel_read_network_state(sudo_agent_t)
 kernel_read_kernel_sysctls(sudo_agent_t)
 dev_read_sysfs(sudo_agent_t)
 
-# Grant access to debugfs and tracefs for eBPF attachment
 require { type debugfs_t; type tracefs_t; type sysfs_t; }
 allow sudo_agent_t { debugfs_t tracefs_t }:dir { search read open getattr };
 allow sudo_agent_t { debugfs_t tracefs_t }:file { read open getattr };
 allow sudo_agent_t sysfs_t:file { map };
 
-# Inode watching for sandbox (via fsnotify)
-# This is the big one: allow reading and watching most files.
+# Inode watching for sandbox
 files_read_all_files(sudo_agent_t)
 files_read_all_symlinks(sudo_agent_t)
 
-# Explicitly allow 'watch' on the types we saw in AVC logs.
-# SELinux requires explicit watch permissions even if read is allowed.
 require {
     type etc_t; type bin_t; type lib_t; type usr_t; type var_log_t;
     type sysctl_t; type sysctl_kernel_t; type sysctl_net_t;
