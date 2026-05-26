@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.0.9)
+policy_module(sudo_logger, 1.1.0)
 
 ########################################
 #
@@ -8,9 +8,6 @@ policy_module(sudo_logger, 1.0.9)
 type sudo_agent_t;
 type sudo_agent_exec_t;
 init_daemon_domain(sudo_agent_t, sudo_agent_exec_t)
-
-# Keep it permissive for one last round to ensure eBPF loads and sandbox works.
-permissive sudo_agent_t;
 
 type sudo_agent_var_run_t;
 files_pid_file(sudo_agent_var_run_t)
@@ -36,6 +33,7 @@ allow sudo_agent_t self:capability2 { bpf perfmon checkpoint_restore };
 
 # BPF and LSM - Critical for session recording and sandbox
 allow sudo_agent_t self:bpf { map_create map_read map_write prog_load prog_run };
+allow sudo_agent_t self:perf_event { open cpu kernel read write tracepoint };
 
 # Runtime files (/run/sudo-logger/)
 manage_dirs_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
@@ -77,7 +75,7 @@ dev_read_sysfs(sudo_agent_t)
 require { type debugfs_t; type tracefs_t; type sysfs_t; }
 allow sudo_agent_t { debugfs_t tracefs_t }:dir { search read open getattr };
 allow sudo_agent_t { debugfs_t tracefs_t }:file { read open getattr };
-allow sudo_agent_t sysfs_t:file { map };
+allow sudo_agent_t sysfs_t:file { read map };
 
 # Inode watching for sandbox - required for fsnotify
 files_read_all_files(sudo_agent_t)
@@ -89,6 +87,8 @@ require {
     type dbusd_etc_t; type cert_t;
     type systemd_unit_file_t; type selinux_config_t;
     type init_var_run_t; type syslogd_var_run_t;
+    type boot_t; type root_t; type udev_rules_t; type shadow_t;
+    type security_t;
 }
 allow sudo_agent_t {
     etc_t bin_t lib_t usr_t var_log_t
@@ -96,6 +96,8 @@ allow sudo_agent_t {
     dbusd_etc_t cert_t
     systemd_unit_file_t selinux_config_t
     init_var_run_t syslogd_var_run_t
+    boot_t root_t udev_rules_t shadow_t
+    security_t
 }:dir { watch watch_reads watch_mount watch_with_perm };
 
 allow sudo_agent_t {
@@ -104,6 +106,8 @@ allow sudo_agent_t {
     dbusd_etc_t cert_t
     systemd_unit_file_t selinux_config_t
     init_var_run_t syslogd_var_run_t
+    boot_t root_t udev_rules_t shadow_t
+    security_t
 }:file { watch watch_reads watch_mount watch_with_perm };
 
 # System integration (Auth, DBus, Logging)

@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.61
+Version:        1.20.62
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -96,6 +96,8 @@ if [ ! -f %{_sysconfdir}/sudo-logger/agent.conf ] && \
     cp -p %{_sysconfdir}/sudo-logger/shipper.conf \
           %{_sysconfdir}/sudo-logger/agent.conf
 fi
+# Clear any stale BPF hooks/maps before the new agent starts.
+rm -rf /sys/fs/bpf/sudo-logger 2>/dev/null || true
 # Remove immutable flag from our binaries before RPM writes new files.
 # This is needed for upgrades — on first install the files don't exist yet
 # so the commands silently fail (|| true).
@@ -170,6 +172,11 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Tue May 27 2026 sudo-logger 1.20.62-1
+- feat(spec): robust upgrade path for eBPF/Sandbox restoration
+- feat(spec): clear stale BPF pins in %%pre to prevent agent start failures
+- feat(spec): ensure chattr -i/+i and restorecon are applied to all binaries
+
 * Tue May 26 2026 sudo-logger 1.20.52-1
 - chore: rename shipper → agent throughout (g_agent_fd, connect_agent(),
   error messages); remove dead cmd/shipper package, sudo-shipper.service,

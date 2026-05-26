@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"sudo-logger/internal/protocol"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/fsnotify/fsnotify"
@@ -162,7 +164,11 @@ func (s *sandboxSubsystem) retryViolation(cgid uint64, alert protocol.SandboxAle
 // registerPID marks a PID (tgid) as sandboxed in the BPF map.
 // The sched_process_fork hook propagates membership to all descendants.
 func (s *sandboxSubsystem) registerPID(pid uint32) {
-	if s == nil || s.objs == nil {
+	if s == nil || s.objs == nil || pid == 0 {
+		return
+	}
+	if pid == uint32(os.Getpid()) {
+		debugLog("sandbox: skipping registration of agent self pid %d", pid)
 		return
 	}
 	marker := uint8(1)
@@ -185,11 +191,12 @@ func (s *sandboxSubsystem) unregisterPID(pid uint32) {
 // sandboxSubsystem enforces filesystem and process-kill restrictions on
 // processes running inside sudo-logger session cgroups, via eBPF LSM hooks.
 type sandboxSubsystem struct {
-	objs       *SandboxObjects
-	links      []link.Link
-	mu         sync.Mutex
-	pathInodes map[string]SandboxInodeKey // protected path → inode key currently in BPF map
-	watcher    *fsnotify.Watcher
+	objs          *SandboxObjects
+	links         []link.Link
+	mu            sync.Mutex
+	pathInodes    map[string]SandboxInodeKey // protected path → inode key currently in BPF map
+	watcher       *fsnotify.Watcher
+	selfCgroupID  uint64                     // agent's own cgroup ID, excluded from sandbox
 }
 
 var sandboxSys *sandboxSubsystem
@@ -237,13 +244,34 @@ func startSandbox(configPath string) {
 }
 
 func (s *sandboxSubsystem) start(configPath string) error {
+	s.selfCgroupID = cgroupInodeOf(os.Getpid())
+	if s.selfCgroupID != 0 {
+		debugLog("sandbox: agent self cgroup id: %d", s.selfCgroupID)
+	}
+
+	// Clean up any stale BPF pins from a previous crashed run. If the agent
+	// died while its own cgroup was being sandboxed, stuck pins in /sys/fs/bpf
+	// could prevent the new agent from reading its own config.
+	pinPath := "/sys/fs/bpf/sudo-logger"
+	if _, err := os.Stat(pinPath); err == nil {
+		debugLog("sandbox: cleaning up stale BPF pins at %s", pinPath)
+		if err := os.RemoveAll(pinPath); err != nil {
+			log.Printf("sandbox: warning: failed to remove stale pins: %v", err)
+		}
+	}
+
 	spec, err := LoadSandbox()
 	if err != nil {
 		return fmt.Errorf("load Sandbox spec: %w", err)
 	}
 
 	objs := &SandboxObjects{}
-	if err := spec.LoadAndAssign(objs, nil); err != nil {
+	opts := &ebpf.CollectionOptions{
+		Maps: ebpf.MapOptions{
+			PinPath: pinPath,
+		},
+	}
+	if err := spec.LoadAndAssign(objs, opts); err != nil {
 		return fmt.Errorf("load BPF objects: %w", err)
 	}
 	s.objs = objs
@@ -426,7 +454,11 @@ func (s *sandboxSubsystem) start(configPath string) error {
 // registerCgroup marks a cgroup as subject to sandbox restrictions.
 // Called when a sudo session cgroup is created.
 func (s *sandboxSubsystem) registerCgroup(cgroupID uint64) {
-	if s == nil || s.objs == nil {
+	if s == nil || s.objs == nil || cgroupID == 0 {
+		return
+	}
+	if cgroupID == s.selfCgroupID {
+		debugLog("sandbox: skipping registration of agent self cgroup %d", cgroupID)
 		return
 	}
 	marker := uint8(1)
