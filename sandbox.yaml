@@ -73,8 +73,11 @@ protect:
     - /var/log/messages
     - /var/log/journal           # systemd journal on-disk store
 
-    # SELinux — policy tampering would disable MAC enforcement
-    - /etc/selinux
+    # SELinux — protecting config (SELINUX=permissive/disabled) is the critical
+    # target; the broad /etc/selinux directory is intentionally NOT protected so
+    # that semodule/semanage can update file_contexts and the compiled policy.
+    # Protecting the whole tree would block legitimate policy updates and cause
+    # a circular dependency (sandbox blocks semodule which fixes sandbox denials).
     - /etc/selinux/config
 
     # System-wide crypto policies (TLS cipher suites, key lengths)

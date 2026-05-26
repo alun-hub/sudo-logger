@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.6)
+policy_module(sudo_logger, 1.1.8)
 
 ########################################
 #
@@ -82,10 +82,15 @@ require { attribute file_type; attribute sysctl_type;
           type debugfs_t; type tracefs_t; }
 # Dir: open/read for recursive sandbox config scan; watch for inotify watcher.
 allow sudo_agent_t file_type:dir { open read getattr search watch };
-# File/symlink: getattr (stat) needed when sandbox config loader enumerates
-# protected paths recursively — e.g. .service files in /etc/systemd/system/.
+# File/symlink/socket: getattr (stat) needed when sandbox config loader
+# enumerates protected paths recursively.  sock_file covers sockets such as
+# /var/lib/sss/pipes/private/sbus-master (sssd_var_lib_t, a sock_file).
 allow sudo_agent_t file_type:file { getattr };
 allow sudo_agent_t file_type:lnk_file { getattr read };
+allow sudo_agent_t file_type:sock_file { getattr };
+# proc_security_t (/proc/sys/fs/suid_dumpable etc.) is not in file_type.
+require { type proc_security_t; }
+allow sudo_agent_t proc_security_t:file { getattr };
 # sysctl types lack file_type — cover explicitly.
 allow sudo_agent_t sysctl_type:dir { open read getattr search watch };
 allow sudo_agent_t sysctl_type:file { getattr };
@@ -96,6 +101,25 @@ allow sudo_agent_t debugfs_t:dir { search read open getattr };
 allow sudo_agent_t debugfs_t:file { read open getattr };
 allow sudo_agent_t tracefs_t:dir { search read open getattr write add_name remove_name };
 allow sudo_agent_t tracefs_t:file { read open getattr write create unlink };
+# cilium/ebpf calls statfs() on the tracefs/debugfs mount point to verify the
+# filesystem type before accessing kprobe_events.  filesystem:getattr is the
+# permission backing statfs(2) — without it the library reports
+# "neither debugfs nor tracefs are mounted" and aborts kprobe attachment.
+allow sudo_agent_t tracefs_t:filesystem getattr;
+allow sudo_agent_t debugfs_t:filesystem getattr;
+
+# mmap /sys/kernel/btf/vmlinux for CO-RE BTF type information.
+# sysfs_t is in file_type but domain_can_mmap_files boolean is off, so the
+# conditional domain:file_type:file:map rule never fires.  Unconditional rule.
+require { type sysfs_t; }
+allow sudo_agent_t sysfs_t:file { read open getattr map };
+
+# getattr on device/proc paths that sandbox.yaml may list as protected.
+# loadSandboxConfig() calls stat() on every entry during startup.
+require { type proc_kcore_t; type memory_device_t; type fixed_disk_device_t; }
+allow sudo_agent_t proc_kcore_t:file { getattr };
+allow sudo_agent_t memory_device_t:chr_file { getattr };
+allow sudo_agent_t fixed_disk_device_t:blk_file { getattr };
 
 # Read /proc/<pid> entries for tracked session processes.
 allow sudo_agent_t domain:dir { search getattr };
