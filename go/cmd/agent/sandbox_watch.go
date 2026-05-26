@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/fsnotify/fsnotify"
@@ -30,6 +31,13 @@ func (s *sandboxSubsystem) startWatcher(pathInodes map[string]SandboxInodeKey) {
 		dirs[parent] = struct{}{}
 	}
 	for dir := range dirs {
+		// Skip pseudo-filesystems: procfs and sysfs entries are virtual files
+		// that are never atomically replaced (rename/create), so inotify watches
+		// on them are pointless and may fail or generate no useful events.
+		if strings.HasPrefix(dir, "/proc/") || strings.HasPrefix(dir, "/sys/") {
+			debugLog("sandbox: skipping watch on pseudo-fs path %s", dir)
+			continue
+		}
 		if err := watcher.Add(dir); err != nil {
 			log.Printf("sandbox: watch %s: %v", dir, err)
 		}

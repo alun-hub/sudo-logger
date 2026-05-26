@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.69
+Version:        1.20.70
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,12 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.70-1
+- fix(selinux): add sysctl_type:dir { watch } — sysctl_net_t and sysctl_kernel_t
+  lack the file_type attribute so must be covered by sysctl_type attribute
+- fix(sandbox): skip inotify watches on /proc/ and /sys/ paths — pseudo-fs
+  entries are never atomically replaced so watches produce no useful events
+
 * Tue May 26 2026 sudo-logger 1.20.69-1
 - fix(selinux): add file_type:dir { open read getattr search watch } for
   sudo_agent_t — dir:watch (kernel 5.x+ inotify permission) and dir:read/open

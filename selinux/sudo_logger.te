@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.4)
+policy_module(sudo_logger, 1.1.5)
 
 ########################################
 #
@@ -78,8 +78,10 @@ allow sudo_agent_t cgroup_t:file { create };
 # parent dirs.  These paths span many types: etc_t, cert_t, pam_etc_t, bin_t,
 # var_log_t, sysctl_t, system_conf_t, etc.
 # dir:watch is the kernel 5.x+ permission required by inotify_add_watch(2).
-require { attribute file_type; }
+require { attribute file_type; attribute sysctl_type; }
 allow sudo_agent_t file_type:dir { open read getattr search watch };
+# sysctl_t and related proc types lack the file_type attribute.
+allow sudo_agent_t sysctl_type:dir { open read getattr search watch };
 
 # Read /proc/<pid> entries for tracked session processes.
 allow sudo_agent_t domain:dir { search getattr };
