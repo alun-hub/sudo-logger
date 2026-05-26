@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.0.8)
+policy_module(sudo_logger, 1.0.9)
 
 ########################################
 #
@@ -9,8 +9,7 @@ type sudo_agent_t;
 type sudo_agent_exec_t;
 init_daemon_domain(sudo_agent_t, sudo_agent_exec_t)
 
-# Make the domain permissive so it works while we gather all necessary rules.
-# This ensures the agent CAN load eBPF/LSM even if some rules are still missing.
+# Keep it permissive for one last round to ensure eBPF loads and sandbox works.
 permissive sudo_agent_t;
 
 type sudo_agent_var_run_t;
@@ -27,43 +26,41 @@ files_type(sudo_logger_plugin_t)
 # sudo_agent_t local policy
 #
 
-# Basic process and networking
+# Core process and system capabilities
 allow sudo_agent_t self:fifo_file rw_fifo_file_perms;
 allow sudo_agent_t self:unix_stream_socket create_stream_socket_perms;
 allow sudo_agent_t self:tcp_socket create_stream_socket_perms;
 allow sudo_agent_t self:process { fork sigchld sigkill sigstop signull signal };
-
-# Capabilities
 allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search chown fowner sys_resource };
 allow sudo_agent_t self:capability2 { bpf perfmon checkpoint_restore };
 
-# BPF permissions
+# BPF and LSM - Critical for session recording and sandbox
 allow sudo_agent_t self:bpf { map_create map_read map_write prog_load prog_run };
 
-# Manage /run/sudo-logger/
+# Runtime files (/run/sudo-logger/)
 manage_dirs_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
 manage_files_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
 manage_sock_files_pattern(sudo_agent_t, sudo_agent_var_run_t, sudo_agent_var_run_t)
 files_pid_filetrans(sudo_agent_t, sudo_agent_var_run_t, { dir file sock_file })
 
-# Read /etc/sudo-logger/
+# Configuration (/etc/sudo-logger/)
 list_dirs_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
 read_files_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
 read_lnk_files_pattern(sudo_agent_t, sudo_agent_etc_t, sudo_agent_etc_t)
 files_search_etc(sudo_agent_t)
 
-# Outbound TLS
+# Network
 corenet_tcp_connect_generic_port(sudo_agent_t)
 corenet_sendrecv_generic_client_packets(sudo_agent_t)
 sysnet_dns_name_resolve(sudo_agent_t)
 
-# Cgroup management
+# Cgroups and system state
 fs_manage_cgroup_dirs(sudo_agent_t)
 fs_rw_cgroup_files(sudo_agent_t)
 require { type cgroup_t; }
 allow sudo_agent_t cgroup_t:file { create getattr open read write };
 
-# Process tracking and PTY access
+# Broad system visibility for the recorder
 domain_read_all_domains_state(sudo_agent_t)
 domain_getattr_all_domains(sudo_agent_t)
 allow sudo_agent_t domain:process { getpgid signal sigstop };
@@ -71,7 +68,7 @@ allow sudo_agent_t domain:process { getpgid signal sigstop };
 require { type user_devpts_t; }
 allow sudo_agent_t user_devpts_t:chr_file { open write getattr ioctl };
 
-# eBPF Tracing and CO-RE (BTF)
+# eBPF/CORE/Tracing
 kernel_read_system_state(sudo_agent_t)
 kernel_read_network_state(sudo_agent_t)
 kernel_read_kernel_sysctls(sudo_agent_t)
@@ -82,7 +79,7 @@ allow sudo_agent_t { debugfs_t tracefs_t }:dir { search read open getattr };
 allow sudo_agent_t { debugfs_t tracefs_t }:file { read open getattr };
 allow sudo_agent_t sysfs_t:file { map };
 
-# Inode watching for sandbox
+# Inode watching for sandbox - required for fsnotify
 files_read_all_files(sudo_agent_t)
 files_read_all_symlinks(sudo_agent_t)
 
@@ -109,28 +106,21 @@ allow sudo_agent_t {
     init_var_run_t syslogd_var_run_t
 }:file { watch watch_reads watch_mount watch_with_perm };
 
-# SSSD and local auth files
+# System integration (Auth, DBus, Logging)
 auth_read_passwd(sudo_agent_t)
 auth_read_shadow(sudo_agent_t)
 auth_use_nsswitch(sudo_agent_t)
-
-# D-Bus system bus monitoring
 dbus_system_bus_client(sudo_agent_t)
 dbus_connect_system_bus(sudo_agent_t)
-
-# Logging
 logging_send_syslog_msg(sudo_agent_t)
 logging_read_all_logs(sudo_agent_t)
 
 ########################################
 #
-# sudo_t policy additions
+# sudo_t additions
 #
-
 optional_policy(`
-    gen_require(`
-        type sudo_t;
-    ')
+    gen_require(` type sudo_t; ')
     allow sudo_t sudo_logger_plugin_t:file { read open execute map getattr };
     allow sudo_t sudo_agent_var_run_t:dir search;
     allow sudo_t sudo_agent_var_run_t:sock_file write;
