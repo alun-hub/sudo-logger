@@ -17,8 +17,7 @@ repos:
       - id: go-vet
         name: go vet
         language: system
-        # ebpf-recorder requires generated files from 'make generate' — skip until built
-        entry: bash -c 'cd go && export PATH=/usr/lib/golang/bin:$PATH GOROOT=/usr/lib/golang && go vet $(go list ./... | grep -v ebpf-recorder)'
+        entry: bash -c 'cd go && export PATH=/usr/lib/golang/bin:$PATH GOROOT=/usr/lib/golang && go vet ./...'
         pass_filenames: false
         files: \.go$
 
@@ -32,7 +31,7 @@ repos:
       - id: go-test
         name: go test
         language: system
-        entry: bash -c 'cd go && export PATH=/usr/lib/golang/bin:$PATH GOROOT=/usr/lib/golang && go test -count=1 $(go list ./... | grep -v ebpf-recorder)'
+        entry: bash -c 'cd go && export PATH=/usr/lib/golang/bin:$PATH GOROOT=/usr/lib/golang && go test -count=1 ./...'
         pass_filenames: false
         files: \.go$
 
