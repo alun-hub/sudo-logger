@@ -136,7 +136,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	5 — added source, parent_session_id, has_io, divergence_status, matched_session_id
 //	6 — added caller_process (polkit/dbus calling process name or service)
 //	7 — added sandbox_violation column to sudo_sessions
-const currentSchemaVersion = 7
+//	8 — added tty_cols, tty_rows to capture terminal dimensions
+const currentSchemaVersion = 8
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -245,6 +246,10 @@ CREATE INDEX IF NOT EXISTS sudo_sessions_div_pending
 ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS caller_process TEXT DEFAULT '';
 ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS sandbox_violation BOOLEAN DEFAULT FALSE;
 
+-- migration v8: terminal dimensions from cast header
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS tty_cols INT DEFAULT 0;
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS tty_rows INT DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
 `); err != nil {
 		return err
@@ -296,14 +301,16 @@ func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.Session
 INSERT INTO sudo_sessions
   (tsid, session_id, "user", host, runas, runas_uid, runas_gid,
    command, resolved_command, cwd, flags, start_time, in_progress,
-   source, parent_session_id, has_io, divergence_status, caller_process)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,$13,$14,$15,$16,$17)
+   source, parent_session_id, has_io, divergence_status, caller_process,
+   tty_cols, tty_rows)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,TRUE,$13,$14,$15,$16,$17,$18,$19)
 ON CONFLICT (tsid) DO NOTHING`,
 		tsid, meta.SessionID, meta.User, meta.Host,
 		meta.RunasUser, meta.RunasUID, meta.RunasGID,
 		meta.Command, meta.ResolvedCommand, meta.Cwd, meta.Flags,
 		startTime.Unix(),
 		meta.Source, meta.ParentSessionID, meta.HasIO, divStatus, meta.CallerProcess,
+		meta.Cols, meta.Rows,
 	)
 	if err != nil {
 		_ = w.Close()
@@ -322,7 +329,8 @@ SELECT tsid, session_id, "user", host, runas, runas_uid, runas_gid,
        incomplete, network_outage, in_progress,
        COALESCE(source, 'plugin'), COALESCE(parent_session_id, ''),
        COALESCE(has_io, TRUE), COALESCE(divergence_status, 'unwitnessed'),
-       COALESCE(matched_session_id, ''), COALESCE(caller_process, '')
+       COALESCE(matched_session_id, ''), COALESCE(caller_process, ''),
+       COALESCE(tty_cols, 0), COALESCE(tty_rows, 0)
 FROM sudo_sessions
 ORDER BY start_time DESC`)
 	if err != nil {
@@ -340,6 +348,7 @@ ORDER BY start_time DESC`)
 			&r.Incomplete, &r.NetworkOutage, &r.InProgress,
 			&r.Source, &r.ParentSessionID, &r.HasIO,
 			&r.DivergenceStatus, &r.MatchedSessionID, &r.CallerProcess,
+			&r.Cols, &r.Rows,
 		); err != nil {
 			return nil, fmt.Errorf("scan session row: %w", err)
 		}

@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.20.2
+Version:        1.20.3
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,6 +68,11 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.3-1
+- fix(distributed): store and retrieve tty_cols/tty_rows in PostgreSQL
+  (schema migration v8 adds tty_cols/tty_rows columns; INSERT and SELECT
+  updated so distributed-mode deployments expose terminal dimensions via API)
+
 * Tue May 26 2026 sudo-logger 1.20.2-1
 - fix(replay): resize xterm.js terminal to match recorded session dimensions
   (cols/rows now read from cast header and exposed via API)

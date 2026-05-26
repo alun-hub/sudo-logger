@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.20.0
+Version:        1.20.1
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,10 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.1-1
+- fix(distributed): store tty_cols/tty_rows at session creation (schema v8)
+  so replay-server can expose terminal dimensions for xterm.js resize
+
 * Thu Apr 30 2026 sudo-logger 1.19.0-1
 - feat: accept source, parent_session_id, has_io fields from sudo-logger-agent
 - store: add divergence_status and matched_session_id to SessionRecord
