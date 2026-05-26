@@ -65,17 +65,14 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	old, ok := s.pathInodes[path]
-	if !ok {
-		return // path not in our protect list
-	}
-
 	var st syscall.Stat_t
 	if err := syscall.Stat(path, &st); err != nil {
-		// File removed — pull it from the map and stop tracking it.
-		log.Printf("sandbox: %s removed after rename — dropping from protected inodes", path)
-		_ = s.objs.ProtectedInodes.Delete(old)
-		delete(s.pathInodes, path)
+		// File removed — check if we were tracking it
+		if old, ok := s.pathInodes[path]; ok {
+			log.Printf("sandbox: %s removed — dropping from protected inodes", path)
+			_ = s.objs.ProtectedInodes.Delete(old)
+			delete(s.pathInodes, path)
+		}
 		return
 	}
 
@@ -85,29 +82,37 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 		dev = uint32(st.Dev)
 	}
 	newKey := SandboxInodeKey{Ino: st.Ino, Dev: dev}
-	if newKey == old {
-		return // inode unchanged, nothing to do
-	}
 
-	// Only delete the old key if no other protected path still uses it.
-	shared := false
-	for otherPath, k := range s.pathInodes {
-		if otherPath != path && k == old {
-			shared = true
-			break
+	old, ok := s.pathInodes[path]
+	if ok {
+		if newKey == old {
+			return // inode unchanged, nothing to do
 		}
-	}
-	if !shared {
-		_ = s.objs.ProtectedInodes.Delete(old)
+
+		// Only delete the old key if no other protected path still uses it.
+		shared := false
+		for otherPath, k := range s.pathInodes {
+			if otherPath != path && k == old {
+				shared = true
+				break
+			}
+		}
+		if !shared {
+			_ = s.objs.ProtectedInodes.Delete(old)
+		}
+		log.Printf("sandbox: refreshed protected inode for %s: {ino=%d dev=%d} → {ino=%d dev=%d}",
+			path, old.Ino, old.Dev, newKey.Ino, newKey.Dev)
+	} else {
+		// New file created in a watched directory
+		log.Printf("sandbox: protecting newly created file %s: {ino=%d dev=%d}",
+			path, newKey.Ino, newKey.Dev)
 	}
 
 	marker := uint8(1)
 	if err := s.objs.ProtectedInodes.Put(newKey, marker); err != nil {
-		log.Printf("sandbox: refresh inode for %s: %v", path, err)
+		log.Printf("sandbox: protect inode for %s: %v", path, err)
 		return
 	}
 
 	s.pathInodes[path] = newKey
-	log.Printf("sandbox: refreshed protected inode for %s: {ino=%d dev=%d} → {ino=%d dev=%d}",
-		path, old.Ino, old.Dev, newKey.Ino, newKey.Dev)
 }
