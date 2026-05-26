@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.20.1
+Version:        1.20.2
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -100,6 +100,11 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Tue May 26 2026 sudo-logger 1.20.2-1
+- fix(distributed): apply 220x50 defaults for tty_cols/tty_rows at INSERT
+  (matches iolog.NewWriter cast header defaults; fixes 0 stored for sessions
+  without PTY-attached sudo, e.g. non-interactive or new shells)
+
 * Tue May 26 2026 sudo-logger 1.20.1-1
 - fix(distributed): store tty_cols/tty_rows at session creation (schema v8)
   so replay-server can expose terminal dimensions for xterm.js resize
