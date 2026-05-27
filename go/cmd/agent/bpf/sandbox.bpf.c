@@ -66,6 +66,9 @@ struct sandbox_alert {
 	__u32 pid;
 	__u32 type;
 	char  comm[TASK_COMM_LEN];
+	__u64 ino; // inode number of the protected object that was blocked
+	__u32 dev; // block device id (s_dev from superblock)
+	__u32 pad;
 };
 
 struct {
@@ -73,7 +76,8 @@ struct {
 	__uint(max_entries, 256 * 1024); // 256 KB ring buffer
 } sandbox_alerts SEC(".maps");
 
-static __always_inline void submit_alert(enum sandbox_alert_type type)
+static __always_inline void submit_alert(enum sandbox_alert_type type,
+					 __u64 ino, __u32 dev)
 {
 	struct sandbox_alert *a;
 
@@ -85,6 +89,9 @@ static __always_inline void submit_alert(enum sandbox_alert_type type)
 	a->pid = bpf_get_current_pid_tgid() >> 32;
 	a->type = type;
 	bpf_get_current_comm(&a->comm, sizeof(a->comm));
+	a->ino = ino;
+	a->dev = dev;
+	a->pad = 0;
 
 	bpf_ringbuf_submit(a, 0);
 }
@@ -183,7 +190,9 @@ int BPF_PROG(sandbox_file_open, struct file *file)
 
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
 	if (inode_protected(inode)) {
-		submit_alert(ALERT_FILE_OPEN);
+		submit_alert(ALERT_FILE_OPEN,
+			     BPF_CORE_READ(inode, i_ino),
+			     (__u32)BPF_CORE_READ(inode, i_sb, s_dev));
 		return -EPERM;
 	}
 
@@ -200,7 +209,9 @@ int BPF_PROG(sandbox_path_truncate, const struct path *path)
 
 	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
 	if (inode_protected(inode)) {
-		submit_alert(ALERT_FILE_TRUNCATE);
+		submit_alert(ALERT_FILE_TRUNCATE,
+			     BPF_CORE_READ(inode, i_ino),
+			     (__u32)BPF_CORE_READ(inode, i_sb, s_dev));
 		return -EPERM;
 	}
 
@@ -219,7 +230,9 @@ int BPF_PROG(sandbox_file_permission, struct file *file, int mask)
 
 	struct inode *inode = BPF_CORE_READ(file, f_inode);
 	if (inode_protected(inode)) {
-		submit_alert(ALERT_FILE_WRITE);
+		submit_alert(ALERT_FILE_WRITE,
+			     BPF_CORE_READ(inode, i_ino),
+			     (__u32)BPF_CORE_READ(inode, i_sb, s_dev));
 		return -EPERM;
 	}
 
@@ -236,7 +249,9 @@ int BPF_PROG(sandbox_inode_setattr, struct dentry *dentry, struct iattr *attr)
 
 	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
 	if (inode_protected(inode)) {
-		submit_alert(ALERT_FILE_SETATTR);
+		submit_alert(ALERT_FILE_SETATTR,
+			     BPF_CORE_READ(inode, i_ino),
+			     (__u32)BPF_CORE_READ(inode, i_sb, s_dev));
 		return -EPERM;
 	}
 
@@ -251,7 +266,9 @@ int BPF_PROG(sandbox_inode_unlink, struct inode *dir, struct dentry *dentry)
 		return 0;
 	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
 	if (inode_protected(inode)) {
-		submit_alert(ALERT_FILE_UNLINK);
+		submit_alert(ALERT_FILE_UNLINK,
+			     BPF_CORE_READ(inode, i_ino),
+			     (__u32)BPF_CORE_READ(inode, i_sb, s_dev));
 		return -EPERM;
 	}
 	return 0;
@@ -268,18 +285,24 @@ int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_den
 		return 0;
 	struct inode *old_inode = BPF_CORE_READ(old_dentry, d_inode);
 	if (inode_protected(old_inode)) {
-		submit_alert(ALERT_FILE_RENAME);
+		submit_alert(ALERT_FILE_RENAME,
+			     BPF_CORE_READ(old_inode, i_ino),
+			     (__u32)BPF_CORE_READ(old_inode, i_sb, s_dev));
 		return -EPERM;
 	}
 	struct inode *new_inode = BPF_CORE_READ(new_dentry, d_inode);
 	if (inode_protected(new_inode)) {
-		submit_alert(ALERT_FILE_RENAME);
+		submit_alert(ALERT_FILE_RENAME,
+			     BPF_CORE_READ(new_inode, i_ino),
+			     (__u32)BPF_CORE_READ(new_inode, i_sb, s_dev));
 		return -EPERM;
 	}
 
 	// Also prevent renaming a new file INTO a protected directory.
 	if (inode_protected(new_dir)) {
-		submit_alert(ALERT_FILE_RENAME);
+		submit_alert(ALERT_FILE_RENAME,
+			     BPF_CORE_READ(new_dir, i_ino),
+			     (__u32)BPF_CORE_READ(new_dir, i_sb, s_dev));
 		return -EPERM;
 	}
 
@@ -293,7 +316,9 @@ int BPF_PROG(sandbox_inode_mkdir, struct inode *dir, struct dentry *dentry, umod
 	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_MKDIR);
+		submit_alert(ALERT_DIR_MKDIR,
+			     BPF_CORE_READ(dir, i_ino),
+			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
 		return -EPERM;
 	}
 	return 0;
@@ -305,7 +330,9 @@ int BPF_PROG(sandbox_inode_create, struct inode *dir, struct dentry *dentry, umo
 	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_CREATE);
+		submit_alert(ALERT_DIR_CREATE,
+			     BPF_CORE_READ(dir, i_ino),
+			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
 		return -EPERM;
 	}
 	return 0;
@@ -317,7 +344,9 @@ int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umod
 	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_MKNOD);
+		submit_alert(ALERT_DIR_MKNOD,
+			     BPF_CORE_READ(dir, i_ino),
+			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
 		return -EPERM;
 	}
 	return 0;
@@ -329,7 +358,9 @@ int BPF_PROG(sandbox_inode_symlink, struct inode *dir, struct dentry *dentry, co
 	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_SYMLINK);
+		submit_alert(ALERT_DIR_SYMLINK,
+			     BPF_CORE_READ(dir, i_ino),
+			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
 		return -EPERM;
 	}
 	return 0;
@@ -348,7 +379,7 @@ int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 	// The comm offset is stable; vmlinux.h reflects the running kernel layout.
 	bpf_probe_read_kernel_str(comm, sizeof(comm), p->comm);
 	if (bpf_map_lookup_elem(&protected_procs, comm)) {
-		submit_alert(ALERT_PROCESS_KILL);
+		submit_alert(ALERT_PROCESS_KILL, 0, 0); // no file inode for process kill
 		return -EPERM;
 	}
 	return 0;

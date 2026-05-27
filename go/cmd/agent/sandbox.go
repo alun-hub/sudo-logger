@@ -53,6 +53,9 @@ type bpfSandboxAlert struct {
 	Pid      uint32
 	Type     uint32
 	Comm     [16]byte
+	Ino      uint64
+	Dev      uint32
+	_        uint32 // pad
 }
 
 func (s *sandboxSubsystem) pollAlerts() {
@@ -79,18 +82,42 @@ func (s *sandboxSubsystem) pollAlerts() {
 		}
 
 		comm := string(bytes.TrimRight(bpfAlert.Comm[:], "\x00"))
-		s.reportViolation(bpfAlert.CgroupID, bpfAlert.Pid, bpfAlert.Type, comm)
+		s.reportViolation(bpfAlert.CgroupID, bpfAlert.Pid, bpfAlert.Type, comm,
+			bpfAlert.Ino, bpfAlert.Dev)
 	}
 }
 
-func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType uint32, comm string) {
+// pathForInode returns the protected path for an inode key, or "" if unknown.
+func (s *sandboxSubsystem) pathForInode(ino uint64, dev uint32) string {
+	if ino == 0 {
+		return ""
+	}
+	key := SandboxInodeKey{Ino: ino, Dev: dev}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for path, k := range s.pathInodes {
+		if k == key {
+			return path
+		}
+	}
+	return ""
+}
+
+func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType uint32, comm string,
+	ino uint64, dev uint32) {
 	typeName := alertNames[alertType]
 	if typeName == "" {
 		typeName = "UNKNOWN"
 	}
 
-	log.Printf("SANDBOX VIOLATION: Process %q (PID %d) blocked by %s [cgid=%d]",
-		comm, pid, typeName, cgid)
+	path := s.pathForInode(ino, dev)
+	if path != "" {
+		log.Printf("SANDBOX VIOLATION: Process %q (PID %d) blocked by %s on %s [cgid=%d]",
+			comm, pid, typeName, path, cgid)
+	} else {
+		log.Printf("SANDBOX VIOLATION: Process %q (PID %d) blocked by %s [cgid=%d]",
+			comm, pid, typeName, cgid)
+	}
 
 	alert := protocol.SandboxAlert{
 		Pid:  pid,
