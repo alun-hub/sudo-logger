@@ -20,6 +20,8 @@
 //	0x0b  SERVER_READY    server→agent          empty — session accepted, agent may send SESSION_READY
 //	0x0c  SESSION_DENIED  server→agent,         string block message — policy denial, sudo blocked
 //	                      agent→plugin
+//	0x12  FETCH_CONFIG    agent→server          UTF-8 config key (e.g. "sandbox.yaml")
+//	0x13  CONFIG_DATA     server→agent          UTF-8 YAML content (empty = not found)
 //
 // CHUNK stream types map to sudo's iolog event types (see iolog/iolog.go):
 //
@@ -57,6 +59,8 @@ const (
 	MsgSessionFreezing  = uint8(0x0f) // agent→server (new conn): session frozen due to network loss; payload = session_id UTF-8
 	MsgDivergenceAlert  = uint8(0x10) // agent→server: sudo execve seen but no plugin SESSION_START within 30s
 	MsgSandboxAlert     = uint8(0x11) // agent→server: sandbox violation blocked by kernel LSM
+	MsgFetchConfig      = uint8(0x12) // agent→server: request named config; payload = UTF-8 key
+	MsgConfigData       = uint8(0x13) // server→agent: config response;     payload = UTF-8 YAML (empty = not found)
 
 	StreamStdin   = uint8(0x00)
 

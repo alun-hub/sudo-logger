@@ -75,6 +75,13 @@ func loadSandboxConfig(path string) (*resolvedSandbox, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read sandbox config %s: %w", path, err)
 	}
+	return loadSandboxConfigFromBytes(data)
+}
+
+// loadSandboxConfigFromBytes parses and resolves a sandbox YAML payload.
+// It is used both by loadSandboxConfig (file path) and reloadSandboxFromContent
+// (content received from the log server).
+func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 	var cfg sandboxYAML
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse sandbox config: %w", err)

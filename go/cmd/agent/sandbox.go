@@ -559,3 +559,82 @@ func (s *sandboxSubsystem) stop() {
 		s.objs.Close()
 	}
 }
+
+// reloadConfig atomically replaces the protected inode and process sets in the
+// BPF maps and restarts the inotify watcher for the new path set. The LSM hooks
+// themselves remain attached — only the map contents change.
+func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	marker := uint8(1)
+
+	// Collect then delete all existing protected inodes.
+	var inodeKeys []SandboxInodeKey
+	{
+		var k SandboxInodeKey
+		var v uint8
+		iter := s.objs.ProtectedInodes.Iterate()
+		for iter.Next(&k, &v) {
+			inodeKeys = append(inodeKeys, k)
+		}
+	}
+	for _, k := range inodeKeys {
+		_ = s.objs.ProtectedInodes.Delete(k)
+	}
+
+	// Collect then delete all existing protected process names.
+	var procKeys [][16]byte
+	{
+		var k [16]byte
+		var v uint8
+		iter := s.objs.ProtectedProcs.Iterate()
+		for iter.Next(&k, &v) {
+			procKeys = append(procKeys, k)
+		}
+	}
+	for _, k := range procKeys {
+		_ = s.objs.ProtectedProcs.Delete(k)
+	}
+
+	// Insert the new inode set.
+	for _, key := range res.Inodes {
+		if err := s.objs.ProtectedInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	// Insert the new process set.
+	for _, name := range res.Processes {
+		var key [16]byte
+		copy(key[:], name)
+		if err := s.objs.ProtectedProcs.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert proc %q: %v", name, err)
+		}
+	}
+
+	// Restart the inotify watcher for the new set of parent directories.
+	if s.watcher != nil {
+		s.watcher.Close()
+		s.watcher = nil
+	}
+	s.startWatcher(res.PathInodes)
+
+	log.Printf("sandbox: config reloaded (%d protected inodes, %d protected processes)",
+		len(res.Inodes), len(res.Processes))
+}
+
+// reloadSandboxFromContent parses yamlText and applies it to the running
+// sandbox subsystem. Called by the sandbox poller when the server delivers
+// an updated sandbox.yaml.
+func reloadSandboxFromContent(yamlText string) error {
+	if sandboxSys == nil {
+		return fmt.Errorf("sandbox not running")
+	}
+	res, err := loadSandboxConfigFromBytes([]byte(yamlText))
+	if err != nil {
+		return fmt.Errorf("parse sandbox config from server: %w", err)
+	}
+	sandboxSys.reloadConfig(res)
+	return nil
+}

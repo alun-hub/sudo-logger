@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.79
+Version:        1.20.80
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,14 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Wed May 27 2026 sudo-logger 1.20.80-1
+- feat: central sandbox.yaml management via replay-server UI
+  Protocol: MsgFetchConfig/MsgConfigData (0x12/0x13); log server serves
+  sandbox.yaml from shared store; agent polls every 60s and reloads BPF
+  maps live (no restart). Replay UI: Settings restructured into sub-tabs
+  (Risk Rules / SIEM / Sandbox / Retention); new Sandbox editor tab.
+  Help: new sections for Risk rules YAML format and Process Sandbox fields.
+
 * Wed May 27 2026 sudo-logger 1.20.71-1
 - fix(selinux): add file_type:file { getattr } and lnk_file { getattr read }
   for sandbox config loader stat() calls on .service files and symlinks

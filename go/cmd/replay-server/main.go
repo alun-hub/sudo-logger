@@ -55,6 +55,7 @@ var (
 	flagListen            = flag.String("listen", ":8080", "Listen address")
 	flagLogDir            = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
 	flagRules             = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
+	flagSandbox           = flag.String("sandbox", "/etc/sudo-logger/sandbox.yaml", "Process sandbox config file (served to agents)")
 	flagSiemConfig        = flag.String("siem-config", "/etc/sudo-logger/siem.yaml", "SIEM forwarding config file (shared with log server)")
 	flagBlockedUsers      = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml", "Blocked users config file (shared with log server)")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
@@ -607,6 +608,7 @@ func main() {
 		BlockedUsersPath: *flagBlockedUsers,
 		SiemConfigPath:   *flagSiemConfig,
 		RiskRulesPath:    *flagRules,
+		SandboxConfigPath: *flagSandbox,
 		S3Bucket:         *flagS3Bucket,
 		S3Region:         *flagS3Region,
 		S3Prefix:         *flagS3Prefix,
@@ -644,6 +646,21 @@ func main() {
 		log.Printf("risk rules: no config found — scoring disabled")
 	} else if err := loadRulesFromText(rulesText); err != nil {
 		log.Fatalf("parse risk rules: %v", err)
+	}
+
+	// Seed sandbox.yaml into distributed config on first deployment.
+	sandboxText, err := sessionStore.GetConfig(context.Background(), "sandbox.yaml")
+	if err != nil {
+		log.Printf("sandbox config: load: %v", err)
+	}
+	if sandboxText == "" && *flagStorage == "distributed" {
+		if data, ferr := os.ReadFile(*flagSandbox); ferr == nil && len(data) > 0 {
+			if serr := sessionStore.SetConfig(context.Background(), "sandbox.yaml", string(data)); serr != nil {
+				log.Printf("sandbox config: could not seed to DB: %v", serr)
+			} else {
+				log.Printf("sandbox config: seeded %s into distributed config", *flagSandbox)
+			}
+		}
 	}
 
 	// Start SIEM background reload. In distributed mode poll the DB; in local
@@ -719,6 +736,16 @@ func main() {
 			handleGetRetention(w, r)
 		case http.MethodPut:
 			handlePutRetention(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/sandbox", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetSandbox(w, r)
+		case http.MethodPut:
+			handlePutSandbox(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -1512,6 +1539,49 @@ func handlePutRetention(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ── Sandbox config API ────────────────────────────────────────────────────────
+
+func handleGetSandbox(w http.ResponseWriter, r *http.Request) {
+	content, err := sessionStore.GetConfig(r.Context(), "sandbox.yaml")
+	if err != nil {
+		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"content": content,
+		"path":    *flagSandbox,
+	}); err != nil {
+		log.Printf("encode sandbox config: %v", err)
+	}
+}
+
+func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Validate that the YAML is at least parseable before storing.
+	if body.Content != "" {
+		var check any
+		if err := yaml.Unmarshal([]byte(body.Content), &check); err != nil {
+			http.Error(w, "invalid YAML: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if err := sessionStore.SetConfig(r.Context(), "sandbox.yaml", body.Content); err != nil {
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
+		log.Printf("encode sandbox response: %v", err)
+	}
 }
 
 // ── SIEM config API ───────────────────────────────────────────────────────────

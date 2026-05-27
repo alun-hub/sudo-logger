@@ -83,6 +83,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.RiskRulesPath == "" {
 		cfg.RiskRulesPath = "/etc/sudo-logger/risk-rules.yaml"
 	}
+	if cfg.SandboxConfigPath == "" {
+		cfg.SandboxConfigPath = "/etc/sudo-logger/sandbox.yaml"
+	}
 	if cfg.RetentionPath == "" {
 		cfg.RetentionPath = "/etc/sudo-logger/retention.json"
 	}
@@ -338,6 +341,8 @@ func (ls *LocalStore) configFilePath(key string) string {
 		return ls.cfg.SiemConfigPath
 	case "risk-rules.yaml":
 		return ls.cfg.RiskRulesPath
+	case "sandbox.yaml":
+		return ls.cfg.SandboxConfigPath
 	case "retention_policy":
 		return ls.cfg.RetentionPath
 	default:

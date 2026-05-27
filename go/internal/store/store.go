@@ -256,6 +256,10 @@ type Config struct {
 	// Default: /etc/sudo-logger/risk-rules.yaml
 	RiskRulesPath string
 
+	// SandboxConfigPath is the path to sandbox.yaml (LocalStore only).
+	// Default: /etc/sudo-logger/sandbox.yaml
+	SandboxConfigPath string
+
 	// RetentionPath is the path to retention.json (LocalStore only).
 	// Default: /etc/sudo-logger/retention.json
 	RetentionPath string

@@ -584,6 +584,13 @@
       font-family: var(--font-ui); }
     .settings-status.ok   { color: var(--green); background: var(--green-dim); }
     .settings-status.err  { color: var(--red);   background: rgba(255,80,80,0.08); }
+    .stab-nav { display: flex; gap: 4px; margin-bottom: 22px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .stab-btn { background: none; border: none; cursor: pointer; font-size: 12px; font-family: var(--font-ui);
+      color: var(--text-sub); padding: 5px 14px; border-radius: var(--radius); transition: background .15s, color .15s; }
+    .stab-btn:hover  { background: var(--surface); color: var(--text); }
+    .stab-btn.active { background: var(--surface); color: var(--green); font-weight: 600; }
+    .stab-panel { display: none; }
+    .stab-panel.active { display: block; }
     .rules-score { display: inline-block; font-size: 12px; font-weight: 700;
       width: 32px; text-align: center; padding: 1px 0; border-radius: 3px; }
     .rules-conds { font-size: 12px; color: var(--text-dim);
@@ -750,148 +757,185 @@
 
   <!-- ── Settings tab ──────────────────────────────────────────────────────── -->
   <div class="report-panel" id="tab-settings">
-    <div class="settings-toolbar">
-      <button class="btn-primary" id="btn-add-rule">+ Add rule</button>
-      <span class="settings-path" id="settings-path"></span>
-      <span class="settings-status" id="settings-status" style="display:none"></span>
+    <nav class="stab-nav">
+      <button class="stab-btn active" data-stab="rules">Risk Rules</button>
+      <button class="stab-btn" data-stab="siem">SIEM</button>
+      <button class="stab-btn" data-stab="sandbox">Sandbox</button>
+      <button class="stab-btn" data-stab="retention">Retention</button>
+    </nav>
+
+    <!-- ── Risk Rules ────────────────────────────────────────────────────────── -->
+    <div class="stab-panel active" id="stab-rules">
+      <div class="settings-toolbar">
+        <button class="btn-primary" id="btn-add-rule">+ Add rule</button>
+        <span class="settings-path" id="settings-path"></span>
+        <span class="settings-status" id="settings-status" style="display:none"></span>
+      </div>
+      <table class="report-table">
+        <thead><tr>
+          <th style="width:52px">Score</th>
+          <th>Reason / ID</th>
+          <th>Conditions</th>
+          <th style="width:70px"></th>
+        </tr></thead>
+        <tbody id="rules-tbody"></tbody>
+      </table>
     </div>
-    <table class="report-table">
-      <thead><tr>
-        <th style="width:52px">Score</th>
-        <th>Reason / ID</th>
-        <th>Conditions</th>
-        <th style="width:70px"></th>
-      </tr></thead>
-      <tbody id="rules-tbody"></tbody>
-    </table>
 
     <!-- ── SIEM forwarding ──────────────────────────────────────────────────── -->
-    <div class="siem-section">
-      <div class="siem-heading">
-        SIEM Forwarding
-        <span class="settings-status" id="siem-status" style="display:none"></span>
+    <div class="stab-panel" id="stab-siem">
+      <div class="siem-section" style="margin-top:0">
+        <div class="siem-heading">
+          SIEM Forwarding
+          <span class="settings-status" id="siem-status" style="display:none"></span>
+        </div>
+        <div class="siem-form" id="siem-form">
+
+          <label>Enabled</label>
+          <input type="checkbox" id="siem-enabled">
+
+          <label>Transport</label>
+          <select id="siem-transport">
+            <option value="https">HTTPS</option>
+            <option value="syslog">Syslog</option>
+            <option value="stdout">Stdout (container logs)</option>
+          </select>
+
+          <label>Format</label>
+          <select id="siem-format">
+            <option value="json">JSON</option>
+            <option value="cef">CEF</option>
+            <option value="ocsf">OCSF</option>
+          </select>
+
+          <label>Replay URL base</label>
+          <input type="text" id="siem-replay-url" placeholder="https://replay.example.com  ← required for replay links in SIEM">
+
+          <!-- HTTPS fields -->
+          <div class="siem-subsection" id="siem-https-hdr">HTTPS</div>
+
+          <label>URL</label>
+          <input type="text" id="siem-https-url" placeholder="https://logstash.example.com:8080/events">
+
+          <label>Token</label>
+          <input type="text" id="siem-https-token" placeholder="Bearer / Splunk HEC token (optional)">
+
+          <label>CA cert</label>
+          <div class="cert-input">
+            <input type="text" id="siem-https-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+            <input type="file" id="siem-https-ca-file" accept=".crt,.pem,.key" style="display:none">
+            <button class="btn-upload" onclick="uploadCert('siem-https-ca')">Upload</button>
+          </div>
+
+          <label>Client cert</label>
+          <div class="cert-input">
+            <input type="text" id="siem-https-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+            <input type="file" id="siem-https-cert-file" accept=".crt,.pem,.key" style="display:none">
+            <button class="btn-upload" onclick="uploadCert('siem-https-cert')">Upload</button>
+          </div>
+
+          <label>Client key</label>
+          <div class="cert-input">
+            <input type="text" id="siem-https-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+            <input type="file" id="siem-https-key-file" accept=".crt,.pem,.key" style="display:none">
+            <button class="btn-upload" onclick="uploadCert('siem-https-key')">Upload</button>
+          </div>
+
+          <!-- Syslog fields -->
+          <div class="siem-subsection" id="siem-syslog-hdr">Syslog</div>
+
+          <label>Address</label>
+          <input type="text" id="siem-syslog-addr" placeholder="syslog.example.com:514">
+
+          <label>Protocol</label>
+          <select id="siem-syslog-proto">
+            <option value="udp">UDP</option>
+            <option value="tcp">TCP</option>
+            <option value="tcp-tls">TCP + TLS / mTLS</option>
+          </select>
+
+          <label>CA cert</label>
+          <div class="cert-input">
+            <input type="text" id="siem-syslog-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
+            <input type="file" id="siem-syslog-ca-file" accept=".crt,.pem,.key" style="display:none">
+            <button class="btn-upload" onclick="uploadCert('siem-syslog-ca')">Upload</button>
+          </div>
+
+          <label>Client cert</label>
+          <div class="cert-input">
+            <input type="text" id="siem-syslog-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
+            <input type="file" id="siem-syslog-cert-file" accept=".crt,.pem,.key" style="display:none">
+            <button class="btn-upload" onclick="uploadCert('siem-syslog-cert')">Upload</button>
+          </div>
+
+          <label>Client key</label>
+          <div class="cert-input">
+            <input type="text" id="siem-syslog-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
+            <input type="file" id="siem-syslog-key-file" accept=".crt,.pem,.key" style="display:none">
+            <button class="btn-upload" onclick="uploadCert('siem-syslog-key')">Upload</button>
+          </div>
+
+          <p class="siem-note">
+            Changes reload within 30 seconds.
+            Certificate paths must be readable by the log server process.
+          </p>
+        </div>
+        <div class="siem-footer">
+          <button class="btn-primary" id="btn-save-siem">Save SIEM config</button>
+          <span id="siem-path" style="font-size:11px;color:var(--text-dim)"></span>
+        </div>
       </div>
-      <div class="siem-form" id="siem-form">
+    </div>
 
-        <label>Enabled</label>
-        <input type="checkbox" id="siem-enabled">
-
-        <label>Transport</label>
-        <select id="siem-transport">
-          <option value="https">HTTPS</option>
-          <option value="syslog">Syslog</option>
-          <option value="stdout">Stdout (container logs)</option>
-        </select>
-
-        <label>Format</label>
-        <select id="siem-format">
-          <option value="json">JSON</option>
-          <option value="cef">CEF</option>
-          <option value="ocsf">OCSF</option>
-        </select>
-
-        <label>Replay URL base</label>
-        <input type="text" id="siem-replay-url" placeholder="https://replay.example.com  ← required for replay links in SIEM">
-
-        <!-- HTTPS fields -->
-        <div class="siem-subsection" id="siem-https-hdr">HTTPS</div>
-
-        <label>URL</label>
-        <input type="text" id="siem-https-url" placeholder="https://logstash.example.com:8080/events">
-
-        <label>Token</label>
-        <input type="text" id="siem-https-token" placeholder="Bearer / Splunk HEC token (optional)">
-
-        <label>CA cert</label>
-        <div class="cert-input">
-          <input type="text" id="siem-https-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
-          <input type="file" id="siem-https-ca-file" accept=".crt,.pem,.key" style="display:none">
-          <button class="btn-upload" onclick="uploadCert('siem-https-ca')">Upload</button>
+    <!-- ── Process Sandbox ──────────────────────────────────────────────────── -->
+    <div class="stab-panel" id="stab-sandbox">
+      <div class="siem-section" style="margin-top:0">
+        <div class="siem-heading">
+          Process Sandbox
+          <span class="settings-status" id="sandbox-status" style="display:none"></span>
         </div>
-
-        <label>Client cert</label>
-        <div class="cert-input">
-          <input type="text" id="siem-https-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
-          <input type="file" id="siem-https-cert-file" accept=".crt,.pem,.key" style="display:none">
-          <button class="btn-upload" onclick="uploadCert('siem-https-cert')">Upload</button>
+        <div class="siem-form">
+          <label>sandbox.yaml</label>
+          <textarea id="sandbox-yaml" class="form-input" rows="20"
+            style="font-family:monospace;font-size:12px;line-height:1.5;resize:vertical"
+            placeholder="protect:&#10;  files:&#10;    - /etc/sudoers&#10;    - /etc/shadow&#10;  processes:&#10;    - auditd&#10;    - sshd"></textarea>
+          <p class="siem-note">
+            Saved changes are fetched by all agents within 60 seconds — no agent restart needed.
+            See <strong>Help → Process Sandbox</strong> for field reference and examples.
+          </p>
         </div>
-
-        <label>Client key</label>
-        <div class="cert-input">
-          <input type="text" id="siem-https-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
-          <input type="file" id="siem-https-key-file" accept=".crt,.pem,.key" style="display:none">
-          <button class="btn-upload" onclick="uploadCert('siem-https-key')">Upload</button>
+        <div class="siem-footer">
+          <button class="btn-primary" id="btn-save-sandbox">Save sandbox.yaml</button>
+          <span id="sandbox-path" style="font-size:11px;color:var(--text-dim)"></span>
         </div>
-
-        <!-- Syslog fields -->
-        <div class="siem-subsection" id="siem-syslog-hdr">Syslog</div>
-
-        <label>Address</label>
-        <input type="text" id="siem-syslog-addr" placeholder="syslog.example.com:514">
-
-        <label>Protocol</label>
-        <select id="siem-syslog-proto">
-          <option value="udp">UDP</option>
-          <option value="tcp">TCP</option>
-          <option value="tcp-tls">TCP + TLS / mTLS</option>
-        </select>
-
-        <label>CA cert</label>
-        <div class="cert-input">
-          <input type="text" id="siem-syslog-ca" placeholder="/etc/sudo-logger/siem-ca.crt">
-          <input type="file" id="siem-syslog-ca-file" accept=".crt,.pem,.key" style="display:none">
-          <button class="btn-upload" onclick="uploadCert('siem-syslog-ca')">Upload</button>
-        </div>
-
-        <label>Client cert</label>
-        <div class="cert-input">
-          <input type="text" id="siem-syslog-cert" placeholder="/etc/sudo-logger/siem-client.crt (mTLS)">
-          <input type="file" id="siem-syslog-cert-file" accept=".crt,.pem,.key" style="display:none">
-          <button class="btn-upload" onclick="uploadCert('siem-syslog-cert')">Upload</button>
-        </div>
-
-        <label>Client key</label>
-        <div class="cert-input">
-          <input type="text" id="siem-syslog-key" placeholder="/etc/sudo-logger/siem-client.key (mTLS)">
-          <input type="file" id="siem-syslog-key-file" accept=".crt,.pem,.key" style="display:none">
-          <button class="btn-upload" onclick="uploadCert('siem-syslog-key')">Upload</button>
-        </div>
-
-        <p class="siem-note">
-          Changes reload within 30 seconds.
-          Certificate paths must be readable by the log server process.
-        </p>
-      </div>
-
-      <div class="siem-footer">
-        <button class="btn-primary" id="btn-save-siem">Save SIEM config</button>
-        <span id="siem-path" style="font-size:11px;color:var(--text-dim)"></span>
       </div>
     </div>
 
     <!-- ── Data Retention ────────────────────────────────────────────────────── -->
-    <div class="siem-section">
-      <div class="siem-heading">
-        Data Retention
-        <span class="settings-status" id="retention-status" style="display:none"></span>
-      </div>
-      <div class="siem-form">
-        <label>Auto-cleanup</label>
-        <input type="checkbox" id="retention-enabled">
-
-        <label>Retention period</label>
-        <div style="display:flex;align-items:center;gap:8px">
-          <input type="number" id="retention-days" class="form-input" style="width:80px" min="1" placeholder="90">
-          <span style="font-size:13px;color:var(--text-sub)">days</span>
+    <div class="stab-panel" id="stab-retention">
+      <div class="siem-section" style="margin-top:0">
+        <div class="siem-heading">
+          Data Retention
+          <span class="settings-status" id="retention-status" style="display:none"></span>
         </div>
+        <div class="siem-form">
+          <label>Auto-cleanup</label>
+          <input type="checkbox" id="retention-enabled">
 
-        <p class="siem-note">
-          When enabled, sessions older than the retention period are permanently deleted from both the database and storage (S3/local).
-          The cleanup process runs once every 24 hours.
-        </p>
-      </div>
-      <div class="siem-footer">
-        <button class="btn-primary" id="btn-save-retention">Save retention policy</button>
+          <label>Retention period</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="retention-days" class="form-input" style="width:80px" min="1" placeholder="90">
+            <span style="font-size:13px;color:var(--text-sub)">days</span>
+          </div>
+
+          <p class="siem-note">
+            When enabled, sessions older than the retention period are permanently deleted from both the database and storage (S3/local).
+            The cleanup process runs once every 24 hours.
+          </p>
+        </div>
+        <div class="siem-footer">
+          <button class="btn-primary" id="btn-save-retention">Save retention policy</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1125,6 +1169,71 @@
           <div class="help-tip">Scores accumulate across rules. A session matching three rules with scores 30, 40, and 20 gets a total of 90 (Critical). Design scores accordingly.</div>
           <div class="help-tip">Leave unused fields empty — only filled fields are evaluated. An empty rule (no conditions, no metadata) matches every session.</div>
           <div class="help-tip">Changes saved in Settings take effect immediately. Cached scores are invalidated automatically on the next page load.</div>
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>Risk rules — YAML format</h3>
+        <p class="help-intro">Rules are stored as YAML and edited in <strong>Settings → Risk Rules</strong>. Changes take effect immediately — no server restart needed.</p>
+        <table class="help-table">
+          <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>score</code></td><td>integer 0–100</td><td>Added to the session score when this rule matches. Scores from multiple rules accumulate.</td></tr>
+            <tr><td><code>id</code></td><td>string</td><td>Unique identifier shown in SIEM events and the replay UI.</td></tr>
+            <tr><td><code>reason</code></td><td>string</td><td>Human-readable label shown in the replay UI risk column.</td></tr>
+            <tr><td><code>command.contains_any</code></td><td>string list</td><td>Matches if the full command line contains at least one of these substrings.</td></tr>
+            <tr><td><code>command.also_any</code></td><td>string list</td><td>AND condition — all <code>contains_any</code> and <code>also_any</code> lists must have at least one match.</td></tr>
+            <tr><td><code>command.name_any</code></td><td>string list</td><td>Matches if the command basename (program name) equals one of these values.</td></tr>
+            <tr><td><code>shell.contains_any</code></td><td>string list</td><td>Scans terminal output for any of these strings (up to 512 KB). Useful for detecting activity inside a root shell.</td></tr>
+            <tr><td><code>runas</code></td><td>string</td><td>Matches if the target user equals this value (default target is <code>root</code>).</td></tr>
+            <tr><td><code>min_duration</code></td><td>duration (e.g. <code>5m</code>)</td><td>Matches only if the session lasted at least this long.</td></tr>
+            <tr><td><code>incomplete</code></td><td>bool</td><td>If <code>true</code>, matches only sessions flagged as incomplete (agent killed mid-session).</td></tr>
+            <tr><td><code>after_hours</code></td><td>bool</td><td>If <code>true</code>, matches only sessions that started outside 08:00–18:00 local server time.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="help-section">
+        <h3>Process Sandbox</h3>
+        <p class="help-intro">
+          The process sandbox uses <strong>eBPF LSM hooks</strong> to enforce kernel-level restrictions on every sudo session.
+          Even a root process with full capabilities cannot bypass these restrictions — they run below capability checks in the kernel.
+          Configure the sandbox in <strong>Settings → Sandbox</strong>. Changes reach all connected agents within 60 seconds.
+        </p>
+        <table class="help-table">
+          <thead><tr><th>YAML field</th><th>Blocks</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><code>protect.files</code></td>
+              <td>Open for write, truncate, delete, rename, setattr on listed paths. Directories are expanded recursively.</td>
+              <td><code>- /etc/sudoers<br>- /var/log/sudo-logger</code></td>
+            </tr>
+            <tr>
+              <td><code>protect.devices</code></td>
+              <td>Open for write / read of raw device nodes (prevents direct disk or memory access).</td>
+              <td><code>- /dev/mem<br>- /dev/sda</code></td>
+            </tr>
+            <tr>
+              <td><code>protect.proc</code></td>
+              <td>Write to <code>/proc</code> entries (prevents sysctl changes, sysrq triggers, etc.).</td>
+              <td><code>- /proc/sysrq-trigger</code></td>
+            </tr>
+            <tr>
+              <td><code>protect.sockets</code></td>
+              <td>Delete or replace Unix socket files (prevents tampering with agent or D-Bus sockets).</td>
+              <td><code>- /run/sudo-logger/plugin.sock</code></td>
+            </tr>
+            <tr>
+              <td><code>protect.processes</code></td>
+              <td>Send signals to named daemons (prevents kill/stop of audit or security services). Names are matched against <code>/proc/&lt;pid&gt;/comm</code> — max 15 characters.</td>
+              <td><code>- auditd<br>- sshd<br>- systemd-journal</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="help-tips" style="margin-top:16px">
+          <div class="help-tip"><strong>Propagation:</strong> Save in the UI → stored in the shared config backend → agents poll every 60 s → BPF maps updated live. No agent restart required.</div>
+          <div class="help-tip"><strong>Local override:</strong> If <code>sandbox_config = /path/to/sandbox.yaml</code> is set in <code>agent.conf</code>, that file is loaded at startup. The server-managed config is still fetched and applied on top during the first poll.</div>
+          <div class="help-tip"><strong>Violation alerts:</strong> Blocked operations are logged as <code>SANDBOX VIOLATION</code> in the agent log and forwarded to the log server as structured SIEM events with <code>action=</code>, <code>path=</code>, <code>comm=</code>, and session context.</div>
         </div>
       </div>
 
@@ -2534,12 +2643,25 @@ function switchTab(tab) {
   document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
   document.querySelectorAll('.report-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
   if (tab === 'summary' || tab === 'anomalies') fetchReport();
-  if (tab === 'settings') { fetchRules(); fetchSiemConfig(); fetchRetentionConfig(); }
+  if (tab === 'settings') {
+    switchSettingsTab('rules');
+    fetchRules(); fetchSiemConfig(); fetchRetentionConfig(); fetchSandboxConfig();
+  }
   if (tab === 'blocked') fetchBlockedUsers();
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
   btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+// ── Settings sub-tabs ──────────────────────────────────────────────────────────
+
+function switchSettingsTab(stab) {
+  document.querySelectorAll('.stab-btn').forEach(b => b.classList.toggle('active', b.dataset.stab === stab));
+  document.querySelectorAll('.stab-panel').forEach(p => p.classList.toggle('active', p.id === 'stab-' + stab));
+}
+
+document.querySelectorAll('.stab-btn').forEach(btn =>
+  btn.addEventListener('click', () => switchSettingsTab(btn.dataset.stab)));
 
 elReportFrom.addEventListener('change', () => { reportFromVal = elReportFrom.value; reportDirty = true; fetchReport(); });
 elReportTo.addEventListener('change',   () => { reportToVal   = elReportTo.value;   reportDirty = true; fetchReport(); });
@@ -2902,6 +3024,51 @@ function showRetentionStatus(msg, isErr) {
 }
 
 document.getElementById('btn-save-retention').addEventListener('click', saveRetentionConfig);
+
+// ── Sandbox config ─────────────────────────────────────────────────────────────
+
+async function fetchSandboxConfig() {
+  try {
+    const res = await fetch('/api/sandbox');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    document.getElementById('sandbox-yaml').value = data.content || '';
+    const pathEl = document.getElementById('sandbox-path');
+    if (pathEl && data.path) pathEl.textContent = data.path;
+  } catch (err) {
+    showSandboxStatus('Load failed: ' + err.message, true);
+  }
+}
+
+async function saveSandboxConfig() {
+  const content = document.getElementById('sandbox-yaml').value;
+  const btn = document.getElementById('btn-save-sandbox');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/sandbox', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    showSandboxStatus('Saved — agents will reload within 60 s', false);
+  } catch (err) {
+    showSandboxStatus('Save failed: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showSandboxStatus(msg, isErr) {
+  const s = document.getElementById('sandbox-status');
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  clearTimeout(s._t);
+  s._t = setTimeout(() => { s.style.display = 'none'; }, 5000);
+}
+
+document.getElementById('btn-save-sandbox').addEventListener('click', saveSandboxConfig);
 
 // uploadCert opens a file picker for the cert/key field identified by fieldId,
 // uploads the chosen file to /api/siem-cert, and populates the path field on success.

@@ -107,6 +107,9 @@ func main() {
 	if cfg.SandboxConfig != "" {
 		startSandbox(cfg.SandboxConfig)
 	}
+	// Poll the log server for sandbox.yaml updates (allows central management
+	// via the replay-server UI). No-op if the server has no config stored.
+	startSandboxPoller()
 
 	// Remove stale socket from previous run.
 	if err := os.Remove(cfg.Socket); err != nil && !os.IsNotExist(err) {

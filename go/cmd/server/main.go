@@ -587,6 +587,19 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				}
 			}
 
+		case protocol.MsgFetchConfig:
+			// Agent requests a named config blob (e.g. "sandbox.yaml").
+			// Respond immediately and keep reading — peer closes after receiving.
+			key := strings.TrimSpace(string(payload))
+			content, err := srv.sessionStore.GetConfig(context.Background(), key)
+			if err != nil {
+				log.Printf("fetch config %q from %s: %v", key, remote, err)
+				content = ""
+			}
+			netWriteMu.Lock()
+			_ = protocol.WriteMessage(w, protocol.MsgConfigData, []byte(content))
+			netWriteMu.Unlock()
+
 		case protocol.MsgDivergenceAlert:
 			// Agent detected a sudo/pkexec execve with no plugin SESSION_START.
 			// This indicates sudo.conf was tampered with (Plugin line removed).
