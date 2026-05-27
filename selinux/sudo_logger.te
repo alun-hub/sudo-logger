@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.11)
+policy_module(sudo_logger, 1.1.12)
 
 ########################################
 #
@@ -21,10 +21,6 @@ files_config_file(sudo_agent_etc_t)
 ## The plugin .so loaded by sudo
 type sudo_logger_plugin_t;
 files_type(sudo_logger_plugin_t)
-
-## The wayland-proxy helper executed by sudo-logger-agent
-type wayland_proxy_exec_t;
-files_type(wayland_proxy_exec_t)
 
 ########################################
 #
@@ -141,29 +137,11 @@ allow sudo_agent_t domain:process { getpgid };
 # Send signals (including SIGSTOP/SIGCONT) to session processes.
 allow sudo_agent_t domain:process { signal sigstop };
 
-# Execute wayland-proxy without domain transition — runs as sudo_agent_t.
-allow sudo_agent_t wayland_proxy_exec_t:file { read open execute execute_no_trans map getattr };
-
 # Execute loginctl (bin_t) to query session metadata for the eBPF session
 # tracker (loginctlSession in ebpf.go).  No domain transition: subprocess
 # inherits sudo_agent_t.
 require { type bin_t; }
 allow sudo_agent_t bin_t:file { read open execute execute_no_trans map getattr };
-
-# Wayland proxy socket operations in /run/user/<uid>/
-require { type user_tmp_t; }
-allow sudo_agent_t user_tmp_t:dir { search getattr write add_name remove_name };
-allow sudo_agent_t user_tmp_t:sock_file { create read write unlink setattr };
-# wayland-proxy mmaps SHM pool memfds passed by the client
-allow sudo_agent_t user_tmp_t:file { map read open getattr write };
-allow sudo_agent_t self:unix_stream_socket { connectto create_stream_socket_perms };
-
-# Connect to the Wayland compositor socket (kwin/mutter run as unconfined_t).
-require { type unconfined_t; type dri_device_t; }
-allow sudo_agent_t unconfined_t:unix_stream_socket connectto;
-
-# Allow access to graphics hardware (DRI) for DMA-buf support.
-allow sudo_agent_t dri_device_t:chr_file { read write open getattr ioctl };
 
 # Connect to the D-Bus system bus for polkit CheckAuthorization monitoring.
 dbus_system_bus_client(sudo_agent_t)

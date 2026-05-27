@@ -104,9 +104,6 @@ key|/etc/sudo-logger/client.key|PEM client TLS private key
 ca|/etc/sudo-logger/ca.crt|PEM CA certificate for server verification
 verify_key|/etc/sudo-logger/ack-verify.key|ed25519 public key for ACK signature verification
 socket|/run/sudo-logger/plugin.sock|Unix socket path for plugin connections
-wayland|true|Enable Wayland screen capture for GUI sessions
-proxy_bin|\fI(built-in path)\fR|Path to the Wayland proxy binary
-proxy_period|200ms|Wayland screenshot capture interval
 freeze_timeout|3m|Terminate frozen sessions after this duration (0 = never)
 idle_timeout|0|Terminate sessions idle for this duration (0 = disabled)
 ebpf|true|Enable eBPF session recording (requires kernel BTF)

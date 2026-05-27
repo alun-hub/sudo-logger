@@ -44,7 +44,6 @@ go/migrate-sessions
 selinux/*.pp
 selinux/tmp/
 gemini-changes
-go/wayland-proxy
 
 # MemPalace per-project files (issue #185)
 mempalace.yaml

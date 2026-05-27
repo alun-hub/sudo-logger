@@ -50,39 +50,33 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 
 `sudo-logger` implements **Surgical Redaction** in the local agent. It uses a stateful redactor that detects interactive password prompts (e.g., `[sudo] password for ...`) and masks subsequent input until a newline. It also uses a high-performance "trigger regex" fast-path to identify and mask AWS access keys, API tokens, Bearer headers, JWT tokens, and IBAN/SWIFT numbers before they reach the network.
 
-### 6. Wayland screen capture and Linger Mode
-
-`sudo-logsrvd` records terminal I/O only.
-
-`sudo-logger` additionally records GUI programs started under sudo on Wayland desktops by intercepting `wl_surface_commit` via a transparent compositor proxy. Uniquely, it features a **Linger Mode**: if the main `sudo` process exits but backgrounded GUI processes (e.g., `sudo gvim &`) are still running, the agent continues to track and log their screen updates until the entire process group is empty.
-
-### 7. Host identity binding
+### 6. Host identity binding
 
 `sudo-logsrvd` with `tls_checkpeer` verifies the client certificate is signed by the CA but does not bind the certificate identity to the session's claimed `host` field.
 
 `sudo-logger` provides optional **Strict Identity Binding** (`-strict-cert-host`). When enabled, the server rejects sessions if the claimed `host` field does not match the CN or DNS SANs of the presenting client certificate. This prevents a compromised host from spoofing logs as another host.
 
-### 8. cgroup namespace isolation
+### 7. cgroup namespace isolation
 
 `sudo-logsrvd` does no process isolation.
 
 `sudo-logger` calls **`unshare(CLONE_NEWCGROUP)`** at session start. This creates a new cgroup namespace where the child process sees the session cgroup as its private `/sys/fs/cgroup` root. Even with `CAP_SYS_ADMIN`, a process cannot navigate to a parent directory to escape the freeze or move itself to another cgroup.
 
-### 9. Distributed storage
+### 8. Distributed storage
 
 `sudo-logsrvd` stores logs locally (relay mode can forward to another `sudo-logsrvd` instance).
 
 `sudo-logger` supports **Distributed Storage** using S3-compatible object storage (AWS, MinIO, NetApp) and PostgreSQL. This enables a stateless log-server tier that scales horizontally in Kubernetes without requiring shared volumes (ReadWriteMany).
 
-### 10. Process sandboxing (eBPF LSM)
+### 9. Process sandboxing (eBPF LSM)
 
 `sudo-logger` includes an optional kernel-level sandbox enforced via eBPF LSM hooks. It can block a root user from modifying critical files (e.g., `/etc/sudoers`), killing protected daemons, or deleting audit logs during their session. `sudo-logsrvd` provides no such enforcement.
 
-### 11. eBPF divergence detection
+### 10. eBPF divergence detection
 
 `sudo-logger` uses kernel tracepoints to monitor all executions of `sudo` and `pkexec`. It correlates these kernel events with plugin activity; if a `sudo` command is executed but the plugin is bypassed (e.g., by tampering with `sudo.conf`), the agent larmar centrally. `sudo-logsrvd` relies entirely on the plugin being loaded.
 
-### 12. Relay topology
+### 11. Relay topology
 
 `sudo-logsrvd` supports hierarchical relay chains (client → relay → relay → server). This allows sudo to log even when the central server is temporarily unreachable by queuing at an intermediate relay.
 
@@ -105,7 +99,6 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 | **Risk scoring** | ✗ | ✅ |
 | **SIEM forwarding** | ✗ | ✅ CEF / OCSF / syslog |
 | **Secret redaction** | ✗ | ✅ |
-| **Wayland screen capture** | ✗ | ✅ |
 | **Process sandboxing (eBPF LSM)** | ✗ | ✅ |
 | **eBPF divergence detection** | ✗ | ✅ |
 | **Distributed storage (S3 + PG)** | ✗ | ✅ |
@@ -130,4 +123,3 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 - Secret redaction is required before data leaves the client
 - You want cryptographic proof that every chunk was received and stored
 - You run Kubernetes and need horizontal scaling without shared filesystems
-- GUI session recording on Wayland is required
