@@ -92,29 +92,29 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 	newKey := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 
 	old, ok := s.pathInodes[path]
-	if ok {
-		if newKey == old {
-			return // inode unchanged, nothing to do
-		}
-
-		// Only delete the old key if no other protected path still uses it.
-		shared := false
-		for otherPath, k := range s.pathInodes {
-			if otherPath != path && k == old {
-				shared = true
-				break
-			}
-		}
-		if !shared {
-			_ = s.objs.ProtectedInodes.Delete(old)
-		}
-		log.Printf("sandbox: refreshed protected inode for %s: {ino=%d dev=%d} → {ino=%d dev=%d}",
-			path, old.Ino, old.Dev, newKey.Ino, newKey.Dev)
-	} else {
-		// New file created in a watched directory
-		log.Printf("sandbox: protecting newly created file %s: {ino=%d dev=%d}",
-			path, newKey.Ino, newKey.Dev)
+	if !ok {
+		// File is not a protected path — a new unrelated file was created in a
+		// watched parent directory. Do not auto-protect it.
+		return
 	}
+
+	if newKey == old {
+		return // inode unchanged, nothing to do
+	}
+
+	// Only delete the old key if no other protected path still uses it.
+	shared := false
+	for otherPath, k := range s.pathInodes {
+		if otherPath != path && k == old {
+			shared = true
+			break
+		}
+	}
+	if !shared {
+		_ = s.objs.ProtectedInodes.Delete(old)
+	}
+	log.Printf("sandbox: refreshed protected inode for %s: {ino=%d dev=%d} → {ino=%d dev=%d}",
+		path, old.Ino, old.Dev, newKey.Ino, newKey.Dev)
 
 	marker := uint8(1)
 	if err := s.objs.ProtectedInodes.Put(newKey, marker); err != nil {
