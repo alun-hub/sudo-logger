@@ -63,6 +63,8 @@ var (
 			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
 	flagBlockedUsers = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml",
 		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
+	flagSandbox = flag.String("sandbox", "/etc/sudo-logger/sandbox.yaml",
+		"Process sandbox config file (served to agents)")
 	flagSandboxTemplates = flag.String("sandbox-templates", "/etc/sudo-logger/sandbox-templates.json",
 		"Sandbox templates file (LocalStore only)")
 
@@ -133,6 +135,7 @@ func main() {
 		Backend:              *flagStorage,
 		LogDir:               *flagLogDir,
 		BlockedUsersPath:     *flagBlockedUsers,
+		SandboxConfigPath:    *flagSandbox,
 		SandboxTemplatesPath: *flagSandboxTemplates,
 		S3Bucket:             *flagS3Bucket,
 		S3Region:         *flagS3Region,
