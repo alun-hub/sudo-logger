@@ -89,6 +89,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.RetentionPath == "" {
 		cfg.RetentionPath = "/etc/sudo-logger/retention.json"
 	}
+	if cfg.SandboxTemplatesPath == "" {
+		cfg.SandboxTemplatesPath = "/etc/sudo-logger/sandbox-templates.json"
+	}
 
 	ls := &LocalStore{
 		cfg:    cfg,
@@ -345,6 +348,8 @@ func (ls *LocalStore) configFilePath(key string) string {
 		return ls.cfg.SandboxConfigPath
 	case "retention_policy":
 		return ls.cfg.RetentionPath
+	case "sandbox_templates":
+		return ls.cfg.SandboxTemplatesPath
 	default:
 		return ""
 	}

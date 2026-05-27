@@ -63,6 +63,8 @@ var (
 			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
 	flagBlockedUsers = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml",
 		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
+	flagSandboxTemplates = flag.String("sandbox-templates", "/etc/sudo-logger/sandbox-templates.json",
+		"Sandbox templates file (LocalStore only)")
 
 	// Storage backend flags.
 	// NOTE: these flags are intentionally duplicated in cmd/replay-server/main.go.
@@ -128,10 +130,11 @@ func main() {
 	}
 
 	sessionStore, err := store.New(store.Config{
-		Backend:          *flagStorage,
-		LogDir:           *flagLogDir,
-		BlockedUsersPath: *flagBlockedUsers,
-		S3Bucket:         *flagS3Bucket,
+		Backend:              *flagStorage,
+		LogDir:               *flagLogDir,
+		BlockedUsersPath:     *flagBlockedUsers,
+		SandboxTemplatesPath: *flagSandboxTemplates,
+		S3Bucket:             *flagS3Bucket,
 		S3Region:         *flagS3Region,
 		S3Prefix:         *flagS3Prefix,
 		S3Endpoint:       *flagS3Endpoint,

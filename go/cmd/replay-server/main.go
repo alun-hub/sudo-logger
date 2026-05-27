@@ -56,6 +56,7 @@ var (
 	flagLogDir            = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
 	flagRules             = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
 	flagSandbox           = flag.String("sandbox", "/etc/sudo-logger/sandbox.yaml", "Process sandbox config file (served to agents)")
+	flagSandboxTemplates  = flag.String("sandbox-templates", "/etc/sudo-logger/sandbox-templates.json", "Sandbox templates file (LocalStore only)")
 	flagSiemConfig        = flag.String("siem-config", "/etc/sudo-logger/siem.yaml", "SIEM forwarding config file (shared with log server)")
 	flagBlockedUsers      = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml", "Blocked users config file (shared with log server)")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
@@ -609,6 +610,7 @@ func main() {
 		SiemConfigPath:   *flagSiemConfig,
 		RiskRulesPath:    *flagRules,
 		SandboxConfigPath: *flagSandbox,
+		SandboxTemplatesPath: *flagSandboxTemplates,
 		S3Bucket:         *flagS3Bucket,
 		S3Region:         *flagS3Region,
 		S3Prefix:         *flagS3Prefix,

@@ -264,6 +264,10 @@ type Config struct {
 	// Default: /etc/sudo-logger/retention.json
 	RetentionPath string
 
+	// SandboxTemplatesPath is the path to sandbox-templates.json (LocalStore only).
+	// Default: /etc/sudo-logger/sandbox-templates.json
+	SandboxTemplatesPath string
+
 	// ── DistributedStore fields ──────────────────────────────────────────────
 
 	// S3Bucket is the bucket used for storing cast files.
