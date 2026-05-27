@@ -49,13 +49,30 @@ var alertNames = map[uint32]string{
 
 // bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c
 type bpfSandboxAlert struct {
-	CgroupID uint64
-	Pid      uint32
-	Type     uint32
-	Comm     [16]byte
-	Ino      uint64
-	Dev      uint32
-	_        uint32 // pad
+	CgroupID   uint64
+	Pid        uint32
+	Type       uint32
+	Comm       [16]byte
+	Ino        uint64
+	Dev        uint32
+	TargetPid  uint32
+	TargetComm [16]byte
+	Sig        uint32
+	_          uint32 // pad
+}
+
+// sigName returns a human-readable signal name for common signals.
+func sigName(sig uint32) string {
+	names := map[uint32]string{
+		1: "SIGHUP", 2: "SIGINT", 3: "SIGQUIT", 4: "SIGILL",
+		6: "SIGABRT", 8: "SIGFPE", 9: "SIGKILL", 11: "SIGSEGV",
+		13: "SIGPIPE", 14: "SIGALRM", 15: "SIGTERM",
+		17: "SIGCHLD", 18: "SIGCONT", 19: "SIGSTOP", 20: "SIGTSTP",
+	}
+	if name, ok := names[sig]; ok {
+		return name
+	}
+	return fmt.Sprintf("SIG%d", sig)
 }
 
 func (s *sandboxSubsystem) pollAlerts() {
@@ -82,8 +99,9 @@ func (s *sandboxSubsystem) pollAlerts() {
 		}
 
 		comm := string(bytes.TrimRight(bpfAlert.Comm[:], "\x00"))
+		targetComm := string(bytes.TrimRight(bpfAlert.TargetComm[:], "\x00"))
 		s.reportViolation(bpfAlert.CgroupID, bpfAlert.Pid, bpfAlert.Type, comm,
-			bpfAlert.Ino, bpfAlert.Dev)
+			bpfAlert.Ino, bpfAlert.Dev, bpfAlert.TargetPid, targetComm, bpfAlert.Sig)
 	}
 }
 
@@ -104,20 +122,13 @@ func (s *sandboxSubsystem) pathForInode(ino uint64, dev uint32) string {
 }
 
 func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType uint32, comm string,
-	ino uint64, dev uint32) {
+	ino uint64, dev uint32, targetPid uint32, targetComm string, sig uint32) {
 	typeName := alertNames[alertType]
 	if typeName == "" {
 		typeName = "UNKNOWN"
 	}
 
 	path := s.pathForInode(ino, dev)
-	if path != "" {
-		log.Printf("SANDBOX VIOLATION: Process %q (PID %d) blocked by %s on %s [cgid=%d]",
-			comm, pid, typeName, path, cgid)
-	} else {
-		log.Printf("SANDBOX VIOLATION: Process %q (PID %d) blocked by %s [cgid=%d]",
-			comm, pid, typeName, cgid)
-	}
 
 	alert := protocol.SandboxAlert{
 		Pid:  pid,
@@ -126,6 +137,7 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 		Ts:   time.Now().Unix(),
 	}
 
+	// Resolve session before logging so sess= is included in the message.
 	activeCgsMu.Lock()
 	var serverW *protocol.Writer
 	for _, cg := range activeCgs {
@@ -137,6 +149,33 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 	}
 	nSessions := len(activeCgs)
 	activeCgsMu.Unlock()
+
+	sess := alert.SessionID
+	if sess == "" {
+		sess = "?"
+	}
+
+	switch {
+	case alertType == alertProcessKill:
+		log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d target=%q target_pid=%d sig=%s sess=%q cgid=%d",
+			typeName, comm, pid, targetComm, targetPid, sigName(sig), sess, cgid)
+	case alertType >= alertDirMkdir && alertType <= alertDirSymlink:
+		if path != "" {
+			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d dir=%q sess=%q cgid=%d",
+				typeName, comm, pid, path, sess, cgid)
+		} else {
+			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d sess=%q cgid=%d",
+				typeName, comm, pid, sess, cgid)
+		}
+	default:
+		if path != "" {
+			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d path=%q sess=%q cgid=%d",
+				typeName, comm, pid, path, sess, cgid)
+		} else {
+			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d sess=%q cgid=%d",
+				typeName, comm, pid, sess, cgid)
+		}
+	}
 
 	if serverW == nil {
 		// Primary lookup by session cgroup failed. The alerting process may have

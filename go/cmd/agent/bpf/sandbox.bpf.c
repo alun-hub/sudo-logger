@@ -66,8 +66,11 @@ struct sandbox_alert {
 	__u32 pid;
 	__u32 type;
 	char  comm[TASK_COMM_LEN];
-	__u64 ino; // inode number of the protected object that was blocked
-	__u32 dev; // block device id (s_dev from superblock)
+	__u64 ino;            // inode of the blocked object (file/dir hooks)
+	__u32 dev;            // superblock dev (matches i_sb->s_dev read by BPF)
+	__u32 target_pid;     // PROCESS_KILL: PID (tgid) of the target process
+	char  target_comm[TASK_COMM_LEN]; // PROCESS_KILL: comm of target
+	__u32 sig;            // PROCESS_KILL: signal number
 	__u32 pad;
 };
 
@@ -91,6 +94,9 @@ static __always_inline void submit_alert(enum sandbox_alert_type type,
 	bpf_get_current_comm(&a->comm, sizeof(a->comm));
 	a->ino = ino;
 	a->dev = dev;
+	a->target_pid = 0;
+	__builtin_memset(a->target_comm, 0, sizeof(a->target_comm));
+	a->sig = 0;
 	a->pad = 0;
 
 	bpf_ringbuf_submit(a, 0);
@@ -379,7 +385,21 @@ int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 	// The comm offset is stable; vmlinux.h reflects the running kernel layout.
 	bpf_probe_read_kernel_str(comm, sizeof(comm), p->comm);
 	if (bpf_map_lookup_elem(&protected_procs, comm)) {
-		submit_alert(ALERT_PROCESS_KILL, 0, 0); // no file inode for process kill
+		struct sandbox_alert *a;
+		a = bpf_ringbuf_reserve(&sandbox_alerts, sizeof(*a), 0);
+		if (!a)
+			return -EPERM;
+		a->cgroup_id = bpf_get_current_cgroup_id();
+		a->pid = bpf_get_current_pid_tgid() >> 32;
+		a->type = ALERT_PROCESS_KILL;
+		bpf_get_current_comm(&a->comm, sizeof(a->comm));
+		a->ino = 0;
+		a->dev = 0;
+		a->target_pid = (__u32)BPF_CORE_READ(p, tgid);
+		bpf_probe_read_kernel_str(a->target_comm, sizeof(a->target_comm), p->comm);
+		a->sig = (__u32)sig;
+		a->pad = 0;
+		bpf_ringbuf_submit(a, 0);
 		return -EPERM;
 	}
 	return 0;
