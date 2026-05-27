@@ -31,12 +31,13 @@ func startSandboxPoller() {
 				debugLog("sandbox poller: %v", err)
 			} else if content != "" {
 				h := sha256.Sum256([]byte(content))
-				if h != lastHash {
-					if err := reloadSandboxFromContent(content); err != nil {
-						log.Printf("sandbox poller: reload: %v", err)
-					} else {
-						lastHash = h
-					}
+				changed := (h != lastHash)
+				// Always reload sandbox if content is available.
+				// This acts as a self-healing mechanism in case eBPF maps were tampered with.
+				if err := reloadSandboxFromContent(content, changed); err != nil {
+					log.Printf("sandbox poller: reload: %v", err)
+				} else {
+					lastHash = h
 				}
 			}
 			<-ticker.C

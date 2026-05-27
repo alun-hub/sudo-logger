@@ -31,6 +31,7 @@ const (
 	alertDirMknod     = 9
 	alertDirSymlink   = 10
 	alertProcessKill  = 11
+	alertBpfSyscall   = 12
 )
 
 var alertNames = map[uint32]string{
@@ -45,6 +46,7 @@ var alertNames = map[uint32]string{
 	alertDirMknod:     "DIR_MKNOD",
 	alertDirSymlink:   "DIR_SYMLINK",
 	alertProcessKill:  "PROCESS_KILL",
+	alertBpfSyscall:   "BPF_SYSCALL",
 }
 
 // bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c
@@ -563,7 +565,7 @@ func (s *sandboxSubsystem) stop() {
 // reloadConfig atomically replaces the protected inode and process sets in the
 // BPF maps and restarts the inotify watcher for the new path set. The LSM hooks
 // themselves remain attached — only the map contents change.
-func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox) {
+func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -620,14 +622,18 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox) {
 	}
 	s.startWatcher(res.PathInodes)
 
-	log.Printf("sandbox: config reloaded (%d protected inodes, %d protected processes)",
-		len(res.Inodes), len(res.Processes))
+	if logChange {
+		log.Printf("sandbox: config reloaded (%d protected inodes, %d protected processes)",
+			len(res.Inodes), len(res.Processes))
+	} else {
+		debugLog("sandbox: configuration refreshed (periodic)")
+	}
 }
 
 // reloadSandboxFromContent parses yamlText and applies it to the running
 // sandbox subsystem. Called by the sandbox poller when the server delivers
 // an updated sandbox.yaml.
-func reloadSandboxFromContent(yamlText string) error {
+func reloadSandboxFromContent(yamlText string, logChange bool) error {
 	if sandboxSys == nil {
 		return fmt.Errorf("sandbox not running")
 	}
@@ -635,6 +641,6 @@ func reloadSandboxFromContent(yamlText string) error {
 	if err != nil {
 		return fmt.Errorf("parse sandbox config from server: %w", err)
 	}
-	sandboxSys.reloadConfig(res)
+	sandboxSys.reloadConfig(res, logChange)
 	return nil
 }

@@ -62,6 +62,7 @@ type SandboxSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxProgramSpecs struct {
+	SandboxBpf            *ebpf.ProgramSpec `ebpf:"sandbox_bpf"`
 	SandboxFileOpen       *ebpf.ProgramSpec `ebpf:"sandbox_file_open"`
 	SandboxFilePermission *ebpf.ProgramSpec `ebpf:"sandbox_file_permission"`
 	SandboxInodeCreate    *ebpf.ProgramSpec `ebpf:"sandbox_inode_create"`
@@ -141,6 +142,7 @@ type SandboxVariables struct {
 //
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxPrograms struct {
+	SandboxBpf            *ebpf.Program `ebpf:"sandbox_bpf"`
 	SandboxFileOpen       *ebpf.Program `ebpf:"sandbox_file_open"`
 	SandboxFilePermission *ebpf.Program `ebpf:"sandbox_file_permission"`
 	SandboxInodeCreate    *ebpf.Program `ebpf:"sandbox_inode_create"`
@@ -158,6 +160,7 @@ type SandboxPrograms struct {
 
 func (p *SandboxPrograms) Close() error {
 	return _SandboxClose(
+		p.SandboxBpf,
 		p.SandboxFileOpen,
 		p.SandboxFilePermission,
 		p.SandboxInodeCreate,

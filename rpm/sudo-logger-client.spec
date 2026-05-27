@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.80
+Version:        1.20.81
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -172,6 +172,14 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Wed May 27 2026 sudo-logger 1.20.81-1
+- security: add lsm/bpf hook to block eBPF syscalls for sandboxed processes
+  Prevents root users inside a sudo session from manipulating protected_inodes
+  or protected_procs maps (e.g. via bpftool map delete).
+- fix(sandbox): enforce periodic map refresh in agent poller (self-healing)
+  Agent now rewrites BPF maps every 60s even if the server config hasn't
+  changed, ensuring local tampering is automatically reverted.
+
 * Wed May 27 2026 sudo-logger 1.20.80-1
 - feat: central sandbox.yaml management via replay-server UI
   Protocol: MsgFetchConfig/MsgConfigData (0x12/0x13); log server serves

@@ -59,6 +59,7 @@ enum sandbox_alert_type {
 	ALERT_DIR_MKNOD = 9,
 	ALERT_DIR_SYMLINK = 10,
 	ALERT_PROCESS_KILL = 11,
+	ALERT_BPF_SYSCALL = 12,
 };
 
 struct sandbox_alert {
@@ -404,6 +405,19 @@ int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 	}
 	return 0;
 }
+
+// Deny bpf() syscall to prevent manipulation of eBPF maps and programs.
+SEC("lsm/bpf")
+int BPF_PROG(sandbox_bpf, int cmd, union bpf_attr *attr, unsigned int size)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	// We block ALL bpf() syscalls for sandboxed processes.
+	submit_alert(ALERT_BPF_SYSCALL, 0, 0);
+	return -EPERM;
+}
+
 // Propagate sandbox membership from parent to child at fork time.
 // Fires in the parent's context before the child runs any userspace code,
 // making it race-free against the PAM session scope cgroup migration.
