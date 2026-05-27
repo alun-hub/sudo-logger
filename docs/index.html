@@ -1402,6 +1402,14 @@ body::after {
           </div>
         </div>
 
+        <div class="sec-card">
+          <div class="sec-icon">🛡️</div>
+          <div>
+            <div class="sec-title">Kernel-enforced process sandbox</div>
+            <div class="sec-desc">eBPF LSM hooks prevent root from deleting audit logs, killing daemons, or modifying <code>/etc/sudoers</code> — even with full <code>CAP_ALL</code>. Not a policy. A kernel veto.</div>
+          </div>
+        </div>
+
         <div class="sec-card full">
           <div class="sec-icon">⌨</div>
           <div>
@@ -2174,28 +2182,42 @@ body::after {
 
   <!-- ░░ SLIDE 15: ENTERPRISE SCALE ░░ -->
   <div class="slide" id="s15">
-    <div class="s-security" style="max-width:920px">
+    <div class="s-security" style="max-width:960px">
       <div class="slide-heading">ENTERPRISE SCALE</div>
       <div class="sec-grid">
         <div class="sec-card full">
           <div class="sec-icon">🚀</div>
           <div>
             <div class="sec-title">High-Performance Pipeline</div>
-            <div class="sec-desc">Engineered for 500+ simultaneous sessions. Uses an asynchronous <strong>Batch Disk Writer</strong> that bundles up to 100 chunks into a single atomic write, reducing I/O syscall overhead by 99%.</div>
+            <div class="sec-desc">Engineered for 500+ simultaneous sessions. The log server uses an asynchronous <strong>Batch Disk Writer</strong> that bundles up to 100 chunks into a single atomic write — turning hundreds of small I/O calls into one, cutting syscall overhead by ~99%.</div>
           </div>
         </div>
         <div class="sec-card">
           <div class="sec-icon">⚙️</div>
           <div>
-            <div class="sec-title">Non-Blocking Ingestion</div>
-            <div class="sec-desc">Network loop remains hot even under heavy disk load. Secondary memory queues and overflow goroutines ensure Heartbeats and ACKs are never delayed by I/O wait.</div>
+            <div class="sec-title">Network Never Stalls on Disk</div>
+            <div class="sec-desc">The TLS ingestion loop and the disk writer run independently. Even under heavy write load, ACKs and heartbeats are sent on time — sessions are never frozen because a disk was slow.</div>
           </div>
         </div>
         <div class="sec-card">
           <div class="sec-icon">⚖️</div>
           <div>
-            <div class="sec-title">Horizontal Scaling</div>
-            <div class="sec-desc">Leader election via PostgreSQL advisory locks ensures exactly-one replica handles SIEM forwarding, while all replicas serve replay traffic and ingestion.</div>
+            <div class="sec-title">Horizontal Scaling — Kubernetes Ready</div>
+            <div class="sec-desc">Run as many log-server replicas as needed. PostgreSQL advisory locks ensure exactly one replica forwards SIEM events (no duplicates), while all replicas serve ingestion and replay traffic simultaneously.</div>
+          </div>
+        </div>
+        <div class="sec-card">
+          <div class="sec-icon">🗂️</div>
+          <div>
+            <div class="sec-title">Stateless Storage Tier</div>
+            <div class="sec-desc">Session recordings are stored in S3-compatible object storage (AWS S3, MinIO, NetApp). No shared filesystem needed — pods start and stop freely without data loss or coordination.</div>
+          </div>
+        </div>
+        <div class="sec-card full">
+          <div class="sec-icon">🛡️</div>
+          <div>
+            <div class="sec-title">Sandbox Scales with the Fleet</div>
+            <div class="sec-desc">The eBPF LSM sandbox runs entirely on the client host — zero server involvement. Adding 1 000 monitored hosts does not increase server load. Sandbox policy is distributed via the same agent config as everything else.</div>
           </div>
         </div>
       </div>
@@ -2261,20 +2283,19 @@ body::after {
 
   <!-- ░░ SLIDE 17: EBPF AGENT ░░ -->
   <div class="slide" id="s17">
-    <div class="s-features" style="max-width:920px">
+    <div class="s-features" style="max-width:960px">
       <h2>EBPF<br>AGENT</h2>
-      <div class="sub">▸ Unified daemon · divergence detection · pkexec tracking · outage buffering</div>
+      <div class="sub">▸ The kernel watches even when the plugin can't</div>
 
-      <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:28px;font-size:13px">
+      <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:20px 48px;margin-top:28px;font-size:13px">
 
         <div style="border-left:2px solid var(--green-dim);padding-left:16px">
-          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">DIVERGENCE DETECTION</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> eBPF tracepoints record every exec independently of the plugin</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Cross-validates kernel observations against plugin-logged events</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Mismatch within 30 s window → alert log + optional webhook</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Detects plugin tampering, sudo binary replacement, bypasses</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Divergence badge shown in replay UI only when mismatch detected</div>
-          <div style="margin-top:12px;font-family:'JetBrains Mono',monospace;font-size:9.5px;border:1px solid rgba(255,95,109,0.3);border-radius:4px;padding:10px 13px;line-height:1.9;background:rgba(255,95,109,0.04);">
+          <div style="color:var(--green);font-weight:700;margin-bottom:10px;font-size:11px;letter-spacing:.1em">TAMPER DETECTION</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr">→</span> The kernel records every <code>sudo</code> invocation independently — the plugin cannot suppress it</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr">→</span> If sudo ran but no session was logged, the agent raises an alert within 30 seconds</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr">→</span> Catches disabled plugins, tampered <code>sudo.conf</code>, or a swapped sudo binary</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr">→</span> Flagged sessions appear in the replay UI with a <em>divergence</em> badge</div>
+          <div style="margin-top:14px;font-family:'JetBrains Mono',monospace;font-size:9.5px;border:1px solid rgba(255,95,109,0.3);border-radius:4px;padding:10px 13px;line-height:1.9;background:rgba(255,95,109,0.04);">
             <span style="color:#ff5f6d">ALERT:</span> <span style="color:var(--text-dim)">divergence detected</span><br>
             <span style="color:var(--text-dim)">user=alice host=prod01</span><br>
             <span style="color:var(--text-dim)">comm="bash" — no plugin event</span>
@@ -2282,16 +2303,18 @@ body::after {
         </div>
 
         <div style="border-left:2px solid var(--amber);padding-left:16px">
-          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">OUTAGE BUFFERING</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Session chunks queued in-memory when TLS server unreachable</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Session continues uninterrupted — freeze delayed until limit exceeded</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Buffer flushed in-order on reconnect — zero data loss</div>
-          <div style="color:var(--amber);font-weight:700;margin-top:16px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PKEXEC TRACKING</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Natively records <code>pkexec</code> sessions (no plugin support)</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Captures interactive shells and commands via kernel tracepoints</div>
-          <div style="color:var(--amber);font-weight:700;margin-top:16px;margin-bottom:8px;font-size:11px;letter-spacing:.1em">UNIFIED DAEMON</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Plugin handler + eBPF recorder merged into one binary</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Auto-detects BTF — falls back to plugin-only on older kernels</div>
+          <div style="color:var(--amber);font-weight:700;margin-bottom:10px;font-size:11px;letter-spacing:.1em">SESSIONS KEEP GOING DURING OUTAGES</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr" style="color:var(--amber)">★</span> If the log server goes down mid-session, the work in progress is not interrupted</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr" style="color:var(--amber)">★</span> Data is buffered locally and delivered in order when the connection returns</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr" style="color:var(--amber)">★</span> The freeze kicks in only if the buffer limit is reached — zero data loss either way</div>
+
+          <div style="color:var(--amber);font-weight:700;margin-top:18px;margin-bottom:10px;font-size:11px;letter-spacing:.1em">NO BLIND SPOTS — PKEXEC COVERED TOO</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr" style="color:var(--amber)">★</span> <code>pkexec</code> (PolicyKit) has no plugin API — sudo-logger records it via kernel tracepoints</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr" style="color:var(--amber)">★</span> Interactive shells and commands are captured the same way as sudo sessions</div>
+
+          <div style="color:var(--amber);font-weight:700;margin-top:18px;margin-bottom:10px;font-size:11px;letter-spacing:.1em">ONE BINARY, SIMPLE DEPLOYMENT</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr" style="color:var(--amber)">★</span> Session handler + kernel recorder ship as a single systemd service</div>
+          <div class="feat" style="font-size:12.5px"><span class="arr" style="color:var(--amber)">★</span> Runs on older kernels without BTF — automatically falls back to plugin-only mode</div>
         </div>
 
       </div>
