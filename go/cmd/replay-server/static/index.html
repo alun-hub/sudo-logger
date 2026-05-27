@@ -3081,17 +3081,25 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /etc/shadow
     - /etc/group
     - /etc/gshadow
+    - /etc/login.defs
     - /etc/pam.d
     - /etc/security
     - /etc/ssh
+    - /etc/ssh/sshd_config
     - /etc/sssd
+    - /etc/sssd/sssd.conf
+    - /var/lib/sss
+    - /var/lib/sss/db
     - /etc/krb5.conf
     - /etc/krb5.keytab
     - /etc/audit
     - /var/log/audit
     - /etc/rsyslog.conf
     - /etc/rsyslog.d
+    - /etc/syslog-ng
     - /var/log/secure
+    - /var/log/messages
+    - /var/log/journal
     - /etc/selinux/config
     - /etc/crypto-policies
     - /etc/pki
@@ -3099,32 +3107,63 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /etc/polkit-1
     - /etc/dbus-1
     - /etc/cron.d
+    - /etc/cron.daily
+    - /etc/cron.hourly
+    - /etc/cron.weekly
+    - /etc/cron.monthly
     - /etc/crontab
+    - /var/spool/cron
     - /etc/systemd/system
     - /usr/lib/systemd/system
+    - /root/.bashrc
+    - /root/.bash_profile
+    - /root/.bash_logout
     - /root/.ssh
+    - /root/.ssh/authorized_keys
   devices:
     - /dev/mem
     - /dev/kmem
     - /dev/port
     - /dev/sda
+    - /dev/sdb
     - /dev/nvme0n1
+    - /dev/nvme0n1p1
   proc:
     - /proc/sysrq-trigger
     - /proc/kcore
     - /proc/kallsyms
     - /proc/sys/kernel/core_pattern
     - /proc/sys/kernel/randomize_va_space
+    - /proc/sys/kernel/dmesg_restrict
+    - /proc/sys/kernel/kptr_restrict
+    - /proc/sys/kernel/perf_event_paranoid
+    - /proc/sys/kernel/modules_disabled
+    - /proc/sys/kernel/unprivileged_userns_clone
+    - /proc/sys/fs/suid_dumpable
+    - /proc/sys/net/ipv4/ip_forward
+    - /proc/sys/net/ipv4/conf/all/accept_redirects
+    - /proc/sys/net/ipv6/conf/all/forwarding
   sockets:
     - /run/sudo-logger/plugin.sock
     - /run/dbus/system_bus_socket
     - /run/systemd/journal/socket
+    - /run/systemd/journal/stdout
+    - /run/systemd/private
   processes:
     - auditd
     - rsyslogd
-    - sshd
-    - sssd
+    - syslog-ng
+    - systemd-journal
     - systemd
+    - sssd
+    - sshd
+    - dbus-daemon
+    - polkitd
+    - chronyd
+    - NetworkManager
+    - firewalld
+    - gssproxy
+    - crond
     - sudo-logger-age
 `;
 
