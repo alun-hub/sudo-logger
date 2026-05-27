@@ -585,7 +585,7 @@ body::after {
 /* ════════════════════════════════════════════
    DENSE INFO SLIDES — tighter outer padding
 ════════════════════════════════════════════ */
-#s5, #s6, #s7 { padding: 20px 48px; }
+#s5, #s6, #s7, #s16 { padding: 20px 48px; }
 #s5 .slide-heading, #s6 .slide-heading, #s7 .slide-heading {
   font-size: 40px; margin-bottom: 14px;
 }
@@ -1075,6 +1075,105 @@ body::after {
   text-transform: uppercase; letter-spacing: 0.08em;
   padding-bottom: 8px; border-bottom: 1px solid #1e2230; margin-bottom: 10px;
 }
+
+/* ════════════════════════════════════════════
+   PROCESS SANDBOX — KILLER FEATURE SLIDE
+════════════════════════════════════════════ */
+.s-sandbox-hero { width: 100%; max-width: 1160px; }
+
+.sbh-top { margin-bottom: 14px; }
+
+.sbh-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px; letter-spacing: 0.28em;
+  color: var(--red); text-transform: uppercase; margin-bottom: 6px;
+}
+
+.sbh-heading {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: clamp(52px, 6.5vw, 78px);
+  line-height: 0.88; color: #fff; letter-spacing: 0.03em;
+}
+
+.sbh-claim {
+  font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-top: 6px;
+}
+
+.sbh-claim code {
+  font-family: 'JetBrains Mono', monospace; color: var(--amber); font-size: 11px;
+}
+
+.sbh-layout {
+  display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 12px;
+}
+
+.sbh-left {
+  background: #090606; border: 1px solid rgba(255,53,53,0.25); padding: 14px 16px;
+}
+
+.sbh-blocked-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--red); margin-bottom: 10px;
+  border-bottom: 1px solid rgba(255,53,53,0.18); padding-bottom: 8px;
+}
+
+.sbh-ops { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+
+.sbh-op {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: rgba(255,53,53,0.04); border: 1px solid rgba(255,53,53,0.12); padding: 5px 10px;
+}
+
+.sbh-cmd {
+  font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--text-dim); flex: 1;
+}
+
+.sbh-tag {
+  font-family: 'JetBrains Mono', monospace; font-size: 8.5px; letter-spacing: 0.1em;
+  color: var(--red); background: rgba(255,53,53,0.09);
+  border: 1px solid rgba(255,53,53,0.28); padding: 2px 6px; white-space: nowrap;
+}
+
+.sbh-eperm {
+  font-family: 'JetBrains Mono', monospace; font-size: 9px; text-align: center;
+  color: rgba(255,53,53,0.45); letter-spacing: 0.08em; margin-bottom: 8px;
+}
+
+.sbh-alert {
+  font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+  background: rgba(0,232,122,0.03); border: 1px solid rgba(0,232,122,0.18);
+  border-left: 3px solid var(--green); padding: 8px 12px; line-height: 1.75; color: var(--text-dim);
+}
+
+.sbh-right { display: flex; flex-direction: column; gap: 10px; }
+
+.sbh-panel { background: var(--card); border: 1px solid var(--border); padding: 12px 14px; }
+
+.sbh-panel-title {
+  font-family: 'JetBrains Mono', monospace; font-size: 9.5px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--amber); margin-bottom: 10px;
+  border-bottom: 1px solid var(--border); padding-bottom: 7px;
+}
+
+.sbh-why {
+  font-size: 11.5px; color: var(--text-dim); line-height: 1.5;
+  padding: 4px 0 4px 14px; position: relative; border-bottom: 1px solid var(--border);
+}
+
+.sbh-why:last-child { border-bottom: none; }
+
+.sbh-why::before { content: '▸'; color: var(--amber); position: absolute; left: 0; top: 5px; }
+
+.sbh-why code { font-family: 'JetBrains Mono', monospace; color: var(--green); font-size: 10px; }
+
+.sbh-why em { color: var(--text); font-style: normal; font-weight: 600; }
+
+.sbh-yaml {
+  font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text-dim);
+  background: #080d08; border: 1px solid var(--border);
+  padding: 8px 12px; line-height: 1.65; white-space: pre; margin-top: 8px;
+}
 </style>
 </head>
 <body>
@@ -1095,7 +1194,7 @@ body::after {
   <div class="slide active" id="s0">
     <div class="title-grid"></div>
     <div class="s-title">
-      <div class="title-eyebrow">▶ session recording &nbsp;·&nbsp; mTLS &nbsp;·&nbsp; mandatory acknowledgement</div>
+      <div class="title-eyebrow">▶ session recording &nbsp;·&nbsp; mTLS &nbsp;·&nbsp; mandatory acknowledgement &nbsp;·&nbsp; process sandbox</div>
       <div class="title-main">
         SUDO<span class="dash">-</span>LOGGER<span class="title-cursor"></span>
       </div>
@@ -2103,96 +2202,56 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 16: WAYLAND SCREEN CAPTURE ░░ -->
+  <!-- ░░ SLIDE 16: PROCESS SANDBOX — KILLER FEATURE ░░ -->
   <div class="slide" id="s16">
-    <div class="s-features" style="max-width:900px">
-      <h2>WAYLAND<br>SCREEN CAPTURE</h2>
-      <div class="sub">▸ GUI sudo sessions recorded without compositor patches</div>
+    <div class="s-sandbox-hero">
 
-      <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:32px;font-size:13px">
-
-        <div style="border-left:2px solid var(--green-dim);padding-left:16px">
-          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">HOW IT WORKS</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> <code style="font-size:10px">wayland-proxy</code> sits between app and compositor</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Intercepts <code style="font-size:10px">wl_surface.commit</code> — reads SHM pixel data</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> JPEG-encodes frames at ≤ 300 ms intervals</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Streams frames to agent via stdout pipe</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Agent forwards as <code style="font-size:10px">STREAM_SCREEN</code> chunks</div>
-          <div class="feat" style="font-size:12px"><span class="arr">→</span> Replay shows image slideshow instead of xterm.js</div>
-        </div>
-
-        <div style="border-left:2px solid var(--amber);padding-left:16px">
-          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PROPERTIES</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Works on KDE and GNOME Wayland — no patches</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Linger mode — holds session open until GUI exits</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Force-captures last frame on client disconnect</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Configurable interval via <code style="font-size:10px">proxy_period</code></div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Disable with <code style="font-size:10px">wayland = false</code> in agent.conf</div>
-          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> SELinux policy covers all proxy socket operations</div>
-        </div>
-
+      <div class="sbh-top">
+        <div class="sbh-label">▶ eBPF LSM &nbsp;·&nbsp; kernel 5.7+ &nbsp;·&nbsp; 13 hooks &nbsp;·&nbsp; inode-tracked &nbsp;·&nbsp; PAM-race-proof</div>
+        <div class="sbh-heading">PROCESS SANDBOX</div>
+        <div class="sbh-claim">Kernel-enforced constraints on every sudo session. Root cannot escape — not even with <code>CAP_ALL</code>.</div>
       </div>
 
-      <div style="margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:12px 16px;text-align:left;max-width:760px">
-        <span style="color:var(--green-dim)"># sudo gvim → agent log</span><br>
-        <span style="color:var(--text)">wayland-proxy started, socket=/run/user/1000/sudo-wayland-…sock</span><br>
-        <span style="color:var(--text)">sudo-logger: patched WAYLAND_DISPLAY → …sock</span><br>
-        <span style="color:var(--text)">wayland-proxy: client connected</span><br>
-        <span style="color:var(--text)">sudo exited but GUI processes remain; entering linger mode</span><br>
-        <span style="color:var(--text)">all GUI processes exited; finishing session</span>
-      </div>
-    </div>
-  </div>
+      <div class="sbh-layout">
 
-  <!-- ░░ SLIDE 17: PROCESS SANDBOX ░░ -->
-  <div class="slide" id="s17">
-    <div class="s-features" style="max-width:1150px">
-      <h2>PROCESS<br>SANDBOX</h2>
-      <div class="sub">▸ 13 eBPF hooks · kernel-enforced deny-list · blocks root · Btrfs-safe · PAM-race-proof</div>
-
-      <div class="feat-grid" style="grid-template-columns:1.2fr 1fr 1fr;gap:16px 30px;margin-top:28px;font-size:12.5px">
-
-        <!-- Column 1: Hooks -->
-        <div style="border-left:2px solid var(--green-dim);padding-left:16px">
-          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">13 HOOKS — KERNEL LEVEL</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">lsm/file_open</code> — deny write-mode opens on protected inodes</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">lsm/file_permission</code> — deny write/append to protected inodes</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">lsm/path_truncate · inode_setattr</code> — deny truncation attacks</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">lsm/inode_unlink</code> — deny deletion of protected inodes</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">lsm/inode_rename</code> — deny atomic rename-over attacks</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">lsm/inode_create · mkdir · mknod · symlink</code> — deny file creation</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">lsm/task_kill</code> — deny signals to named system daemons</div>
-          <div class="feat" style="font-size:11px;margin-bottom:6px;"><span class="arr">→</span> <code style="font-size:9.5px">tp_btf/sched_process_fork</code> — propagate sandbox at fork</div>
+        <div class="sbh-left">
+          <div class="sbh-blocked-title">BLOCKED INSIDE EVERY SUDO SESSION</div>
+          <div class="sbh-ops">
+            <div class="sbh-op"><span class="sbh-cmd">rm /etc/sudoers</span><span class="sbh-tag">FILE_UNLINK</span></div>
+            <div class="sbh-op"><span class="sbh-cmd">echo x &gt; /etc/shadow</span><span class="sbh-tag">FILE_OPEN</span></div>
+            <div class="sbh-op"><span class="sbh-cmd">mv /tmp/evil /etc/sudoers</span><span class="sbh-tag">FILE_RENAME</span></div>
+            <div class="sbh-op"><span class="sbh-cmd">kill -SIGKILL auditd</span><span class="sbh-tag">PROCESS_KILL</span></div>
+            <div class="sbh-op"><span class="sbh-cmd">truncate -s0 /var/log/audit.log</span><span class="sbh-tag">FILE_TRUNCATE</span></div>
+            <div class="sbh-op"><span class="sbh-cmd">chmod 777 /etc/passwd</span><span class="sbh-tag">FILE_SETATTR</span></div>
+          </div>
+          <div class="sbh-eperm">↓ &nbsp; kernel LSM returns EPERM — no userspace can override this &nbsp; ↓</div>
+          <div class="sbh-alert">
+            <span style="color:var(--red)">SANDBOX VIOLATION</span> action=FILE_UNLINK comm="rm" pid=9182 path="/etc/sudoers" sess="bash-root" cgid=44821<br>
+            <span style="color:var(--red)">SANDBOX VIOLATION</span> action=PROCESS_KILL comm="bash" pid=9186 target="auditd" target_pid=891 sig=SIGKILL sess="bash-root" cgid=44821
+          </div>
         </div>
 
-        <!-- Column 2: Properties -->
-        <div style="border-left:2px solid var(--amber);padding-left:16px">
-          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">PROPERTIES</div>
-          <div class="feat" style="font-size:11px;margin-bottom:8px;"><span class="arr" style="color:var(--amber)">★</span> Dual scoping: cgroup-based + PID-tracked from fork — catches PAM scope migration race</div>
-          <div class="feat" style="font-size:11px;margin-bottom:8px;"><span class="arr" style="color:var(--amber)">★</span> Inode + mountinfo device ID — correct on Btrfs, XFS, ext4, tmpfs</div>
-          <div class="feat" style="font-size:11px;margin-bottom:8px;"><span class="arr" style="color:var(--amber)">★</span> Cannot be bypassed by root within the session</div>
-          <div class="feat" style="font-size:11px;margin-bottom:8px;"><span class="arr" style="color:var(--amber)">★</span> CONFIG_BPF_LSM=y · kernel ≥ 5.7 · active by default on Fedora 38+</div>
-        </div>
-
-        <!-- Column 3: YAML -->
-        <div style="border-left:2px solid var(--amber);padding-left:16px">
-          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">SANDBOX.YAML</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:8px 12px;line-height:1.6;white-space:pre;">
-<span style="color:var(--green-dim)">protect:</span>
-  <span style="color:var(--green-dim)">files:</span>
-    <span style="color:var(--text)">- /etc/sudoers</span>
-    <span style="color:var(--text)">- /etc/shadow</span>
-  <span style="color:var(--green-dim)">devices:</span>
-    <span style="color:var(--text)">- /dev/mem</span>
-  <span style="color:var(--green-dim)">proc:</span>
-    <span style="color:var(--text)">- /proc/sysrq-trigger</span>
-  <span style="color:var(--green-dim)">sockets:</span>
-    <span style="color:var(--text)">- .../plugin.sock</span>
+        <div class="sbh-right">
+          <div class="sbh-panel">
+            <div class="sbh-panel-title">WHY ROOT CANNOT BYPASS IT</div>
+            <div class="sbh-why">LSM hooks run in the kernel, <em>below</em> capability checks — <code>CAP_SYS_ADMIN</code> and <code>CAP_DAC_OVERRIDE</code> don't help</div>
+            <div class="sbh-why">13 hooks cover every attack vector: open, write, truncate, rename, unlink, setattr, mkdir, create, mknod, symlink, signal</div>
+            <div class="sbh-why">Inode + superblock device ID — immune to symlinks, bind-mounts, path aliasing, and Btrfs subvolumes</div>
+            <div class="sbh-why">Dual scoping: cgroup-based + PID propagated at fork → PAM session scope migration race has no effect</div>
+            <div class="sbh-why">inotify watcher refreshes inodes on atomic rename — protected files stay protected after every editor write</div>
+          </div>
+          <div class="sbh-panel">
+            <div class="sbh-panel-title">SANDBOX.YAML</div>
+            <div class="sbh-yaml"><span style="color:var(--green-dim)">protect:</span>
+  <span style="color:var(--green-dim)">files:</span>    <span style="color:var(--text)">- /etc/sudoers  # dirs expand recursively</span>
+            <span style="color:var(--text)">- /etc/shadow</span>
+  <span style="color:var(--green-dim)">devices:</span>  <span style="color:var(--text)">- /dev/mem</span>
+  <span style="color:var(--green-dim)">proc:</span>     <span style="color:var(--text)">- /proc/sysrq-trigger</span>
+  <span style="color:var(--green-dim)">sockets:</span>  <span style="color:var(--text)">- /run/sudo-logger/agent.sock</span>
   <span style="color:var(--green-dim)">processes:</span>
-    <span style="color:var(--text)">- auditd</span>
-    <span style="color:var(--text)">- systemd</span></div>
-          <div style="margin-top:8px;font-size:9px;color:var(--text-dim);line-height:1.5;">
-            Enable with <code style="font-size:9px">sandbox_config</code> in <code style="font-size:9px">agent.conf</code>.
+            <span style="color:var(--text)">- auditd</span>
+            <span style="color:var(--text)">- systemd</span></div>
+            <div style="margin-top:8px;font-size:9px;color:var(--text-dim);">Enable: <code style="font-size:9px;color:var(--green)">sandbox_config = /etc/sudo-logger/sandbox.yaml</code> in agent.conf</div>
           </div>
         </div>
 
@@ -2200,8 +2259,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 18: EBPF AGENT ░░ -->
-  <div class="slide" id="s18">
+  <!-- ░░ SLIDE 17: EBPF AGENT ░░ -->
+  <div class="slide" id="s17">
     <div class="s-features" style="max-width:920px">
       <h2>EBPF<br>AGENT</h2>
       <div class="sub">▸ Unified daemon · divergence detection · pkexec tracking · outage buffering</div>
@@ -2239,8 +2298,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 19: READY TO DEPLOY ░░ -->
-  <div class="slide" id="s19">
+  <!-- ░░ SLIDE 18: READY TO DEPLOY ░░ -->
+  <div class="slide" id="s18">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
       <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
@@ -2258,11 +2317,10 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if agent killed (&lt;150 ms)</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt;30 s propagation</div>
-        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Wayland screen capture — GUI sessions recorded, image slideshow replay</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
-        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Process sandbox — 13 eBPF hooks · blocks writes, opens, truncations, deletes, creates, signals · root-proof</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> eBPF agent — divergence detection · outage buffering · pkexec tracking</div>
+        <div class="feat" style="border-left-color:var(--red);"><span class="arr" style="color:var(--red)">⚡</span> Process sandbox — eBPF LSM · root-proof · kernel-enforced · SIEM-ready structured alerts</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
@@ -2276,7 +2334,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 20;
+  const N = 19;
   let cur = 0, busy = false;
 
   /* cursor */
