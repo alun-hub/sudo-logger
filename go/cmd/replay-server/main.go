@@ -750,6 +750,16 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	mux.HandleFunc("/api/sandbox/templates", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetSandboxTemplates(w, r)
+		case http.MethodPut:
+			handlePutSandboxTemplates(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/api/hosts", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1579,9 +1589,35 @@ func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
-		log.Printf("encode sandbox response: %v", err)
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func handleGetSandboxTemplates(w http.ResponseWriter, r *http.Request) {
+	content, err := sessionStore.GetConfig(r.Context(), "sandbox_templates")
+	if err != nil {
+		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
+	if content == "" {
+		content = "{}"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(content))
+}
+
+func handlePutSandboxTemplates(w http.ResponseWriter, r *http.Request) {
+	var templates map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&templates); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	data, _ := json.Marshal(templates)
+	if err := sessionStore.SetConfig(r.Context(), "sandbox_templates", string(data)); err != nil {
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 // ── SIEM config API ───────────────────────────────────────────────────────────

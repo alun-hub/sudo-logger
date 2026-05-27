@@ -895,6 +895,16 @@
           <span class="settings-status" id="sandbox-status" style="display:none"></span>
         </div>
         <div class="siem-form">
+          <label>Templates</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="sb-template-select" class="form-input" style="width:240px">
+              <option value="">-- Load Template --</option>
+              <option value="builtin:hardening">Default Hardening (Fedora/RHEL)</option>
+            </select>
+            <button class="btn-secondary" id="btn-load-template">Load</button>
+            <button class="btn-secondary" id="btn-save-template">Save as Template</button>
+          </div>
+
           <label>Files & directories</label>
           <div class="form-group">
             <div class="tag-input-wrap" id="f-sb-files"></div>
@@ -2671,7 +2681,7 @@ function switchTab(tab) {
   if (tab === 'summary' || tab === 'anomalies') fetchReport();
   if (tab === 'settings') {
     switchSettingsTab('rules');
-    fetchRules(); fetchSiemConfig(); fetchRetentionConfig(); fetchSandboxConfig();
+    fetchRules(); fetchSiemConfig(); fetchRetentionConfig(); fetchSandboxConfig(); fetchSandboxTemplates();
   }
   if (tab === 'blocked') fetchBlockedUsers();
 }
@@ -3057,6 +3067,147 @@ function showRetentionStatus(msg, isErr) {
 document.getElementById('btn-save-retention').addEventListener('click', saveRetentionConfig);
 
 // ── Sandbox config ─────────────────────────────────────────────────────────────
+
+const DEFAULT_HARDENING_YAML = `protect:
+  files:
+    - /etc/sudo-logger
+    - /var/log/sudo-logger
+    - /usr/bin/sudo-logger-agent
+    - /usr/libexec/sudo/sudo_logger_plugin.so
+    - /etc/sudoers
+    - /etc/sudoers.d
+    - /etc/sudo.conf
+    - /etc/passwd
+    - /etc/shadow
+    - /etc/group
+    - /etc/gshadow
+    - /etc/pam.d
+    - /etc/security
+    - /etc/ssh
+    - /etc/sssd
+    - /etc/krb5.conf
+    - /etc/krb5.keytab
+    - /etc/audit
+    - /var/log/audit
+    - /etc/rsyslog.conf
+    - /etc/rsyslog.d
+    - /var/log/secure
+    - /etc/selinux/config
+    - /etc/crypto-policies
+    - /etc/pki
+    - /etc/authselect
+    - /etc/polkit-1
+    - /etc/dbus-1
+    - /etc/cron.d
+    - /etc/crontab
+    - /etc/systemd/system
+    - /usr/lib/systemd/system
+    - /root/.ssh
+  devices:
+    - /dev/mem
+    - /dev/kmem
+    - /dev/port
+    - /dev/sda
+    - /dev/nvme0n1
+  proc:
+    - /proc/sysrq-trigger
+    - /proc/kcore
+    - /proc/kallsyms
+    - /proc/sys/kernel/core_pattern
+    - /proc/sys/kernel/randomize_va_space
+  sockets:
+    - /run/sudo-logger/plugin.sock
+    - /run/dbus/system_bus_socket
+    - /run/systemd/journal/socket
+  processes:
+    - auditd
+    - rsyslogd
+    - sshd
+    - sssd
+    - systemd
+    - sudo-logger-age
+`;
+
+let customTemplates = {};
+
+async function fetchSandboxTemplates() {
+  try {
+    const res = await fetch('/api/sandbox/templates');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    customTemplates = await res.json();
+    renderTemplateSelect();
+  } catch (err) {
+    console.error('Fetch templates failed:', err);
+  }
+}
+
+function renderTemplateSelect() {
+  const sel = document.getElementById('sb-template-select');
+  const val = sel.value;
+  sel.innerHTML = '<option value="">-- Load Template --</option>' +
+                  '<option value="builtin:hardening">Default Hardening (Fedora/RHEL)</option>';
+  Object.keys(customTemplates).sort().forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = 'custom:' + name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  sel.value = val;
+}
+
+function loadTemplate() {
+  const sel = document.getElementById('sb-template-select');
+  const id = sel.value;
+  if (!id) return;
+
+  let yaml = '';
+  if (id === 'builtin:hardening') {
+    yaml = DEFAULT_HARDENING_YAML;
+  } else if (id.startsWith('custom:')) {
+    yaml = customTemplates[id.substring(7)];
+  }
+
+  if (yaml) {
+    const parsed = parseSandboxYaml(yaml);
+    tagInputs['f-sb-files'].setTags(parsed.files);
+    tagInputs['f-sb-devices'].setTags(parsed.devices);
+    tagInputs['f-sb-proc'].setTags(parsed.proc);
+    tagInputs['f-sb-sockets'].setTags(parsed.sockets);
+    tagInputs['f-sb-processes'].setTags(parsed.processes);
+  }
+}
+
+async function saveAsTemplate() {
+  const name = prompt('Enter a name for this template:');
+  if (!name) return;
+
+  const data = {
+    files: tagInputs['f-sb-files'].getTags(),
+    devices: tagInputs['f-sb-devices'].getTags(),
+    proc: tagInputs['f-sb-proc'].getTags(),
+    sockets: tagInputs['f-sb-sockets'].getTags(),
+    processes: tagInputs['f-sb-processes'].getTags(),
+  };
+  const yaml = buildSandboxYaml(data);
+
+  customTemplates[name] = yaml;
+  try {
+    const res = await fetch('/api/sandbox/templates', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(customTemplates),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    renderTemplateSelect();
+    document.getElementById('sb-template-select').value = 'custom:' + name;
+    showSandboxStatus('Template saved', false);
+  } catch (err) {
+    showSandboxStatus('Save template failed: ' + err.message, true);
+  }
+}
+
+document.getElementById('btn-load-template').addEventListener('click', loadTemplate);
+document.getElementById('btn-save-template').addEventListener('click', saveAsTemplate);
 
 function parseSandboxYaml(yamlStr) {
   const data = { files: [], devices: [], proc: [], sockets: [], processes: [] };
