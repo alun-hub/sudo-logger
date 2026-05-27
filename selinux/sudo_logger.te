@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.10)
+policy_module(sudo_logger, 1.1.11)
 
 ########################################
 #
@@ -167,6 +167,18 @@ allow sudo_agent_t dri_device_t:chr_file { read write open getattr ioctl };
 
 # Connect to the D-Bus system bus for polkit CheckAuthorization monitoring.
 dbus_system_bus_client(sudo_agent_t)
+
+# D-Bus chat with logind — loginctl calls GetSession via the system bus.
+# Grants bidirectional send_msg so logind can reply.
+systemd_dbus_chat_logind(sudo_agent_t)
+
+# Read /etc/passwd for UID→username resolution during session tracking.
+# Also enables optional SSSD public file reads and SSSD stream connect.
+auth_read_passwd(sudo_agent_t)
+
+# Connect to systemd-userdbd sockets (/run/systemd/userdb/io.systemd.*)
+# for NSS user lookups triggered by loginctl and getpwuid().
+systemd_userdbd_stream_connect(sudo_agent_t)
 
 # Logging
 logging_send_syslog_msg(sudo_agent_t)
