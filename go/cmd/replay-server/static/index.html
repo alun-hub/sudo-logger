@@ -895,10 +895,36 @@
           <span class="settings-status" id="sandbox-status" style="display:none"></span>
         </div>
         <div class="siem-form">
-          <label>sandbox.yaml</label>
-          <textarea id="sandbox-yaml" class="form-input" rows="20"
-            style="font-family:monospace;font-size:12px;line-height:1.5;resize:vertical"
-            placeholder="protect:&#10;  files:&#10;    - /etc/sudoers&#10;    - /etc/shadow&#10;  processes:&#10;    - auditd&#10;    - sshd"></textarea>
+          <label>Files & directories</label>
+          <div class="form-group">
+            <div class="tag-input-wrap" id="f-sb-files"></div>
+            <p class="form-hint">Blocked paths (recursive). Example: <code>/etc/sudoers</code>, <code>/etc/shadow</code>, <code>/var/log/sudo-logger</code></p>
+          </div>
+
+          <label>Device nodes</label>
+          <div class="form-group">
+            <div class="tag-input-wrap" id="f-sb-devices"></div>
+            <p class="form-hint">Raw device access. Example: <code>/dev/mem</code>, <code>/dev/sda</code>, <code>/dev/nvme0n1</code></p>
+          </div>
+
+          <label>/proc entries</label>
+          <div class="form-group">
+            <div class="tag-input-wrap" id="f-sb-proc"></div>
+            <p class="form-hint">Kernel parameters & triggers. Example: <code>/proc/sysrq-trigger</code>, <code>/proc/kcore</code></p>
+          </div>
+
+          <label>Unix sockets</label>
+          <div class="form-group">
+            <div class="tag-input-wrap" id="f-sb-sockets"></div>
+            <p class="form-hint">Domain socket protection. Example: <code>/run/sudo-logger/plugin.sock</code></p>
+          </div>
+
+          <label>Process names</label>
+          <div class="form-group">
+            <div class="tag-input-wrap" id="f-sb-processes"></div>
+            <p class="form-hint">Signal protection for daemons. Names matched against <code>/proc/pid/comm</code>. Example: <code>auditd</code>, <code>sshd</code>, <code>sssd</code> (max 15 chars)</p>
+          </div>
+
           <p class="siem-note">
             Saved changes are fetched by all agents within 60 seconds — no agent restart needed.
             See <strong>Help → Process Sandbox</strong> for field reference and examples.
@@ -1201,32 +1227,32 @@
           Configure the sandbox in <strong>Settings → Sandbox</strong>. Changes reach all connected agents within 60 seconds.
         </p>
         <table class="help-table">
-          <thead><tr><th>YAML field</th><th>Blocks</th><th>Example</th></tr></thead>
+          <thead><tr><th>Category</th><th>Blocks</th><th>Example</th></tr></thead>
           <tbody>
             <tr>
-              <td><code>protect.files</code></td>
+              <td>Files & directories</td>
               <td>Open for write, truncate, delete, rename, setattr on listed paths. Directories are expanded recursively.</td>
-              <td><code>- /etc/sudoers<br>- /var/log/sudo-logger</code></td>
+              <td><code>/etc/sudoers</code>, <code>/var/log/sudo-logger</code></td>
             </tr>
             <tr>
-              <td><code>protect.devices</code></td>
+              <td>Device nodes</td>
               <td>Open for write / read of raw device nodes (prevents direct disk or memory access).</td>
-              <td><code>- /dev/mem<br>- /dev/sda</code></td>
+              <td><code>/dev/mem</code>, <code>/dev/sda</code></td>
             </tr>
             <tr>
-              <td><code>protect.proc</code></td>
+              <td>/proc entries</td>
               <td>Write to <code>/proc</code> entries (prevents sysctl changes, sysrq triggers, etc.).</td>
-              <td><code>- /proc/sysrq-trigger</code></td>
+              <td><code>/proc/sysrq-trigger</code></td>
             </tr>
             <tr>
-              <td><code>protect.sockets</code></td>
+              <td>Unix sockets</td>
               <td>Delete or replace Unix socket files (prevents tampering with agent or D-Bus sockets).</td>
-              <td><code>- /run/sudo-logger/plugin.sock</code></td>
+              <td><code>/run/sudo-logger/plugin.sock</code></td>
             </tr>
             <tr>
-              <td><code>protect.processes</code></td>
-              <td>Send signals to named daemons (prevents kill/stop of audit or security services). Names are matched against <code>/proc/&lt;pid&gt;/comm</code> — max 15 characters.</td>
-              <td><code>- auditd<br>- sshd<br>- systemd-journal</code></td>
+              <td>Process names</td>
+              <td>Send signals to named daemons (prevents kill/stop of audit or security services). Names are matched against <code>/proc/pid/comm</code> — max 15 characters.</td>
+              <td><code>auditd</code>, <code>sshd</code>, <code>systemd-journal</code></td>
             </tr>
           </tbody>
         </table>
@@ -2726,8 +2752,13 @@ let editingIdx = -1;   // -1 = new rule
 const tagInputs = {};
 
 function initTagInputs() {
-  ['f-cmd-contains','f-cmd-also','f-cmd-base','f-con-contains','f-con-also'].forEach(id => {
-    tagInputs[id] = makeTagInput(document.getElementById(id));
+  const ids = [
+    'f-cmd-contains','f-cmd-also','f-cmd-base','f-con-contains','f-con-also',
+    'f-sb-files','f-sb-devices','f-sb-proc','f-sb-sockets','f-sb-processes'
+  ];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) tagInputs[id] = makeTagInput(el);
   });
 }
 initTagInputs();
@@ -3027,12 +3058,65 @@ document.getElementById('btn-save-retention').addEventListener('click', saveRete
 
 // ── Sandbox config ─────────────────────────────────────────────────────────────
 
+function parseSandboxYaml(yamlStr) {
+  const data = { files: [], devices: [], proc: [], sockets: [], processes: [] };
+  if (!yamlStr) return data;
+  let currentKey = null;
+  const lines = yamlStr.split('\n');
+  for (let line of lines) {
+    // Strip comments and trailing space
+    const cleanLine = line.replace(/#.*/, '').trimRight();
+    if (!cleanLine.trim()) continue;
+
+    // Match top-level keys like "  files:"
+    const keyMatch = cleanLine.match(/^ {2}(files|devices|proc|sockets|processes):/);
+    if (keyMatch) {
+      currentKey = keyMatch[1];
+      continue;
+    }
+
+    // Match list items like "    - /etc/sudoers"
+    const itemMatch = cleanLine.match(/^ {4}- (.*)/);
+    if (itemMatch && currentKey) {
+      let val = itemMatch[1].trim();
+      // Unwrap quotes if present
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.substring(1, val.length - 1);
+      }
+      data[currentKey].push(val);
+    }
+  }
+  return data;
+}
+
+function buildSandboxYaml(data) {
+  let yaml = "# /etc/sudo-logger/sandbox.yaml\n# Generated by replay-server UI\n\nprotect:\n";
+  const keys = ['files', 'devices', 'proc', 'sockets', 'processes'];
+  for (const k of keys) {
+    const list = data[k] || [];
+    if (list.length > 0) {
+      yaml += `  ${k}:\n`;
+      list.forEach(item => {
+        yaml += `    - ${item}\n`;
+      });
+    }
+  }
+  return yaml;
+}
+
 async function fetchSandboxConfig() {
   try {
     const res = await fetch('/api/sandbox');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    document.getElementById('sandbox-yaml').value = data.content || '';
+    const parsed = parseSandboxYaml(data.content);
+
+    tagInputs['f-sb-files'].setTags(parsed.files);
+    tagInputs['f-sb-devices'].setTags(parsed.devices);
+    tagInputs['f-sb-proc'].setTags(parsed.proc);
+    tagInputs['f-sb-sockets'].setTags(parsed.sockets);
+    tagInputs['f-sb-processes'].setTags(parsed.processes);
+
     const pathEl = document.getElementById('sandbox-path');
     if (pathEl && data.path) pathEl.textContent = data.path;
   } catch (err) {
@@ -3041,7 +3125,15 @@ async function fetchSandboxConfig() {
 }
 
 async function saveSandboxConfig() {
-  const content = document.getElementById('sandbox-yaml').value;
+  const data = {
+    files: tagInputs['f-sb-files'].getTags(),
+    devices: tagInputs['f-sb-devices'].getTags(),
+    proc: tagInputs['f-sb-proc'].getTags(),
+    sockets: tagInputs['f-sb-sockets'].getTags(),
+    processes: tagInputs['f-sb-processes'].getTags(),
+  };
+
+  const content = buildSandboxYaml(data);
   const btn = document.getElementById('btn-save-sandbox');
   btn.disabled = true;
   try {
