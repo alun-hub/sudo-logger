@@ -555,7 +555,11 @@ func (lw *localWriter) MarkDone() error {
 
 func (lw *localWriter) WriteExitCode(code int32) error {
 	return os.WriteFile(filepath.Join(lw.w.Dir(), "exit_code"),
-		[]byte(strconv.Itoa(int(code))), 0o640)
+		[]byte(fmt.Sprintf("%d\n", code)), 0o640)
+}
+
+func (lw *localWriter) Flush() error {
+	return lw.w.Flush()
 }
 
 func (lw *localWriter) Close() error {

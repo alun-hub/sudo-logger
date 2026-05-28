@@ -44,7 +44,8 @@ func TestNewWriterCreatesCastFile(t *testing.T) {
 
 // TestNewWriterHeaderContent checks that the cast header contains key fields.
 func TestNewWriterHeaderContent(t *testing.T) {
-	_, dir := newTestWriter(t)
+	w, dir := newTestWriter(t)
+	w.Flush()
 	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
 	if err != nil {
 		t.Fatalf("read cast: %v", err)
@@ -77,6 +78,7 @@ func TestWriteOutput(t *testing.T) {
 		t.Fatalf("WriteOutput: %v", err)
 	}
 
+	w.Flush()
 	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
 	if err != nil {
 		t.Fatalf("read cast: %v", err)
@@ -114,6 +116,7 @@ func TestWriteInput(t *testing.T) {
 		t.Fatalf("WriteInput: %v", err)
 	}
 
+	w.Flush()
 	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
 	if err != nil {
 		t.Fatalf("read cast: %v", err)
@@ -198,6 +201,7 @@ func TestConcurrentWrites(t *testing.T) {
 	wg.Wait()
 
 	// Verify file exists and has at least header + all events.
+	w.Flush()
 	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
 	if err != nil {
 		t.Fatalf("read cast after concurrent writes: %v", err)

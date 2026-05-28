@@ -22,6 +22,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/cilium/ebpf/rlimit"
 )
 
 const defaultConfigPath = "/etc/sudo-logger/agent.conf"
@@ -42,6 +44,10 @@ var debugLog = func(format string, args ...any) {}
 
 func main() {
 	flag.Parse()
+
+	if err := rlimit.RemoveMemlock(); err != nil {
+		log.Printf("warning: failed to remove memlock limit: %v", err)
+	}
 
 	configPath := *flagConfig
 	// Backward compatibility: if agent.conf is missing but the legacy

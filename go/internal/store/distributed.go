@@ -985,6 +985,10 @@ func (dw *distributedWriter) WriteExitCode(code int32) error {
 	return err
 }
 
+func (dw *distributedWriter) Flush() error {
+	return dw.w.Flush()
+}
+
 // Close flushes the cast file, then triggers an async S3 upload.
 func (dw *distributedWriter) Close() error {
 	if err := dw.w.Close(); err != nil {

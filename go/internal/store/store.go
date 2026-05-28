@@ -53,6 +53,9 @@ type SessionWriter interface {
 	// WriteExitCode persists the numeric exit code from SESSION_END.
 	WriteExitCode(code int32) error
 
+	// Flush explicitly flushes the underlying buffer to disk.
+	Flush() error
+
 	// Close flushes and releases all resources held by the writer.
 	Close() error
 

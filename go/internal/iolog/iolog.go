@@ -13,6 +13,7 @@
 package iolog
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -58,6 +59,7 @@ type Writer struct {
 	mu        sync.Mutex
 	dir       string
 	castF     *os.File
+	castBuf   *bufio.Writer
 	startTime time.Time
 }
 
@@ -155,7 +157,8 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 		castF.Close()
 		return nil, fmt.Errorf("marshal cast header: %w", err)
 	}
-	if _, err := castF.Write(append(b, '\n')); err != nil {
+	castBuf := bufio.NewWriter(castF)
+	if _, err := castBuf.Write(append(b, '\n')); err != nil {
 		castF.Close()
 		return nil, fmt.Errorf("write cast header: %w", err)
 	}
@@ -170,6 +173,7 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 	return &Writer{
 		dir:       dir,
 		castF:     castF,
+		castBuf:   castBuf,
 		startTime: startTime,
 	}, nil
 }
@@ -204,8 +208,15 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	if err != nil {
 		return err
 	}
-	_, err = w.castF.Write(append(b, '\n'))
+	_, err = w.castBuf.Write(append(b, '\n'))
 	return err
+}
+
+// Flush explicitly flushes the underlying buffer to disk.
+func (w *Writer) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.castBuf.Flush()
 }
 
 // Dir returns the session directory path (contains session.cast and marker files).
@@ -224,6 +235,9 @@ func (w *Writer) CastPath() string {
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if err := w.castBuf.Flush(); err != nil {
+		return err
+	}
 	if err := w.castF.Sync(); err != nil {
 		return err
 	}

@@ -325,6 +325,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				}
 			}
 
+			if sess != nil {
+				_ = sess.writer.Flush()
+			}
+
 			// ONLY NOW that the batch is on disk, we signal the ACK coalescer
 			if lastSeq > 0 {
 				sendMu.Lock()

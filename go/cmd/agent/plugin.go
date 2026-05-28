@@ -583,7 +583,7 @@ func handlePluginConn(pluginConn net.Conn) {
 			lastServerMsgMu.Lock()
 			age := time.Since(lastServerMsg)
 			lastServerMsgMu.Unlock()
-			if age > 2*hbInterval {
+			if age > 15*hbInterval {
 				consecutiveOK = 0
 				markDead()
 			} else {
