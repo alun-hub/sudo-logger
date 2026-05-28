@@ -597,7 +597,11 @@ func scanAllSessions(logDir string) ([]SessionRecord, error) {
 				continue
 			}
 			sessDir := filepath.Join(userDir, sessEntry.Name())
-			if _, err := os.Stat(filepath.Join(sessDir, "session.cast")); err != nil {
+			hasCast := false
+			if _, err := os.Stat(filepath.Join(sessDir, "session.cast")); err == nil {
+				hasCast = true
+			}
+			if _, err := os.Stat(filepath.Join(sessDir, "session.json")); err != nil && !hasCast {
 				continue // not a cast session directory
 			}
 			tsid := userEntry.Name() + "/" + sessEntry.Name()
@@ -612,19 +616,27 @@ func scanAllSessions(logDir string) ([]SessionRecord, error) {
 	return records, nil
 }
 
-// parseSessionRecord reads the asciinema v2 header from session.cast and the
-// marker files beside it, returning a SessionRecord.
+// parseSessionRecord reads the session header and marker files, returning a
+// SessionRecord. It prefers session.json (header-only, cheap) and falls back
+// to reading the first line of session.cast for sessions created before
+// session.json was introduced.
 func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
-	f, err := os.Open(filepath.Join(sessDir, "session.cast"))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
+	var headerBytes []byte
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
-	if !scanner.Scan() {
-		return nil, fmt.Errorf("empty cast file")
+	if b, err := os.ReadFile(filepath.Join(sessDir, "session.json")); err == nil {
+		headerBytes = b
+	} else {
+		f, err := os.Open(filepath.Join(sessDir, "session.cast"))
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 64*1024), 64*1024)
+		if !scanner.Scan() {
+			return nil, fmt.Errorf("empty cast file")
+		}
+		headerBytes = scanner.Bytes()
 	}
 
 	var hdr struct {
@@ -646,7 +658,7 @@ func parseSessionRecord(sessDir, tsid string) (*SessionRecord, error) {
 		HasIO           bool   `json:"has_io"`
 		CallerProcess   string `json:"caller_process"`
 	}
-	if err := json.Unmarshal(scanner.Bytes(), &hdr); err != nil {
+	if err := json.Unmarshal(headerBytes, &hdr); err != nil {
 		return nil, fmt.Errorf("parse cast header: %w", err)
 	}
 

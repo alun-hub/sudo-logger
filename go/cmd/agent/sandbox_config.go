@@ -93,31 +93,73 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 	seen := make(map[SandboxInodeKey]bool)
 
 	// Use a queue to implement recursive directory traversal.
-	queue := make([]string, 0,
+	// To prevent Denial of Service, we track depth and limit the total number
+	// of resolved nodes.
+	type node struct {
+		path  string
+		depth int
+	}
+	queue := make([]node, 0,
 		len(cfg.Protect.Files)+len(cfg.Protect.Devices)+
 			len(cfg.Protect.Proc)+len(cfg.Protect.Sockets))
-	queue = append(queue, cfg.Protect.Files...)
-	queue = append(queue, cfg.Protect.Devices...)
-	queue = append(queue, cfg.Protect.Proc...)
-	queue = append(queue, cfg.Protect.Sockets...)
+	for _, p := range cfg.Protect.Files {
+		queue = append(queue, node{p, 0})
+	}
+	for _, p := range cfg.Protect.Devices {
+		queue = append(queue, node{p, 0})
+	}
+	for _, p := range cfg.Protect.Proc {
+		queue = append(queue, node{p, 0})
+	}
+	for _, p := range cfg.Protect.Sockets {
+		queue = append(queue, node{p, 0})
+	}
+
+	const maxNodes = 4096
+	const maxDepth = 3
+
+	// Paths that are themselves large filesystem roots. Recursing into them
+	// would stat millions of files. We still protect the top-level inode but
+	// skip ReadDir. Subdirectories of these (e.g. /usr/lib/systemd/system) are
+	// fine — they arrive as explicit entries with their own depth counter.
+	dangerousRoots := map[string]bool{
+		"/": true, "/usr": true, "/bin": true, "/sbin": true,
+		"/lib": true, "/lib64": true, "/lib32": true,
+		"/proc": true, "/sys": true, "/dev": true, "/run": true,
+	}
 
 	for i := 0; i < len(queue); i++ {
-		p := queue[i]
+		if len(res.PathInodes) >= maxNodes {
+			log.Printf("sandbox: max nodes (%d) reached, skipping remaining paths", maxNodes)
+			break
+		}
+
+		n := queue[i]
+		p := n.path
+
+		// Require absolute paths to prevent relative traversal.
+		if !filepath.IsAbs(p) {
+			log.Printf("sandbox: skipping non-absolute path %q", p)
+			continue
+		}
+
 		fi, err := os.Stat(p)
 		if err != nil {
 			debugLog("sandbox: stat %s: %v (skipping)", p, err)
 			continue
 		}
 
-		if fi.IsDir() {
+		if fi.IsDir() && n.depth < maxDepth && !dangerousRoots[filepath.Clean(p)] {
 			entries, err := os.ReadDir(p)
 			if err != nil {
 				log.Printf("sandbox: readdir %s: %v", p, err)
 			} else {
 				for _, entry := range entries {
-					queue = append(queue, filepath.Join(p, entry.Name()))
+					queue = append(queue, node{filepath.Join(p, entry.Name()), n.depth + 1})
 				}
 			}
+		} else if fi.IsDir() && dangerousRoots[filepath.Clean(p)] {
+			log.Printf("sandbox: skipping recursive scan of large root %q (protecting inode only)", p)
 		}
 
 		var st syscall.Stat_t

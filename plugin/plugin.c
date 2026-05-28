@@ -1039,32 +1039,6 @@ static void plugin_close(int exit_status, int error)
  * Input typed during a freeze is buffered in the pty; bash cannot process it
  * until the cgroup unfreezes.
  */
-/* Returns 1 if buf contains GUI startup noise that should be suppressed from
- * the session recording.  On Fedora 44+, GUI apps started as root emit these
- * to stderr: GTK4 portal/session-bus warnings (no portal service for root),
- * and Qt/Mesa/AMD GPU errors (root has no DRM auth in F44, falls back to XCB).
- * None of these strings are produced by shells or non-GUI programs. */
-static int is_gtk4_portal_noise(const char *buf, unsigned int len)
-{
-    if (memmem(buf, len, "Gdk-WARNING", 11) && memmem(buf, len, "portal", 6))
-        return 1;
-    if (memmem(buf, len, "Gtk-WARNING", 11) && memmem(buf, len, "session bus", 11))
-        return 1;
-    if (memmem(buf, len, "amdgpu_get_auth", 15))
-        return 1;
-    if (memmem(buf, len, "MESA: error:", 12))
-        return 1;
-    if (memmem(buf, len, "glx: failed to create dri3 screen", 33))
-        return 1;
-    if (memmem(buf, len, "failed to load driver:", 22))
-        return 1;
-    if (memmem(buf, len, "TU: error:", 10))
-        return 1;
-    if (memmem(buf, len, "qt.qpa.services:", 16) && memmem(buf, len, "portal", 6))
-        return 1;
-    return 0;
-}
-
 static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
@@ -1080,8 +1054,6 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
     (void)errstr;
     if (atomic_load(&g_agent_dead))
         return 0;
-    if (is_gtk4_portal_noise(buf, len))
-        return 1;
     ship_chunk(STREAM_TTYOUT, buf, len);
     return 1;
 }
@@ -1112,8 +1084,6 @@ static int log_stderr(const char *buf, unsigned int len, const char **errstr)
     (void)errstr;
     if (atomic_load(&g_agent_dead))
         return 0;
-    if (is_gtk4_portal_noise(buf, len))
-        return 1;
     ship_chunk(STREAM_STDERR, buf, len);
     return 1;
 }

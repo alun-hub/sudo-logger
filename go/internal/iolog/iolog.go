@@ -4,6 +4,7 @@
 //
 //	<base>/<user>/<host>_<timestamp>/
 //	    session.cast  - asciinema v2 recording (header + event lines)
+//	    session.json  - header-only copy for fast metadata listing (no I/O data)
 //	    ACTIVE        - marker written at open, removed at close
 //	    INCOMPLETE    - marker written if connection drops without session_end
 //	    risk.json     - optional risk score cache (written by replay-server)
@@ -157,6 +158,13 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 	if _, err := castF.Write(append(b, '\n')); err != nil {
 		castF.Close()
 		return nil, fmt.Errorf("write cast header: %w", err)
+	}
+
+	// Write session.json alongside session.cast so that ListSessions can read
+	// only this small file instead of opening the full (potentially large) cast.
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), b, 0640); err != nil {
+		castF.Close()
+		return nil, fmt.Errorf("write session.json: %w", err)
 	}
 
 	return &Writer{

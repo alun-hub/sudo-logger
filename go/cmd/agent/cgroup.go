@@ -204,7 +204,12 @@ func (cg *cgroupSession) moveSudoOut() {
 
 func (cg *cgroupSession) trackDescendants() {
 	defer close(cg.trackDone)
-	ticker := time.NewTicker(50 * time.Millisecond)
+	// 500 ms is a 10x reduction from the original 50 ms while still providing
+	// sub-second response for moveSudoOut and escaped-cgroup detection.
+	// Real-time fork notification via eBPF (sandbox.bpf.c sched_process_fork)
+	// would eliminate polling entirely but requires a dedicated ring-buffer
+	// channel back to Go — deferred as a follow-up.
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	seen := map[int]struct{}{cg.sudoPid: {}}
