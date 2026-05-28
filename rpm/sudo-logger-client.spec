@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.82
+Version:        1.20.83
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -117,6 +117,10 @@ fi
 # Load SELinux policy module
 semodule -i %{_datadir}/selinux/packages/sudo_logger.pp 2>/dev/null || true
 %systemd_post sudo-logger-agent.service
+# On upgrade the preset only runs for fresh installs, so explicitly enable
+# and start the service here. On upgrade %postun of the old package sends
+# SIGTERM via systemctl kill; Restart=always then picks up the new binary.
+systemctl enable --now sudo-logger-agent.service >/dev/null 2>&1 || true
 
 %posttrans
 # Make plugin binary and agent immutable so they cannot be silently replaced
@@ -177,6 +181,9 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Wed May 28 2026 sudo-logger 1.20.83-1
+- fix(spec): enable and start agent service on upgrade (not only fresh install)
+
 * Wed May 28 2026 sudo-logger 1.20.82-1
 - fix(spec): install systemd preset so service is auto-enabled on fresh install
 
