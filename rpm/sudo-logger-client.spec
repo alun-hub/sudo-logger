@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.81
+Version:        1.20.82
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -63,6 +63,10 @@ install -D -m 0755 go/sudo-logger-agent \
 # Systemd service
 install -D -m 0644 sudo-logger-agent.service \
     %{buildroot}%{_unitdir}/sudo-logger-agent.service
+
+# Systemd preset (enable service on install)
+install -D -m 0644 sudo-logger-agent.preset \
+    %{buildroot}%{_presetdir}/50-sudo-logger-agent.preset
 
 # Config directory (certs placed here by admin)
 install -d -m 0750 %{buildroot}%{_sysconfdir}/sudo-logger
@@ -162,6 +166,7 @@ fi
 %{_libexecdir}/sudo/sudo_logger_plugin.so
 %{_bindir}/sudo-logger-agent
 %{_unitdir}/sudo-logger-agent.service
+%{_presetdir}/50-sudo-logger-agent.preset
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/agent.conf
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/sandbox.yaml
@@ -172,6 +177,9 @@ fi
 %{_mandir}/man5/sandbox.yaml.5*
 
 %changelog
+* Wed May 28 2026 sudo-logger 1.20.82-1
+- fix(spec): install systemd preset so service is auto-enabled on fresh install
+
 * Wed May 27 2026 sudo-logger 1.20.81-1
 - security: add lsm/bpf hook to block eBPF syscalls for sandboxed processes
   Prevents root users inside a sudo session from manipulating protected_inodes
