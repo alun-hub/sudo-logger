@@ -1555,6 +1555,24 @@ func handlePutRetention(w http.ResponseWriter, r *http.Request) {
 
 // ── Sandbox config API ────────────────────────────────────────────────────────
 
+// sandboxYAML mirrors the agent's sandboxYAML struct and is used for strict
+// schema validation of sandbox configs submitted via the API.
+type sandboxYAML struct {
+	Protect struct {
+		Files     []string `yaml:"files"`
+		Devices   []string `yaml:"devices"`
+		Proc      []string `yaml:"proc"`
+		Sockets   []string `yaml:"sockets"`
+		Processes []string `yaml:"processes"`
+	} `yaml:"protect"`
+}
+
+const (
+	maxSandboxConfigSize  = 1 << 20 // 1 MB — generous for any sandbox.yaml
+	maxSandboxTemplates   = 50
+	maxSandboxTemplateLen = 64 * 1024 // 64 KB per template
+)
+
 func handleGetSandbox(w http.ResponseWriter, r *http.Request) {
 	content, err := sessionStore.GetConfig(r.Context(), "sandbox.yaml")
 	if err != nil {
@@ -1571,6 +1589,7 @@ func handleGetSandbox(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSandboxConfigSize)
 	var body struct {
 		Content string `json:"content"`
 	}
@@ -1578,11 +1597,13 @@ func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	// Validate that the YAML is at least parseable before storing.
+	// Validate against the typed schema with strict unknown-field rejection.
 	if body.Content != "" {
-		var check any
-		if err := yaml.Unmarshal([]byte(body.Content), &check); err != nil {
-			http.Error(w, "invalid YAML: "+err.Error(), http.StatusBadRequest)
+		dec := yaml.NewDecoder(strings.NewReader(body.Content))
+		dec.KnownFields(true)
+		var check sandboxYAML
+		if err := dec.Decode(&check); err != nil {
+			http.Error(w, "invalid sandbox config: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -1608,12 +1629,37 @@ func handleGetSandboxTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutSandboxTemplates(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSandboxConfigSize)
 	var templates map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&templates); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	data, _ := json.Marshal(templates)
+	if len(templates) > maxSandboxTemplates {
+		http.Error(w, fmt.Sprintf("too many templates (max %d)", maxSandboxTemplates), http.StatusBadRequest)
+		return
+	}
+	for name, content := range templates {
+		if len(content) > maxSandboxTemplateLen {
+			http.Error(w, fmt.Sprintf("template %q exceeds maximum size", name), http.StatusBadRequest)
+			return
+		}
+		if content == "" {
+			continue
+		}
+		dec := yaml.NewDecoder(strings.NewReader(content))
+		dec.KnownFields(true)
+		var check sandboxYAML
+		if err := dec.Decode(&check); err != nil {
+			http.Error(w, fmt.Sprintf("template %q: invalid sandbox config: %s", name, err.Error()), http.StatusBadRequest)
+			return
+		}
+	}
+	data, err := json.Marshal(templates)
+	if err != nil {
+		http.Error(w, "marshal failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if err := sessionStore.SetConfig(r.Context(), "sandbox_templates", string(data)); err != nil {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return

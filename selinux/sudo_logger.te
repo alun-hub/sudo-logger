@@ -137,9 +137,12 @@ allow sudo_agent_t domain:process { getpgid };
 # Send signals (including SIGSTOP/SIGCONT) to session processes.
 allow sudo_agent_t domain:process { signal sigstop };
 
-# Execute loginctl (bin_t) to query session metadata for the eBPF session
-# tracker (loginctlSession in ebpf.go).  No domain transition: subprocess
-# inherits sudo_agent_t.
+# Execute loginctl to query session metadata for the eBPF session tracker
+# (loginctlSession in ebpf.go).  No domain transition: subprocess inherits
+# sudo_agent_t.  /usr/bin/loginctl is labeled bin_t by the distro policy so
+# this rule is intentionally broad; relabeling loginctl to a custom type would
+# break any other domain that executes it via bin_t.  Acceptable because
+# sudo_agent_t is already a tightly constrained privileged domain.
 require { type bin_t; }
 allow sudo_agent_t bin_t:file { read open execute execute_no_trans map getattr };
 

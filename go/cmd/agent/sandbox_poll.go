@@ -31,13 +31,12 @@ func startSandboxPoller() {
 				debugLog("sandbox poller: %v", err)
 			} else if content != "" {
 				h := sha256.Sum256([]byte(content))
-				changed := (h != lastHash)
-				// Always reload sandbox if content is available.
-				// This acts as a self-healing mechanism in case eBPF maps were tampered with.
-				if err := reloadSandboxFromContent(content, changed); err != nil {
-					log.Printf("sandbox poller: reload: %v", err)
-				} else {
-					lastHash = h
+				if h != lastHash {
+					if err := reloadSandboxFromContent(content, true); err != nil {
+						log.Printf("sandbox poller: reload: %v", err)
+					} else {
+						lastHash = h
+					}
 				}
 			}
 			<-ticker.C
@@ -66,6 +65,9 @@ func fetchConfigFromServer(server, key string) (string, error) {
 	if err := conn.Handshake(); err != nil {
 		return "", fmt.Errorf("TLS handshake: %w", err)
 	}
+	// Reset the deadline so the full 10 s applies to the request/response I/O
+	// rather than the remaining time after the handshake.
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	w := bufio.NewWriter(conn)
 	if err := protocol.WriteMessage(w, protocol.MsgFetchConfig, []byte(key)); err != nil {
