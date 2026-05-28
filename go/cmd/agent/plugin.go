@@ -29,7 +29,11 @@ var validTTYPath = regexp.MustCompile(`^/dev/(pts/\d{1,6}|tty[a-zA-Z0-9]{0,10})$
 
 func resolveTTYPath(ttyPath string, sudoPID int) string {
 	if ttyPath != "/dev/tty" {
-		return ttyPath
+		if validTTYPath.MatchString(ttyPath) {
+			return ttyPath
+		}
+		// If the provided path is invalid, fall back to /dev/tty resolution via procfs.
+		ttyPath = "/dev/tty"
 	}
 	for _, fd := range []int{0, 1, 2} {
 		link, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", sudoPID, fd))

@@ -831,7 +831,7 @@ static int plugin_open(unsigned int        version,
     setsockopt(g_agent_fd, SOL_SOCKET, SO_RCVTIMEO,
                &rcv_timeout, sizeof(rcv_timeout));
 
-    char payload[8192];
+    char payload[16384];
     int plen = snprintf(payload, sizeof(payload),
         "{\"session_id\":\"%s\",\"user\":\"%s\",\"host\":\"%s\","
         "\"command\":\"%s\","
@@ -851,14 +851,13 @@ static int plugin_open(unsigned int        version,
         user_uid, user_gid,
         (long long)now_sec(), (int)getpid());
 
-    /* snprintf returns the number of bytes that *would* have been written,
-     * which may exceed sizeof(payload) if the input was truncated.
-     * Use the actual length written (capped by sizeof(payload)-1) to avoid
-     * over-reading the stack buffer in send_msg/writev. */
-    if (plen < 0)
-        plen = 0;
-    else if (plen >= (int)sizeof(payload))
-        plen = (int)strlen(payload);
+    /* Prevent sending malformed/truncated JSON if the buffer was too small. */
+    if (plen < 0 || plen >= (int)sizeof(payload)) {
+        *errstr = "sudo-logger: session metadata too large (truncated)";
+        close(g_agent_fd);
+        g_agent_fd = -1;
+        return -1;
+    }
 
     send_msg(g_agent_fd, MSG_SESSION_START, payload, (uint32_t)plen);
 
