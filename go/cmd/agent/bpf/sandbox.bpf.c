@@ -506,7 +506,12 @@ int BPF_PROG(sandbox_ptrace_access_check, struct task_struct *child, unsigned in
 {
 	if (!in_sandbox_pid())
 		return 0;
-	if (!cfg_enabled(CFG_DENY_PTRACE))
+
+	// Only block and alert on ATTACH attempts (mode & 2).
+	// We allow READ attempts (mode & 1) because tools like 'pkill', 'ps' and 'top'
+	// need to read process metadata from /proc to function. Blocking read
+	// access causes massive log spam and breaks basic system observability.
+	if (!(mode & 2))
 		return 0;
 
 	// Exempt sudo itself.
