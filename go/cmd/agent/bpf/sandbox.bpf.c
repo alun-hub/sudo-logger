@@ -467,29 +467,28 @@ int BPF_PROG(sandbox_bpf, int cmd, union bpf_attr *attr, unsigned int size)
 #define NETLINK_AUDIT 9
 #endif
 
-// Deny creation of AF_NETLINK sockets used for firewall/network/audit tampering.
+// Deny creation of AF_NETLINK sockets used for firewall tampering.
 SEC("lsm/socket_create")
 int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern)
 {
 	if (!in_sandbox_pid())
 		return 0;
-	if (!cfg_enabled(CFG_DENY_NETLINK))
-		return 0;
 
-	// Exempt the sudo process itself from these restrictions, as PAM modules
-	// (like pam_systemd or pam_audit) may need to create netlink sockets
-	// during session setup.
+	// Exempt the sudo process itself from these restrictions.
 	char comm[16];
 	bpf_get_current_comm(&comm, sizeof(comm));
 	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
 		return 0;
 
 	if (family == AF_NETLINK) {
-		// NETLINK_ROUTE:      iproute2, nmcli — IP addresses, routes
+		// We allow NETLINK_ROUTE because glibc/nss modules use it for basic
+		// lookups (getifaddrs, getaddrinfo). Blocking it causes heavy spam
+		// and breaks many standard utilities.
+		//
+		// We focus on blocking protocols used exclusively for tampering:
 		// NETLINK_FIREWALL/NETLINK_NETFILTER: iptables, nftables, firewalld
-		// NETLINK_AUDIT:      auditctl — kernel audit rule changes (auditctl -D)
-		if (protocol == NETLINK_ROUTE     ||
-		    protocol == NETLINK_FIREWALL  ||
+		// NETLINK_AUDIT: auditctl (tampering with audit logs)
+		if (protocol == NETLINK_FIREWALL  ||
 		    protocol == NETLINK_NETFILTER ||
 		    protocol == NETLINK_AUDIT) {
 			submit_alert(ALERT_SOCKET_CREATE, family, protocol);
@@ -595,15 +594,8 @@ int BPF_PROG(sandbox_capable, const struct cred *cred,
 	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
 		return 0;
 
-	if (cap == CAP_AUDIT_CONTROL && cfg_enabled(CFG_DENY_CAP_AUDIT_CONTROL)) {
-		submit_alert(ALERT_CAPABLE, 0, cap);
-		return -EPERM;
-	}
-	if (cap == CAP_NET_ADMIN && cfg_enabled(CFG_DENY_CAP_NET_ADMIN)) {
-		submit_alert(ALERT_CAPABLE, 0, cap);
-		return -EPERM;
-	}
-	if (cap == CAP_SYS_MODULE && cfg_enabled(CFG_DENY_CAP_SYS_MODULE)) {
+	// We block these critical capabilities for root-sessions in the sandbox.
+	if (cap == CAP_AUDIT_CONTROL || cap == CAP_NET_ADMIN || cap == CAP_SYS_MODULE) {
 		submit_alert(ALERT_CAPABLE, 0, cap);
 		return -EPERM;
 	}
