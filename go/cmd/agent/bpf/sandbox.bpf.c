@@ -476,6 +476,14 @@ int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern
 	if (!cfg_enabled(CFG_DENY_NETLINK))
 		return 0;
 
+	// Exempt the sudo process itself from these restrictions, as PAM modules
+	// (like pam_systemd or pam_audit) may need to create netlink sockets
+	// during session setup.
+	char comm[16];
+	bpf_get_current_comm(&comm, sizeof(comm));
+	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
+		return 0;
+
 	if (family == AF_NETLINK) {
 		// NETLINK_ROUTE:      iproute2, nmcli — IP addresses, routes
 		// NETLINK_FIREWALL/NETLINK_NETFILTER: iptables, nftables, firewalld
@@ -499,6 +507,12 @@ int BPF_PROG(sandbox_ptrace_access_check, struct task_struct *child, unsigned in
 	if (!in_sandbox_pid())
 		return 0;
 	if (!cfg_enabled(CFG_DENY_PTRACE))
+		return 0;
+
+	// Exempt sudo itself.
+	char comm[16];
+	bpf_get_current_comm(&comm, sizeof(comm));
+	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
 		return 0;
 
 	__u32 target_tgid = BPF_CORE_READ(child, tgid);
@@ -537,6 +551,12 @@ int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, co
 	if (!cfg_enabled(CFG_DENY_MOUNT))
 		return 0;
 
+	// Exempt sudo itself (some PAM modules might check mounts or even do them).
+	char comm[16];
+	bpf_get_current_comm(&comm, sizeof(comm));
+	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
+		return 0;
+
 	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
 	if (!inode_protected(inode))
 		return 0;
@@ -567,6 +587,12 @@ int BPF_PROG(sandbox_capable, const struct cred *cred,
 	     struct user_namespace *ns, int cap, unsigned int opts)
 {
 	if (!in_sandbox_pid())
+		return 0;
+
+	// Exempt sudo itself.
+	char comm[16];
+	bpf_get_current_comm(&comm, sizeof(comm));
+	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
 		return 0;
 
 	if (cap == CAP_AUDIT_CONTROL && cfg_enabled(CFG_DENY_CAP_AUDIT_CONTROL)) {
