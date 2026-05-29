@@ -128,7 +128,14 @@ func main() {
 		log.Fatalf("mkdir /run/sudo-logger: %v", err)
 	}
 
+	// Create the socket with 0600 permissions atomically via umask. Calling
+	// Chmod after Listen leaves a TOCTOU window in which a local non-root
+	// process could connect and inject or read session data; constraining the
+	// creation mode closes that window. The Chmod below is kept as a
+	// belt-and-suspenders guard (and normalises perms if umask interacts oddly).
+	oldUmask := syscall.Umask(0o177)
 	ln, err := net.Listen("unix", cfg.Socket)
+	syscall.Umask(oldUmask)
 	if err != nil {
 		log.Fatalf("listen unix %s: %v", cfg.Socket, err)
 	}

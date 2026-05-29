@@ -80,6 +80,37 @@ func TestParseChunkTooShort(t *testing.T) {
 	}
 }
 
+// TestParseChunkOverflowDlen verifies that a crafted datalen near 2^32 cannot
+// bypass the bounds check via uint32 overflow. Such a payload previously caused
+// a ~4 GB allocation or a slice-bounds panic, crashing the log server (a
+// remotely triggerable DoS for any holder of a valid client certificate).
+func TestParseChunkOverflowDlen(t *testing.T) {
+	payload := make([]byte, 100)
+	// datalen = 0xFFFFFFF0: with the old code 21+dlen wraps (uint32) to 5,
+	// which is < len(payload), so the truncation guard was skipped.
+	binary.BigEndian.PutUint32(payload[17:21], 0xFFFFFFF0)
+
+	// Must return an error, must not panic, and must not allocate.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("ParseChunk panicked on crafted datalen: %v", r)
+		}
+	}()
+	if _, err := protocol.ParseChunk(payload); err == nil {
+		t.Error("expected error for chunk with overflowing datalen")
+	}
+}
+
+// TestParseChunkDlenExceedsPayload verifies a plain (non-overflowing) oversized
+// datalen is still rejected as truncated.
+func TestParseChunkDlenExceedsPayload(t *testing.T) {
+	payload := make([]byte, 100)
+	binary.BigEndian.PutUint32(payload[17:21], 1000) // claims 1000 data bytes, only 79 present
+	if _, err := protocol.ParseChunk(payload); err == nil {
+		t.Error("expected error for chunk claiming more data than present")
+	}
+}
+
 // TestParseSessionEnd decodes a valid SESSION_END payload.
 func TestParseSessionEnd(t *testing.T) {
 	var payload [12]byte
