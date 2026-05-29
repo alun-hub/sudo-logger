@@ -83,6 +83,16 @@ install -D -m 0640 sandbox.yaml \
 install -D -m 0644 selinux/sudo_logger.pp \
     %{buildroot}%{_datadir}/selinux/packages/sudo_logger.pp
 
+# Audit immutable rules — lock audit config against runtime changes
+install -D -m 0640 audit/99-immutable.rules \
+    %{buildroot}%{_sysconfdir}/audit/rules.d/99-immutable.rules
+
+# systemd drop-ins — RefuseManualStop=yes for security-critical daemons
+for svc in sshd sssd rsyslog polkit chronyd NetworkManager firewalld crond gssproxy; do
+    install -D -m 0644 systemd-drop-ins/refuse-stop.conf \
+        %{buildroot}/etc/systemd/system/${svc}.service.d/refuse-stop.conf
+done
+
 # Man pages
 install -D -m 0644 man/sudo-logger-agent.8 \
     %{buildroot}%{_mandir}/man8/sudo-logger-agent.8
@@ -179,8 +189,32 @@ fi
 %{_mandir}/man8/sudo-logger-agent.8*
 %{_mandir}/man8/sudo_logger_plugin.8*
 %{_mandir}/man5/sandbox.yaml.5*
+%config(noreplace) %attr(0640, root, root) %{_sysconfdir}/audit/rules.d/99-immutable.rules
+%dir /etc/systemd/system/sshd.service.d
+/etc/systemd/system/sshd.service.d/refuse-stop.conf
+%dir /etc/systemd/system/sssd.service.d
+/etc/systemd/system/sssd.service.d/refuse-stop.conf
+%dir /etc/systemd/system/rsyslog.service.d
+/etc/systemd/system/rsyslog.service.d/refuse-stop.conf
+%dir /etc/systemd/system/polkit.service.d
+/etc/systemd/system/polkit.service.d/refuse-stop.conf
+%dir /etc/systemd/system/chronyd.service.d
+/etc/systemd/system/chronyd.service.d/refuse-stop.conf
+%dir /etc/systemd/system/NetworkManager.service.d
+/etc/systemd/system/NetworkManager.service.d/refuse-stop.conf
+%dir /etc/systemd/system/firewalld.service.d
+/etc/systemd/system/firewalld.service.d/refuse-stop.conf
+%dir /etc/systemd/system/crond.service.d
+/etc/systemd/system/crond.service.d/refuse-stop.conf
+%dir /etc/systemd/system/gssproxy.service.d
+/etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Thu May 29 2026 sudo-logger 1.20.84-1
+- hardening(sandbox): protect /etc/hosts, resolv.conf, ld.so.preload, /var/spool/at, nftables config
+- hardening(audit): install /etc/audit/rules.d/99-immutable.rules (-e 2) to lock audit rules at runtime
+- hardening(systemd): RefuseManualStop=yes drop-ins for sshd, sssd, rsyslog, polkit, chronyd, NetworkManager, firewalld, crond, gssproxy
+
 * Wed May 28 2026 sudo-logger 1.20.83-1
 - fix(spec): enable and start agent service on upgrade (not only fresh install)
 

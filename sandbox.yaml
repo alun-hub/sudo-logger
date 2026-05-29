@@ -104,9 +104,31 @@ protect:
     - /etc/crontab
     - /var/spool/cron
 
+    # at — one-shot scheduled jobs (post-session execution vector)
+    - /var/spool/at
+    - /etc/at.allow
+    - /etc/at.deny
+
     # systemd units — prevent installing persistent backdoor services
     - /etc/systemd/system
     - /usr/lib/systemd/system
+
+    # Firewall rules persistence — transient iptables/nftables rules survive via these
+    - /etc/sysconfig/iptables
+    - /etc/sysconfig/ip6tables
+    - /etc/nftables.conf
+    - /etc/nftables
+
+    # Network name resolution — DNS redirect to rogue log server
+    - /etc/hosts
+    - /etc/resolv.conf
+    - /etc/nsswitch.conf
+    - /etc/NetworkManager
+
+    # Dynamic linker — ld.so.preload injects libraries into agent on next restart
+    - /etc/ld.so.preload
+    - /etc/ld.so.conf
+    - /etc/ld.so.conf.d
 
     # root home — prevent planting shell hooks or SSH backdoors
     - /root/.bashrc

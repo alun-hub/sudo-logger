@@ -1,0 +1,3 @@
+# Lock audit configuration — prevents auditctl -D and rule changes without reboot.
+# Must be the last rule file loaded (99-prefix).
+-e 2
