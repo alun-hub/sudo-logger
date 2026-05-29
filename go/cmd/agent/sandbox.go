@@ -32,6 +32,9 @@ const (
 	alertDirSymlink   = 10
 	alertProcessKill  = 11
 	alertBpfSyscall   = 12
+	alertSocketCreate = 13
+	alertPtrace       = 14
+	alertMount        = 15
 )
 
 var alertNames = map[uint32]string{
@@ -47,6 +50,9 @@ var alertNames = map[uint32]string{
 	alertDirSymlink:   "DIR_SYMLINK",
 	alertProcessKill:  "PROCESS_KILL",
 	alertBpfSyscall:   "BPF_SYSCALL",
+	alertSocketCreate: "SOCKET_CREATE",
+	alertPtrace:       "PTRACE",
+	alertMount:        "MOUNT",
 }
 
 // bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c

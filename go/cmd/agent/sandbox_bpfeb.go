@@ -62,20 +62,23 @@ type SandboxSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxProgramSpecs struct {
-	SandboxBpf            *ebpf.ProgramSpec `ebpf:"sandbox_bpf"`
-	SandboxFileOpen       *ebpf.ProgramSpec `ebpf:"sandbox_file_open"`
-	SandboxFilePermission *ebpf.ProgramSpec `ebpf:"sandbox_file_permission"`
-	SandboxInodeCreate    *ebpf.ProgramSpec `ebpf:"sandbox_inode_create"`
-	SandboxInodeMkdir     *ebpf.ProgramSpec `ebpf:"sandbox_inode_mkdir"`
-	SandboxInodeMknod     *ebpf.ProgramSpec `ebpf:"sandbox_inode_mknod"`
-	SandboxInodeRename    *ebpf.ProgramSpec `ebpf:"sandbox_inode_rename"`
-	SandboxInodeSetattr   *ebpf.ProgramSpec `ebpf:"sandbox_inode_setattr"`
-	SandboxInodeSymlink   *ebpf.ProgramSpec `ebpf:"sandbox_inode_symlink"`
-	SandboxInodeUnlink    *ebpf.ProgramSpec `ebpf:"sandbox_inode_unlink"`
-	SandboxPathTruncate   *ebpf.ProgramSpec `ebpf:"sandbox_path_truncate"`
-	SandboxProcessExit    *ebpf.ProgramSpec `ebpf:"sandbox_process_exit"`
-	SandboxProcessFork    *ebpf.ProgramSpec `ebpf:"sandbox_process_fork"`
-	SandboxTaskKill       *ebpf.ProgramSpec `ebpf:"sandbox_task_kill"`
+	SandboxBpf               *ebpf.ProgramSpec `ebpf:"sandbox_bpf"`
+	SandboxFileOpen          *ebpf.ProgramSpec `ebpf:"sandbox_file_open"`
+	SandboxFilePermission    *ebpf.ProgramSpec `ebpf:"sandbox_file_permission"`
+	SandboxInodeCreate       *ebpf.ProgramSpec `ebpf:"sandbox_inode_create"`
+	SandboxInodeMkdir        *ebpf.ProgramSpec `ebpf:"sandbox_inode_mkdir"`
+	SandboxInodeMknod        *ebpf.ProgramSpec `ebpf:"sandbox_inode_mknod"`
+	SandboxInodeRename       *ebpf.ProgramSpec `ebpf:"sandbox_inode_rename"`
+	SandboxInodeSetattr      *ebpf.ProgramSpec `ebpf:"sandbox_inode_setattr"`
+	SandboxInodeSymlink      *ebpf.ProgramSpec `ebpf:"sandbox_inode_symlink"`
+	SandboxInodeUnlink       *ebpf.ProgramSpec `ebpf:"sandbox_inode_unlink"`
+	SandboxPathTruncate      *ebpf.ProgramSpec `ebpf:"sandbox_path_truncate"`
+	SandboxProcessExit       *ebpf.ProgramSpec `ebpf:"sandbox_process_exit"`
+	SandboxProcessFork       *ebpf.ProgramSpec `ebpf:"sandbox_process_fork"`
+	SandboxPtraceAccessCheck *ebpf.ProgramSpec `ebpf:"sandbox_ptrace_access_check"`
+	SandboxSbMount           *ebpf.ProgramSpec `ebpf:"sandbox_sb_mount"`
+	SandboxSocketCreate      *ebpf.ProgramSpec `ebpf:"sandbox_socket_create"`
+	SandboxTaskKill          *ebpf.ProgramSpec `ebpf:"sandbox_task_kill"`
 }
 
 // SandboxMapSpecs contains maps before they are loaded into the kernel.
@@ -142,20 +145,23 @@ type SandboxVariables struct {
 //
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxPrograms struct {
-	SandboxBpf            *ebpf.Program `ebpf:"sandbox_bpf"`
-	SandboxFileOpen       *ebpf.Program `ebpf:"sandbox_file_open"`
-	SandboxFilePermission *ebpf.Program `ebpf:"sandbox_file_permission"`
-	SandboxInodeCreate    *ebpf.Program `ebpf:"sandbox_inode_create"`
-	SandboxInodeMkdir     *ebpf.Program `ebpf:"sandbox_inode_mkdir"`
-	SandboxInodeMknod     *ebpf.Program `ebpf:"sandbox_inode_mknod"`
-	SandboxInodeRename    *ebpf.Program `ebpf:"sandbox_inode_rename"`
-	SandboxInodeSetattr   *ebpf.Program `ebpf:"sandbox_inode_setattr"`
-	SandboxInodeSymlink   *ebpf.Program `ebpf:"sandbox_inode_symlink"`
-	SandboxInodeUnlink    *ebpf.Program `ebpf:"sandbox_inode_unlink"`
-	SandboxPathTruncate   *ebpf.Program `ebpf:"sandbox_path_truncate"`
-	SandboxProcessExit    *ebpf.Program `ebpf:"sandbox_process_exit"`
-	SandboxProcessFork    *ebpf.Program `ebpf:"sandbox_process_fork"`
-	SandboxTaskKill       *ebpf.Program `ebpf:"sandbox_task_kill"`
+	SandboxBpf               *ebpf.Program `ebpf:"sandbox_bpf"`
+	SandboxFileOpen          *ebpf.Program `ebpf:"sandbox_file_open"`
+	SandboxFilePermission    *ebpf.Program `ebpf:"sandbox_file_permission"`
+	SandboxInodeCreate       *ebpf.Program `ebpf:"sandbox_inode_create"`
+	SandboxInodeMkdir        *ebpf.Program `ebpf:"sandbox_inode_mkdir"`
+	SandboxInodeMknod        *ebpf.Program `ebpf:"sandbox_inode_mknod"`
+	SandboxInodeRename       *ebpf.Program `ebpf:"sandbox_inode_rename"`
+	SandboxInodeSetattr      *ebpf.Program `ebpf:"sandbox_inode_setattr"`
+	SandboxInodeSymlink      *ebpf.Program `ebpf:"sandbox_inode_symlink"`
+	SandboxInodeUnlink       *ebpf.Program `ebpf:"sandbox_inode_unlink"`
+	SandboxPathTruncate      *ebpf.Program `ebpf:"sandbox_path_truncate"`
+	SandboxProcessExit       *ebpf.Program `ebpf:"sandbox_process_exit"`
+	SandboxProcessFork       *ebpf.Program `ebpf:"sandbox_process_fork"`
+	SandboxPtraceAccessCheck *ebpf.Program `ebpf:"sandbox_ptrace_access_check"`
+	SandboxSbMount           *ebpf.Program `ebpf:"sandbox_sb_mount"`
+	SandboxSocketCreate      *ebpf.Program `ebpf:"sandbox_socket_create"`
+	SandboxTaskKill          *ebpf.Program `ebpf:"sandbox_task_kill"`
 }
 
 func (p *SandboxPrograms) Close() error {
@@ -173,6 +179,9 @@ func (p *SandboxPrograms) Close() error {
 		p.SandboxPathTruncate,
 		p.SandboxProcessExit,
 		p.SandboxProcessFork,
+		p.SandboxPtraceAccessCheck,
+		p.SandboxSbMount,
+		p.SandboxSocketCreate,
 		p.SandboxTaskKill,
 	)
 }

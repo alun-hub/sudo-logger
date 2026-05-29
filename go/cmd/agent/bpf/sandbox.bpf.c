@@ -60,6 +60,9 @@ enum sandbox_alert_type {
 	ALERT_DIR_SYMLINK = 10,
 	ALERT_PROCESS_KILL = 11,
 	ALERT_BPF_SYSCALL = 12,
+	ALERT_SOCKET_CREATE = 13,
+	ALERT_PTRACE = 14,
+	ALERT_MOUNT = 15,
 };
 
 struct sandbox_alert {
@@ -415,6 +418,85 @@ int BPF_PROG(sandbox_bpf, int cmd, union bpf_attr *attr, unsigned int size)
 
 	// We block ALL bpf() syscalls for sandboxed processes.
 	submit_alert(ALERT_BPF_SYSCALL, 0, 0);
+	return -EPERM;
+}
+
+#ifndef AF_NETLINK
+#define AF_NETLINK 16
+#endif
+#ifndef NETLINK_ROUTE
+#define NETLINK_ROUTE 0
+#endif
+#ifndef NETLINK_FIREWALL
+#define NETLINK_FIREWALL 3
+#endif
+#ifndef NETLINK_NETFILTER
+#define NETLINK_NETFILTER 12
+#endif
+
+// Deny creation of specific AF_NETLINK sockets to prevent firewall/network tampering.
+SEC("lsm/socket_create")
+int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	if (family == AF_NETLINK) {
+		// NETLINK_ROUTE: iproute2, nmcli, adding/removing IP addresses, routes
+		// NETLINK_FIREWALL/NETLINK_NETFILTER: iptables, nftables, firewalld
+		if (protocol == NETLINK_ROUTE || protocol == NETLINK_FIREWALL || protocol == NETLINK_NETFILTER) {
+			submit_alert(ALERT_SOCKET_CREATE, family, protocol);
+			return -EPERM;
+		}
+	}
+	return 0;
+}
+
+// Deny ptracing processes outside the sandbox to prevent injecting code into
+// root-owned daemons (e.g. systemd or sshd) as an escape vector.
+SEC("lsm/ptrace_access_check")
+int BPF_PROG(sandbox_ptrace_access_check, struct task_struct *child, unsigned int mode)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	__u32 target_tgid = BPF_CORE_READ(child, tgid);
+
+	// If the target is NOT also in the sandbox, block it!
+	if (!bpf_map_lookup_elem(&sandboxed_pids, &target_tgid)) {
+		struct sandbox_alert *a;
+		a = bpf_ringbuf_reserve(&sandbox_alerts, sizeof(*a), 0);
+		if (!a)
+			return -EPERM;
+		a->cgroup_id = bpf_get_current_cgroup_id();
+		a->pid = bpf_get_current_pid_tgid() >> 32;
+		a->type = ALERT_PTRACE;
+		bpf_get_current_comm(&a->comm, sizeof(a->comm));
+		a->ino = 0;
+		a->dev = 0;
+		a->target_pid = target_tgid;
+		bpf_probe_read_kernel_str(a->target_comm, sizeof(a->target_comm), child->comm);
+		a->sig = 0;
+		a->pad = 0;
+		bpf_ringbuf_submit(a, 0);
+		return -EPERM;
+	}
+	return 0;
+}
+
+// Deny mount syscalls. This prevents a user from mounting an empty tmpfs over
+// a protected directory (like /etc/sudo-logger) to bypass file monitoring.
+SEC("lsm/sb_mount")
+int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, const char *type, unsigned long flags, void *data)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	// Inode/device info for where the mount is happening
+	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
+	submit_alert(ALERT_MOUNT,
+		BPF_CORE_READ(inode, i_ino),
+		(__u32)BPF_CORE_READ(inode, i_sb, s_dev));
 	return -EPERM;
 }
 
