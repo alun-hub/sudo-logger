@@ -484,6 +484,10 @@
     .form-input:focus { border-color: var(--green); }
     .form-input::placeholder { color: var(--text-dim); }
     .form-hint { font-size: 11px; color: var(--text-dim); font-family: var(--font-ui); }
+    .cb-feature { display:flex; align-items:flex-start; gap:7px; font-size:12px; color:var(--text-primary);
+      font-family:var(--font-ui); cursor:pointer; padding:3px 0; }
+    .cb-feature input[type=checkbox] { margin-top:2px; accent-color:var(--green); flex-shrink:0; }
+    .cb-feature strong { color:var(--text-primary); }
     .form-section { font-size: 11px; font-weight: 600; letter-spacing: 0.07em;
       text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--border);
       padding-bottom: 5px; margin-bottom: 2px; font-family: var(--font-ui); }
@@ -902,6 +906,25 @@
             </select>
             <button class="btn-secondary" id="btn-load-template">Load</button>
             <button class="btn-secondary" id="btn-save-template">Save as Template</button>
+          </div>
+
+          <label>Security features</label>
+          <div class="form-group">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px">
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-netlink" checked>
+                <span><strong>Block AF_NETLINK</strong> — iptables, nftables, ip route, auditctl</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-mount" checked>
+                <span><strong>Block mount</strong> — prevent bind-mounting over protected paths</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-ptrace" checked>
+                <span><strong>Block ptrace</strong> — prevent code injection into root daemons</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-audit-control" checked>
+                <span><strong>Block CAP_AUDIT_CONTROL</strong> — defence-in-depth for auditctl</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-net-admin" checked>
+                <span><strong>Block CAP_NET_ADMIN</strong> — raw sockets and netdevice ops</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-sys-module" checked>
+                <span><strong>Block CAP_SYS_MODULE</strong> — insmod / modprobe</span></label>
+            </div>
+            <p class="form-hint">All features are active by default. Uncheck to allow a specific operation (e.g. for network-admin sessions that need iproute2).</p>
           </div>
 
           <label>Files & directories</label>
@@ -3213,6 +3236,13 @@ function loadTemplate() {
     tagInputs['f-sb-proc'].setTags(parsed.proc);
     tagInputs['f-sb-sockets'].setTags(parsed.sockets);
     tagInputs['f-sb-processes'].setTags(parsed.processes);
+    const f = parsed.features;
+    document.getElementById('sb-feat-deny-netlink').checked           = f.deny_netlink !== false;
+    document.getElementById('sb-feat-deny-mount').checked             = f.deny_mount !== false;
+    document.getElementById('sb-feat-deny-ptrace').checked            = f.deny_ptrace !== false;
+    document.getElementById('sb-feat-deny-cap-audit-control').checked = f.deny_cap_audit_control !== false;
+    document.getElementById('sb-feat-deny-cap-net-admin').checked     = f.deny_cap_net_admin !== false;
+    document.getElementById('sb-feat-deny-cap-sys-module').checked    = f.deny_cap_sys_module !== false;
   }
 }
 
@@ -3221,10 +3251,18 @@ async function saveAsTemplate() {
   if (!name) return;
 
   const data = {
-    files: tagInputs['f-sb-files'].getTags(),
-    devices: tagInputs['f-sb-devices'].getTags(),
-    proc: tagInputs['f-sb-proc'].getTags(),
-    sockets: tagInputs['f-sb-sockets'].getTags(),
+    features: {
+      deny_netlink:           document.getElementById('sb-feat-deny-netlink').checked,
+      deny_mount:             document.getElementById('sb-feat-deny-mount').checked,
+      deny_ptrace:            document.getElementById('sb-feat-deny-ptrace').checked,
+      deny_cap_audit_control: document.getElementById('sb-feat-deny-cap-audit-control').checked,
+      deny_cap_net_admin:     document.getElementById('sb-feat-deny-cap-net-admin').checked,
+      deny_cap_sys_module:    document.getElementById('sb-feat-deny-cap-sys-module').checked,
+    },
+    files:     tagInputs['f-sb-files'].getTags(),
+    devices:   tagInputs['f-sb-devices'].getTags(),
+    proc:      tagInputs['f-sb-proc'].getTags(),
+    sockets:   tagInputs['f-sb-sockets'].getTags(),
     processes: tagInputs['f-sb-processes'].getTags(),
   };
   const yaml = buildSandboxYaml(data);
@@ -3249,46 +3287,64 @@ document.getElementById('btn-load-template').addEventListener('click', loadTempl
 document.getElementById('btn-save-template').addEventListener('click', saveAsTemplate);
 
 function parseSandboxYaml(yamlStr) {
-  const data = { files: [], devices: [], proc: [], sockets: [], processes: [] };
+  const featureKeys = ['deny_netlink','deny_mount','deny_ptrace',
+    'deny_cap_audit_control','deny_cap_net_admin','deny_cap_sys_module'];
+  const data = {
+    files: [], devices: [], proc: [], sockets: [], processes: [],
+    features: Object.fromEntries(featureKeys.map(k => [k, true])), // default all true
+  };
   if (!yamlStr) return data;
+
+  let section = null; // 'features' | 'protect' | null
   let currentKey = null;
-  const lines = yamlStr.split('\n');
-  for (let line of lines) {
-    // Strip comments and trailing space
+  for (let line of yamlStr.split('\n')) {
     const cleanLine = line.replace(/#.*/, '').trimRight();
     if (!cleanLine.trim()) continue;
 
-    // Match top-level keys like "  files:"
-    const keyMatch = cleanLine.match(/^ {2}(files|devices|proc|sockets|processes):/);
-    if (keyMatch) {
-      currentKey = keyMatch[1];
-      continue;
-    }
+    // Top-level sections
+    if (/^features:/.test(cleanLine)) { section = 'features'; currentKey = null; continue; }
+    if (/^protect:/.test(cleanLine))  { section = 'protect';  currentKey = null; continue; }
 
-    // Match list items like "    - /etc/sudoers"
-    const itemMatch = cleanLine.match(/^ {4}- (.*)/);
-    if (itemMatch && currentKey) {
-      let val = itemMatch[1].trim();
-      // Unwrap quotes if present
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.substring(1, val.length - 1);
+    if (section === 'features') {
+      // "  deny_netlink: true"
+      const m = cleanLine.match(/^ {2}(deny_\w+):\s*(true|false)/);
+      if (m) data.features[m[1]] = m[2] === 'true';
+    } else if (section === 'protect') {
+      const keyMatch = cleanLine.match(/^ {2}(files|devices|proc|sockets|processes):/);
+      if (keyMatch) { currentKey = keyMatch[1]; continue; }
+
+      const itemMatch = cleanLine.match(/^ {4}- (.*)/);
+      if (itemMatch && currentKey) {
+        let val = itemMatch[1].trim();
+        if ((val.startsWith('"') && val.endsWith('"')) ||
+            (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.substring(1, val.length - 1);
+        }
+        data[currentKey].push(val);
       }
-      data[currentKey].push(val);
     }
   }
   return data;
 }
 
 function buildSandboxYaml(data) {
-  let yaml = "# /etc/sudo-logger/sandbox.yaml\n# Generated by replay-server UI\n\nprotect:\n";
-  const keys = ['files', 'devices', 'proc', 'sockets', 'processes'];
-  for (const k of keys) {
+  let yaml = "# /etc/sudo-logger/sandbox.yaml\n# Generated by replay-server UI\n\n";
+
+  const f = data.features || {};
+  yaml += "features:\n";
+  yaml += `  deny_netlink: ${f.deny_netlink !== false}\n`;
+  yaml += `  deny_mount: ${f.deny_mount !== false}\n`;
+  yaml += `  deny_ptrace: ${f.deny_ptrace !== false}\n`;
+  yaml += `  deny_cap_audit_control: ${f.deny_cap_audit_control !== false}\n`;
+  yaml += `  deny_cap_net_admin: ${f.deny_cap_net_admin !== false}\n`;
+  yaml += `  deny_cap_sys_module: ${f.deny_cap_sys_module !== false}\n`;
+
+  yaml += "\nprotect:\n";
+  for (const k of ['files', 'devices', 'proc', 'sockets', 'processes']) {
     const list = data[k] || [];
     if (list.length > 0) {
       yaml += `  ${k}:\n`;
-      list.forEach(item => {
-        yaml += `    - ${item}\n`;
-      });
+      list.forEach(item => { yaml += `    - ${item}\n`; });
     }
   }
   return yaml;
@@ -3307,6 +3363,14 @@ async function fetchSandboxConfig() {
     tagInputs['f-sb-sockets'].setTags(parsed.sockets);
     tagInputs['f-sb-processes'].setTags(parsed.processes);
 
+    const f = parsed.features;
+    document.getElementById('sb-feat-deny-netlink').checked           = f.deny_netlink !== false;
+    document.getElementById('sb-feat-deny-mount').checked             = f.deny_mount !== false;
+    document.getElementById('sb-feat-deny-ptrace').checked            = f.deny_ptrace !== false;
+    document.getElementById('sb-feat-deny-cap-audit-control').checked = f.deny_cap_audit_control !== false;
+    document.getElementById('sb-feat-deny-cap-net-admin').checked     = f.deny_cap_net_admin !== false;
+    document.getElementById('sb-feat-deny-cap-sys-module').checked    = f.deny_cap_sys_module !== false;
+
     const pathEl = document.getElementById('sandbox-path');
     if (pathEl && data.path) pathEl.textContent = data.path;
   } catch (err) {
@@ -3315,11 +3379,20 @@ async function fetchSandboxConfig() {
 }
 
 async function saveSandboxConfig() {
+  const cb = id => document.getElementById(id).checked;
   const data = {
-    files: tagInputs['f-sb-files'].getTags(),
-    devices: tagInputs['f-sb-devices'].getTags(),
-    proc: tagInputs['f-sb-proc'].getTags(),
-    sockets: tagInputs['f-sb-sockets'].getTags(),
+    features: {
+      deny_netlink:           cb('sb-feat-deny-netlink'),
+      deny_mount:             cb('sb-feat-deny-mount'),
+      deny_ptrace:            cb('sb-feat-deny-ptrace'),
+      deny_cap_audit_control: cb('sb-feat-deny-cap-audit-control'),
+      deny_cap_net_admin:     cb('sb-feat-deny-cap-net-admin'),
+      deny_cap_sys_module:    cb('sb-feat-deny-cap-sys-module'),
+    },
+    files:     tagInputs['f-sb-files'].getTags(),
+    devices:   tagInputs['f-sb-devices'].getTags(),
+    proc:      tagInputs['f-sb-proc'].getTags(),
+    sockets:   tagInputs['f-sb-sockets'].getTags(),
     processes: tagInputs['f-sb-processes'].getTags(),
   };
 
