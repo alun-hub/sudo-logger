@@ -238,7 +238,11 @@ func ParseChunk(payload []byte) (*Chunk, error) {
 		return nil, fmt.Errorf("chunk payload too short: %d bytes", len(payload))
 	}
 	dlen := binary.BigEndian.Uint32(payload[17:21])
-	if uint32(len(payload)) < 21+dlen {
+	// Compare in 64-bit space: "21+dlen" in uint32 wraps when dlen is near
+	// 2^32, which would bypass this guard and lead to a ~4 GB allocation or a
+	// slice-bounds panic in the copy below — a remotely triggerable crash for
+	// any client holding a valid mTLS certificate.
+	if uint64(dlen) > uint64(len(payload))-21 {
 		return nil, fmt.Errorf("chunk data truncated")
 	}
 	c := &Chunk{
