@@ -1,7 +1,7 @@
 # /etc/sudo-logger/sandbox.yaml
 #
-# Comprehensive process sandbox deny-list for Fedora systems.
-# Protect security-critical files, devices, proc entries, sockets and daemons
+# Comprehensive process sandbox for sudo sessions on Fedora systems.
+# Protects security-critical files, devices, proc entries, sockets and daemons
 # from being tampered with by processes running inside sudo sessions.
 #
 # Enforcement is kernel-level via eBPF LSM — cannot be bypassed by root
@@ -10,13 +10,36 @@
 # Fedora 38+: active by default, no boot parameters needed.
 # Older/non-Fedora: add lsm=bpf to GRUB_CMDLINE_LINUX, run grub2-mkconfig.
 #
-# IMPORTANT — what this protects and what it does not:
-#   PROTECTS:  writing to, opening for write, truncating, deleting, and renaming listed paths.
-#   PROTECTS:  creating new files, dirs, symlinks, or device nodes INSIDE a listed directory.
-#   DOES NOT:  prevent reading listed paths.
-#   DOES NOT:  block IPC via connect()+send() to listed sockets (only file replacement).
-#   NOTE:      paths are resolved to inodes at agent startup — restart the agent
-#              after adding entries for new paths.
+# WHAT THIS PROTECTS:
+#
+#   Files (from the protect.files list):
+#     BLOCKS:  write-open, truncate, delete, rename of listed paths.
+#     BLOCKS:  creating files, dirs, symlinks, device nodes INSIDE listed dirs.
+#     BLOCKS:  bind-mounting over a listed path (mount target inode is protected).
+#     ALLOWS:  reading listed paths (no read restriction).
+#     ALLOWS:  mounting onto paths NOT in the list (e.g. sudo mount /dev/sdb1 /mnt).
+#
+#   Network (always enforced, not configurable here yet):
+#     BLOCKS:  AF_NETLINK sockets for NETLINK_ROUTE, NETLINK_NETFILTER,
+#              NETLINK_FIREWALL and NETLINK_AUDIT — prevents iptables, nft,
+#              ip-route changes and auditctl -D from within a session.
+#     ALLOWS:  all other socket families and protocols.
+#
+#   Process integrity (always enforced, not configurable here yet):
+#     BLOCKS:  ptrace() targeting processes outside the sandbox — prevents
+#              /proc/<pid>/mem injection into root daemons (sshd, agent, etc.).
+#
+#   Sockets (from the protect.sockets list):
+#     BLOCKS:  replacing (write/rename/unlink) listed socket files.
+#     ALLOWS:  connect()+send() IPC through listed sockets (content not filtered).
+#
+#   Processes (from the protect.processes list):
+#     BLOCKS:  any signal (including SIGKILL) sent directly from a session process.
+#     NOTE:    systemctl stop goes via D-Bus → systemd and is blocked separately
+#              by RefuseManualStop=yes in the respective unit drop-in files.
+#
+#   NOTE: paths are resolved to inodes at agent startup. Restart the agent
+#         after adding entries for new paths.
 #
 # Adapt device paths (sda/nvme) to match your hardware before deploying.
 
