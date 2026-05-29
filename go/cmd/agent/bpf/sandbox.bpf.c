@@ -482,15 +482,16 @@ int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern
 
 	if (family == AF_NETLINK) {
 		// We allow NETLINK_ROUTE because glibc/nss modules use it for basic
-		// lookups (getifaddrs, getaddrinfo). Blocking it causes heavy spam
-		// and breaks many standard utilities.
+		// lookups (getifaddrs, getaddrinfo).
 		//
-		// We focus on blocking protocols used exclusively for tampering:
-		// NETLINK_FIREWALL/NETLINK_NETFILTER: iptables, nftables, firewalld
-		// NETLINK_AUDIT: auditctl (tampering with audit logs)
+		// We also allow NETLINK_AUDIT (9) at the socket level because many
+		// shell integrations and libraries (libaudit) open it for reading
+		// or status checks. Actual rule changes are blocked via CAP_AUDIT_CONTROL.
+		//
+		// We focus on blocking protocols used exclusively for firewall tampering:
+		// NETLINK_FIREWALL (3) / NETLINK_NETFILTER (12): iptables, nftables, firewalld
 		if (protocol == NETLINK_FIREWALL  ||
-		    protocol == NETLINK_NETFILTER ||
-		    protocol == NETLINK_AUDIT) {
+		    protocol == NETLINK_NETFILTER) {
 			submit_alert(ALERT_SOCKET_CREATE, family, protocol);
 			return -EPERM;
 		}
