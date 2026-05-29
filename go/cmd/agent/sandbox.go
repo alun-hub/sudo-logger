@@ -177,6 +177,12 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 	case alertType == alertProcessKill:
 		log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d target=%q target_pid=%d sig=%s sess=%q cgid=%d",
 			typeName, comm, pid, targetComm, targetPid, sigName(sig), sess, cgid)
+	case alertType == alertSocketCreate:
+		log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d family=%d protocol=%d sess=%q cgid=%d",
+			typeName, comm, pid, ino, dev, sess, cgid)
+	case alertType == alertCapable:
+		log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d cap=%d sess=%q cgid=%d",
+			typeName, comm, pid, dev, sess, cgid)
 	case alertType >= alertDirMkdir && alertType <= alertDirSymlink:
 		if path != "" {
 			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d dir=%q sess=%q cgid=%d",
