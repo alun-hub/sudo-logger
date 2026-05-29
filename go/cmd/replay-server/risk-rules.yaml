@@ -59,6 +59,39 @@ rules:
       contains_any: [auditctl]
       also_any:     ["-e 0", "-e0"]
 
+  # ── Privilege delegation / sandbox escape ─────────────────────────────────
+  # Asking PID 1 (systemd) to spawn a process moves the work OUTSIDE the
+  # session's eBPF sandbox and cgroup, where the file/cap/ptrace/mount
+  # restrictions no longer apply (the spawned process is a child of systemd,
+  # not of the sandboxed session). The kernel sandbox cannot block this
+  # per-process, so we flag it loudly here. Rarely legitimate interactively.
+
+  - id: systemd_run_delegation
+    score: 60
+    reason: "process spawned via systemd-run (escapes session sandbox)"
+    command:
+      contains_any: [systemd-run]
+    content:
+      contains_any: [systemd-run]
+
+  - id: machinectl_shell
+    score: 60
+    reason: "machinectl shell/login (escapes session sandbox)"
+    command:
+      contains_any: [machinectl]
+      also_any:     [" shell", " login"]
+    content:
+      contains_any: [machinectl]
+      also_any:     [" shell", " login"]
+
+  - id: dbus_transient_unit
+    score: 60
+    reason: "transient systemd unit started via D-Bus (sandbox escape vector)"
+    command:
+      contains_any: [starttransientunit]
+    content:
+      contains_any: [starttransientunit]
+
   - id: audit_log_tampered
     score: 40
     reason: "audit log file tampered"
