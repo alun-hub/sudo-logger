@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.84
+Version:        1.20.85
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -210,6 +210,10 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Thu May 29 2026 sudo-logger 1.20.85-1
+- fix(bpf): add NETLINK_AUDIT to socket_create block list so auditctl -D is denied in sessions
+- fix(bpf): sb_mount now only blocks mounts over protected inodes; legitimate mounts allowed
+
 * Thu May 29 2026 sudo-logger 1.20.84-1
 - hardening(sandbox): protect /etc/hosts, resolv.conf, ld.so.preload, /var/spool/at, nftables config
 - hardening(audit): install /etc/audit/rules.d/99-immutable.rules (-e 2) to lock audit rules at runtime
