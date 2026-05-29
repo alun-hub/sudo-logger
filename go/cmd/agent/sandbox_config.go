@@ -13,6 +13,14 @@ import (
 )
 
 type sandboxYAML struct {
+	Features struct {
+		DenyNetlink         *bool `yaml:"deny_netlink"`
+		DenyMount           *bool `yaml:"deny_mount"`
+		DenyPtrace          *bool `yaml:"deny_ptrace"`
+		DenyCapAuditControl *bool `yaml:"deny_cap_audit_control"`
+		DenyCapNetAdmin     *bool `yaml:"deny_cap_net_admin"`
+		DenyCapSysModule    *bool `yaml:"deny_cap_sys_module"`
+	} `yaml:"features"`
 	Protect struct {
 		Files     []string `yaml:"files"`
 		Devices   []string `yaml:"devices"`
@@ -22,7 +30,27 @@ type sandboxYAML struct {
 	} `yaml:"protect"`
 }
 
+// resolvedFeatures holds feature flags with defaults applied.
+// All flags default to true (deny) when absent from sandbox.yaml.
+type resolvedFeatures struct {
+	DenyNetlink         bool
+	DenyMount           bool
+	DenyPtrace          bool
+	DenyCapAuditControl bool
+	DenyCapNetAdmin     bool
+	DenyCapSysModule    bool
+}
+
+// featureDefault returns v's value, or true if v is nil (absent from YAML).
+func featureDefault(v *bool) bool {
+	if v == nil {
+		return true
+	}
+	return *v
+}
+
 type resolvedSandbox struct {
+	Features   resolvedFeatures
 	Inodes     []SandboxInodeKey
 	PathInodes map[string]SandboxInodeKey // protected path → its current inode key
 	Processes  []string
@@ -89,6 +117,14 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 
 	res := &resolvedSandbox{
 		PathInodes: make(map[string]SandboxInodeKey),
+		Features: resolvedFeatures{
+			DenyNetlink:         featureDefault(cfg.Features.DenyNetlink),
+			DenyMount:           featureDefault(cfg.Features.DenyMount),
+			DenyPtrace:          featureDefault(cfg.Features.DenyPtrace),
+			DenyCapAuditControl: featureDefault(cfg.Features.DenyCapAuditControl),
+			DenyCapNetAdmin:     featureDefault(cfg.Features.DenyCapNetAdmin),
+			DenyCapSysModule:    featureDefault(cfg.Features.DenyCapSysModule),
+		},
 	}
 	seen := make(map[SandboxInodeKey]bool)
 

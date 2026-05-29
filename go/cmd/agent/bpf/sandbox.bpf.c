@@ -20,6 +20,7 @@
 //   lsm/socket_create        — deny AF_NETLINK sockets for route/firewall/audit tampering
 //   lsm/ptrace_access_check  — deny ptrace of processes outside the sandbox
 //   lsm/sb_mount             — deny mounting over protected inodes (bind-mount bypass)
+//   lsm/capable              — deny CAP_AUDIT_CONTROL, CAP_NET_ADMIN, CAP_SYS_MODULE
 //   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
 //   tp_btf/sched_process_exit — clean up PID tracking when a process exits
 //
@@ -66,6 +67,7 @@ enum sandbox_alert_type {
 	ALERT_SOCKET_CREATE = 13,
 	ALERT_PTRACE = 14,
 	ALERT_MOUNT = 15,
+	ALERT_CAPABLE = 16,
 };
 
 struct sandbox_alert {
@@ -156,6 +158,24 @@ struct {
 	__type(value, __u8);
 } protected_procs SEC(".maps");
 
+// sandbox_config: feature-flag array written by the agent from sandbox.yaml.
+// key = index (u32), value = u32 (0=disabled, 1=enabled).
+// Default when not populated by Go: 0 (disabled) — Go always writes all entries.
+#define CFG_DENY_NETLINK           0
+#define CFG_DENY_MOUNT             1
+#define CFG_DENY_PTRACE            2
+#define CFG_DENY_CAP_AUDIT_CONTROL 3
+#define CFG_DENY_CAP_NET_ADMIN     4
+#define CFG_DENY_CAP_SYS_MODULE    5
+#define CFG_COUNT                  6
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, CFG_COUNT);
+	__type(key, __u32);
+	__type(value, __u32);
+} sandbox_config SEC(".maps");
+
 // in_sandbox_cgroup: cgroup-only scoping, used for file/inode hooks.
 // PAM scope migration moves short-lived commands out of the session cgroup
 // before they can write, so this correctly exempts rpm/dnf etc.
@@ -185,6 +205,13 @@ static __always_inline int inode_protected(struct inode *inode)
 	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
 	key.pad = 0;
 	return bpf_map_lookup_elem(&protected_inodes, &key) != NULL;
+}
+
+// cfg_enabled returns non-zero if feature flag at index idx is set to 1.
+static __always_inline int cfg_enabled(__u32 idx)
+{
+	__u32 *val = bpf_map_lookup_elem(&sandbox_config, &idx);
+	return val != NULL && *val != 0;
 }
 
 // Kernel FMODE_* bits (from linux/fs.h).
@@ -446,6 +473,8 @@ int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern
 {
 	if (!in_sandbox_pid())
 		return 0;
+	if (!cfg_enabled(CFG_DENY_NETLINK))
+		return 0;
 
 	if (family == AF_NETLINK) {
 		// NETLINK_ROUTE:      iproute2, nmcli — IP addresses, routes
@@ -468,6 +497,8 @@ SEC("lsm/ptrace_access_check")
 int BPF_PROG(sandbox_ptrace_access_check, struct task_struct *child, unsigned int mode)
 {
 	if (!in_sandbox_pid())
+		return 0;
+	if (!cfg_enabled(CFG_DENY_PTRACE))
 		return 0;
 
 	__u32 target_tgid = BPF_CORE_READ(child, tgid);
@@ -503,6 +534,8 @@ int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, co
 {
 	if (!in_sandbox_pid())
 		return 0;
+	if (!cfg_enabled(CFG_DENY_MOUNT))
+		return 0;
 
 	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
 	if (!inode_protected(inode))
@@ -512,6 +545,43 @@ int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, co
 		BPF_CORE_READ(inode, i_ino),
 		(__u32)BPF_CORE_READ(inode, i_sb, s_dev));
 	return -EPERM;
+}
+
+#ifndef CAP_NET_ADMIN
+#define CAP_NET_ADMIN     12
+#endif
+#ifndef CAP_SYS_MODULE
+#define CAP_SYS_MODULE    16
+#endif
+#ifndef CAP_AUDIT_CONTROL
+#define CAP_AUDIT_CONTROL 30
+#endif
+
+// Deny specific Linux capabilities within a sandbox session.
+// Covers escalation paths not blocked by file/socket hooks:
+//   CAP_AUDIT_CONTROL: auditctl rule manipulation (complementary to NETLINK_AUDIT block)
+//   CAP_NET_ADMIN:     raw socket and netdevice operations outside netlink
+//   CAP_SYS_MODULE:    insmod/modprobe kernel module loading
+SEC("lsm/capable")
+int BPF_PROG(sandbox_capable, const struct cred *cred,
+	     struct user_namespace *ns, int cap, unsigned int opts)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	if (cap == CAP_AUDIT_CONTROL && cfg_enabled(CFG_DENY_CAP_AUDIT_CONTROL)) {
+		submit_alert(ALERT_CAPABLE, 0, cap);
+		return -EPERM;
+	}
+	if (cap == CAP_NET_ADMIN && cfg_enabled(CFG_DENY_CAP_NET_ADMIN)) {
+		submit_alert(ALERT_CAPABLE, 0, cap);
+		return -EPERM;
+	}
+	if (cap == CAP_SYS_MODULE && cfg_enabled(CFG_DENY_CAP_SYS_MODULE)) {
+		submit_alert(ALERT_CAPABLE, 0, cap);
+		return -EPERM;
+	}
+	return 0;
 }
 
 // Propagate sandbox membership from parent to child at fork time.

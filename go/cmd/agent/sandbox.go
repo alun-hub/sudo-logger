@@ -35,6 +35,15 @@ const (
 	alertSocketCreate = 13
 	alertPtrace       = 14
 	alertMount        = 15
+	alertCapable      = 16
+
+	// sandbox_config BPF array indices — must match CFG_* in sandbox.bpf.c.
+	cfgDenyNetlink         = 0
+	cfgDenyMount           = 1
+	cfgDenyPtrace          = 2
+	cfgDenyCapAuditControl = 3
+	cfgDenyCapNetAdmin     = 4
+	cfgDenyCapSysModule    = 5
 )
 
 var alertNames = map[uint32]string{
@@ -53,6 +62,7 @@ var alertNames = map[uint32]string{
 	alertSocketCreate: "SOCKET_CREATE",
 	alertPtrace:       "PTRACE",
 	alertMount:        "MOUNT",
+	alertCapable:      "CAPABLE",
 }
 
 // bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c
@@ -307,6 +317,27 @@ func (s *sandboxSubsystem) unregisterAuxCgroups(cg *cgroupSession) {
 	auxCgroupMu.Unlock()
 }
 
+// applyFeatures writes the resolved feature flags into the sandbox_config BPF
+// array map. Called on start and on every config reload so that changes to
+// sandbox.yaml take effect without an agent restart.
+func applyFeatures(objs *SandboxObjects, f resolvedFeatures) {
+	flag := func(idx uint32, enabled bool) {
+		var val uint32
+		if enabled {
+			val = 1
+		}
+		if err := objs.SandboxConfig.Put(idx, val); err != nil {
+			log.Printf("sandbox: write feature[%d]=%d: %v", idx, val, err)
+		}
+	}
+	flag(cfgDenyNetlink, f.DenyNetlink)
+	flag(cfgDenyMount, f.DenyMount)
+	flag(cfgDenyPtrace, f.DenyPtrace)
+	flag(cfgDenyCapAuditControl, f.DenyCapAuditControl)
+	flag(cfgDenyCapNetAdmin, f.DenyCapNetAdmin)
+	flag(cfgDenyCapSysModule, f.DenyCapSysModule)
+}
+
 func startSandbox(configPath string) {
 	s := &sandboxSubsystem{}
 	sandboxSys = s // Set global variable BEFORE starting, so ResolveDeviceID works during init
@@ -515,7 +546,53 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		objs.Close()
 		return fmt.Errorf("attach tp/sched_process_exit: %w", err)
 	}
-	s.links = []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink, lsmSetattr, lsmOpen, lsmTrunc, tpFork, tpExit}
+	applyFeatures(objs, res.Features)
+
+	// Collect existing links; use closer helper to avoid repetitive cleanup below.
+	attached := []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink, lsmSetattr, lsmOpen, lsmTrunc, tpFork, tpExit}
+	closeAttached := func() {
+		for _, l := range attached {
+			l.Close()
+		}
+		objs.Close()
+	}
+
+	lsmBpf, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxBpf})
+	if err != nil {
+		closeAttached()
+		return fmt.Errorf("attach lsm/bpf: %w", err)
+	}
+	attached = append(attached, lsmBpf)
+
+	lsmSocket, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxSocketCreate})
+	if err != nil {
+		closeAttached()
+		return fmt.Errorf("attach lsm/socket_create: %w", err)
+	}
+	attached = append(attached, lsmSocket)
+
+	lsmPtrace, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxPtraceAccessCheck})
+	if err != nil {
+		closeAttached()
+		return fmt.Errorf("attach lsm/ptrace_access_check: %w", err)
+	}
+	attached = append(attached, lsmPtrace)
+
+	lsmMount, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxSbMount})
+	if err != nil {
+		closeAttached()
+		return fmt.Errorf("attach lsm/sb_mount: %w", err)
+	}
+	attached = append(attached, lsmMount)
+
+	lsmCapable, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxCapable})
+	if err != nil {
+		closeAttached()
+		return fmt.Errorf("attach lsm/capable: %w", err)
+	}
+	attached = append(attached, lsmCapable)
+
+	s.links = attached
 
 	go s.pollAlerts()
 	s.startWatcher(res.PathInodes)
@@ -604,6 +681,8 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 	for _, k := range procKeys {
 		_ = s.objs.ProtectedProcs.Delete(k)
 	}
+
+	applyFeatures(s.objs, res.Features)
 
 	// Insert the new inode set.
 	for _, key := range res.Inodes {

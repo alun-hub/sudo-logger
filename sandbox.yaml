@@ -43,6 +43,17 @@
 #
 # Adapt device paths (sda/nvme) to match your hardware before deploying.
 
+# Global feature flags — all default to true when absent.
+# Set to false to disable a specific protection (e.g. in environments where
+# network administrators need iproute2 or admins need mount operations).
+features:
+  deny_netlink: true          # Block AF_NETLINK (iptables, nftables, ip route, auditctl -D)
+  deny_mount: true            # Block mounting over protected inodes
+  deny_ptrace: true           # Block ptrace of processes outside the sandbox
+  deny_cap_audit_control: true  # Block CAP_AUDIT_CONTROL (auditctl, defence in depth)
+  deny_cap_net_admin: true    # Block CAP_NET_ADMIN (raw sockets, netdevice ops)
+  deny_cap_sys_module: true   # Block CAP_SYS_MODULE (insmod, modprobe)
+
 protect:
 
   # ── Files and directories ────────────────────────────────────────────────────

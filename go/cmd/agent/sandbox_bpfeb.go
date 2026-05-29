@@ -63,6 +63,7 @@ type SandboxSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxProgramSpecs struct {
 	SandboxBpf               *ebpf.ProgramSpec `ebpf:"sandbox_bpf"`
+	SandboxCapable           *ebpf.ProgramSpec `ebpf:"sandbox_capable"`
 	SandboxFileOpen          *ebpf.ProgramSpec `ebpf:"sandbox_file_open"`
 	SandboxFilePermission    *ebpf.ProgramSpec `ebpf:"sandbox_file_permission"`
 	SandboxInodeCreate       *ebpf.ProgramSpec `ebpf:"sandbox_inode_create"`
@@ -88,6 +89,7 @@ type SandboxMapSpecs struct {
 	ProtectedInodes  *ebpf.MapSpec `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.MapSpec `ebpf:"protected_procs"`
 	SandboxAlerts    *ebpf.MapSpec `ebpf:"sandbox_alerts"`
+	SandboxConfig    *ebpf.MapSpec `ebpf:"sandbox_config"`
 	SandboxedCgroups *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
 	SandboxedPids    *ebpf.MapSpec `ebpf:"sandboxed_pids"`
 }
@@ -121,6 +123,7 @@ type SandboxMaps struct {
 	ProtectedInodes  *ebpf.Map `ebpf:"protected_inodes"`
 	ProtectedProcs   *ebpf.Map `ebpf:"protected_procs"`
 	SandboxAlerts    *ebpf.Map `ebpf:"sandbox_alerts"`
+	SandboxConfig    *ebpf.Map `ebpf:"sandbox_config"`
 	SandboxedCgroups *ebpf.Map `ebpf:"sandboxed_cgroups"`
 	SandboxedPids    *ebpf.Map `ebpf:"sandboxed_pids"`
 }
@@ -130,6 +133,7 @@ func (m *SandboxMaps) Close() error {
 		m.ProtectedInodes,
 		m.ProtectedProcs,
 		m.SandboxAlerts,
+		m.SandboxConfig,
 		m.SandboxedCgroups,
 		m.SandboxedPids,
 	)
@@ -146,6 +150,7 @@ type SandboxVariables struct {
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxPrograms struct {
 	SandboxBpf               *ebpf.Program `ebpf:"sandbox_bpf"`
+	SandboxCapable           *ebpf.Program `ebpf:"sandbox_capable"`
 	SandboxFileOpen          *ebpf.Program `ebpf:"sandbox_file_open"`
 	SandboxFilePermission    *ebpf.Program `ebpf:"sandbox_file_permission"`
 	SandboxInodeCreate       *ebpf.Program `ebpf:"sandbox_inode_create"`
@@ -167,6 +172,7 @@ type SandboxPrograms struct {
 func (p *SandboxPrograms) Close() error {
 	return _SandboxClose(
 		p.SandboxBpf,
+		p.SandboxCapable,
 		p.SandboxFileOpen,
 		p.SandboxFilePermission,
 		p.SandboxInodeCreate,
