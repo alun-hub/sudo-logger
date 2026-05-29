@@ -50,6 +50,13 @@
 
 #define EPERM 1
 
+// File type bits (from linux/stat.h) — not present in vmlinux.h.
+#ifndef S_IFMT
+#define S_IFMT  00170000
+#define S_IFBLK 00060000
+#define S_IFCHR 00020000
+#endif
+
 // Sandbox alert types for userspace reporting
 enum sandbox_alert_type {
 	ALERT_FILE_OPEN = 1,
@@ -176,6 +183,9 @@ struct {
 	__type(value, __u32);
 } sandbox_config SEC(".maps");
 
+#define PID_MARKER_SANDBOXED 1
+#define PID_MARKER_EXEMPT     2
+
 // in_sandbox_cgroup: cgroup-only scoping, used for file/inode hooks.
 // PAM scope migration moves short-lived commands out of the session cgroup
 // before they can write, so this correctly exempts rpm/dnf etc.
@@ -185,15 +195,25 @@ static __always_inline int in_sandbox_cgroup(void)
 	return bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL;
 }
 
-// in_sandbox_pid: checks both cgroups and sandboxed_pids, used for task_kill.
-// Catches short-lived commands (e.g. sudo pkill auditd) that escape the
-// session cgroup via the PAM scope migration race.
+// in_sandbox_pid: checks both cgroups and sandboxed_pids.
+// Returns the PID marker (1=sandboxed, 2=exempt leader) if in a sandbox, else 0.
 static __always_inline int in_sandbox_pid(void)
 {
 	if (in_sandbox_cgroup())
-		return 1;
+		return PID_MARKER_SANDBOXED;
 	__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
-	return bpf_map_lookup_elem(&sandboxed_pids, &tgid) != NULL;
+	__u8 *marker = bpf_map_lookup_elem(&sandboxed_pids, &tgid);
+	if (marker)
+		return *marker;
+	return 0;
+}
+
+// is_exempt_leader: returns true if the current process is the registered
+// session leader (the sudo process itself). Secure replacement for comm name
+// checks.
+static __always_inline bool is_exempt_leader()
+{
+	return in_sandbox_pid() == PID_MARKER_EXEMPT;
 }
 
 static __always_inline int inode_protected(struct inode *inode)
@@ -383,6 +403,19 @@ int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umod
 {
 	if (!in_sandbox_pid())
 		return 0;
+
+	// Block creation of block/char device nodes anywhere inside the sandbox.
+	// A fresh node with the same major:minor as a protected device
+	// (e.g. mknod /tmp/x b 8 0, or c 1 1 for /dev/mem) is a NEW inode that is
+	// not in protected_inodes, so writing through it would bypass the
+	// inode-based device protection and reach the raw disk/memory directly.
+	// Creating device nodes is essentially never legitimate inside an
+	// interactive session; FIFOs and unix sockets (also via mknod) are allowed.
+	if ((mode & S_IFMT) == S_IFBLK || (mode & S_IFMT) == S_IFCHR) {
+		submit_alert(ALERT_DIR_MKNOD, 0, 0);
+		return -EPERM;
+	}
+
 	if (inode_protected(dir)) {
 		submit_alert(ALERT_DIR_MKNOD,
 			     BPF_CORE_READ(dir, i_ino),
@@ -475,9 +508,11 @@ int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern
 		return 0;
 
 	// Exempt the sudo process itself from these restrictions.
-	char comm[16];
-	bpf_get_current_comm(&comm, sizeof(comm));
-	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
+	if (is_exempt_leader())
+		return 0;
+
+	// Gated by the deny_netlink feature flag (sandbox.yaml).
+	if (!cfg_enabled(CFG_DENY_NETLINK))
 		return 0;
 
 	if (family == AF_NETLINK) {
@@ -515,9 +550,11 @@ int BPF_PROG(sandbox_ptrace_access_check, struct task_struct *child, unsigned in
 		return 0;
 
 	// Exempt sudo itself.
-	char comm[16];
-	bpf_get_current_comm(&comm, sizeof(comm));
-	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
+	if (is_exempt_leader())
+		return 0;
+
+	// Gated by the deny_ptrace feature flag (sandbox.yaml).
+	if (!cfg_enabled(CFG_DENY_PTRACE))
 		return 0;
 
 	__u32 target_tgid = BPF_CORE_READ(child, tgid);
@@ -553,13 +590,13 @@ int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, co
 {
 	if (!in_sandbox_pid())
 		return 0;
-	if (!cfg_enabled(CFG_DENY_MOUNT))
-		return 0;
 
 	// Exempt sudo itself (some PAM modules might check mounts or even do them).
-	char comm[16];
-	bpf_get_current_comm(&comm, sizeof(comm));
-	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
+	if (is_exempt_leader())
+		return 0;
+
+	// Gated by the deny_mount feature flag (sandbox.yaml).
+	if (!cfg_enabled(CFG_DENY_MOUNT))
 		return 0;
 
 	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
@@ -595,13 +632,14 @@ int BPF_PROG(sandbox_capable, const struct cred *cred,
 		return 0;
 
 	// Exempt sudo itself.
-	char comm[16];
-	bpf_get_current_comm(&comm, sizeof(comm));
-	if (comm[0] == 's' && comm[1] == 'u' && comm[2] == 'd' && comm[3] == 'o' && comm[4] == '\0')
+	if (is_exempt_leader())
 		return 0;
 
-	// We block these critical capabilities for root-sessions in the sandbox.
-	if (cap == CAP_AUDIT_CONTROL || cap == CAP_NET_ADMIN || cap == CAP_SYS_MODULE) {
+	// Block these critical capabilities for root sessions in the sandbox,
+	// each gated by its own deny_cap_* feature flag (sandbox.yaml).
+	if ((cap == CAP_AUDIT_CONTROL && cfg_enabled(CFG_DENY_CAP_AUDIT_CONTROL)) ||
+	    (cap == CAP_NET_ADMIN     && cfg_enabled(CFG_DENY_CAP_NET_ADMIN))     ||
+	    (cap == CAP_SYS_MODULE    && cfg_enabled(CFG_DENY_CAP_SYS_MODULE))) {
 		submit_alert(ALERT_CAPABLE, 0, cap);
 		return -EPERM;
 	}
@@ -617,8 +655,11 @@ int BPF_PROG(sandbox_process_fork, struct task_struct *parent, struct task_struc
 	__u32 parent_tgid = BPF_CORE_READ(parent, tgid);
 	if (!bpf_map_lookup_elem(&sandboxed_pids, &parent_tgid))
 		return 0;
+
+	// All descendants of a sandboxed PID are subject to full restrictions,
+	// even if the parent was the exempt leader (the sudo process itself).
 	__u32 child_tgid = BPF_CORE_READ(child, tgid);
-	__u8 marker = 1;
+	__u8 marker = PID_MARKER_SANDBOXED;
 	bpf_map_update_elem(&sandboxed_pids, &child_tgid, &marker, BPF_ANY);
 	return 0;
 }

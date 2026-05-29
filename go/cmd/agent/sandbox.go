@@ -251,6 +251,11 @@ func (s *sandboxSubsystem) retryViolation(cgid uint64, alert protocol.SandboxAle
 	}
 }
 
+const (
+	pidMarkerSandboxed = 1
+	pidMarkerExempt    = 2
+)
+
 // registerPID marks a PID (tgid) as sandboxed in the BPF map.
 // The sched_process_fork hook propagates membership to all descendants.
 func (s *sandboxSubsystem) registerPID(pid uint32) {
@@ -261,11 +266,27 @@ func (s *sandboxSubsystem) registerPID(pid uint32) {
 		debugLog("sandbox: skipping registration of agent self pid %d", pid)
 		return
 	}
-	marker := uint8(1)
+	// The root PID (sudo itself) is marked as EXEMPT so it can complete
+	// session setup (PAM modules, audit, etc). Descendants forked via
+	// sched_process_fork are automatically marked as SANDBOXED (1).
+	marker := uint8(pidMarkerExempt)
 	if err := s.objs.SandboxedPids.Put(pid, marker); err != nil {
 		log.Printf("sandbox: register pid %d: %v", pid, err)
 	}
-	debugLog("sandbox: pid %d registered", pid)
+	debugLog("sandbox: pid %d registered (EXEMPT)", pid)
+}
+
+// registerChildPID marks a PID as sandboxed (not exempt). Used for secondary
+// captures (e.g. aux pkexec) where we want immediate full enforcement.
+func (s *sandboxSubsystem) registerChildPID(pid uint32) {
+	if s == nil || s.objs == nil || pid == 0 {
+		return
+	}
+	marker := uint8(pidMarkerSandboxed)
+	if err := s.objs.SandboxedPids.Put(pid, marker); err != nil {
+		log.Printf("sandbox: register child pid %d: %v", pid, err)
+	}
+	debugLog("sandbox: child pid %d registered (SANDBOXED)", pid)
 }
 
 // unregisterPID removes a PID from the sandbox restriction set.
