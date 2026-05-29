@@ -17,6 +17,9 @@
 //   lsm/inode_mknod          — deny creating device nodes inside protected directories
 //   lsm/inode_symlink        — deny creating symlinks inside protected directories
 //   lsm/task_kill            — deny signals to protected process names
+//   lsm/socket_create        — deny AF_NETLINK sockets for route/firewall/audit tampering
+//   lsm/ptrace_access_check  — deny ptrace of processes outside the sandbox
+//   lsm/sb_mount             — deny mounting over protected inodes (bind-mount bypass)
 //   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
 //   tp_btf/sched_process_exit — clean up PID tracking when a process exits
 //
@@ -433,8 +436,11 @@ int BPF_PROG(sandbox_bpf, int cmd, union bpf_attr *attr, unsigned int size)
 #ifndef NETLINK_NETFILTER
 #define NETLINK_NETFILTER 12
 #endif
+#ifndef NETLINK_AUDIT
+#define NETLINK_AUDIT 9
+#endif
 
-// Deny creation of specific AF_NETLINK sockets to prevent firewall/network tampering.
+// Deny creation of AF_NETLINK sockets used for firewall/network/audit tampering.
 SEC("lsm/socket_create")
 int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern)
 {
@@ -442,9 +448,13 @@ int BPF_PROG(sandbox_socket_create, int family, int type, int protocol, int kern
 		return 0;
 
 	if (family == AF_NETLINK) {
-		// NETLINK_ROUTE: iproute2, nmcli, adding/removing IP addresses, routes
+		// NETLINK_ROUTE:      iproute2, nmcli — IP addresses, routes
 		// NETLINK_FIREWALL/NETLINK_NETFILTER: iptables, nftables, firewalld
-		if (protocol == NETLINK_ROUTE || protocol == NETLINK_FIREWALL || protocol == NETLINK_NETFILTER) {
+		// NETLINK_AUDIT:      auditctl — kernel audit rule changes (auditctl -D)
+		if (protocol == NETLINK_ROUTE     ||
+		    protocol == NETLINK_FIREWALL  ||
+		    protocol == NETLINK_NETFILTER ||
+		    protocol == NETLINK_AUDIT) {
 			submit_alert(ALERT_SOCKET_CREATE, family, protocol);
 			return -EPERM;
 		}
@@ -484,16 +494,20 @@ int BPF_PROG(sandbox_ptrace_access_check, struct task_struct *child, unsigned in
 	return 0;
 }
 
-// Deny mount syscalls. This prevents a user from mounting an empty tmpfs over
-// a protected directory (like /etc/sudo-logger) to bypass file monitoring.
+// Deny mounting over protected inodes. Prevents shadowing a protected file or
+// directory (e.g. bind-mounting /tmp/evil over /etc/sudoers) which would give
+// the session a different inode not in the protected_inodes map.
+// Mounts onto unprotected paths (e.g. sudo mount /dev/sdb1 /mnt) are allowed.
 SEC("lsm/sb_mount")
 int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, const char *type, unsigned long flags, void *data)
 {
 	if (!in_sandbox_pid())
 		return 0;
 
-	// Inode/device info for where the mount is happening
 	struct inode *inode = BPF_CORE_READ(path, dentry, d_inode);
+	if (!inode_protected(inode))
+		return 0;
+
 	submit_alert(ALERT_MOUNT,
 		BPF_CORE_READ(inode, i_ino),
 		(__u32)BPF_CORE_READ(inode, i_sb, s_dev));
