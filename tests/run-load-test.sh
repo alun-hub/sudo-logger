@@ -90,7 +90,7 @@ sleep 2
 
 # ── Run Load Test ─────────────────────────────────────────────────────────────
 
-PARALLEL=20
+PARALLEL=500
 CHUNKS=5000
 echo "==> Kör belastningstest ($PARALLEL sessioner, $CHUNKS chunks var)..."
 
