@@ -944,7 +944,8 @@
           <label>No-exec directories</label>
           <div class="form-group">
             <div class="tag-input-wrap" id="f-sb-noexec"></div>
-            <p class="form-hint">Execution blocked from within these directories. Prevents copy-bypass. Example: <code>/tmp</code>, <code>/dev/shm</code></p>
+            <p class="form-hint">Execution blocked from within these directories. Prevents copy-bypass. Example: <code>/tmp</code>, <code>/dev/shm</code><br>
+            <strong>⚠ Btrfs warning:</strong> Do not use on Btrfs systems. Every Btrfs subvolume root (e.g. <code>/home</code>, <code>/</code>) shares inode&nbsp;256 on the same device — adding any subvolume root will also match <code>/</code> and block all execution in the session.</p>
           </div>
 
           <label>Device nodes</label>
@@ -3174,7 +3175,6 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /tmp
     - /var/tmp
     - /dev/shm
-    - /home
     - /run/user
   devices:
     - /dev/mem

@@ -747,6 +747,13 @@ int BPF_PROG(sandbox_unix_connect, struct sock *sock, struct sock *other, struct
 }
 
 // Deny execution of forbidden binaries and from noexec directories.
+//
+// noexec limitation on Btrfs: each Btrfs subvolume root always has inode 256
+// on the same block device as every other subvolume. On a typical Fedora Btrfs
+// layout, / and /home both resolve to {ino=256, dev=X}. If /home is added to
+// noexec_inodes, the dentry walk will also match / — blocking ALL execution.
+// Use noexec only on ext4/xfs or other non-Btrfs filesystems. The agent logs a
+// warning at config load time when a configured noexec path has inode 256.
 SEC("lsm/bprm_check_security")
 int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 {

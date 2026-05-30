@@ -206,7 +206,6 @@ protect:
     - /tmp
     - /var/tmp
     - /dev/shm
-    - /home
     - /run/user
 
   # ── Device nodes ─────────────────────────────────────────────────────────────

@@ -443,6 +443,8 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	for _, key := range res.Noexec {
 		if err := objs.NoexecInodes.Put(key, marker); err != nil {
 			log.Printf("sandbox: insert noexec inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		} else {
+			log.Printf("sandbox: successfully inserted noexec inode {ino=%d dev=%d}", key.Ino, key.Dev)
 		}
 	}
 

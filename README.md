@@ -150,15 +150,17 @@ One goroutine per sudo session:
 in the replay UI, indicating sudo ran without the plugin logging it.
 
 **Process sandbox** — optional eBPF LSM subsystem that enforces kernel-level
-write, open-for-write, truncate, setattr, delete, rename, directory-create, and
-kill restrictions on all processes running inside sudo session cgroups. Thirteen
-hooks (11 LSM + 2 tracepoints) are loaded at startup. Each hook checks whether
-the calling process is in a sandboxed cgroup (`sandboxed_cgroups` BPF map) or
-has been PID-tracked since session start (`sandboxed_pids` map, propagated to
-all descendants via `sched_process_fork`), then applies a deny-list of protected
-inodes and process names configured by the operator. Session cgroups and root
-PIDs are registered on session start and removed on session end. See
-[Process sandbox](#process-sandbox).
+write, open-for-write, truncate, setattr, delete, rename, directory-create,
+network-socket, mount, ptrace, and kill restrictions on all processes running
+inside sudo session cgroups. Eighteen hooks (16 LSM + 2 tracepoints) are loaded
+at startup. Each hook checks whether the calling process is in a sandboxed
+cgroup (`sandboxed_cgroups` BPF map) or has been PID-tracked since session start
+(`sandboxed_pids` map, propagated to all descendants via `sched_process_fork`),
+then applies a deny-list of protected inodes, process names, and capability
+restrictions configured by the operator. The `sudo` process itself is exempt
+from several restrictions to allow PAM modules to complete session setup.
+Session cgroups and root PIDs are registered on session start and removed on
+session end. See [Process sandbox](#process-sandbox).
 
 Reads all settings from `/etc/sudo-logger/agent.conf` (key = value format).
 
@@ -229,7 +231,7 @@ migrate-sessions \
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_agent_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
-| **Process sandbox (optional)** | 13 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Active by default on Fedora 38+; older or non-Fedora kernels may need `lsm=bpf`. See [Process sandbox](#process-sandbox). |
+| **Process sandbox (optional)** | 18 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Also blocks `AF_NETLINK` (firewall tampering), `mount()` (masking audit dirs), and `ptrace()` (code injection into external processes). Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Active by default on Fedora 38+; older or non-Fedora kernels may need `lsm=bpf`. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 
@@ -413,7 +415,7 @@ The ACK signing key pair is generated automatically on the server when the
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.18.1-1.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.20.5-1.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -447,7 +449,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.17.35-1.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.20.85-1.fc43.x86_64.rpm
 
 # Install certificates and ACK verify key
 cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
@@ -740,7 +742,7 @@ sandbox: LSM hooks attached (42 protected inodes, 15 protected processes)
 
 #### Configuration file format
 
-`sandbox.yaml` uses a simple YAML structure with five protection categories.
+`sandbox.yaml` uses a simple YAML structure with seven protection categories.
 All categories are optional.
 
 ```yaml
@@ -750,6 +752,30 @@ protect:
     - /etc/sudoers
     - /etc/sudoers.d
     - /var/log/sudo-logger
+
+  # Forbidden binaries — blocked from execution inside any session.
+  # Useful for tools that delegate privileged actions via D-Bus or IPC
+  # (e.g. firewall-cmd, busctl, nmcli) where blocking by capability alone
+  # is not sufficient. Matched by inode so renaming the binary is blocked,
+  # but copying to a new path creates a new inode that is not covered.
+  forbidden:
+    - /usr/bin/firewall-cmd
+    - /usr/bin/busctl
+    - /usr/bin/gdbus
+    - /usr/bin/dbus-send
+
+  # No-exec directories — execution blocked for binaries residing anywhere
+  # under these directories. Prevents copy-bypass (copying a forbidden binary
+  # to /tmp and running it from there).
+  # WARNING: Do NOT use on Btrfs systems. On Btrfs every subvolume root
+  # (e.g. /home, /) has inode 256 on the same device. Adding a subvolume
+  # root to this list will also match / and block all execution in the session.
+  # Safe to use on ext4 and xfs. The agent logs a warning if inode 256 is
+  # detected at config load time.
+  noexec:
+    - /tmp
+    - /dev/shm
+    - /var/tmp
 
   # Device nodes — prevents raw disk and memory access.
   devices:
@@ -797,7 +823,7 @@ rather than the superblock device. The resulting `{inode, device}` pairs are
 loaded into a BPF hash map (`protected_inodes`). Process names are loaded into
 a second map (`protected_procs`).
 
-Thirteen hooks are then attached to the kernel:
+Twenty hooks are then attached to the kernel:
 
 | Hook | What it blocks |
 |------|---------------|
@@ -812,6 +838,13 @@ Thirteen hooks are then attached to the kernel:
 | `lsm/inode_mknod` | Creating a device node inside a protected directory |
 | `lsm/inode_symlink` | Creating a symlink inside a protected directory |
 | `lsm/task_kill` | Sending any signal to a process whose name is in `protected_procs` |
+| `lsm/bpf` | Calling the `bpf()` syscall (prevents map tampering) |
+| `lsm/socket_create` | Creating `AF_NETLINK` sockets (prevents firewall/route tampering) |
+| `lsm/ptrace_access_check` | Attaching to/debugging processes outside the sandbox (escapes) |
+| `lsm/sb_mount` | Mounting a filesystem over a protected inode (integrity) |
+| `lsm/capable` | Requesting specific capabilities (`CAP_NET_ADMIN`, `CAP_AUDIT_CONTROL`, `CAP_SYS_MODULE`) |
+| `lsm/unix_stream_connect` | Connecting to systemd/D-Bus control sockets when `deny_systemd_ipc` is enabled (closes the `systemd-run` / `busctl StartTransientUnit` sandbox escape) |
+| `lsm/bprm_check_security` | Executing binaries in `forbidden` list or under `noexec` directories |
 | `tp_btf/sched_process_fork` | Propagates PID sandbox membership from parent to child at fork time |
 | `tp_btf/sched_process_exit` | Removes PID from the sandbox tracking map on process exit |
 
@@ -829,6 +862,12 @@ used:
   userspace code). This catches short-lived commands like `sudo pkill auditd`
   where `pam_systemd` moves the process to a new session scope cgroup before
   the command forks — the PAM scope migration race.
+
+**Exemption for sudo:** the `sudo` process itself is automatically exempt from
+several restrictions (socket creation, ptrace, mount, capabilities) during its
+initialization phase. This allows PAM modules (like `pam_audit` or `pam_systemd`)
+to interact with the kernel audit subsystem and D-Bus sockets correctly before
+the user's shell is launched.
 
 Processes outside both sets are unaffected — the hooks are global but
 effectively scoped to active sessions.
@@ -862,6 +901,20 @@ The agent also logs a warning when loading a name that exceeds 15 characters.
   `lsm/inode_mknod`, `lsm/inode_symlink`). Listing individual files inside a
   directory does not prevent siblings from being created next to them.
 
+- **`noexec` is not safe on Btrfs**: the noexec check walks the dentry tree
+  upward and compares `{inode, device}` pairs. On Btrfs every subvolume root
+  always has inode 256 on the same underlying block device. A standard Fedora
+  Btrfs layout mounts both `/` and `/home` as separate subvolumes — both
+  resolve to `{ino=256, dev=X}`. Adding `/home` to `noexec` therefore also
+  matches `/` and blocks all execution inside the session, locking it
+  completely. Use `noexec` only on ext4, xfs, or other non-Btrfs filesystems.
+  The agent emits a `WARNING` log line and the UI shows a warning when a path
+  with inode 256 is configured.
+
+- **`forbidden` does not prevent copy-bypass**: binaries are matched by inode.
+  Copying a forbidden binary to a new path creates a new inode that is not in
+  the map. Pair `forbidden` with `noexec` (on non-Btrfs) to close this gap.
+
 - **Unix socket IPC not blocked**: listing a socket path prevents its
   deletion and replacement, but does not intercept `connect()` + `send()`.
   Normal IPC to the socket continues to work.
@@ -885,7 +938,7 @@ terminal player for recorded sessions.  It reads asciinema v2 session recordings
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.18.2-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.20.7-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -1690,7 +1743,7 @@ rpmdev-setuptree
 
 # Set the version to match the Version: field in the target spec file
 # (each package is versioned independently — see rpm/*.spec)
-VERSION=1.17.35
+VERSION=1.20.85
 
 # 1. Commit your changes first, then create the source tarball from HEAD
 git archive --format=tar.gz --prefix=sudo-logger-${VERSION}/ HEAD \
@@ -2012,8 +2065,23 @@ migrate-sessions \
 
 ## Performance and capacity
 
-| Resource | Per session |
-|----------|-------------|
+`sudo-logger` is optimized for high-density enterprise environments. Key
+performance features include:
+
+- **Asynchronous Batch Disk I/O**: the log server coalesces writes from
+  multiple sessions into background batches, significantly reducing IOPS
+  pressure.
+- **Buffered I/O**: `bufio` is used on both client and server to minimize
+  syscall overhead.
+- **Enterprise HW Capacity**: on enterprise-grade hardware (32+ cores, NVMe
+  storage, 10GbE), a single `sudo-logserver` node can handle **50,000+
+  concurrent human sessions** (low bandwidth) or **2,000–5,000 parallel
+  data-intensive sessions** (e.g. automated log-dumping scripts).
+- **Horizontal Scalability**: in `distributed` mode, log servers are stateless
+  and can be scaled linearly behind a TCP load balancer.
+
+| Resource | Per human session |
+|----------|-------------------|
 | Goroutines | 3 (main read loop + disk writer + ACK coalescer) |
 | Memory | ~100–200 KB |
 | File descriptors | 4 |

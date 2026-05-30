@@ -291,7 +291,10 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 		}
 	}
 
-	// Resolve noexec directories (exact paths, BPF will traverse up to them)
+	// Resolve noexec directories (exact paths, BPF will traverse up to them).
+	// Warn if the resolved inode is 256: on Btrfs every subvolume root gets
+	// inode 256 on the same device, so adding /home would also match / and
+	// block all execution system-wide. This is safe on ext4/xfs.
 	for _, p := range cfg.Protect.Noexec {
 		if !filepath.IsAbs(p) {
 			continue
@@ -303,6 +306,11 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 		dev, _ := mountDev(p)
 		if dev == 0 {
 			dev = uint32(st.Dev)
+		}
+		if st.Ino == 256 {
+			log.Printf("sandbox: WARNING: noexec path %q has inode 256 — this is a Btrfs subvolume root. "+
+				"On Btrfs all subvolume roots share inode 256 on the same device, so this entry will also "+
+				"match the filesystem root and block ALL execution. Remove this entry unless you are on ext4/xfs.", p)
 		}
 		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 		if !seen[key] {
