@@ -20,6 +20,12 @@ type SandboxInodeKey struct {
 	Pad uint32
 }
 
+type SandboxRatelimitKey struct {
+	_    structs.HostLayout
+	Tgid uint32
+	Type uint32
+}
+
 // LoadSandbox returns the embedded CollectionSpec for Sandbox.
 func LoadSandbox() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_SandboxBytes)
@@ -63,6 +69,7 @@ type SandboxSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxProgramSpecs struct {
 	SandboxBpf               *ebpf.ProgramSpec `ebpf:"sandbox_bpf"`
+	SandboxBprmCheckSecurity *ebpf.ProgramSpec `ebpf:"sandbox_bprm_check_security"`
 	SandboxCapable           *ebpf.ProgramSpec `ebpf:"sandbox_capable"`
 	SandboxFileOpen          *ebpf.ProgramSpec `ebpf:"sandbox_file_open"`
 	SandboxFilePermission    *ebpf.ProgramSpec `ebpf:"sandbox_file_permission"`
@@ -87,13 +94,15 @@ type SandboxProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxMapSpecs struct {
-	ProtectedInodes  *ebpf.MapSpec `ebpf:"protected_inodes"`
-	ProtectedProcs   *ebpf.MapSpec `ebpf:"protected_procs"`
-	SandboxAlerts    *ebpf.MapSpec `ebpf:"sandbox_alerts"`
-	SandboxConfig    *ebpf.MapSpec `ebpf:"sandbox_config"`
-	SandboxedCgroups *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
-	SandboxedPids    *ebpf.MapSpec `ebpf:"sandboxed_pids"`
-	SystemdIpcInodes *ebpf.MapSpec `ebpf:"systemd_ipc_inodes"`
+	AlertRatelimit    *ebpf.MapSpec `ebpf:"alert_ratelimit"`
+	ForbiddenBinaries *ebpf.MapSpec `ebpf:"forbidden_binaries"`
+	ProtectedInodes   *ebpf.MapSpec `ebpf:"protected_inodes"`
+	ProtectedProcs    *ebpf.MapSpec `ebpf:"protected_procs"`
+	SandboxAlerts     *ebpf.MapSpec `ebpf:"sandbox_alerts"`
+	SandboxConfig     *ebpf.MapSpec `ebpf:"sandbox_config"`
+	SandboxedCgroups  *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
+	SandboxedPids     *ebpf.MapSpec `ebpf:"sandboxed_pids"`
+	SystemdIpcInodes  *ebpf.MapSpec `ebpf:"systemd_ipc_inodes"`
 }
 
 // SandboxVariableSpecs contains global variables before they are loaded into the kernel.
@@ -122,17 +131,21 @@ func (o *SandboxObjects) Close() error {
 //
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxMaps struct {
-	ProtectedInodes  *ebpf.Map `ebpf:"protected_inodes"`
-	ProtectedProcs   *ebpf.Map `ebpf:"protected_procs"`
-	SandboxAlerts    *ebpf.Map `ebpf:"sandbox_alerts"`
-	SandboxConfig    *ebpf.Map `ebpf:"sandbox_config"`
-	SandboxedCgroups *ebpf.Map `ebpf:"sandboxed_cgroups"`
-	SandboxedPids    *ebpf.Map `ebpf:"sandboxed_pids"`
-	SystemdIpcInodes *ebpf.Map `ebpf:"systemd_ipc_inodes"`
+	AlertRatelimit    *ebpf.Map `ebpf:"alert_ratelimit"`
+	ForbiddenBinaries *ebpf.Map `ebpf:"forbidden_binaries"`
+	ProtectedInodes   *ebpf.Map `ebpf:"protected_inodes"`
+	ProtectedProcs    *ebpf.Map `ebpf:"protected_procs"`
+	SandboxAlerts     *ebpf.Map `ebpf:"sandbox_alerts"`
+	SandboxConfig     *ebpf.Map `ebpf:"sandbox_config"`
+	SandboxedCgroups  *ebpf.Map `ebpf:"sandboxed_cgroups"`
+	SandboxedPids     *ebpf.Map `ebpf:"sandboxed_pids"`
+	SystemdIpcInodes  *ebpf.Map `ebpf:"systemd_ipc_inodes"`
 }
 
 func (m *SandboxMaps) Close() error {
 	return _SandboxClose(
+		m.AlertRatelimit,
+		m.ForbiddenBinaries,
 		m.ProtectedInodes,
 		m.ProtectedProcs,
 		m.SandboxAlerts,
@@ -154,6 +167,7 @@ type SandboxVariables struct {
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxPrograms struct {
 	SandboxBpf               *ebpf.Program `ebpf:"sandbox_bpf"`
+	SandboxBprmCheckSecurity *ebpf.Program `ebpf:"sandbox_bprm_check_security"`
 	SandboxCapable           *ebpf.Program `ebpf:"sandbox_capable"`
 	SandboxFileOpen          *ebpf.Program `ebpf:"sandbox_file_open"`
 	SandboxFilePermission    *ebpf.Program `ebpf:"sandbox_file_permission"`
@@ -177,6 +191,7 @@ type SandboxPrograms struct {
 func (p *SandboxPrograms) Close() error {
 	return _SandboxClose(
 		p.SandboxBpf,
+		p.SandboxBprmCheckSecurity,
 		p.SandboxCapable,
 		p.SandboxFileOpen,
 		p.SandboxFilePermission,

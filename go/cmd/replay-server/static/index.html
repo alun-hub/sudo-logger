@@ -935,6 +935,12 @@
             <p class="form-hint">Blocked paths (recursive). Example: <code>/etc/sudoers</code>, <code>/etc/shadow</code>, <code>/var/log/sudo-logger</code></p>
           </div>
 
+          <label>Forbidden binaries</label>
+          <div class="form-group">
+            <div class="tag-input-wrap" id="f-sb-forbidden"></div>
+            <p class="form-hint">Blocked from execution (prevents escape via IPC). Example: <code>/usr/bin/firewall-cmd</code>, <code>/usr/bin/bpftool</code></p>
+          </div>
+
           <label>Device nodes</label>
           <div class="form-group">
             <div class="tag-input-wrap" id="f-sb-devices"></div>
@@ -1294,7 +1300,7 @@
         <div class="help-tips" style="margin-top:16px">
           <div class="help-tip"><span><strong>Propagation:</strong> Save in the UI → stored in the shared config backend → agents poll every 60 s → BPF maps updated live. No agent restart required.</span></div>
           <div class="help-tip"><span><strong>Local override:</strong> If <code>sandbox_config = /path/to/sandbox.yaml</code> is set in <code>agent.conf</code>, that file is loaded at startup. The server-managed config is still fetched and applied on top during the first poll.</span></div>
-          <div class="help-tip"><span><strong>Violation alerts:</strong> Blocked operations are logged as <code>SANDBOX VIOLATION</code> in the agent log and forwarded to the log server as structured SIEM events with <code>action=</code>, <code>path=</code>, <code>comm=</code>, and session context.</span></div>
+          <div class="help-tip"><span><strong>Violation alerts:</strong> Blocked operations are logged as <code>SANDBOX VIOLATION</code> in the agent log and forwarded to the log server as structured SIEM events with <code>action=</code> (e.g. <code>FILE_WRITE</code>, <code>CAPABLE</code>, <code>EXEC_BLOCK</code>), <code>path=</code>, <code>comm=</code>, and session context.</span></div>
         </div>
       </div>
 
@@ -2789,7 +2795,7 @@ const tagInputs = {};
 function initTagInputs() {
   const ids = [
     'f-cmd-contains','f-cmd-also','f-cmd-base','f-con-contains','f-con-also',
-    'f-sb-files','f-sb-devices','f-sb-proc','f-sb-sockets','f-sb-processes'
+    'f-sb-files','f-sb-forbidden','f-sb-devices','f-sb-proc','f-sb-sockets','f-sb-processes'
   ];
   ids.forEach(id => {
     const el = document.getElementById(id);
@@ -3294,7 +3300,7 @@ function parseSandboxYaml(yamlStr) {
   const featureKeys = ['deny_netlink','deny_mount','deny_ptrace',
     'deny_cap_audit_control','deny_cap_net_admin','deny_cap_sys_module'];
   const data = {
-    files: [], devices: [], proc: [], sockets: [], processes: [],
+    files: [], forbidden: [], devices: [], proc: [], sockets: [], processes: [],
     features: Object.fromEntries(featureKeys.map(k => [k, true])), // default all true
   };
   // deny_systemd_ipc defaults OFF (it also blocks systemctl/loginctl in-session).
@@ -3317,7 +3323,7 @@ function parseSandboxYaml(yamlStr) {
       const m = cleanLine.match(/^ {2}(deny_\w+):\s*(true|false)/);
       if (m) data.features[m[1]] = m[2] === 'true';
     } else if (section === 'protect') {
-      const keyMatch = cleanLine.match(/^ {2}(files|devices|proc|sockets|processes):/);
+      const keyMatch = cleanLine.match(/^ {2}(files|forbidden|devices|proc|sockets|processes):/);
       if (keyMatch) { currentKey = keyMatch[1]; continue; }
 
       const itemMatch = cleanLine.match(/^ {4}- (.*)/);
@@ -3348,7 +3354,7 @@ function buildSandboxYaml(data) {
   yaml += `  deny_systemd_ipc: ${f.deny_systemd_ipc === true}\n`;
 
   yaml += "\nprotect:\n";
-  for (const k of ['files', 'devices', 'proc', 'sockets', 'processes']) {
+  for (const k of ['files', 'forbidden', 'devices', 'proc', 'sockets', 'processes']) {
     const list = data[k] || [];
     if (list.length > 0) {
       yaml += `  ${k}:\n`;
@@ -3366,6 +3372,7 @@ async function fetchSandboxConfig() {
     const parsed = parseSandboxYaml(data.content);
 
     tagInputs['f-sb-files'].setTags(parsed.files);
+    tagInputs['f-sb-forbidden'].setTags(parsed.forbidden);
     tagInputs['f-sb-devices'].setTags(parsed.devices);
     tagInputs['f-sb-proc'].setTags(parsed.proc);
     tagInputs['f-sb-sockets'].setTags(parsed.sockets);
@@ -3400,6 +3407,7 @@ async function saveSandboxConfig() {
       deny_systemd_ipc:       cb('sb-feat-deny-systemd-ipc'),
     },
     files:     tagInputs['f-sb-files'].getTags(),
+    forbidden: tagInputs['f-sb-forbidden'].getTags(),
     devices:   tagInputs['f-sb-devices'].getTags(),
     proc:      tagInputs['f-sb-proc'].getTags(),
     sockets:   tagInputs['f-sb-sockets'].getTags(),

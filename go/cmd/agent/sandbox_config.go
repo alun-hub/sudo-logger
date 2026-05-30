@@ -24,6 +24,7 @@ type sandboxYAML struct {
 	} `yaml:"features"`
 	Protect struct {
 		Files     []string `yaml:"files"`
+		Forbidden []string `yaml:"forbidden"`
 		Devices   []string `yaml:"devices"`
 		Proc      []string `yaml:"proc"`
 		Sockets   []string `yaml:"sockets"`
@@ -64,6 +65,7 @@ func featureDefaultFalse(v *bool) bool {
 type resolvedSandbox struct {
 	Features   resolvedFeatures
 	Inodes     []SandboxInodeKey
+	Forbidden  []SandboxInodeKey // forbidden_binaries (bprm_check_security)
 	IPCInodes  []SandboxInodeKey // systemd/D-Bus control-socket inodes (deny_systemd_ipc)
 	PathInodes map[string]SandboxInodeKey // protected path → its current inode key
 	Processes  []string
@@ -184,9 +186,12 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 		depth int
 	}
 	queue := make([]node, 0,
-		len(cfg.Protect.Files)+len(cfg.Protect.Devices)+
+		len(cfg.Protect.Files)+len(cfg.Protect.Forbidden)+len(cfg.Protect.Devices)+
 			len(cfg.Protect.Proc)+len(cfg.Protect.Sockets))
 	for _, p := range cfg.Protect.Files {
+		queue = append(queue, node{p, 0})
+	}
+	for _, p := range cfg.Protect.Forbidden {
 		queue = append(queue, node{p, 0})
 	}
 	for _, p := range cfg.Protect.Devices {
@@ -262,9 +267,26 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 		debugLog("sandbox: protecting %s {ino=%d dev=%d}", p, st.Ino, dev)
 		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
-		if !seen[key] {
-			seen[key] = true
-			res.Inodes = append(res.Inodes, key)
+
+		// Check if this path was in the forbidden list.
+		isForbidden := false
+		for _, fp := range cfg.Protect.Forbidden {
+			if fp == p {
+				isForbidden = true
+				break
+			}
+		}
+
+		if isForbidden {
+			if !seen[key] {
+				seen[key] = true
+				res.Forbidden = append(res.Forbidden, key)
+			}
+		} else {
+			if !seen[key] {
+				seen[key] = true
+				res.Inodes = append(res.Inodes, key)
+			}
 		}
 	}
 

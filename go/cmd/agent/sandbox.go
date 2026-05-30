@@ -37,6 +37,7 @@ const (
 	alertMount        = 15
 	alertCapable      = 16
 	alertSystemdIpc   = 17
+	alertExecBlock    = 18
 
 	// sandbox_config BPF array indices — must match CFG_* in sandbox.bpf.c.
 	cfgDenyNetlink         = 0
@@ -66,6 +67,7 @@ var alertNames = map[uint32]string{
 	alertMount:        "MOUNT",
 	alertCapable:      "CAPABLE",
 	alertSystemdIpc:   "SYSTEMD_IPC",
+	alertExecBlock:    "EXEC_BLOCK",
 }
 
 // bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c
@@ -432,6 +434,12 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		}
 	}
 
+	for _, key := range res.Forbidden {
+		if err := objs.ForbiddenBinaries.Put(key, marker); err != nil {
+			log.Printf("sandbox: insert forbidden binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
 	for _, name := range res.Processes {
 		var key [16]byte
 		copy(key[:], name)
@@ -636,6 +644,13 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	}
 	attached = append(attached, lsmUnixConn)
 
+	lsmBprm, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxBprmCheckSecurity})
+	if err != nil {
+		closeAttached()
+		return fmt.Errorf("attach lsm/bprm_check_security: %w", err)
+	}
+	attached = append(attached, lsmBprm)
+
 	s.links = attached
 
 	go s.pollAlerts()
@@ -740,12 +755,33 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 		_ = s.objs.SystemdIpcInodes.Delete(k)
 	}
 
+	// Collect then delete all existing forbidden binary inodes.
+	var forbiddenKeys []SandboxInodeKey
+	{
+		var k SandboxInodeKey
+		var v uint8
+		iter := s.objs.ForbiddenBinaries.Iterate()
+		for iter.Next(&k, &v) {
+			forbiddenKeys = append(forbiddenKeys, k)
+		}
+	}
+	for _, k := range forbiddenKeys {
+		_ = s.objs.ForbiddenBinaries.Delete(k)
+	}
+
 	applyFeatures(s.objs, res.Features)
 
 	// Insert the new inode set.
 	for _, key := range res.Inodes {
 		if err := s.objs.ProtectedInodes.Put(key, marker); err != nil {
 			log.Printf("sandbox reload: insert inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	// Insert the new forbidden binary set.
+	for _, key := range res.Forbidden {
+		if err := s.objs.ForbiddenBinaries.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert forbidden binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
 		}
 	}
 

@@ -175,6 +175,17 @@ protect:
     - /root/.ssh
     - /root/.ssh/authorized_keys
 
+  # ── Forbidden binaries ───────────────────────────────────────────────────────
+  # These binaries are completely blocked from execution inside a session.
+  # Use this to prevent sandbox escapes via IPC (e.g. firewall-cmd -> firewalld)
+  # or to block tools that are too dangerous/noisy for audited sessions.
+  forbidden:
+    - /usr/bin/firewall-cmd   # Prevent firewall changes via D-Bus escape
+    - /usr/bin/bpftool       # Prevent BPF tampering and log spam
+    - /usr/sbin/nft          # Direct firewall manipulation
+    - /usr/sbin/iptables     # Direct firewall manipulation (legacy)
+    - /usr/sbin/ip6tables    # Direct firewall manipulation (legacy)
+
   # ── Device nodes ─────────────────────────────────────────────────────────────
   devices:
     # Raw memory access — bypass any in-kernel protection

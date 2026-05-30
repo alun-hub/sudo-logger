@@ -21,6 +21,7 @@
 //   lsm/ptrace_access_check  — deny ptrace of processes outside the sandbox
 //   lsm/sb_mount             — deny mounting over protected inodes (bind-mount bypass)
 //   lsm/capable              — deny CAP_AUDIT_CONTROL, CAP_NET_ADMIN, CAP_SYS_MODULE
+//   lsm/bprm_check_security  — deny execution of forbidden binaries
 //   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
 //   tp_btf/sched_process_exit — clean up PID tracking when a process exits
 //
@@ -76,6 +77,7 @@ enum sandbox_alert_type {
 	ALERT_MOUNT = 15,
 	ALERT_CAPABLE = 16,
 	ALERT_SYSTEMD_IPC = 17,
+	ALERT_EXEC_BLOCK = 18,
 };
 
 struct sandbox_alert {
@@ -91,6 +93,26 @@ struct sandbox_alert {
 	__u32 pad;
 };
 
+struct inode_key {
+	__u64 ino;
+	__u32 dev;
+	__u32 pad;
+};
+
+// alert_ratelimit: tracks the last time a specific alert type was sent for a PID.
+// key = {tgid, alert_type}, value = timestamp (nanoseconds).
+struct ratelimit_key {
+	__u32 tgid;
+	__u32 type;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, MAX_SANDBOXED_PIDS);
+	__type(key, struct ratelimit_key);
+	__type(value, __u64);
+} alert_ratelimit SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 256 * 1024); // 256 KB ring buffer
@@ -99,6 +121,19 @@ struct {
 static __always_inline void submit_alert(enum sandbox_alert_type type,
 					 __u64 ino, __u32 dev)
 {
+	__u64 now = bpf_ktime_get_ns();
+	__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+
+	struct ratelimit_key r_key = { .tgid = tgid, .type = (__u32)type };
+	__u64 *last_alert = bpf_map_lookup_elem(&alert_ratelimit, &r_key);
+
+	// Rate limit: only allow the same alert type for the same PID once every 5 seconds.
+	// This prevents log spam from tools like bpftool that trigger dozens of BPF alerts.
+	if (last_alert && (now - *last_alert) < 5000000000ULL)
+		return;
+
+	bpf_map_update_elem(&alert_ratelimit, &r_key, &now, BPF_ANY);
+
 	struct sandbox_alert *a;
 
 	a = bpf_ringbuf_reserve(&sandbox_alerts, sizeof(*a), 0);
@@ -118,12 +153,6 @@ static __always_inline void submit_alert(enum sandbox_alert_type type,
 
 	bpf_ringbuf_submit(a, 0);
 }
-
-struct inode_key {
-	__u64 ino;
-	__u32 dev;
-	__u32 pad;
-};
 
 // sandboxed_cgroups: set of session cgroup IDs subject to restrictions.
 // key = cgroup_id (u64), value = u8 marker.
@@ -156,6 +185,15 @@ struct {
 	__type(key, struct inode_key);
 	__type(value, __u8);
 } protected_inodes SEC(".maps");
+
+// forbidden_binaries: deny-list of executable inodes.
+// key = {inode number, block device id}, value = u8 marker.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1024);
+	__type(key, struct inode_key);
+	__type(value, __u8);
+} forbidden_binaries SEC(".maps");
 
 // protected_procs: deny-list of process names (comm, max 15 chars + NUL).
 // key = char[TASK_COMM_LEN], value = u8 marker.
@@ -699,6 +737,34 @@ int BPF_PROG(sandbox_unix_connect, struct sock *sock, struct sock *other, struct
 	return 0;
 }
 
+// Deny execution of forbidden binaries.
+SEC("lsm/bprm_check_security")
+int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	// Exempt sudo itself (it needs to exec the command!).
+	if (is_exempt_leader())
+		return 0;
+
+	struct inode *inode = BPF_CORE_READ(bprm, file, f_inode);
+	if (!inode)
+		return 0;
+
+	struct inode_key key = {};
+	key.ino = BPF_CORE_READ(inode, i_ino);
+	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+	key.pad = 0;
+
+	if (bpf_map_lookup_elem(&forbidden_binaries, &key)) {
+		submit_alert(ALERT_EXEC_BLOCK, key.ino, key.dev);
+		return -EPERM;
+	}
+
+	return 0;
+}
+
 // Propagate sandbox membership from parent to child at fork time.
 // Fires in the parent's context before the child runs any userspace code,
 // making it race-free against the PAM session scope cgroup migration.
@@ -724,8 +790,16 @@ int BPF_PROG(sandbox_process_exit, struct task_struct *p)
 	__u32 tgid = BPF_CORE_READ(p, tgid);
 	__u32 pid = BPF_CORE_READ(p, pid);
 	// Only delete when the thread-group leader exits (pid == tgid).
-	if (pid == tgid)
+	if (pid == tgid) {
 		bpf_map_delete_elem(&sandboxed_pids, &tgid);
+
+		// Clean up rate-limit entries for this PID to prevent map exhaustion.
+		// We clean up for all possible alert types.
+		for (int i = 1; i <= 18; i++) {
+			struct ratelimit_key r_key = { .tgid = tgid, .type = (__u32)i };
+			bpf_map_delete_elem(&alert_ratelimit, &r_key);
+		}
+	}
 	return 0;
 }
 
