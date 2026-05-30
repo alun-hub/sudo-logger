@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.20.14
+Version:        1.20.15
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -68,7 +68,11 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog
-* Fri May 30 2026 sudo-logger 1.20.14-1
+* Sat May 30 2026 sudo-logger 1.20.15-1
+- fix(ui): expand sandbox settings and help panel to fill window width
+  (remove siem-form max-width: 1000px; increase help-body to max-width: 1200px)
+
+* Sat May 30 2026 sudo-logger 1.20.14-1
 - feat(sandbox): expose deny_cap_mac_admin, deny_cap_sys_rawio, deny_cap_sys_boot
   in Settings UI with descriptive labels; add /sys/fs/selinux/enforce,
   /sys/fs/selinux/policy, /etc/ld.so.preload and setenforce/semodule/kexec
