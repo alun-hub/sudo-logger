@@ -180,11 +180,23 @@ protect:
   # Use this to prevent sandbox escapes via IPC (e.g. firewall-cmd -> firewalld)
   # or to block tools that are too dangerous/noisy for audited sessions.
   forbidden:
-    - /usr/bin/firewall-cmd   # Prevent firewall changes via D-Bus escape
-    - /usr/bin/bpftool       # Prevent BPF tampering and log spam
-    - /usr/sbin/nft          # Direct firewall manipulation
-    - /usr/sbin/iptables     # Direct firewall manipulation (legacy)
-    - /usr/sbin/ip6tables    # Direct firewall manipulation (legacy)
+    # --- Sandbox Escapes (IPC to PID 1) ---
+    - /usr/bin/systemd-run
+    - /usr/bin/busctl
+    - /usr/bin/machinectl
+
+    # --- Firewall & Network IPC ---
+    - /usr/bin/firewall-cmd
+    - /usr/bin/firewall-offline-cmd
+    - /usr/bin/nmcli
+    - /usr/bin/hostnamectl
+
+    # --- Kernel & Low-level tools ---
+    - /usr/bin/bpftool
+    - /usr/sbin/nft
+    - /usr/sbin/iptables
+    - /usr/sbin/ip6tables
+    - /usr/sbin/auditctl
 
   # ── Device nodes ─────────────────────────────────────────────────────────────
   devices:

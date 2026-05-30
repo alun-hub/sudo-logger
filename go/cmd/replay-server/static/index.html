@@ -3151,6 +3151,19 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /root/.bash_logout
     - /root/.ssh
     - /root/.ssh/authorized_keys
+  forbidden:
+    - /usr/bin/systemd-run
+    - /usr/bin/busctl
+    - /usr/bin/machinectl
+    - /usr/bin/firewall-cmd
+    - /usr/bin/firewall-offline-cmd
+    - /usr/bin/nmcli
+    - /usr/bin/hostnamectl
+    - /usr/bin/bpftool
+    - /usr/sbin/nft
+    - /usr/sbin/iptables
+    - /usr/sbin/ip6tables
+    - /usr/sbin/auditctl
   devices:
     - /dev/mem
     - /dev/kmem
@@ -3176,10 +3189,8 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /proc/sys/net/ipv6/conf/all/forwarding
   sockets:
     - /run/sudo-logger/plugin.sock
-    - /run/dbus/system_bus_socket
     - /run/systemd/journal/socket
     - /run/systemd/journal/stdout
-    - /run/systemd/private
   processes:
     - auditd
     - rsyslogd
