@@ -20,6 +20,9 @@ type sandboxYAML struct {
 		DenyCapAuditControl *bool `yaml:"deny_cap_audit_control"`
 		DenyCapNetAdmin     *bool `yaml:"deny_cap_net_admin"`
 		DenyCapSysModule    *bool `yaml:"deny_cap_sys_module"`
+		DenyCapMacAdmin     *bool `yaml:"deny_cap_mac_admin"`
+		DenyCapSysRawio     *bool `yaml:"deny_cap_sys_rawio"`
+		DenyCapSysBoot      *bool `yaml:"deny_cap_sys_boot"`
 		DenySystemdIPC      *bool `yaml:"deny_systemd_ipc"`
 	} `yaml:"features"`
 	Protect struct {
@@ -42,6 +45,9 @@ type resolvedFeatures struct {
 	DenyCapAuditControl bool
 	DenyCapNetAdmin     bool
 	DenyCapSysModule    bool
+	DenyCapMacAdmin     bool
+	DenyCapSysRawio     bool
+	DenyCapSysBoot      bool
 	DenySystemdIPC      bool
 }
 
@@ -165,6 +171,9 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 			DenyCapAuditControl: featureDefault(cfg.Features.DenyCapAuditControl),
 			DenyCapNetAdmin:     featureDefault(cfg.Features.DenyCapNetAdmin),
 			DenyCapSysModule:    featureDefault(cfg.Features.DenyCapSysModule),
+			DenyCapMacAdmin:     featureDefault(cfg.Features.DenyCapMacAdmin),
+			DenyCapSysRawio:     featureDefault(cfg.Features.DenyCapSysRawio),
+			DenyCapSysBoot:      featureDefault(cfg.Features.DenyCapSysBoot),
 			DenySystemdIPC:      featureDefaultFalse(cfg.Features.DenySystemdIPC),
 		},
 	}

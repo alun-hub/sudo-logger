@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.92
+Version:        1.20.93
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -210,6 +210,12 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Fri May 30 2026 sudo-logger 1.20.93-1
+- feat(sandbox): block CAP_MAC_ADMIN (setenforce/semodule), CAP_SYS_RAWIO
+  (ioperm/iopl, /dev/mem), and CAP_SYS_BOOT (kexec_load) in the eBPF LSM
+  capable hook — all three on by default, each gated by its own feature flag
+  in sandbox.yaml
+
 * Sat May 30 2026 sudo-logger 1.20.86-1
 - feat(sandbox): add deny_systemd_ipc to block connect() to systemd/D-Bus control
   sockets, closing the systemd-run / StartTransientUnit sandbox escape (off by default;

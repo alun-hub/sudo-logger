@@ -47,6 +47,9 @@ const (
 	cfgDenyCapNetAdmin     = 4
 	cfgDenyCapSysModule    = 5
 	cfgDenySystemdIPC      = 6
+	cfgDenyCapMacAdmin     = 7
+	cfgDenyCapSysRawio     = 8
+	cfgDenyCapSysBoot      = 9
 )
 
 var alertNames = map[uint32]string{
@@ -369,6 +372,9 @@ func applyFeatures(objs *SandboxObjects, f resolvedFeatures) {
 	flag(cfgDenyCapNetAdmin, f.DenyCapNetAdmin)
 	flag(cfgDenyCapSysModule, f.DenyCapSysModule)
 	flag(cfgDenySystemdIPC, f.DenySystemdIPC)
+	flag(cfgDenyCapMacAdmin, f.DenyCapMacAdmin)
+	flag(cfgDenyCapSysRawio, f.DenyCapSysRawio)
+	flag(cfgDenyCapSysBoot, f.DenyCapSysBoot)
 }
 
 func startSandbox(configPath string) {

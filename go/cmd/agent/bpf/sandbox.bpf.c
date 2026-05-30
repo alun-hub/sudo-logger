@@ -20,7 +20,7 @@
 //   lsm/socket_create        — deny AF_NETLINK sockets for route/firewall/audit tampering
 //   lsm/ptrace_access_check  — deny ptrace of processes outside the sandbox
 //   lsm/sb_mount             — deny mounting over protected inodes (bind-mount bypass)
-//   lsm/capable              — deny CAP_AUDIT_CONTROL, CAP_NET_ADMIN, CAP_SYS_MODULE
+//   lsm/capable              — deny CAP_AUDIT_CONTROL, CAP_NET_ADMIN, CAP_SYS_MODULE, CAP_MAC_ADMIN, CAP_SYS_RAWIO, CAP_SYS_BOOT
 //   lsm/bprm_check_security  — deny execution of forbidden binaries and from noexec dirs
 //   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
 //   tp_btf/sched_process_exit — clean up PID tracking when a process exits
@@ -235,7 +235,10 @@ struct {
 #define CFG_DENY_CAP_NET_ADMIN     4
 #define CFG_DENY_CAP_SYS_MODULE    5
 #define CFG_DENY_SYSTEMD_IPC       6
-#define CFG_COUNT                  7
+#define CFG_DENY_CAP_MAC_ADMIN     7
+#define CFG_DENY_CAP_SYS_RAWIO     8
+#define CFG_DENY_CAP_SYS_BOOT      9
+#define CFG_COUNT                  10
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -676,8 +679,17 @@ int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, co
 #ifndef CAP_SYS_MODULE
 #define CAP_SYS_MODULE    16
 #endif
+#ifndef CAP_SYS_RAWIO
+#define CAP_SYS_RAWIO     17
+#endif
+#ifndef CAP_SYS_BOOT
+#define CAP_SYS_BOOT      22
+#endif
 #ifndef CAP_AUDIT_CONTROL
 #define CAP_AUDIT_CONTROL 30
+#endif
+#ifndef CAP_MAC_ADMIN
+#define CAP_MAC_ADMIN     33
 #endif
 
 // Deny specific Linux capabilities within a sandbox session.
@@ -685,6 +697,9 @@ int BPF_PROG(sandbox_sb_mount, const char *dev_name, const struct path *path, co
 //   CAP_AUDIT_CONTROL: auditctl rule manipulation (complementary to NETLINK_AUDIT block)
 //   CAP_NET_ADMIN:     raw socket and netdevice operations outside netlink
 //   CAP_SYS_MODULE:    insmod/modprobe kernel module loading
+//   CAP_MAC_ADMIN:     setenforce/semodule — disable or replace the SELinux policy
+//   CAP_SYS_RAWIO:     ioperm/iopl, /dev/mem, /dev/kmem — direct hardware access below VFS
+//   CAP_SYS_BOOT:      kexec_load — replace the running kernel with one lacking audit
 SEC("lsm/capable")
 int BPF_PROG(sandbox_capable, const struct cred *cred,
 	     struct user_namespace *ns, int cap, unsigned int opts)
@@ -700,7 +715,10 @@ int BPF_PROG(sandbox_capable, const struct cred *cred,
 	// each gated by its own deny_cap_* feature flag (sandbox.yaml).
 	if ((cap == CAP_AUDIT_CONTROL && cfg_enabled(CFG_DENY_CAP_AUDIT_CONTROL)) ||
 	    (cap == CAP_NET_ADMIN     && cfg_enabled(CFG_DENY_CAP_NET_ADMIN))     ||
-	    (cap == CAP_SYS_MODULE    && cfg_enabled(CFG_DENY_CAP_SYS_MODULE))) {
+	    (cap == CAP_SYS_MODULE    && cfg_enabled(CFG_DENY_CAP_SYS_MODULE))    ||
+	    (cap == CAP_MAC_ADMIN     && cfg_enabled(CFG_DENY_CAP_MAC_ADMIN))     ||
+	    (cap == CAP_SYS_RAWIO     && cfg_enabled(CFG_DENY_CAP_SYS_RAWIO))     ||
+	    (cap == CAP_SYS_BOOT      && cfg_enabled(CFG_DENY_CAP_SYS_BOOT))) {
 		submit_alert(ALERT_CAPABLE, 0, cap);
 		return -EPERM;
 	}

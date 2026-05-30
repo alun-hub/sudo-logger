@@ -1568,6 +1568,9 @@ type sandboxYAML struct {
 		DenyCapAuditControl *bool `yaml:"deny_cap_audit_control"`
 		DenyCapNetAdmin     *bool `yaml:"deny_cap_net_admin"`
 		DenyCapSysModule    *bool `yaml:"deny_cap_sys_module"`
+		DenyCapMacAdmin     *bool `yaml:"deny_cap_mac_admin"`
+		DenyCapSysRawio     *bool `yaml:"deny_cap_sys_rawio"`
+		DenyCapSysBoot      *bool `yaml:"deny_cap_sys_boot"`
 		DenySystemdIPC      *bool `yaml:"deny_systemd_ipc"`
 	} `yaml:"features"`
 	Protect struct {

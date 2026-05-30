@@ -923,6 +923,12 @@
                 <span><strong>Block CAP_NET_ADMIN</strong> — raw sockets and netdevice ops (off by default)</span></label>
               <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-sys-module" checked>
                 <span><strong>Block CAP_SYS_MODULE</strong> — insmod / modprobe</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-mac-admin" checked>
+                <span><strong>Block CAP_MAC_ADMIN</strong> — setenforce / semodule: disable or replace the SELinux policy</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-sys-rawio" checked>
+                <span><strong>Block CAP_SYS_RAWIO</strong> — ioperm/iopl, /dev/mem, /dev/kmem: direct hardware access below VFS</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-sys-boot" checked>
+                <span><strong>Block CAP_SYS_BOOT</strong> — kexec_load: replace the running kernel with one lacking audit</span></label>
               <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-systemd-ipc">
                 <span><strong>Block systemd/D-Bus IPC</strong> — closes the systemd-run escape; also blocks systemctl/loginctl in-session (off by default)</span></label>
             </div>
@@ -3139,6 +3145,11 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /var/log/messages
     - /var/log/journal
     - /etc/selinux/config
+    - /sys/fs/selinux/enforce
+    - /sys/fs/selinux/policy
+    - /etc/ld.so.preload
+    - /etc/ld.so.conf
+    - /etc/ld.so.conf.d
     - /etc/crypto-policies
     - /etc/pki
     - /etc/authselect
@@ -3171,6 +3182,9 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /usr/sbin/iptables
     - /usr/sbin/ip6tables
     - /usr/sbin/auditctl
+    - /usr/sbin/setenforce
+    - /usr/sbin/semodule
+    - /usr/sbin/kexec
   noexec:
     - /tmp
     - /var/tmp
@@ -3274,6 +3288,9 @@ function loadTemplate() {
     document.getElementById('sb-feat-deny-cap-audit-control').checked = f.deny_cap_audit_control !== false;
     document.getElementById('sb-feat-deny-cap-net-admin').checked     = f.deny_cap_net_admin !== false;
     document.getElementById('sb-feat-deny-cap-sys-module').checked    = f.deny_cap_sys_module !== false;
+    document.getElementById('sb-feat-deny-cap-mac-admin').checked     = f.deny_cap_mac_admin !== false;
+    document.getElementById('sb-feat-deny-cap-sys-rawio').checked     = f.deny_cap_sys_rawio !== false;
+    document.getElementById('sb-feat-deny-cap-sys-boot').checked      = f.deny_cap_sys_boot !== false;
     document.getElementById('sb-feat-deny-systemd-ipc').checked       = f.deny_systemd_ipc === true;
   }
 }
@@ -3290,6 +3307,9 @@ async function saveAsTemplate() {
       deny_cap_audit_control: document.getElementById('sb-feat-deny-cap-audit-control').checked,
       deny_cap_net_admin:     document.getElementById('sb-feat-deny-cap-net-admin').checked,
       deny_cap_sys_module:    document.getElementById('sb-feat-deny-cap-sys-module').checked,
+      deny_cap_mac_admin:     document.getElementById('sb-feat-deny-cap-mac-admin').checked,
+      deny_cap_sys_rawio:     document.getElementById('sb-feat-deny-cap-sys-rawio').checked,
+      deny_cap_sys_boot:      document.getElementById('sb-feat-deny-cap-sys-boot').checked,
       deny_systemd_ipc:       document.getElementById('sb-feat-deny-systemd-ipc').checked,
     },
     files:     tagInputs['f-sb-files'].getTags(),
@@ -3321,7 +3341,8 @@ document.getElementById('btn-save-template').addEventListener('click', saveAsTem
 
 function parseSandboxYaml(yamlStr) {
   const featureKeys = ['deny_netlink','deny_mount','deny_ptrace',
-    'deny_cap_audit_control','deny_cap_net_admin','deny_cap_sys_module'];
+    'deny_cap_audit_control','deny_cap_net_admin','deny_cap_sys_module',
+    'deny_cap_mac_admin','deny_cap_sys_rawio','deny_cap_sys_boot'];
   const data = {
     files: [], forbidden: [], noexec: [], devices: [], proc: [], sockets: [], processes: [],
     features: Object.fromEntries(featureKeys.map(k => [k, true])), // default all true
@@ -3374,6 +3395,9 @@ function buildSandboxYaml(data) {
   yaml += `  deny_cap_audit_control: ${f.deny_cap_audit_control !== false}\n`;
   yaml += `  deny_cap_net_admin: ${f.deny_cap_net_admin !== false}\n`;
   yaml += `  deny_cap_sys_module: ${f.deny_cap_sys_module !== false}\n`;
+  yaml += `  deny_cap_mac_admin: ${f.deny_cap_mac_admin !== false}\n`;
+  yaml += `  deny_cap_sys_rawio: ${f.deny_cap_sys_rawio !== false}\n`;
+  yaml += `  deny_cap_sys_boot: ${f.deny_cap_sys_boot !== false}\n`;
   yaml += `  deny_systemd_ipc: ${f.deny_systemd_ipc === true}\n`;
 
   yaml += "\nprotect:\n";
@@ -3409,6 +3433,9 @@ async function fetchSandboxConfig() {
     document.getElementById('sb-feat-deny-cap-audit-control').checked = f.deny_cap_audit_control !== false;
     document.getElementById('sb-feat-deny-cap-net-admin').checked     = f.deny_cap_net_admin !== false;
     document.getElementById('sb-feat-deny-cap-sys-module').checked    = f.deny_cap_sys_module !== false;
+    document.getElementById('sb-feat-deny-cap-mac-admin').checked     = f.deny_cap_mac_admin !== false;
+    document.getElementById('sb-feat-deny-cap-sys-rawio').checked     = f.deny_cap_sys_rawio !== false;
+    document.getElementById('sb-feat-deny-cap-sys-boot').checked      = f.deny_cap_sys_boot !== false;
     document.getElementById('sb-feat-deny-systemd-ipc').checked       = f.deny_systemd_ipc === true;
 
     const pathEl = document.getElementById('sandbox-path');
@@ -3428,6 +3455,9 @@ async function saveSandboxConfig() {
       deny_cap_audit_control: cb('sb-feat-deny-cap-audit-control'),
       deny_cap_net_admin:     cb('sb-feat-deny-cap-net-admin'),
       deny_cap_sys_module:    cb('sb-feat-deny-cap-sys-module'),
+      deny_cap_mac_admin:     cb('sb-feat-deny-cap-mac-admin'),
+      deny_cap_sys_rawio:     cb('sb-feat-deny-cap-sys-rawio'),
+      deny_cap_sys_boot:      cb('sb-feat-deny-cap-sys-boot'),
       deny_systemd_ipc:       cb('sb-feat-deny-systemd-ipc'),
     },
     files:     tagInputs['f-sb-files'].getTags(),
