@@ -2801,7 +2801,7 @@ const tagInputs = {};
 function initTagInputs() {
   const ids = [
     'f-cmd-contains','f-cmd-also','f-cmd-base','f-con-contains','f-con-also',
-    'f-sb-files','f-sb-forbidden','f-sb-devices','f-sb-proc','f-sb-sockets','f-sb-processes'
+    'f-sb-files','f-sb-forbidden','f-sb-noexec','f-sb-devices','f-sb-proc','f-sb-sockets','f-sb-processes'
   ];
   ids.forEach(id => {
     const el = document.getElementById(id);
@@ -3170,6 +3170,12 @@ const DEFAULT_HARDENING_YAML = `protect:
     - /usr/sbin/iptables
     - /usr/sbin/ip6tables
     - /usr/sbin/auditctl
+  noexec:
+    - /tmp
+    - /var/tmp
+    - /dev/shm
+    - /home
+    - /run/user
   devices:
     - /dev/mem
     - /dev/kmem
