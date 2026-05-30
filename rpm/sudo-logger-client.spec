@@ -219,7 +219,7 @@ fi
 - fix(sandbox): wire the deny_* feature flags to cfg_enabled() so sandbox.yaml toggles
   actually take effect (previously written to a map no BPF hook read)
 
-* Thu May 29 2026 sudo-logger 1.20.85-1
+* Fri May 29 2026 sudo-logger 1.20.85-1
 - fix(bpf): add NETLINK_AUDIT to socket_create block list so auditctl -D is denied in sessions
 - fix(bpf): sb_mount now only blocks mounts over protected inodes; legitimate mounts allowed
 
