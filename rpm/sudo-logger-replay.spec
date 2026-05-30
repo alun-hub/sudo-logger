@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.20.8
+Version:        1.20.9
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
