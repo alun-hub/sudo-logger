@@ -1572,6 +1572,7 @@ type sandboxYAML struct {
 	} `yaml:"features"`
 	Protect struct {
 		Files     []string `yaml:"files"`
+		Forbidden []string `yaml:"forbidden"`
 		Devices   []string `yaml:"devices"`
 		Proc      []string `yaml:"proc"`
 		Sockets   []string `yaml:"sockets"`
