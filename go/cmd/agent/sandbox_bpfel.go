@@ -96,6 +96,7 @@ type SandboxProgramSpecs struct {
 type SandboxMapSpecs struct {
 	AlertRatelimit    *ebpf.MapSpec `ebpf:"alert_ratelimit"`
 	ForbiddenBinaries *ebpf.MapSpec `ebpf:"forbidden_binaries"`
+	NoexecInodes      *ebpf.MapSpec `ebpf:"noexec_inodes"`
 	ProtectedInodes   *ebpf.MapSpec `ebpf:"protected_inodes"`
 	ProtectedProcs    *ebpf.MapSpec `ebpf:"protected_procs"`
 	SandboxAlerts     *ebpf.MapSpec `ebpf:"sandbox_alerts"`
@@ -133,6 +134,7 @@ func (o *SandboxObjects) Close() error {
 type SandboxMaps struct {
 	AlertRatelimit    *ebpf.Map `ebpf:"alert_ratelimit"`
 	ForbiddenBinaries *ebpf.Map `ebpf:"forbidden_binaries"`
+	NoexecInodes      *ebpf.Map `ebpf:"noexec_inodes"`
 	ProtectedInodes   *ebpf.Map `ebpf:"protected_inodes"`
 	ProtectedProcs    *ebpf.Map `ebpf:"protected_procs"`
 	SandboxAlerts     *ebpf.Map `ebpf:"sandbox_alerts"`
@@ -146,6 +148,7 @@ func (m *SandboxMaps) Close() error {
 	return _SandboxClose(
 		m.AlertRatelimit,
 		m.ForbiddenBinaries,
+		m.NoexecInodes,
 		m.ProtectedInodes,
 		m.ProtectedProcs,
 		m.SandboxAlerts,

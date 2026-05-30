@@ -941,6 +941,12 @@
             <p class="form-hint">Blocked from execution (prevents escape via IPC). Example: <code>/usr/bin/firewall-cmd</code>, <code>/usr/bin/bpftool</code></p>
           </div>
 
+          <label>No-exec directories</label>
+          <div class="form-group">
+            <div class="tag-input-wrap" id="f-sb-noexec"></div>
+            <p class="form-hint">Execution blocked from within these directories. Prevents copy-bypass. Example: <code>/tmp</code>, <code>/dev/shm</code></p>
+          </div>
+
           <label>Device nodes</label>
           <div class="form-group">
             <div class="tag-input-wrap" id="f-sb-devices"></div>
@@ -3311,7 +3317,7 @@ function parseSandboxYaml(yamlStr) {
   const featureKeys = ['deny_netlink','deny_mount','deny_ptrace',
     'deny_cap_audit_control','deny_cap_net_admin','deny_cap_sys_module'];
   const data = {
-    files: [], forbidden: [], devices: [], proc: [], sockets: [], processes: [],
+    files: [], forbidden: [], noexec: [], devices: [], proc: [], sockets: [], processes: [],
     features: Object.fromEntries(featureKeys.map(k => [k, true])), // default all true
   };
   // deny_systemd_ipc defaults OFF (it also blocks systemctl/loginctl in-session).
@@ -3334,7 +3340,7 @@ function parseSandboxYaml(yamlStr) {
       const m = cleanLine.match(/^ {2}(deny_\w+):\s*(true|false)/);
       if (m) data.features[m[1]] = m[2] === 'true';
     } else if (section === 'protect') {
-      const keyMatch = cleanLine.match(/^ {2}(files|forbidden|devices|proc|sockets|processes):/);
+      const keyMatch = cleanLine.match(/^ {2}(files|forbidden|noexec|devices|proc|sockets|processes):/);
       if (keyMatch) { currentKey = keyMatch[1]; continue; }
 
       const itemMatch = cleanLine.match(/^ {4}- (.*)/);
@@ -3365,7 +3371,7 @@ function buildSandboxYaml(data) {
   yaml += `  deny_systemd_ipc: ${f.deny_systemd_ipc === true}\n`;
 
   yaml += "\nprotect:\n";
-  for (const k of ['files', 'forbidden', 'devices', 'proc', 'sockets', 'processes']) {
+  for (const k of ['files', 'forbidden', 'noexec', 'devices', 'proc', 'sockets', 'processes']) {
     const list = data[k] || [];
     if (list.length > 0) {
       yaml += `  ${k}:\n`;
@@ -3384,6 +3390,7 @@ async function fetchSandboxConfig() {
 
     tagInputs['f-sb-files'].setTags(parsed.files);
     tagInputs['f-sb-forbidden'].setTags(parsed.forbidden);
+    tagInputs['f-sb-noexec'].setTags(parsed.noexec);
     tagInputs['f-sb-devices'].setTags(parsed.devices);
     tagInputs['f-sb-proc'].setTags(parsed.proc);
     tagInputs['f-sb-sockets'].setTags(parsed.sockets);
@@ -3419,6 +3426,7 @@ async function saveSandboxConfig() {
     },
     files:     tagInputs['f-sb-files'].getTags(),
     forbidden: tagInputs['f-sb-forbidden'].getTags(),
+    noexec:    tagInputs['f-sb-noexec'].getTags(),
     devices:   tagInputs['f-sb-devices'].getTags(),
     proc:      tagInputs['f-sb-proc'].getTags(),
     sockets:   tagInputs['f-sb-sockets'].getTags(),

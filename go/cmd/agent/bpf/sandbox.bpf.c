@@ -21,7 +21,7 @@
 //   lsm/ptrace_access_check  — deny ptrace of processes outside the sandbox
 //   lsm/sb_mount             — deny mounting over protected inodes (bind-mount bypass)
 //   lsm/capable              — deny CAP_AUDIT_CONTROL, CAP_NET_ADMIN, CAP_SYS_MODULE
-//   lsm/bprm_check_security  — deny execution of forbidden binaries
+//   lsm/bprm_check_security  — deny execution of forbidden binaries and from noexec dirs
 //   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
 //   tp_btf/sched_process_exit — clean up PID tracking when a process exits
 //
@@ -194,6 +194,15 @@ struct {
 	__type(key, struct inode_key);
 	__type(value, __u8);
 } forbidden_binaries SEC(".maps");
+
+// noexec_inodes: directory inodes where execution is completely forbidden.
+// key = {inode number, block device id}, value = u8 marker.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 256);
+	__type(key, struct inode_key);
+	__type(value, __u8);
+} noexec_inodes SEC(".maps");
 
 // protected_procs: deny-list of process names (comm, max 15 chars + NUL).
 // key = char[TASK_COMM_LEN], value = u8 marker.
@@ -737,7 +746,7 @@ int BPF_PROG(sandbox_unix_connect, struct sock *sock, struct sock *other, struct
 	return 0;
 }
 
-// Deny execution of forbidden binaries.
+// Deny execution of forbidden binaries and from noexec directories.
 SEC("lsm/bprm_check_security")
 int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 {
@@ -760,6 +769,21 @@ int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 	if (bpf_map_lookup_elem(&forbidden_binaries, &key)) {
 		submit_alert(ALERT_EXEC_BLOCK, key.ino, key.dev);
 		return -EPERM;
+	}
+
+	// Also check the parent directory. If it's a no-exec directory (e.g. /tmp),
+	// block any execution from within it.
+	struct inode *dir = BPF_CORE_READ(bprm, file, f_path.dentry, d_parent, d_inode);
+	if (dir) {
+		struct inode_key dir_key = {};
+		dir_key.ino = BPF_CORE_READ(dir, i_ino);
+		dir_key.dev = (__u32)BPF_CORE_READ(dir, i_sb, s_dev);
+		dir_key.pad = 0;
+
+		if (bpf_map_lookup_elem(&noexec_inodes, &dir_key)) {
+			submit_alert(ALERT_EXEC_BLOCK, key.ino, key.dev);
+			return -EPERM;
+		}
 	}
 
 	return 0;

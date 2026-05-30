@@ -198,6 +198,17 @@ protect:
     - /usr/sbin/ip6tables
     - /usr/sbin/auditctl
 
+  # ── No-exec directories ──────────────────────────────────────────────────────
+  # Execution from these directories is completely blocked.
+  # This prevents users from copying forbidden tools to writable locations
+  # (like /tmp) and running them from there to bypass the forbidden list.
+  noexec:
+    - /tmp
+    - /var/tmp
+    - /dev/shm
+    - /home
+    - /run/user
+
   # ── Device nodes ─────────────────────────────────────────────────────────────
   devices:
     # Raw memory access — bypass any in-kernel protection

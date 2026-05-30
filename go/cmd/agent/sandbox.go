@@ -440,6 +440,12 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		}
 	}
 
+	for _, key := range res.Noexec {
+		if err := objs.NoexecInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox: insert noexec inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
 	for _, name := range res.Processes {
 		var key [16]byte
 		copy(key[:], name)
@@ -769,6 +775,20 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 		_ = s.objs.ForbiddenBinaries.Delete(k)
 	}
 
+	// Collect then delete all existing noexec directory inodes.
+	var noexecKeys []SandboxInodeKey
+	{
+		var k SandboxInodeKey
+		var v uint8
+		iter := s.objs.NoexecInodes.Iterate()
+		for iter.Next(&k, &v) {
+			noexecKeys = append(noexecKeys, k)
+		}
+	}
+	for _, k := range noexecKeys {
+		_ = s.objs.NoexecInodes.Delete(k)
+	}
+
 	applyFeatures(s.objs, res.Features)
 
 	// Insert the new inode set.
@@ -782,6 +802,13 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 	for _, key := range res.Forbidden {
 		if err := s.objs.ForbiddenBinaries.Put(key, marker); err != nil {
 			log.Printf("sandbox reload: insert forbidden binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	// Insert the new noexec directory set.
+	for _, key := range res.Noexec {
+		if err := s.objs.NoexecInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert noexec inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
 		}
 	}
 
