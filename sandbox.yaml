@@ -53,6 +53,10 @@ features:
   deny_cap_audit_control: true  # Block CAP_AUDIT_CONTROL (auditctl, defence in depth)
   deny_cap_net_admin: true    # Block CAP_NET_ADMIN (raw sockets, netdevice ops)
   deny_cap_sys_module: true   # Block CAP_SYS_MODULE (insmod, modprobe)
+  deny_systemd_ipc: false     # Block connect() to systemd/D-Bus control sockets
+                              # (closes the systemd-run / StartTransientUnit escape).
+                              # OFF by default: also blocks systemctl/loginctl/
+                              # hostnamectl from within a sandboxed session.
 
 protect:
 

@@ -20,6 +20,7 @@ type sandboxYAML struct {
 		DenyCapAuditControl *bool `yaml:"deny_cap_audit_control"`
 		DenyCapNetAdmin     *bool `yaml:"deny_cap_net_admin"`
 		DenyCapSysModule    *bool `yaml:"deny_cap_sys_module"`
+		DenySystemdIPC      *bool `yaml:"deny_systemd_ipc"`
 	} `yaml:"features"`
 	Protect struct {
 		Files     []string `yaml:"files"`
@@ -39,6 +40,7 @@ type resolvedFeatures struct {
 	DenyCapAuditControl bool
 	DenyCapNetAdmin     bool
 	DenyCapSysModule    bool
+	DenySystemdIPC      bool
 }
 
 // featureDefault returns v's value, or true if v is nil (absent from YAML).
@@ -49,11 +51,46 @@ func featureDefault(v *bool) bool {
 	return *v
 }
 
+// featureDefaultFalse returns v's value, or false if v is nil. Used for
+// protections that are off by default because they break common workflows
+// (e.g. deny_systemd_ipc also blocks systemctl/loginctl inside a session).
+func featureDefaultFalse(v *bool) bool {
+	if v == nil {
+		return false
+	}
+	return *v
+}
+
 type resolvedSandbox struct {
 	Features   resolvedFeatures
 	Inodes     []SandboxInodeKey
+	IPCInodes  []SandboxInodeKey // systemd/D-Bus control-socket inodes (deny_systemd_ipc)
 	PathInodes map[string]SandboxInodeKey // protected path → its current inode key
 	Processes  []string
+}
+
+// systemdIPCPaths are the control sockets whose connect() is denied inside the
+// sandbox when deny_systemd_ipc is enabled. These are the channels through which
+// a session can ask PID 1 to spawn a process outside the sandbox (systemd-run,
+// busctl StartTransientUnit, machinectl).
+var systemdIPCPaths = []string{
+	"/run/systemd/private",
+	"/run/dbus/system_bus_socket",
+}
+
+// resolveInodeKey resolves an absolute path to its BPF inode key {ino, dev},
+// using mountinfo for s_dev to match what the BPF program reads.
+func resolveInodeKey(p string) (SandboxInodeKey, bool) {
+	var st syscall.Stat_t
+	if err := syscall.Stat(p, &st); err != nil {
+		debugLog("sandbox: stat %s: %v (skipping)", p, err)
+		return SandboxInodeKey{}, false
+	}
+	dev, err := mountDev(p)
+	if err != nil {
+		dev = uint32(st.Dev)
+	}
+	return SandboxInodeKey{Ino: st.Ino, Dev: dev}, true
 }
 
 // mountDev returns the kernel dev_t (MKDEV(major, minor)) for the filesystem
@@ -124,7 +161,18 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 			DenyCapAuditControl: featureDefault(cfg.Features.DenyCapAuditControl),
 			DenyCapNetAdmin:     featureDefault(cfg.Features.DenyCapNetAdmin),
 			DenyCapSysModule:    featureDefault(cfg.Features.DenyCapSysModule),
+			DenySystemdIPC:      featureDefaultFalse(cfg.Features.DenySystemdIPC),
 		},
+	}
+
+	// Resolve systemd/D-Bus control-socket inodes (for deny_systemd_ipc).
+	// Always resolved so the map is populated regardless of the flag's current
+	// value; the BPF hook only consults it when deny_systemd_ipc is enabled.
+	for _, p := range systemdIPCPaths {
+		if key, ok := resolveInodeKey(p); ok {
+			res.IPCInodes = append(res.IPCInodes, key)
+			debugLog("sandbox: systemd-ipc socket %s {ino=%d dev=%d}", p, key.Ino, key.Dev)
+		}
 	}
 	seen := make(map[SandboxInodeKey]bool)
 

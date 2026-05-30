@@ -44,6 +44,7 @@ const (
 	cfgDenyCapAuditControl = 3
 	cfgDenyCapNetAdmin     = 4
 	cfgDenyCapSysModule    = 5
+	cfgDenySystemdIPC      = 6
 )
 
 var alertNames = map[uint32]string{
@@ -363,6 +364,7 @@ func applyFeatures(objs *SandboxObjects, f resolvedFeatures) {
 	flag(cfgDenyCapAuditControl, f.DenyCapAuditControl)
 	flag(cfgDenyCapNetAdmin, f.DenyCapNetAdmin)
 	flag(cfgDenyCapSysModule, f.DenyCapSysModule)
+	flag(cfgDenySystemdIPC, f.DenySystemdIPC)
 }
 
 func startSandbox(configPath string) {
@@ -419,6 +421,12 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	for _, key := range res.Inodes {
 		if err := objs.ProtectedInodes.Put(key, marker); err != nil {
 			log.Printf("sandbox: insert inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	for _, key := range res.IPCInodes {
+		if err := objs.SystemdIpcInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox: insert systemd-ipc inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
 		}
 	}
 
@@ -618,6 +626,13 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		return fmt.Errorf("attach lsm/capable: %w", err)
 	}
 	attached = append(attached, lsmCapable)
+
+	lsmUnixConn, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxUnixConnect})
+	if err != nil {
+		closeAttached()
+		return fmt.Errorf("attach lsm/unix_stream_connect: %w", err)
+	}
+	attached = append(attached, lsmUnixConn)
 
 	s.links = attached
 

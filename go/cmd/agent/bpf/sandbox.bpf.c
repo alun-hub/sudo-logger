@@ -75,6 +75,7 @@ enum sandbox_alert_type {
 	ALERT_PTRACE = 14,
 	ALERT_MOUNT = 15,
 	ALERT_CAPABLE = 16,
+	ALERT_SYSTEMD_IPC = 17,
 };
 
 struct sandbox_alert {
@@ -165,6 +166,18 @@ struct {
 	__type(value, __u8);
 } protected_procs SEC(".maps");
 
+// systemd_ipc_inodes: deny-list of control-socket inodes (e.g. systemd's
+// private socket and the system D-Bus socket) whose connect() is blocked inside
+// the sandbox when deny_systemd_ipc is enabled. Separate from protected_inodes
+// so that connect() is only denied for these specific spawn-capable sockets,
+// while journald/plugin sockets remain reachable.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 16);
+	__type(key, struct inode_key);
+	__type(value, __u8);
+} systemd_ipc_inodes SEC(".maps");
+
 // sandbox_config: feature-flag array written by the agent from sandbox.yaml.
 // key = index (u32), value = u32 (0=disabled, 1=enabled).
 // Default when not populated by Go: 0 (disabled) — Go always writes all entries.
@@ -174,7 +187,8 @@ struct {
 #define CFG_DENY_CAP_AUDIT_CONTROL 3
 #define CFG_DENY_CAP_NET_ADMIN     4
 #define CFG_DENY_CAP_SYS_MODULE    5
-#define CFG_COUNT                  6
+#define CFG_DENY_SYSTEMD_IPC       6
+#define CFG_COUNT                  7
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -641,6 +655,45 @@ int BPF_PROG(sandbox_capable, const struct cred *cred,
 	    (cap == CAP_NET_ADMIN     && cfg_enabled(CFG_DENY_CAP_NET_ADMIN))     ||
 	    (cap == CAP_SYS_MODULE    && cfg_enabled(CFG_DENY_CAP_SYS_MODULE))) {
 		submit_alert(ALERT_CAPABLE, 0, cap);
+		return -EPERM;
+	}
+	return 0;
+}
+
+// Deny connecting to systemd / D-Bus control sockets from inside the sandbox.
+// systemd-run and `busctl ... StartTransientUnit` ask PID 1 to spawn a process,
+// which then runs OUTSIDE the sandbox (child of systemd, in a fresh cgroup that
+// is not in sandboxed_cgroups, with no sandboxed_pids marker propagated). An LSM
+// cannot retroactively confine that process, so we block the IPC connect() that
+// triggers the spawn. Gated by deny_systemd_ipc (off by default — it also blocks
+// systemctl/loginctl/hostnamectl from within a session).
+SEC("lsm/unix_stream_connect")
+int BPF_PROG(sandbox_unix_connect, struct sock *sock, struct sock *other, struct sock *newsk)
+{
+	if (!in_sandbox_pid())
+		return 0;
+
+	// Exempt sudo itself: pam_systemd contacts logind over D-Bus during session
+	// setup, and blocking that could break login.
+	if (is_exempt_leader())
+		return 0;
+
+	if (!cfg_enabled(CFG_DENY_SYSTEMD_IPC))
+		return 0;
+
+	// 'other' is the listening peer socket. struct unix_sock embeds struct sock
+	// as its first member, so the cast is valid; read the bound socket file inode.
+	struct unix_sock *u = (struct unix_sock *)other;
+	struct inode *inode = BPF_CORE_READ(u, path.dentry, d_inode);
+	if (!inode)
+		return 0; // abstract socket (no pathname) — not a control socket we guard
+
+	struct inode_key key = {};
+	key.ino = BPF_CORE_READ(inode, i_ino);
+	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+	key.pad = 0;
+	if (bpf_map_lookup_elem(&systemd_ipc_inodes, &key)) {
+		submit_alert(ALERT_SYSTEMD_IPC, key.ino, key.dev);
 		return -EPERM;
 	}
 	return 0;

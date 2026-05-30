@@ -923,8 +923,10 @@
                 <span><strong>Block CAP_NET_ADMIN</strong> — raw sockets and netdevice ops</span></label>
               <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-sys-module" checked>
                 <span><strong>Block CAP_SYS_MODULE</strong> — insmod / modprobe</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-systemd-ipc">
+                <span><strong>Block systemd/D-Bus IPC</strong> — closes the systemd-run escape; also blocks systemctl/loginctl in-session (off by default)</span></label>
             </div>
-            <p class="form-hint">All features are active by default. Uncheck to allow a specific operation (e.g. for network-admin sessions that need iproute2).</p>
+            <p class="form-hint">Most features are active by default. Uncheck to allow a specific operation (e.g. for network-admin sessions that need iproute2). "Block systemd/D-Bus IPC" is off by default because it also blocks systemctl/loginctl from within a session.</p>
           </div>
 
           <label>Files & directories</label>
@@ -3243,6 +3245,7 @@ function loadTemplate() {
     document.getElementById('sb-feat-deny-cap-audit-control').checked = f.deny_cap_audit_control !== false;
     document.getElementById('sb-feat-deny-cap-net-admin').checked     = f.deny_cap_net_admin !== false;
     document.getElementById('sb-feat-deny-cap-sys-module').checked    = f.deny_cap_sys_module !== false;
+    document.getElementById('sb-feat-deny-systemd-ipc').checked       = f.deny_systemd_ipc === true;
   }
 }
 
@@ -3258,6 +3261,7 @@ async function saveAsTemplate() {
       deny_cap_audit_control: document.getElementById('sb-feat-deny-cap-audit-control').checked,
       deny_cap_net_admin:     document.getElementById('sb-feat-deny-cap-net-admin').checked,
       deny_cap_sys_module:    document.getElementById('sb-feat-deny-cap-sys-module').checked,
+      deny_systemd_ipc:       document.getElementById('sb-feat-deny-systemd-ipc').checked,
     },
     files:     tagInputs['f-sb-files'].getTags(),
     devices:   tagInputs['f-sb-devices'].getTags(),
@@ -3293,6 +3297,9 @@ function parseSandboxYaml(yamlStr) {
     files: [], devices: [], proc: [], sockets: [], processes: [],
     features: Object.fromEntries(featureKeys.map(k => [k, true])), // default all true
   };
+  // deny_systemd_ipc defaults OFF (it also blocks systemctl/loginctl in-session).
+  // The "  deny_\w+: true|false" parser below still picks it up when present.
+  data.features.deny_systemd_ipc = false;
   if (!yamlStr) return data;
 
   let section = null; // 'features' | 'protect' | null
@@ -3338,6 +3345,7 @@ function buildSandboxYaml(data) {
   yaml += `  deny_cap_audit_control: ${f.deny_cap_audit_control !== false}\n`;
   yaml += `  deny_cap_net_admin: ${f.deny_cap_net_admin !== false}\n`;
   yaml += `  deny_cap_sys_module: ${f.deny_cap_sys_module !== false}\n`;
+  yaml += `  deny_systemd_ipc: ${f.deny_systemd_ipc === true}\n`;
 
   yaml += "\nprotect:\n";
   for (const k of ['files', 'devices', 'proc', 'sockets', 'processes']) {
@@ -3370,6 +3378,7 @@ async function fetchSandboxConfig() {
     document.getElementById('sb-feat-deny-cap-audit-control').checked = f.deny_cap_audit_control !== false;
     document.getElementById('sb-feat-deny-cap-net-admin').checked     = f.deny_cap_net_admin !== false;
     document.getElementById('sb-feat-deny-cap-sys-module').checked    = f.deny_cap_sys_module !== false;
+    document.getElementById('sb-feat-deny-systemd-ipc').checked       = f.deny_systemd_ipc === true;
 
     const pathEl = document.getElementById('sandbox-path');
     if (pathEl && data.path) pathEl.textContent = data.path;
@@ -3388,6 +3397,7 @@ async function saveSandboxConfig() {
       deny_cap_audit_control: cb('sb-feat-deny-cap-audit-control'),
       deny_cap_net_admin:     cb('sb-feat-deny-cap-net-admin'),
       deny_cap_sys_module:    cb('sb-feat-deny-cap-sys-module'),
+      deny_systemd_ipc:       cb('sb-feat-deny-systemd-ipc'),
     },
     files:     tagInputs['f-sb-files'].getTags(),
     devices:   tagInputs['f-sb-devices'].getTags(),

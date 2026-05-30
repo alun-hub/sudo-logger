@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.85
+Version:        1.20.86
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -210,6 +210,15 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Sat May 30 2026 sudo-logger 1.20.86-1
+- feat(sandbox): add deny_systemd_ipc to block connect() to systemd/D-Bus control
+  sockets, closing the systemd-run / StartTransientUnit sandbox escape (off by default;
+  also blocks systemctl/loginctl from within a session)
+- feat(sandbox): block block/char device-node creation (mknod) inside the sandbox to
+  stop raw-device writes that bypass inode-based /dev protection
+- fix(sandbox): wire the deny_* feature flags to cfg_enabled() so sandbox.yaml toggles
+  actually take effect (previously written to a map no BPF hook read)
+
 * Thu May 29 2026 sudo-logger 1.20.85-1
 - fix(bpf): add NETLINK_AUDIT to socket_create block list so auditctl -D is denied in sessions
 - fix(bpf): sb_mount now only blocks mounts over protected inodes; legitimate mounts allowed

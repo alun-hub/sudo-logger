@@ -1558,6 +1558,18 @@ func handlePutRetention(w http.ResponseWriter, r *http.Request) {
 // sandboxYAML mirrors the agent's sandboxYAML struct and is used for strict
 // schema validation of sandbox configs submitted via the API.
 type sandboxYAML struct {
+	// Features must be declared here so that strict (KnownFields) validation in
+	// handlePutSandbox accepts a config that carries the feature-flag block —
+	// which every config written by the Settings UI does.
+	Features struct {
+		DenyNetlink         *bool `yaml:"deny_netlink"`
+		DenyMount           *bool `yaml:"deny_mount"`
+		DenyPtrace          *bool `yaml:"deny_ptrace"`
+		DenyCapAuditControl *bool `yaml:"deny_cap_audit_control"`
+		DenyCapNetAdmin     *bool `yaml:"deny_cap_net_admin"`
+		DenyCapSysModule    *bool `yaml:"deny_cap_sys_module"`
+		DenySystemdIPC      *bool `yaml:"deny_systemd_ipc"`
+	} `yaml:"features"`
 	Protect struct {
 		Files     []string `yaml:"files"`
 		Devices   []string `yaml:"devices"`

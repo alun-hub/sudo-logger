@@ -80,6 +80,7 @@ type SandboxProgramSpecs struct {
 	SandboxSbMount           *ebpf.ProgramSpec `ebpf:"sandbox_sb_mount"`
 	SandboxSocketCreate      *ebpf.ProgramSpec `ebpf:"sandbox_socket_create"`
 	SandboxTaskKill          *ebpf.ProgramSpec `ebpf:"sandbox_task_kill"`
+	SandboxUnixConnect       *ebpf.ProgramSpec `ebpf:"sandbox_unix_connect"`
 }
 
 // SandboxMapSpecs contains maps before they are loaded into the kernel.
@@ -92,6 +93,7 @@ type SandboxMapSpecs struct {
 	SandboxConfig    *ebpf.MapSpec `ebpf:"sandbox_config"`
 	SandboxedCgroups *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
 	SandboxedPids    *ebpf.MapSpec `ebpf:"sandboxed_pids"`
+	SystemdIpcInodes *ebpf.MapSpec `ebpf:"systemd_ipc_inodes"`
 }
 
 // SandboxVariableSpecs contains global variables before they are loaded into the kernel.
@@ -126,6 +128,7 @@ type SandboxMaps struct {
 	SandboxConfig    *ebpf.Map `ebpf:"sandbox_config"`
 	SandboxedCgroups *ebpf.Map `ebpf:"sandboxed_cgroups"`
 	SandboxedPids    *ebpf.Map `ebpf:"sandboxed_pids"`
+	SystemdIpcInodes *ebpf.Map `ebpf:"systemd_ipc_inodes"`
 }
 
 func (m *SandboxMaps) Close() error {
@@ -136,6 +139,7 @@ func (m *SandboxMaps) Close() error {
 		m.SandboxConfig,
 		m.SandboxedCgroups,
 		m.SandboxedPids,
+		m.SystemdIpcInodes,
 	)
 }
 
@@ -167,6 +171,7 @@ type SandboxPrograms struct {
 	SandboxSbMount           *ebpf.Program `ebpf:"sandbox_sb_mount"`
 	SandboxSocketCreate      *ebpf.Program `ebpf:"sandbox_socket_create"`
 	SandboxTaskKill          *ebpf.Program `ebpf:"sandbox_task_kill"`
+	SandboxUnixConnect       *ebpf.Program `ebpf:"sandbox_unix_connect"`
 }
 
 func (p *SandboxPrograms) Close() error {
@@ -189,6 +194,7 @@ func (p *SandboxPrograms) Close() error {
 		p.SandboxSbMount,
 		p.SandboxSocketCreate,
 		p.SandboxTaskKill,
+		p.SandboxUnixConnect,
 	)
 }
 
