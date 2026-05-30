@@ -771,10 +771,16 @@ int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 		return -EPERM;
 	}
 
-	// Also check the parent directory. If it's a no-exec directory (e.g. /tmp),
-	// block any execution from within it.
-	struct inode *dir = BPF_CORE_READ(bprm, file, f_path.dentry, d_parent, d_inode);
-	if (dir) {
+	// Walk up the dentry tree to see if this binary resides anywhere under a
+	// noexec directory (e.g. /tmp or /home). We limit to 16 levels deep to
+	// satisfy the BPF verifier while covering all realistic user paths.
+	struct dentry *dentry = BPF_CORE_READ(bprm, file, f_path.dentry);
+	#pragma unroll
+	for (int i = 0; i < 16; i++) {
+		struct inode *dir = BPF_CORE_READ(dentry, d_parent, d_inode);
+		if (!dir)
+			break;
+
 		struct inode_key dir_key = {};
 		dir_key.ino = BPF_CORE_READ(dir, i_ino);
 		dir_key.dev = (__u32)BPF_CORE_READ(dir, i_sb, s_dev);
@@ -784,6 +790,12 @@ int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 			submit_alert(ALERT_EXEC_BLOCK, key.ino, key.dev);
 			return -EPERM;
 		}
+
+		struct dentry *parent_dentry = BPF_CORE_READ(dentry, d_parent);
+		// Stop if we hit the root of the filesystem (dentry == dentry->d_parent).
+		if (dentry == parent_dentry)
+			break;
+		dentry = parent_dentry;
 	}
 
 	return 0;

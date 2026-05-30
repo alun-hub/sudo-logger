@@ -188,15 +188,9 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 		depth int
 	}
 	queue := make([]node, 0,
-		len(cfg.Protect.Files)+len(cfg.Protect.Forbidden)+len(cfg.Protect.Noexec)+len(cfg.Protect.Devices)+
+		len(cfg.Protect.Files)+len(cfg.Protect.Devices)+
 			len(cfg.Protect.Proc)+len(cfg.Protect.Sockets))
 	for _, p := range cfg.Protect.Files {
-		queue = append(queue, node{p, 0})
-	}
-	for _, p := range cfg.Protect.Forbidden {
-		queue = append(queue, node{p, 0})
-	}
-	for _, p := range cfg.Protect.Noexec {
 		queue = append(queue, node{p, 0})
 	}
 	for _, p := range cfg.Protect.Devices {
@@ -261,9 +255,7 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 			continue
 		}
 		// Use mountinfo to get i_sb->s_dev (what BPF reads) rather than
-		// stat().st_dev. On Btrfs both are anonymous devices (major 0) but
-		// with different minor numbers: stat returns the subvolume anon_dev
-		// while the kernel superblock uses a separate anon_dev.
+		// stat().st_dev.
 		dev, devErr := mountDev(p)
 		if devErr != nil {
 			log.Printf("sandbox: mountDev %s: %v (falling back to stat dev)", p, devErr)
@@ -273,41 +265,52 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
 
-		// Check if this path was in the forbidden list.
-		isForbidden := false
-		for _, fp := range cfg.Protect.Forbidden {
-			if fp == p {
-				isForbidden = true
-				break
-			}
-		}
-
-		// Check if this path was in the noexec list.
-		isNoexec := false
-		for _, np := range cfg.Protect.Noexec {
-			if np == p {
-				isNoexec = true
-				break
-			}
-		}
-
-		if isForbidden {
-			if !seen[key] {
-				seen[key] = true
-				res.Forbidden = append(res.Forbidden, key)
-			}
-		} else if isNoexec {
-			if !seen[key] {
-				seen[key] = true
-				res.Noexec = append(res.Noexec, key)
-			}
-		} else {
-			if !seen[key] {
-				seen[key] = true
-				res.Inodes = append(res.Inodes, key)
-			}
+		if !seen[key] {
+			seen[key] = true
+			res.Inodes = append(res.Inodes, key)
 		}
 	}
+
+	// Resolve forbidden binaries (exact paths, no recursion)
+	for _, p := range cfg.Protect.Forbidden {
+		if !filepath.IsAbs(p) {
+			continue
+		}
+		var st syscall.Stat_t
+		if err := syscall.Stat(p, &st); err != nil {
+			continue
+		}
+		dev, _ := mountDev(p)
+		if dev == 0 {
+			dev = uint32(st.Dev)
+		}
+		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
+		if !seen[key] {
+			seen[key] = true
+			res.Forbidden = append(res.Forbidden, key)
+		}
+	}
+
+	// Resolve noexec directories (exact paths, BPF will traverse up to them)
+	for _, p := range cfg.Protect.Noexec {
+		if !filepath.IsAbs(p) {
+			continue
+		}
+		var st syscall.Stat_t
+		if err := syscall.Stat(p, &st); err != nil {
+			continue
+		}
+		dev, _ := mountDev(p)
+		if dev == 0 {
+			dev = uint32(st.Dev)
+		}
+		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
+		if !seen[key] {
+			seen[key] = true
+			res.Noexec = append(res.Noexec, key)
+		}
+	}
+
 
 	for _, name := range cfg.Protect.Processes {
 		if len(name) > 15 {
