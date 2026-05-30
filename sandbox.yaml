@@ -51,7 +51,7 @@ features:
   deny_mount: true            # Block mounting over protected inodes
   deny_ptrace: true           # Block ptrace of processes outside the sandbox
   deny_cap_audit_control: true  # Block CAP_AUDIT_CONTROL (auditctl, defence in depth)
-  deny_cap_net_admin: true    # Block CAP_NET_ADMIN (raw sockets, netdevice ops)
+  deny_cap_net_admin: false   # Block CAP_NET_ADMIN (raw sockets, netdevice ops)
   deny_cap_sys_module: true   # Block CAP_SYS_MODULE (insmod, modprobe)
   deny_systemd_ipc: false     # Block connect() to systemd/D-Bus control sockets
                               # (closes the systemd-run / StartTransientUnit escape).
@@ -216,10 +216,8 @@ protect:
   # of the socket file. It does NOT block connect()+send() IPC.
   sockets:
     - /run/sudo-logger/plugin.sock       # audit pipeline — must not be replaced
-    - /run/dbus/system_bus_socket        # D-Bus system bus
     - /run/systemd/journal/socket        # journald ingestion socket
     - /run/systemd/journal/stdout        # journald stdout forwarder
-    - /run/systemd/private               # systemd private comms
 
   # ── Process names ────────────────────────────────────────────────────────────
   # Sessions cannot send ANY signal (including SIGKILL) to these processes.

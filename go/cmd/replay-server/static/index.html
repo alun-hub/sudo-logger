@@ -919,14 +919,14 @@
                 <span><strong>Block ptrace</strong> — prevent code injection into root daemons</span></label>
               <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-audit-control" checked>
                 <span><strong>Block CAP_AUDIT_CONTROL</strong> — defence-in-depth for auditctl</span></label>
-              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-net-admin" checked>
-                <span><strong>Block CAP_NET_ADMIN</strong> — raw sockets and netdevice ops</span></label>
+              <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-net-admin">
+                <span><strong>Block CAP_NET_ADMIN</strong> — raw sockets and netdevice ops (off by default)</span></label>
               <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-cap-sys-module" checked>
                 <span><strong>Block CAP_SYS_MODULE</strong> — insmod / modprobe</span></label>
               <label class="cb-feature"><input type="checkbox" id="sb-feat-deny-systemd-ipc">
                 <span><strong>Block systemd/D-Bus IPC</strong> — closes the systemd-run escape; also blocks systemctl/loginctl in-session (off by default)</span></label>
             </div>
-            <p class="form-hint">Most features are active by default. Uncheck to allow a specific operation (e.g. for network-admin sessions that need iproute2). "Block systemd/D-Bus IPC" is off by default because it also blocks systemctl/loginctl from within a session.</p>
+            <p class="form-hint">Most features are active by default. Uncheck to allow a specific operation (e.g. for network-admin sessions that need iproute2). "Block CAP_NET_ADMIN" and "Block systemd/D-Bus IPC" are off by default because they also block common tools like <code>dnf</code>, <code>systemctl</code> or <code>loginctl</code> from within a session.</p>
           </div>
 
           <label>Files & directories</label>

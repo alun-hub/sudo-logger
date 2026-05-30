@@ -36,6 +36,7 @@ const (
 	alertPtrace       = 14
 	alertMount        = 15
 	alertCapable      = 16
+	alertSystemdIpc   = 17
 
 	// sandbox_config BPF array indices — must match CFG_* in sandbox.bpf.c.
 	cfgDenyNetlink         = 0
@@ -64,6 +65,7 @@ var alertNames = map[uint32]string{
 	alertPtrace:       "PTRACE",
 	alertMount:        "MOUNT",
 	alertCapable:      "CAPABLE",
+	alertSystemdIpc:   "SYSTEMD_IPC",
 }
 
 // bpfSandboxAlert must match struct sandbox_alert in sandbox.bpf.c
@@ -724,12 +726,33 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 		_ = s.objs.ProtectedProcs.Delete(k)
 	}
 
+	// Collect then delete all existing systemd-ipc inodes.
+	var ipcKeys []SandboxInodeKey
+	{
+		var k SandboxInodeKey
+		var v uint8
+		iter := s.objs.SystemdIpcInodes.Iterate()
+		for iter.Next(&k, &v) {
+			ipcKeys = append(ipcKeys, k)
+		}
+	}
+	for _, k := range ipcKeys {
+		_ = s.objs.SystemdIpcInodes.Delete(k)
+	}
+
 	applyFeatures(s.objs, res.Features)
 
 	// Insert the new inode set.
 	for _, key := range res.Inodes {
 		if err := s.objs.ProtectedInodes.Put(key, marker); err != nil {
 			log.Printf("sandbox reload: insert inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	// Insert the new systemd-ipc set.
+	for _, key := range res.IPCInodes {
+		if err := s.objs.SystemdIpcInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert systemd-ipc inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
 		}
 	}
 
