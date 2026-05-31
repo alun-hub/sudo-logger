@@ -63,6 +63,8 @@ var (
 			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
 	flagBlockedUsers = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml",
 		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
+	flagApprovalPolicy = flag.String("approval-policy", "/etc/sudo-logger/approval-policy.yaml",
+		"JIT approval policy file (reloaded every 30 s; feature disabled when file absent)")
 	flagSandbox = flag.String("sandbox", "/etc/sudo-logger/sandbox.yaml",
 		"Process sandbox config file (served to agents)")
 	flagSandboxTemplates = flag.String("sandbox-templates", "/etc/sudo-logger/sandbox-templates.json",
@@ -87,6 +89,7 @@ var (
 type server struct {
 	signKey      ed25519.PrivateKey
 	sessionStore store.SessionStore
+	approvalMgr  *ApprovalManager
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -158,9 +161,11 @@ func main() {
 	}
 	defer ln.Close()
 
+	storePath := defaultApprovalStorePath(*flagApprovalPolicy)
 	srv := &server{
 		signKey:      signKey,
 		sessionStore: sessionStore,
+		approvalMgr:  newApprovalManager(*flagApprovalPolicy, storePath),
 		sessions:     make(map[string]*session),
 	}
 
@@ -171,6 +176,7 @@ func main() {
 		healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintln(w, "ok")
 		})
+		srv.approvalMgr.RegisterApprovalAPI(healthMux)
 		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 			srv.mu.Lock()
 			active := len(srv.sessions)
@@ -464,6 +470,36 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
 				netWriteMu.Unlock()
 				return
+			}
+
+			// ── JIT approval check ─────────────────────────────────────────────
+			result := srv.approvalMgr.Check(start.User, start.Host, start.Command,
+				start.Justification, start.NotifyVia)
+			switch result.Result {
+			case ApprovalResultNeedReason:
+				// Check if there's already a pending request for this user@host
+				// so we can give a more informative retry message.
+				if msg := srv.approvalMgr.RetryMessage(start.User, start.Host); msg != "" {
+					netWriteMu.Lock()
+					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
+					netWriteMu.Unlock()
+				} else {
+					netWriteMu.Lock()
+					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
+						"sudo-logger: access requires justification. Run sudo again and provide a reason when prompted."))
+					netWriteMu.Unlock()
+				}
+				log.Printf("[%s] approval: user=%s host=%s — no justification provided", start.SessionID, start.User, start.Host)
+				return
+			case ApprovalResultPending:
+				msg := fmt.Sprintf("sudo-logger: approval request %s submitted. You will be notified when approved. Retry sudo when notified.", result.RequestID)
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
+				netWriteMu.Unlock()
+				log.Printf("[%s] approval: user=%s host=%s — pending request %s created", start.SessionID, start.User, start.Host, result.RequestID)
+				return
+			case ApprovalResultAllow:
+				// Approved or exempt — continue normally.
 			}
 
 			sess, err = srv.openSession(start)

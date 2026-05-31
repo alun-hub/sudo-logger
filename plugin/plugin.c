@@ -708,8 +708,8 @@ static int plugin_open(unsigned int        version,
                        char * const        plugin_options[],
                        const char        **errstr)
 {
-    (void)version; (void)conversation;
-    (void)plugin_options; (void)user_env;
+    (void)version;
+    (void)user_env;
 
     g_printf  = sudo_plugin_printf;
     g_seq     = 0;
@@ -781,6 +781,41 @@ static int plugin_open(unsigned int        version,
     if (flen > 0 && flags[flen - 1] == ',')
         flags[flen - 1] = '\0';
 
+    /* ── Justification prompt ─────────────────────────────────────────────
+     * Enabled via plugin option in /etc/sudo.conf:
+     *   Plugin sudo_logger sudo_logger_plugin.so require_justification=1
+     * Skipped automatically for non-interactive sessions (no TTY).        */
+    int require_justification = 0;
+    if (plugin_options) {
+        for (int i = 0; plugin_options[i] != NULL; i++) {
+            if (strcmp(plugin_options[i], "require_justification=1") == 0)
+                require_justification = 1;
+        }
+    }
+
+    char g_justification[512] = "";
+    char g_notify_via[128]    = "";
+
+    if (require_justification && g_tty_fd >= 0 && conversation != NULL) {
+        struct sudo_conv_message msgs[2];
+        struct sudo_conv_reply   replies[2];
+
+        memset(msgs,    0, sizeof(msgs));
+        memset(replies, 0, sizeof(replies));
+
+        msgs[0].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
+        msgs[0].msg      = "Reason for sudo: ";
+        msgs[1].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
+        msgs[1].msg      = "Notify via (Slack handle/email, optional): ";
+
+        if (conversation(2, msgs, replies, NULL) == 0) {
+            if (replies[0].reply && replies[0].reply[0] != '\0')
+                strncpy(g_justification, replies[0].reply, sizeof(g_justification) - 1);
+            if (replies[1].reply && replies[1].reply[0] != '\0')
+                strncpy(g_notify_via, replies[1].reply, sizeof(g_notify_via) - 1);
+        }
+    }
+
     /* JSON-escape fields that may contain backslashes, quotes, or spaces */
     char resolved_j[512];
     char cwd_j[512];
@@ -788,12 +823,16 @@ static int plugin_open(unsigned int        version,
     char user_j[128];
     char host_j[256];
     char ttypath_j[128];
-    json_escape_into(resolved_j,   sizeof(resolved_j),   raw_resolved);
-    json_escape_into(cwd_j,        sizeof(cwd_j),        raw_cwd);
-    json_escape_into(runas_user_j, sizeof(runas_user_j), runas_user);
-    json_escape_into(user_j,       sizeof(user_j),       user);
-    json_escape_into(host_j,       sizeof(host_j),       host);
-    json_escape_into(ttypath_j,    sizeof(ttypath_j),    g_tty_path);
+    char justification_j[512];
+    char notify_via_j[256];
+    json_escape_into(resolved_j,      sizeof(resolved_j),      raw_resolved);
+    json_escape_into(cwd_j,           sizeof(cwd_j),           raw_cwd);
+    json_escape_into(runas_user_j,    sizeof(runas_user_j),    runas_user);
+    json_escape_into(user_j,          sizeof(user_j),          user);
+    json_escape_into(host_j,          sizeof(host_j),          host);
+    json_escape_into(ttypath_j,       sizeof(ttypath_j),       g_tty_path);
+    json_escape_into(justification_j, sizeof(justification_j), g_justification);
+    json_escape_into(notify_via_j,    sizeof(notify_via_j),    g_notify_via);
 
     char cmd[256];
     if (argc > 0)
@@ -841,7 +880,8 @@ static int plugin_open(unsigned int        version,
         "\"rows\":%d,\"cols\":%d,"
         "\"tty_path\":\"%s\","
         "\"user_uid\":%d,\"user_gid\":%d,"
-        "\"ts\":%lld,\"pid\":%d}",
+        "\"ts\":%lld,\"pid\":%d,"
+        "\"justification\":\"%s\",\"notify_via\":\"%s\"}",
         session_id_j, user_j, host_j, cmd,
         resolved_j, runas_user_j,
         runas_uid, runas_gid,
@@ -849,7 +889,8 @@ static int plugin_open(unsigned int        version,
         term_rows, term_cols,
         ttypath_j,
         user_uid, user_gid,
-        (long long)now_sec(), (int)getpid());
+        (long long)now_sec(), (int)getpid(),
+        justification_j, notify_via_j);
 
     /* Prevent sending malformed/truncated JSON if the buffer was too small. */
     if (plen < 0 || plen >= (int)sizeof(payload)) {

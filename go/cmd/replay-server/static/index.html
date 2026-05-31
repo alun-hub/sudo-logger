@@ -662,6 +662,7 @@
       <button class="tab-btn" data-tab="anomalies">Anomalies</button>
       <button class="tab-btn" data-tab="settings">Settings</button>
       <button class="tab-btn" data-tab="blocked">Blocked Users</button>
+      <button class="tab-btn" data-tab="approvals" id="approvals-tab-btn" style="display:none">Approvals <span id="approvals-badge" class="badge" style="display:none"></span></button>
       <button class="tab-btn" data-tab="help">Help</button>
     </nav>
     <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
@@ -1376,6 +1377,32 @@
           <th style="width:60px"></th>
         </tr></thead>
         <tbody id="blocked-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="report-panel" id="tab-approvals">
+    <div class="siem-section">
+      <div class="siem-heading">
+        Pending Approval Requests
+        <button class="btn-primary" id="btn-refresh-approvals" style="margin-left:auto">↺ Refresh</button>
+      </div>
+      <p class="siem-note">
+        Users waiting for sudo approval. Approve grants a time window; Deny cancels the request.
+        The user is notified via webhook when a decision is made.
+      </p>
+      <table class="report-table" style="margin-top:12px" id="approvals-table">
+        <thead><tr>
+          <th>User</th>
+          <th>Host</th>
+          <th>Command</th>
+          <th>Reason</th>
+          <th>Notify via</th>
+          <th>Submitted</th>
+          <th>Expires</th>
+          <th style="width:160px"></th>
+        </tr></thead>
+        <tbody id="approvals-tbody"></tbody>
       </table>
     </div>
   </div>
@@ -2728,6 +2755,7 @@ function switchTab(tab) {
     fetchRules(); fetchSiemConfig(); fetchRetentionConfig(); fetchSandboxConfig(); fetchSandboxTemplates();
   }
   if (tab === 'blocked') fetchBlockedUsers();
+  if (tab === 'approvals') fetchApprovals();
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
@@ -3831,6 +3859,128 @@ async function fetchCurrentUser() {
   } catch (_) { /* not fatal */ }
 }
 fetchCurrentUser();
+
+// ── Approvals ──────────────────────────────────────────────────────────────────
+
+let approvalsAvailable = false;
+
+async function checkApprovalsAvailable() {
+  try {
+    const r = await fetch('/api/approvals');
+    if (r.status !== 404) {
+      approvalsAvailable = true;
+      document.getElementById('approvals-tab-btn').style.display = '';
+      fetchApprovals();
+      setInterval(fetchApprovals, 10000);
+    }
+  } catch (_) {}
+}
+checkApprovalsAvailable();
+
+async function fetchApprovals() {
+  if (!approvalsAvailable) return;
+  try {
+    const r = await fetch('/api/approvals');
+    if (!r.ok) return;
+    const items = await r.json();
+    renderApprovals(items || []);
+    const badge = document.getElementById('approvals-badge');
+    if (items && items.length > 0) {
+      badge.textContent = items.length;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (_) {}
+}
+
+function makeCell(text, opts = {}) {
+  const td = document.createElement('td');
+  if (opts.style) td.setAttribute('style', opts.style);
+  if (opts.title) td.title = text;
+  if (opts.code) {
+    const code = document.createElement('code');
+    code.textContent = text;
+    td.appendChild(code);
+  } else {
+    td.textContent = text;
+  }
+  return td;
+}
+
+function renderApprovals(items) {
+  const tbody = document.getElementById('approvals-tbody');
+  tbody.innerHTML = '';
+  if (!items.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 8;
+    td.setAttribute('style', 'color:var(--text-dim);text-align:center;padding:20px');
+    td.textContent = 'No pending approval requests.';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  items.forEach(req => {
+    const tr = document.createElement('tr');
+    const submitted = new Date(req.submitted_at).toLocaleString();
+    const expires   = new Date(req.expires_at).toLocaleString();
+
+    tr.appendChild(makeCell(req.user || '', { code: true }));
+    tr.appendChild(makeCell(req.host || ''));
+    tr.appendChild(makeCell(req.command || '', { code: true, title: true,
+      style: 'max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }));
+    tr.appendChild(makeCell(req.justification || '', { title: true,
+      style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }));
+    tr.appendChild(makeCell(req.notify_via || '—'));
+    tr.appendChild(makeCell(submitted, { style: 'white-space:nowrap' }));
+    tr.appendChild(makeCell(expires,   { style: 'white-space:nowrap' }));
+
+    const tdBtn = document.createElement('td');
+    tdBtn.setAttribute('style', 'white-space:nowrap');
+
+    const btnApprove = document.createElement('button');
+    btnApprove.className = 'btn-primary';
+    btnApprove.setAttribute('style', 'padding:3px 10px;font-size:11px;margin-right:4px');
+    btnApprove.textContent = 'Approve';
+    btnApprove.addEventListener('click', () => approveRequest(req.id));
+
+    const btnDeny = document.createElement('button');
+    btnDeny.className = 'btn-primary';
+    btnDeny.setAttribute('style', 'padding:3px 10px;font-size:11px;background:var(--danger,#c0392b)');
+    btnDeny.textContent = 'Deny';
+    btnDeny.addEventListener('click', () => denyRequest(req.id));
+
+    tdBtn.appendChild(btnApprove);
+    tdBtn.appendChild(btnDeny);
+    tr.appendChild(tdBtn);
+    tbody.appendChild(tr);
+  });
+}
+
+async function approveRequest(id) {
+  const window = prompt('Approval window duration (e.g. 30m, 1h, 2h):', '30m');
+  if (window === null) return;
+  const r = await fetch(`/api/approvals/${id}/approve?window=${encodeURIComponent(window)}`, { method: 'POST' });
+  if (r.ok) { fetchApprovals(); } else { alert('Approve failed: ' + r.status); }
+}
+
+async function denyRequest(id) {
+  const reason = prompt('Reason for denial (optional):');
+  if (reason === null) return;
+  const r = await fetch(`/api/approvals/${id}/deny`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason })
+  });
+  if (r.ok) { fetchApprovals(); } else { alert('Deny failed: ' + r.status); }
+}
+
+document.getElementById('btn-refresh-approvals').addEventListener('click', fetchApprovals);
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 </script>
 </body>
 </html>

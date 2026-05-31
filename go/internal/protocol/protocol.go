@@ -111,6 +111,13 @@ type SessionStart struct {
 	// (for dbus-polkit: process comm or inferred service name like "firewalld").
 	// Empty for plugin and ebpf-tty sessions.
 	CallerProcess string `json:"caller_process,omitempty"`
+	// Justification is the reason the user provided when prompted by the plugin.
+	// Empty when the host does not have require_justification enabled or when
+	// the user ran sudo non-interactively (cron, scripts).
+	Justification string `json:"justification,omitempty"`
+	// NotifyVia is an optional contact handle the user supplied at prompt time
+	// (e.g. a Slack username) so the notification system can route approvals.
+	NotifyVia string `json:"notify_via,omitempty"`
 }
 
 // DivergenceAlert is the JSON payload for MsgDivergenceAlert.
