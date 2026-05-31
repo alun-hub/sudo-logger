@@ -60,6 +60,7 @@ var (
 	flagSiemConfig        = flag.String("siem-config", "/etc/sudo-logger/siem.yaml", "SIEM forwarding config file (shared with log server)")
 	flagBlockedUsers      = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml", "Blocked users config file (shared with log server)")
 	flagLogServerAdmin    = flag.String("logserver-admin", "", "Log server admin address for approval API (e.g. http://localhost:9877); empty disables approvals tab")
+	flagLogServerAdminToken = flag.String("logserver-admin-token", "", "Shared bearer token for the log server approval API (must match -approval-token on the log server)")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	flagTLSKey            = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
 	flagHTPasswd          = flag.String("htpasswd", "", "Path to htpasswd file for HTTP Basic Auth (bcrypt hashes only; reload with SIGHUP)")
@@ -725,12 +726,13 @@ func main() {
 	})
 	if *flagLogServerAdmin != "" {
 		adminBase := strings.TrimRight(*flagLogServerAdmin, "/")
+		adminToken := *flagLogServerAdminToken
 		mux.HandleFunc("/api/approvals", func(w http.ResponseWriter, r *http.Request) {
-			proxyToLogServer(w, r, adminBase+"/api/approvals")
+			proxyToLogServer(w, r, adminBase+"/api/approvals", adminToken, viewerFromContext(r))
 		})
 		mux.HandleFunc("/api/approvals/", func(w http.ResponseWriter, r *http.Request) {
 			tail := strings.TrimPrefix(r.URL.Path, "/api/approvals/")
-			proxyToLogServer(w, r, adminBase+"/api/approvals/"+tail)
+			proxyToLogServer(w, r, adminBase+"/api/approvals/"+tail, adminToken, viewerFromContext(r))
 		})
 	}
 

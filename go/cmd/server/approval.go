@@ -565,9 +565,26 @@ func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, text, color string, f
 // ── REST API ──────────────────────────────────────────────────────────────────
 
 // RegisterApprovalAPI mounts the approval REST endpoints on mux.
-func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux) {
-	mux.HandleFunc("/api/approvals", m.handleList)
-	mux.HandleFunc("/api/approvals/", m.handleDecision)
+// token is a shared secret that callers must supply as "Authorization: Bearer <token>".
+// If token is empty the endpoints are not registered and a warning is logged —
+// the approval API must not be exposed unauthenticated.
+func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) {
+	if token == "" {
+		log.Printf("approval: WARNING: -approval-token not set — approval REST API disabled. " +
+			"Set -approval-token to enable the UI approval panel.")
+		return
+	}
+	auth := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+token {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next(w, r)
+		}
+	}
+	mux.HandleFunc("/api/approvals", auth(m.handleList))
+	mux.HandleFunc("/api/approvals/", auth(m.handleDecision))
 }
 
 func (m *ApprovalManager) handleList(w http.ResponseWriter, r *http.Request) {
@@ -592,9 +609,11 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	id, action := parts[1], parts[2]
-	decidedBy := r.Header.Get("X-Decided-By")
+	// X-Sudo-Logger-Decided-By is set by the replay-server from its authenticated
+	// session identity — never forwarded from the browser request.
+	decidedBy := r.Header.Get("X-Sudo-Logger-Decided-By")
 	if decidedBy == "" {
-		decidedBy = "admin"
+		decidedBy = "unknown"
 	}
 
 	switch action {

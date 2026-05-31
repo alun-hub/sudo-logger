@@ -65,6 +65,8 @@ var (
 		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
 	flagApprovalPolicy = flag.String("approval-policy", "/etc/sudo-logger/approval-policy.yaml",
 		"JIT approval policy file (reloaded every 30 s; feature disabled when file absent)")
+	flagApprovalToken = flag.String("approval-token", "",
+		"Shared secret for the approval REST API (Bearer token); required to enable /api/approvals endpoints")
 	flagSandbox = flag.String("sandbox", "/etc/sudo-logger/sandbox.yaml",
 		"Process sandbox config file (served to agents)")
 	flagSandboxTemplates = flag.String("sandbox-templates", "/etc/sudo-logger/sandbox-templates.json",
@@ -176,7 +178,7 @@ func main() {
 		healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintln(w, "ok")
 		})
-		srv.approvalMgr.RegisterApprovalAPI(healthMux)
+		srv.approvalMgr.RegisterApprovalAPI(healthMux, *flagApprovalToken)
 		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 			srv.mu.Lock()
 			active := len(srv.sessions)
