@@ -158,6 +158,40 @@ type SessionStore interface {
 	Close() error
 }
 
+// ApprovalStore handles the state for the JIT sudo approval system.
+// Both LocalStore and DistributedStore implement this interface.
+// LocalStore uses an in-memory map + YAML file; DistributedStore uses PostgreSQL.
+type ApprovalStore interface {
+	// ListApprovalRequests returns all non-expired pending requests.
+	ListApprovalRequests(ctx context.Context) ([]ApprovalRequest, error)
+
+	// CreateApprovalRequest persists a new pending request.
+	CreateApprovalRequest(ctx context.Context, req ApprovalRequest) error
+
+	// DeleteApprovalRequest removes a request by ID and returns it.
+	// Returns (nil, nil) if the ID is not found (idempotent).
+	DeleteApprovalRequest(ctx context.Context, id string) (*ApprovalRequest, error)
+
+	// HasApprovalWindow reports whether user@host has an active (non-expired) window.
+	HasApprovalWindow(ctx context.Context, user, host string) (bool, error)
+
+	// CreateApprovalWindow records a new active window, replacing any previous one
+	// for the same user@host.
+	CreateApprovalWindow(ctx context.Context, user, host, grantedBy string, expiresAt time.Time) error
+}
+
+// ApprovalRequest is a pending sudo approval waiting for an admin decision.
+type ApprovalRequest struct {
+	ID            string    `json:"id"`
+	User          string    `json:"user"`
+	Host          string    `json:"host"`
+	Command       string    `json:"command"`
+	Justification string    `json:"justification"`
+	NotifyVia     string    `json:"notify_via"`
+	SubmittedAt   time.Time `json:"submitted_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
 // AccessLogEntry records a single session-view event.
 type AccessLogEntry struct {
 	Time      time.Time `json:"time"`
@@ -270,6 +304,11 @@ type Config struct {
 	// SandboxTemplatesPath is the path to sandbox-templates.json (LocalStore only).
 	// Default: /etc/sudo-logger/sandbox-templates.json
 	SandboxTemplatesPath string
+
+	// ApprovalStorePath is the YAML file used by LocalStore to persist pending
+	// approval requests and active windows across restarts.
+	// Default: /etc/sudo-logger/approval-store.yaml
+	ApprovalStorePath string
 
 	// ── DistributedStore fields ──────────────────────────────────────────────
 

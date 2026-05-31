@@ -137,7 +137,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	6 — added caller_process (polkit/dbus calling process name or service)
 //	7 — added sandbox_violation column to sudo_sessions
 //	8 — added tty_cols, tty_rows to capture terminal dimensions
-const currentSchemaVersion = 8
+//	9 — added sudo_approval_requests and sudo_approval_windows for JIT approval
+const currentSchemaVersion = 9
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -249,6 +250,28 @@ ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS sandbox_violation BOOLEAN DEF
 -- migration v8: terminal dimensions from cast header
 ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS tty_cols INT DEFAULT 0;
 ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS tty_rows INT DEFAULT 0;
+
+-- migration v9: JIT sudo approval system
+CREATE TABLE IF NOT EXISTS sudo_approval_requests (
+    id             TEXT PRIMARY KEY,
+    username       TEXT NOT NULL,
+    host           TEXT NOT NULL,
+    command        TEXT NOT NULL,
+    justification  TEXT NOT NULL DEFAULT '',
+    notify_via     TEXT NOT NULL DEFAULT '',
+    submitted_at   BIGINT NOT NULL,
+    expires_at     BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sudo_approval_requests_user_host
+    ON sudo_approval_requests (username, host);
+
+CREATE TABLE IF NOT EXISTS sudo_approval_windows (
+    username    TEXT NOT NULL,
+    host        TEXT NOT NULL,
+    granted_by  TEXT NOT NULL DEFAULT '',
+    expires_at  BIGINT NOT NULL,
+    PRIMARY KEY (username, host)
+);
 
 CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
 `); err != nil {
@@ -933,6 +956,92 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
 	}
 
 	return tx.Commit(ctx)
+}
+
+// ── ApprovalStore implementation (DistributedStore) ───────────────────────────
+
+func (d *DistributedStore) ListApprovalRequests(ctx context.Context) ([]ApprovalRequest, error) {
+	rows, err := d.db.Query(ctx, `
+SELECT id, username, host, command, justification, notify_via, submitted_at, expires_at
+FROM sudo_approval_requests
+WHERE expires_at > $1
+ORDER BY submitted_at ASC`,
+		time.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ApprovalRequest
+	for rows.Next() {
+		var r ApprovalRequest
+		var submittedAt, expiresAt int64
+		if err := rows.Scan(&r.ID, &r.User, &r.Host, &r.Command,
+			&r.Justification, &r.NotifyVia, &submittedAt, &expiresAt); err != nil {
+			return nil, err
+		}
+		r.SubmittedAt = time.Unix(submittedAt, 0)
+		r.ExpiresAt = time.Unix(expiresAt, 0)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (d *DistributedStore) CreateApprovalRequest(ctx context.Context, req ApprovalRequest) error {
+	_, err := d.db.Exec(ctx, `
+INSERT INTO sudo_approval_requests
+    (id, username, host, command, justification, notify_via, submitted_at, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (id) DO NOTHING`,
+		req.ID, req.User, req.Host, req.Command,
+		req.Justification, req.NotifyVia,
+		req.SubmittedAt.Unix(), req.ExpiresAt.Unix())
+	return err
+}
+
+func (d *DistributedStore) DeleteApprovalRequest(ctx context.Context, id string) (*ApprovalRequest, error) {
+	var r ApprovalRequest
+	var submittedAt, expiresAt int64
+	err := d.db.QueryRow(ctx, `
+DELETE FROM sudo_approval_requests
+WHERE id = $1
+RETURNING id, username, host, command, justification, notify_via, submitted_at, expires_at`,
+		id).Scan(&r.ID, &r.User, &r.Host, &r.Command,
+		&r.Justification, &r.NotifyVia, &submittedAt, &expiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.SubmittedAt = time.Unix(submittedAt, 0)
+	r.ExpiresAt = time.Unix(expiresAt, 0)
+	return &r, nil
+}
+
+func (d *DistributedStore) HasApprovalWindow(ctx context.Context, user, host string) (bool, error) {
+	var expiresAt int64
+	err := d.db.QueryRow(ctx, `
+SELECT expires_at FROM sudo_approval_windows
+WHERE username = $1 AND host = $2`,
+		user, host).Scan(&expiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return time.Unix(expiresAt, 0).After(time.Now()), nil
+}
+
+func (d *DistributedStore) CreateApprovalWindow(ctx context.Context, user, host, grantedBy string, expiresAt time.Time) error {
+	_, err := d.db.Exec(ctx, `
+INSERT INTO sudo_approval_windows (username, host, granted_by, expires_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (username, host) DO UPDATE
+    SET granted_by = EXCLUDED.granted_by,
+        expires_at = EXCLUDED.expires_at`,
+		user, host, grantedBy, expiresAt.Unix())
+	return err
 }
 
 // ── distributedWriter ─────────────────────────────────────────────────────────

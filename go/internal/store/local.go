@@ -49,6 +49,11 @@ type LocalStore struct {
 	// are small strings and the process lifetime matches session lifetime).
 	sessionDirs sync.Map // map[string]string
 
+	// approval state — in-memory + YAML persistence.
+	approvalMu      sync.RWMutex
+	approvalPending map[string]*ApprovalRequest // id → request
+	approvalWindows []localApprovalWindow
+
 	stopOnce sync.Once
 	stopCh   chan struct{}
 }
@@ -92,15 +97,22 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.SandboxTemplatesPath == "" {
 		cfg.SandboxTemplatesPath = "/etc/sudo-logger/sandbox-templates.json"
 	}
+	if cfg.ApprovalStorePath == "" {
+		cfg.ApprovalStorePath = "/etc/sudo-logger/approval-store.yaml"
+	}
 
 	ls := &LocalStore{
-		cfg:    cfg,
-		stopCh: make(chan struct{}),
+		cfg:             cfg,
+		stopCh:          make(chan struct{}),
+		approvalPending: make(map[string]*ApprovalRequest),
 	}
 
 	// Initial load — non-fatal; file may not exist yet.
 	if err := ls.loadBlockedUsers(); err != nil {
 		log.Printf("store/local: blocked-users initial load: %v", err)
+	}
+	if err := ls.loadApprovalStore(); err != nil {
+		log.Printf("store/local: approval-store initial load: %v", err)
 	}
 
 	// Reload every 30 s.

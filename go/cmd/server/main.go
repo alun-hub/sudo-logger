@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -43,6 +44,12 @@ var nonIDChar = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 // host, user, PID, nanosecond timestamp and a random hex suffix — and is
 // therefore longer than a single name component (up to 255 chars).
 var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
+
+// approvalStorePath returns the YAML persistence path for the approval store,
+// derived from the policy file path so both live in the same directory.
+func approvalStorePath(policyPath string) string {
+	return filepath.Join(filepath.Dir(policyPath), "approval-store.yaml")
+}
 
 func sanitizeName(s string) (string, error) {
 	if !validName.MatchString(s) {
@@ -142,6 +149,7 @@ func main() {
 		BlockedUsersPath:     *flagBlockedUsers,
 		SandboxConfigPath:    *flagSandbox,
 		SandboxTemplatesPath: *flagSandboxTemplates,
+		ApprovalStorePath:    approvalStorePath(*flagApprovalPolicy),
 		S3Bucket:             *flagS3Bucket,
 		S3Region:         *flagS3Region,
 		S3Prefix:         *flagS3Prefix,
@@ -163,11 +171,16 @@ func main() {
 	}
 	defer ln.Close()
 
-	storePath := defaultApprovalStorePath(*flagApprovalPolicy)
+	var approvalMgr *ApprovalManager
+	if approvalBackend, ok := sessionStore.(store.ApprovalStore); ok {
+		approvalMgr = newApprovalManager(*flagApprovalPolicy, approvalBackend)
+	} else {
+		log.Printf("approval: storage backend does not support ApprovalStore — JIT approval disabled")
+	}
 	srv := &server{
 		signKey:      signKey,
 		sessionStore: sessionStore,
-		approvalMgr:  newApprovalManager(*flagApprovalPolicy, storePath),
+		approvalMgr:  approvalMgr,
 		sessions:     make(map[string]*session),
 	}
 

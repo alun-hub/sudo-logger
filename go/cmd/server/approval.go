@@ -10,13 +10,15 @@
 //      asking user to provide a reason).
 //
 // REST API (mounted on -health-listen):
-//   GET  /api/approvals                       — list pending requests
-//   POST /api/approvals/{id}/approve?window=  — grant a time window
-//   POST /api/approvals/{id}/deny             — deny (optional reason in body)
+//
+//	GET  /api/approvals                       — list pending requests
+//	POST /api/approvals/{id}/approve?window=  — grant a time window
+//	POST /api/approvals/{id}/deny             — deny (optional reason in body)
 package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -26,20 +28,21 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"sudo-logger/internal/store"
 )
 
 // ── Policy ────────────────────────────────────────────────────────────────────
 
 type approvalPolicy struct {
 	Enabled       bool              `yaml:"enabled"`
-	DefaultWindow time.Duration     `yaml:"default_window"` // how long an approval lasts
-	PendingTTL    time.Duration     `yaml:"pending_ttl"`    // how long a request waits before auto-deny
+	DefaultWindow time.Duration     `yaml:"default_window"`
+	PendingTTL    time.Duration     `yaml:"pending_ttl"`
 	Exempt        []exemptRule      `yaml:"exempt"`
 	Notifications approvalNotifyCfg `yaml:"notifications"`
 }
@@ -81,31 +84,7 @@ func (p *approvalPolicy) isExempt(user, host string) bool {
 	return false
 }
 
-// ── In-memory state ───────────────────────────────────────────────────────────
-
-// ApprovalRequest is a pending sudo approval waiting for an admin decision.
-type ApprovalRequest struct {
-	ID            string    `json:"id"             yaml:"id"`
-	User          string    `json:"user"           yaml:"user"`
-	Host          string    `json:"host"           yaml:"host"`
-	Command       string    `json:"command"        yaml:"command"`
-	Justification string    `json:"justification"  yaml:"justification"`
-	NotifyVia     string    `json:"notify_via"     yaml:"notify_via"`
-	SubmittedAt   time.Time `json:"submitted_at"   yaml:"submitted_at"`
-	ExpiresAt     time.Time `json:"expires_at"     yaml:"expires_at"`
-}
-
-type approvalWindow struct {
-	User      string    `yaml:"user"`
-	Host      string    `yaml:"host"`
-	GrantedBy string    `yaml:"granted_by"`
-	ExpiresAt time.Time `yaml:"expires_at"`
-}
-
-type approvalStore struct {
-	Pending []ApprovalRequest `yaml:"pending"`
-	Windows []approvalWindow  `yaml:"windows"`
-}
+// ── Result types ──────────────────────────────────────────────────────────────
 
 // ApprovalResult is returned by ApprovalManager.Check.
 type ApprovalResult int
@@ -116,33 +95,34 @@ const (
 	ApprovalResultNeedReason                       // SESSION_DENIED asking for justification
 )
 
-// ── Manager ───────────────────────────────────────────────────────────────────
-
-// ApprovalManager handles the full JIT approval lifecycle.
-type ApprovalManager struct {
-	policyPath string
-	storePath  string
-
-	mu      sync.RWMutex
-	policy  approvalPolicy
-	pending map[string]*ApprovalRequest // id → request
-	windows []approvalWindow
+// CheckResult carries the outcome of ApprovalManager.Check.
+type CheckResult struct {
+	Result    ApprovalResult
+	RequestID string // set when Result == ApprovalResultPending
 }
 
-func newApprovalManager(policyPath, storePath string) *ApprovalManager {
+// ── Manager ───────────────────────────────────────────────────────────────────
+
+// ApprovalManager handles the JIT approval lifecycle.
+// State persistence is delegated to the store.ApprovalStore backend so that
+// both local (YAML) and distributed (PostgreSQL) deployments are supported.
+type ApprovalManager struct {
+	policyPath string
+	backend    store.ApprovalStore
+
+	mu     sync.RWMutex
+	policy approvalPolicy
+}
+
+func newApprovalManager(policyPath string, backend store.ApprovalStore) *ApprovalManager {
 	m := &ApprovalManager{
 		policyPath: policyPath,
-		storePath:  storePath,
-		pending:    make(map[string]*ApprovalRequest),
+		backend:    backend,
 	}
 	if err := m.loadPolicy(); err != nil {
 		log.Printf("approval: policy initial load: %v", err)
 	}
-	if err := m.loadStore(); err != nil {
-		log.Printf("approval: store initial load: %v", err)
-	}
 	go m.reloadLoop()
-	go m.expireLoop()
 	return m
 }
 
@@ -153,14 +133,6 @@ func (m *ApprovalManager) reloadLoop() {
 		if err := m.loadPolicy(); err != nil {
 			log.Printf("approval: policy reload: %v", err)
 		}
-	}
-}
-
-func (m *ApprovalManager) expireLoop() {
-	t := time.NewTicker(60 * time.Second)
-	defer t.Stop()
-	for range t.C {
-		m.expireOld()
 	}
 }
 
@@ -188,97 +160,9 @@ func (m *ApprovalManager) loadPolicy() error {
 	return nil
 }
 
-func (m *ApprovalManager) loadStore() error {
-	data, err := os.ReadFile(m.storePath)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var s approvalStore
-	if err := yaml.Unmarshal(data, &s); err != nil {
-		return fmt.Errorf("parse approval store: %w", err)
-	}
-	now := time.Now()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, r := range s.Pending {
-		r := r
-		if r.ExpiresAt.After(now) {
-			m.pending[r.ID] = &r
-		}
-	}
-	for _, w := range s.Windows {
-		if w.ExpiresAt.After(now) {
-			m.windows = append(m.windows, w)
-		}
-	}
-	log.Printf("approval: loaded store from %s (%d pending, %d windows)",
-		m.storePath, len(m.pending), len(m.windows))
-	return nil
-}
-
-func (m *ApprovalManager) saveStore() {
-	m.mu.RLock()
-	s := approvalStore{}
-	for _, r := range m.pending {
-		s.Pending = append(s.Pending, *r)
-	}
-	s.Windows = append(s.Windows, m.windows...)
-	m.mu.RUnlock()
-
-	data, err := yaml.Marshal(s)
-	if err != nil {
-		log.Printf("approval: marshal store: %v", err)
-		return
-	}
-	tmp := m.storePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		log.Printf("approval: write store: %v", err)
-		return
-	}
-	if err := os.Rename(tmp, m.storePath); err != nil {
-		log.Printf("approval: rename store: %v", err)
-	}
-}
-
-func (m *ApprovalManager) expireOld() {
-	now := time.Now()
-	m.mu.Lock()
-	changed := false
-	for id, r := range m.pending {
-		if !r.ExpiresAt.After(now) {
-			log.Printf("approval: request %s for %s@%s expired", id, r.User, r.Host)
-			delete(m.pending, id)
-			changed = true
-		}
-	}
-	newW := m.windows[:0]
-	for _, w := range m.windows {
-		if w.ExpiresAt.After(now) {
-			newW = append(newW, w)
-		} else {
-			changed = true
-		}
-	}
-	m.windows = newW
-	m.mu.Unlock()
-	if changed {
-		m.saveStore()
-	}
-}
-
 // ── Check ─────────────────────────────────────────────────────────────────────
 
-// CheckResult carries the outcome of ApprovalManager.Check.
-type CheckResult struct {
-	Result    ApprovalResult
-	RequestID string // set when Result == ApprovalResultPending
-}
-
 // Check evaluates whether the SESSION_START should be allowed, pending, or denied.
-// user, host, command and justification come from the SESSION_START payload.
 // Returns ApprovalResultAllow immediately if the manager is nil (feature not configured).
 func (m *ApprovalManager) Check(user, host, command, justification, notifyVia string) CheckResult {
 	if m == nil {
@@ -294,17 +178,23 @@ func (m *ApprovalManager) Check(user, host, command, justification, notifyVia st
 	if policy.isExempt(user, host) {
 		return CheckResult{Result: ApprovalResultAllow}
 	}
-	if m.hasActiveWindow(user, host) {
+
+	ctx := context.Background()
+	hasWindow, err := m.backend.HasApprovalWindow(ctx, user, host)
+	if err != nil {
+		log.Printf("approval: HasApprovalWindow: %v", err)
+	}
+	if hasWindow {
 		return CheckResult{Result: ApprovalResultAllow}
 	}
+
 	if strings.TrimSpace(justification) == "" {
 		return CheckResult{Result: ApprovalResultNeedReason}
 	}
 
-	// Create pending request.
 	id := newRequestID()
 	now := time.Now()
-	req := &ApprovalRequest{
+	req := store.ApprovalRequest{
 		ID:            id,
 		User:          user,
 		Host:          host,
@@ -314,37 +204,25 @@ func (m *ApprovalManager) Check(user, host, command, justification, notifyVia st
 		SubmittedAt:   now,
 		ExpiresAt:     now.Add(policy.PendingTTL),
 	}
-	m.mu.Lock()
-	m.pending[id] = req
-	m.mu.Unlock()
-	m.saveStore()
+	if err := m.backend.CreateApprovalRequest(ctx, req); err != nil {
+		log.Printf("approval: CreateApprovalRequest: %v", err)
+	}
 
-	go m.sendWebhook("requested", req, "", policy.Notifications)
+	go m.sendWebhook("requested", &req, "", policy.Notifications)
 	return CheckResult{Result: ApprovalResultPending, RequestID: id}
 }
 
-func (m *ApprovalManager) hasActiveWindow(user, host string) bool {
-	now := time.Now()
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, w := range m.windows {
-		if w.User == user && w.Host == host && w.ExpiresAt.After(now) {
-			return true
-		}
-	}
-	return false
-}
-
 // RetryMessage returns the SESSION_DENIED message shown when user retries sudo.
-// It reflects the current state of any pending request for user@host.
 func (m *ApprovalManager) RetryMessage(user, host string) string {
 	if m == nil {
 		return ""
 	}
+	reqs, err := m.backend.ListApprovalRequests(context.Background())
+	if err != nil {
+		return ""
+	}
 	now := time.Now()
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, r := range m.pending {
+	for _, r := range reqs {
 		if r.User == user && r.Host == host && r.ExpiresAt.After(now) {
 			age := now.Sub(r.SubmittedAt).Round(time.Second)
 			return fmt.Sprintf("sudo-logger: approval request %s still pending (submitted %s ago). Retry when notified.", r.ID, age)
@@ -357,92 +235,64 @@ func (m *ApprovalManager) RetryMessage(user, host string) string {
 
 // Approve grants a time window for user@host and removes the pending request.
 func (m *ApprovalManager) Approve(id, decidedBy string, window time.Duration) error {
-	m.mu.Lock()
-	req, ok := m.pending[id]
-	if !ok {
-		m.mu.Unlock()
+	ctx := context.Background()
+	req, err := m.backend.DeleteApprovalRequest(ctx, id)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	if req == nil {
 		return fmt.Errorf("request %s not found", id)
 	}
-	if window == 0 {
-		m.mu.RLock()
-		window = m.policy.DefaultWindow
-		m.mu.RUnlock()
-	}
-	w := approvalWindow{
-		User:      req.User,
-		Host:      req.Host,
-		GrantedBy: decidedBy,
-		ExpiresAt: time.Now().Add(window),
-	}
-	m.windows = append(m.windows, w)
-	delete(m.pending, id)
-	reqCopy := *req
-	m.mu.Unlock()
-	m.saveStore()
 
 	m.mu.RLock()
-	notif := m.policy.Notifications
+	policy := m.policy
 	m.mu.RUnlock()
-	go m.sendWebhook("approved", &reqCopy, decidedBy, notif)
+	if window == 0 {
+		window = policy.DefaultWindow
+	}
+
+	expiresAt := time.Now().Add(window)
+	if err := m.backend.CreateApprovalWindow(ctx, req.User, req.Host, decidedBy, expiresAt); err != nil {
+		return fmt.Errorf("create window: %w", err)
+	}
+
+	go m.sendWebhook("approved", req, decidedBy, policy.Notifications)
 	log.Printf("approval: request %s approved by %s (window %s) for %s@%s",
-		id, decidedBy, window, reqCopy.User, reqCopy.Host)
+		id, decidedBy, window, req.User, req.Host)
 	return nil
 }
 
 // Deny removes the pending request and notifies the user.
 func (m *ApprovalManager) Deny(id, decidedBy, reason string) error {
-	m.mu.Lock()
-	req, ok := m.pending[id]
-	if !ok {
-		m.mu.Unlock()
+	ctx := context.Background()
+	req, err := m.backend.DeleteApprovalRequest(ctx, id)
+	if err != nil {
+		return fmt.Errorf("delete request: %w", err)
+	}
+	if req == nil {
 		return fmt.Errorf("request %s not found", id)
 	}
-	reqCopy := *req
-	delete(m.pending, id)
-	m.mu.Unlock()
-	m.saveStore()
 
 	m.mu.RLock()
 	notif := m.policy.Notifications
 	m.mu.RUnlock()
-	go m.sendWebhookDeny(&reqCopy, decidedBy, reason, notif)
-	log.Printf("approval: request %s denied by %s for %s@%s",
-		id, decidedBy, reqCopy.User, reqCopy.Host)
+	go m.sendWebhookDeny(req, decidedBy, reason, notif)
+	log.Printf("approval: request %s denied by %s for %s@%s", id, decidedBy, req.User, req.Host)
 	return nil
 }
 
-// ListPending returns a snapshot of all pending requests.
-func (m *ApprovalManager) ListPending() []ApprovalRequest {
-	now := time.Now()
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	out := make([]ApprovalRequest, 0, len(m.pending))
-	for _, r := range m.pending {
-		if r.ExpiresAt.After(now) {
-			out = append(out, *r)
-		}
+// ListPending returns all unexpired pending requests.
+func (m *ApprovalManager) ListPending() []store.ApprovalRequest {
+	reqs, err := m.backend.ListApprovalRequests(context.Background())
+	if err != nil {
+		log.Printf("approval: ListApprovalRequests: %v", err)
+		return nil
 	}
-	return out
+	return reqs
 }
 
 // ── Webhook ───────────────────────────────────────────────────────────────────
 
-type webhookPayload struct {
-	Event         string `json:"event"`
-	RequestID     string `json:"request_id"`
-	User          string `json:"user"`
-	Host          string `json:"host"`
-	Command       string `json:"command,omitempty"`
-	Justification string `json:"justification,omitempty"`
-	NotifyVia     string `json:"notify_via,omitempty"`
-	SubmittedAt   string `json:"submitted_at,omitempty"`
-	ExpiresAt     string `json:"expires_at,omitempty"`
-	DecidedBy     string `json:"decided_by,omitempty"`
-	WindowExpires string `json:"window_expires,omitempty"`
-	Reason        string `json:"reason,omitempty"`
-}
-
-// slackAttachment is the Slack/Mattermost incoming webhook format.
 type slackPayload struct {
 	Text        string            `json:"text"`
 	Username    string            `json:"username"`
@@ -462,16 +312,12 @@ type slackField struct {
 	Short bool   `json:"short"`
 }
 
-func (m *ApprovalManager) sendWebhook(event string, req *ApprovalRequest, decidedBy string, cfg approvalNotifyCfg) {
+func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, decidedBy string, cfg approvalNotifyCfg) {
 	if cfg.WebhookURL == "" {
 		return
 	}
-	var (
-		color  string
-		header string
-		fields []slackField
-		footer string
-	)
+	var color, header, footer string
+	var fields []slackField
 	switch event {
 	case "requested":
 		color = "#ff9900"
@@ -504,7 +350,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *ApprovalRequest, decide
 	m.postSlack(cfg, header, color, fields, footer)
 }
 
-func (m *ApprovalManager) sendWebhookDeny(req *ApprovalRequest, decidedBy, reason string, cfg approvalNotifyCfg) {
+func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy, reason string, cfg approvalNotifyCfg) {
 	if cfg.WebhookURL == "" {
 		return
 	}
@@ -537,21 +383,19 @@ func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, text, color string, f
 		log.Printf("approval: webhook marshal: %v", err)
 		return
 	}
-
-	req, err := http.NewRequest(http.MethodPost, cfg.WebhookURL, bytes.NewReader(body))
+	hreq, err := http.NewRequest(http.MethodPost, cfg.WebhookURL, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("approval: webhook request: %v", err)
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
+	hreq.Header.Set("Content-Type", "application/json")
 	if cfg.WebhookSecret != "" {
 		mac := hmac.New(sha256.New, []byte(cfg.WebhookSecret))
 		mac.Write(body)
-		req.Header.Set("X-Sudo-Logger-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+		hreq.Header.Set("X-Sudo-Logger-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
-
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(hreq)
 	if err != nil {
 		log.Printf("approval: webhook post: %v", err)
 		return
@@ -565,9 +409,7 @@ func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, text, color string, f
 // ── REST API ──────────────────────────────────────────────────────────────────
 
 // RegisterApprovalAPI mounts the approval REST endpoints on mux.
-// token is a shared secret that callers must supply as "Authorization: Bearer <token>".
-// If token is empty the endpoints are not registered and a warning is logged —
-// the approval API must not be exposed unauthenticated.
+// token is a shared secret (Authorization: Bearer). If empty, endpoints are not registered.
 func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) {
 	if token == "" {
 		log.Printf("approval: WARNING: -approval-token not set — approval REST API disabled. " +
@@ -602,7 +444,6 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// Path: /api/approvals/{id}/approve or /api/approvals/{id}/deny
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) != 3 {
 		http.Error(w, "invalid path", http.StatusBadRequest)
@@ -655,7 +496,6 @@ func newRequestID() string {
 	return strings.ToUpper(hex.EncodeToString(b))
 }
 
-// matchGlob matches a simple glob pattern (only * wildcard) against s.
 func matchGlob(pattern, s string) bool {
 	if pattern == "*" {
 		return true
@@ -665,10 +505,4 @@ func matchGlob(pattern, s string) bool {
 	}
 	parts := strings.SplitN(pattern, "*", 2)
 	return strings.HasPrefix(s, parts[0]) && strings.HasSuffix(s, parts[1])
-}
-
-// defaultApprovalStorePath returns the path next to the policy file.
-func defaultApprovalStorePath(policyPath string) string {
-	dir := filepath.Dir(policyPath)
-	return filepath.Join(dir, "approval-store.yaml")
 }
