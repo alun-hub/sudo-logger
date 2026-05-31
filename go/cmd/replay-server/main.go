@@ -734,6 +734,9 @@ func main() {
 			tail := strings.TrimPrefix(r.URL.Path, "/api/approvals/")
 			proxyToLogServer(w, r, adminBase+"/api/approvals/"+tail, adminToken, viewerFromContext(r))
 		})
+		mux.HandleFunc("/api/approval-config", func(w http.ResponseWriter, r *http.Request) {
+			proxyToLogServer(w, r, adminBase+"/api/approval-config", adminToken, viewerFromContext(r))
+		})
 	}
 
 	mux.HandleFunc("/api/blocked-users", func(w http.ResponseWriter, r *http.Request) {

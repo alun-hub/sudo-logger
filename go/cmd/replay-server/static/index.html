@@ -766,10 +766,55 @@
       <button class="stab-btn active" data-stab="rules">Risk Rules</button>
       <button class="stab-btn" data-stab="siem">SIEM</button>
       <button class="stab-btn" data-stab="sandbox">Sandbox</button>
+      <button class="stab-btn" data-stab="approval">JIT Approval</button>
       <button class="stab-btn" data-stab="retention">Retention</button>
-    </nav>
+      </nav>
+      ...
+      <!-- ── JIT Approval ────────────────────────────────────────────────────── -->
+      <div class="stab-panel" id="stab-approval">
+      <div class="siem-section" style="margin-top:0">
+        <div class="siem-heading">
+          JIT Approval Policy
+          <span class="settings-status" id="approval-status" style="display:none"></span>
+        </div>
+        <div class="siem-form">
+          <label>Enabled</label>
+          <input type="checkbox" id="appr-enabled">
 
-    <!-- ── Risk Rules ────────────────────────────────────────────────────────── -->
+          <label>Default window</label>
+          <input type="text" id="appr-default-window" placeholder="30m">
+
+          <label>Pending request TTL</label>
+          <input type="text" id="appr-pending-ttl" placeholder="24h">
+
+          <div class="siem-subsection">Notifications (Mattermost/Slack)</div>
+
+          <label>Webhook URL</label>
+          <input type="text" id="appr-webhook-url" placeholder="http://gnarg.alun.se:8065/hooks/...">
+
+          <label>Request channel</label>
+          <input type="text" id="appr-request-channel" placeholder="sudo-logger">
+
+          <label>Webhook secret</label>
+          <input type="password" id="appr-webhook-secret" placeholder="(optional)">
+
+          <label>Mention user</label>
+          <input type="checkbox" id="appr-mention-user">
+
+          <p class="siem-note">
+            Changes reload within 30 seconds.
+            The "Request channel" is where new requests are posted. Outcome notifications (approve/deny) are sent as DMs to the user's handle.
+          </p>
+        </div>
+        <div class="siem-footer">
+          <button class="btn-primary" id="btn-save-approval">Save approval policy</button>
+          <span id="approval-path" style="font-size:11px;color:var(--text-dim)"></span>
+        </div>
+      </div>
+      </div>
+
+      <!-- ── Data Retention ────────────────────────────────────────────────────── -->
+
     <div class="stab-panel active" id="stab-rules">
       <div class="settings-toolbar">
         <button class="btn-primary" id="btn-add-rule">+ Add rule</button>
@@ -2752,7 +2797,7 @@ function switchTab(tab) {
   if (tab === 'summary' || tab === 'anomalies') fetchReport();
   if (tab === 'settings') {
     switchSettingsTab('rules');
-    fetchRules(); fetchSiemConfig(); fetchRetentionConfig(); fetchSandboxConfig(); fetchSandboxTemplates();
+    fetchRules(); fetchSiemConfig(); fetchApprovalConfig(); fetchRetentionConfig(); fetchSandboxConfig(); fetchSandboxTemplates();
   }
   if (tab === 'blocked') fetchBlockedUsers();
   if (tab === 'approvals') fetchApprovals();
@@ -3090,6 +3135,79 @@ function showSiemStatus(msg, isErr) {
 }
 
 document.getElementById('btn-save-siem').addEventListener('click', saveSiemConfig);
+
+// ── JIT Approval ──────────────────────────────────────────────────────────────
+
+async function fetchApprovalConfig() {
+  try {
+    const res = await fetch('/api/approval-config');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const c = data.config || {};
+    document.getElementById('approval-path').textContent = data.path || '';
+    document.getElementById('appr-enabled').checked         = !!c.enabled;
+    document.getElementById('appr-default-window').value    = c.default_window  || '30m';
+    document.getElementById('appr-pending-ttl').value       = c.pending_ttl     || '24h';
+    document.getElementById('appr-webhook-url').value       = (c.notifications && c.notifications.webhook_url)    || '';
+    document.getElementById('appr-request-channel').value   = (c.notifications && c.notifications.request_channel) || '';
+    document.getElementById('appr-webhook-secret').value    = (c.notifications && c.notifications.webhook_secret) || '';
+    document.getElementById('appr-mention-user').checked    = !!(c.notifications && c.notifications.mention_user);
+  } catch (err) {
+    showApprovalStatus('Load failed: ' + err.message, true);
+  }
+}
+
+async function saveApprovalConfig() {
+  const cfg = {
+    enabled:        document.getElementById('appr-enabled').checked,
+    default_window: document.getElementById('appr-default-window').value.trim(),
+    pending_ttl:    document.getElementById('appr-pending-ttl').value.trim(),
+    notifications: {
+      webhook_url:     document.getElementById('appr-webhook-url').value.trim(),
+      request_channel: document.getElementById('appr-request-channel').value.trim(),
+      webhook_secret:  document.getElementById('appr-webhook-secret').value.trim(),
+      mention_user:    document.getElementById('appr-mention-user').checked,
+    },
+    exempt: [], // preserved server-side if we only send what we have, but policy is the full struct.
+    // To be safe, we should probably fetch the existing policy and only update the fields we have in the UI.
+  };
+
+  // Re-fetch to preserve exempt rules which are not in the UI yet
+  try {
+    const res = await fetch('/api/approval-config');
+    if (res.ok) {
+      const data = await res.json();
+      cfg.exempt = data.config.exempt || [];
+    }
+  } catch (e) {}
+
+  const btn = document.getElementById('btn-save-approval');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/approval-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: cfg }),
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t); }
+    showApprovalStatus('Saved — reloads within 30 s', false);
+  } catch (err) {
+    showApprovalStatus('Save failed: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showApprovalStatus(msg, isErr) {
+  const s = document.getElementById('approval-status');
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  clearTimeout(s._t);
+  s._t = setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
+
+document.getElementById('btn-save-approval').addEventListener('click', saveApprovalConfig);
 
 // ── Data Retention ────────────────────────────────────────────────────────────
 

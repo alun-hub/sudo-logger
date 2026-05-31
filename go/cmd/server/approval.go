@@ -459,6 +459,46 @@ func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) 
 	}
 	mux.HandleFunc("/api/approvals", auth(m.handleList))
 	mux.HandleFunc("/api/approvals/", auth(m.handleDecision))
+	mux.HandleFunc("/api/approval-config", auth(m.handleConfig))
+}
+
+func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		m.mu.RLock()
+		policy := m.policy
+		m.mu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"config": policy,
+			"path":   m.policyPath,
+		})
+	case http.MethodPut:
+		var req struct {
+			Config approvalPolicy `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Preserve path
+		data, err := yaml.Marshal(req.Config)
+		if err != nil {
+			http.Error(w, "yaml marshal: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := os.WriteFile(m.policyPath, data, 0644); err != nil {
+			http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Success — the reloadLoop will pick it up, or we can force it now:
+		if err := m.loadPolicy(); err != nil {
+			log.Printf("approval: reload after API update: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (m *ApprovalManager) handleList(w http.ResponseWriter, r *http.Request) {
