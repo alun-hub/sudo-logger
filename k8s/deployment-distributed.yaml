@@ -47,6 +47,7 @@ spec:
             - -s3-secret-key=$(S3_SECRET_KEY)
             - -db-url=$(DB_URL)
             - -buffer-dir=/var/lib/sudo-logger/buffer
+            - -approval-policy=/etc/sudo-logger-approval/approval-policy.yaml
             - -approval-token=$(APPROVAL_TOKEN)
 
           env:
@@ -82,6 +83,9 @@ spec:
           volumeMounts:
             - name: tls-certs
               mountPath: /etc/sudo-logger
+              readOnly: true
+            - name: approval-policy
+              mountPath: /etc/sudo-logger-approval
               readOnly: true
             - name: buffer
               mountPath: /var/lib/sudo-logger/buffer
@@ -121,5 +125,8 @@ spec:
           secret:
             secretName: sudo-logger-tls  # pragma: allowlist secret
             defaultMode: 0400
+        - name: approval-policy
+          configMap:
+            name: sudo-logger-approval-policy
         - name: buffer
           emptyDir: {}
