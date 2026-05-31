@@ -40,23 +40,23 @@ import (
 // ── Policy ────────────────────────────────────────────────────────────────────
 
 type approvalPolicy struct {
-	Enabled       bool              `yaml:"enabled"`
-	DefaultWindow time.Duration     `yaml:"default_window"`
-	PendingTTL    time.Duration     `yaml:"pending_ttl"`
-	Exempt        []exemptRule      `yaml:"exempt"`
-	Notifications approvalNotifyCfg `yaml:"notifications"`
+	Enabled       bool              `yaml:"enabled" json:"enabled"`
+	DefaultWindow time.Duration     `yaml:"default_window" json:"default_window"`
+	PendingTTL    time.Duration     `yaml:"pending_ttl" json:"pending_ttl"`
+	Exempt        []exemptRule      `yaml:"exempt" json:"exempt"`
+	Notifications approvalNotifyCfg `yaml:"notifications" json:"notifications"`
 }
 
 type exemptRule struct {
-	User  string   `yaml:"user"`
-	Hosts []string `yaml:"hosts"` // empty = all hosts
+	User  string   `yaml:"user" json:"user"`
+	Hosts []string `yaml:"hosts" json:"hosts"` // empty = all hosts
 }
 
 type approvalNotifyCfg struct {
-	WebhookURL     string `yaml:"webhook_url"`
-	WebhookSecret  string `yaml:"webhook_secret"`
-	MentionUser    bool   `yaml:"mention_user"`
-	RequestChannel string `yaml:"request_channel"`
+	WebhookURL     string `yaml:"webhook_url" json:"webhook_url"`
+	WebhookSecret  string `yaml:"webhook_secret" json:"webhook_secret"`
+	MentionUser    bool   `yaml:"mention_user" json:"mention_user"`
+	RequestChannel string `yaml:"request_channel" json:"request_channel"`
 }
 
 func (p *approvalPolicy) setDefaults() {
@@ -477,26 +477,67 @@ func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) 
 }
 
 func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
+	// Internal struct for JSON roundtrip because time.Duration in JSON is nanoseconds (int64)
+	// whereas UI and YAML want strings like "30m".
+	type policyJSON struct {
+		Enabled       bool   `json:"enabled"`
+		DefaultWindow string `json:"default_window"`
+		PendingTTL    string `json:"pending_ttl"`
+		Exempt        []exemptRule      `json:"exempt"`
+		Notifications approvalNotifyCfg `json:"notifications"`
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		m.mu.RLock()
-		policy := m.policy
+		p := m.policy
 		m.mu.RUnlock()
+
+		pj := policyJSON{
+			Enabled:       p.Enabled,
+			DefaultWindow: p.DefaultWindow.String(),
+			PendingTTL:    p.PendingTTL.String(),
+			Exempt:        p.Exempt,
+			Notifications: p.Notifications,
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"config": policy,
+			"config": pj,
 			"path":   m.policyPath,
 		})
 	case http.MethodPut:
 		var req struct {
-			Config approvalPolicy `json:"config"`
+			Config policyJSON `json:"config"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// Preserve path
-		data, err := yaml.Marshal(req.Config)
+
+		// Map back to real policy to validate durations
+		p := approvalPolicy{
+			Enabled:       req.Config.Enabled,
+			Exempt:        req.Config.Exempt,
+			Notifications: req.Config.Notifications,
+		}
+		var err error
+		if req.Config.DefaultWindow != "" {
+			p.DefaultWindow, err = time.ParseDuration(req.Config.DefaultWindow)
+			if err != nil {
+				http.Error(w, "invalid default_window: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if req.Config.PendingTTL != "" {
+			p.PendingTTL, err = time.ParseDuration(req.Config.PendingTTL)
+			if err != nil {
+				http.Error(w, "invalid pending_ttl: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
+		data, err := yaml.Marshal(p)
 		if err != nil {
 			http.Error(w, "yaml marshal: "+err.Error(), http.StatusInternalServerError)
 			return
