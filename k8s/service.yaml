@@ -28,3 +28,20 @@ spec:
   # loadBalancerSourceRanges:
   #   - 192.168.0.0/16
   #   - 10.0.0.0/8
+---
+# Internal-only ClusterIP service for the log-server admin port (approval API).
+# Not exposed externally — only reachable from within the cluster (e.g. replay-server).
+apiVersion: v1
+kind: Service
+metadata:
+  name: sudo-logserver-admin
+  namespace: sudo-logger
+spec:
+  type: ClusterIP
+  selector:
+    app: sudo-logserver
+  ports:
+    - name: admin
+      port: 9877
+      targetPort: 9877
+      protocol: TCP
