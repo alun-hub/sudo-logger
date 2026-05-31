@@ -93,12 +93,14 @@ const (
 	ApprovalResultAllow      ApprovalResult = iota // proceed normally
 	ApprovalResultPending                          // request created; SESSION_DENIED with request ID
 	ApprovalResultNeedReason                       // SESSION_DENIED asking for justification
+	ApprovalResultChallenge                        // MSG_SESSION_CHALLENGE asking for justification
 )
 
 // CheckResult carries the outcome of ApprovalManager.Check.
 type CheckResult struct {
-	Result    ApprovalResult
-	RequestID string // set when Result == ApprovalResultPending
+	Result     ApprovalResult
+	RequestID  string // set when Result == ApprovalResultPending
+	HasWebhook bool   // set when Result == ApprovalResultChallenge or ApprovalResultNeedReason
 }
 
 // ── Manager ───────────────────────────────────────────────────────────────────
@@ -160,6 +162,16 @@ func (m *ApprovalManager) loadPolicy() error {
 	return nil
 }
 
+// HasWebhook reports whether the policy has a webhook configured.
+func (m *ApprovalManager) HasWebhook() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.policy.Notifications.WebhookURL != ""
+}
+
 // ── Check ─────────────────────────────────────────────────────────────────────
 
 // Check evaluates whether the SESSION_START should be allowed, pending, or denied.
@@ -189,7 +201,10 @@ func (m *ApprovalManager) Check(user, host, command, justification, notifyVia st
 	}
 
 	if strings.TrimSpace(justification) == "" {
-		return CheckResult{Result: ApprovalResultNeedReason}
+		if m.RetryMessage(user, host) != "" {
+			return CheckResult{Result: ApprovalResultNeedReason, HasWebhook: policy.Notifications.WebhookURL != ""}
+		}
+		return CheckResult{Result: ApprovalResultChallenge, HasWebhook: policy.Notifications.WebhookURL != ""}
 	}
 
 	id := newRequestID()
@@ -209,7 +224,7 @@ func (m *ApprovalManager) Check(user, host, command, justification, notifyVia st
 	}
 
 	go m.sendWebhook("requested", &req, "", policy.Notifications)
-	return CheckResult{Result: ApprovalResultPending, RequestID: id}
+	return CheckResult{Result: ApprovalResultPending, RequestID: id, HasWebhook: policy.Notifications.WebhookURL != ""}
 }
 
 // RetryMessage returns the SESSION_DENIED message shown when user retries sudo.

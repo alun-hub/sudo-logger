@@ -272,6 +272,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 	var netWriteMu sync.Mutex // Protects all writes to 'w'
 
 	var sess *session
+	var start *protocol.SessionStart
 
 	// ── Async ACK Coalescer ───────────────────────────────────────────────
 	// Prevents TCP flow control deadlocks by decoupling reads from writes.
@@ -455,7 +456,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 		switch msgType {
 		case protocol.MsgSessionStart:
-			start, err := protocol.ParseSessionStart(payload)
+			var err error
+			start, err = protocol.ParseSessionStart(payload)
 			if err != nil {
 				log.Printf("parse session start from %s: %v", remote, err)
 				return
@@ -506,6 +508,24 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				}
 				log.Printf("[%s] approval: user=%s host=%s — no justification provided", start.SessionID, start.User, start.Host)
 				return
+			case ApprovalResultChallenge:
+				if start.TtyPath == "" {
+					// Non-TTY session (cron, script): cannot challenge for justification.
+					// Fall back to a standard denial with instructions.
+					netWriteMu.Lock()
+					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
+						"sudo-logger: access requires justification. Provide reason via sudo-logger-agent or retry interactively."))
+					netWriteMu.Unlock()
+					log.Printf("[%s] approval: user=%s host=%s — non-TTY session requires justification", start.SessionID, start.User, start.Host)
+					return
+				}
+				challenge := protocol.SessionChallenge{HasWebhook: result.HasWebhook}
+				body, _ := json.Marshal(challenge)
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionChallenge, body)
+				netWriteMu.Unlock()
+				log.Printf("[%s] approval: user=%s host=%s — challenge sent", start.SessionID, start.User, start.Host)
+				continue
 			case ApprovalResultPending:
 				msg := fmt.Sprintf("sudo-logger: approval request %s submitted. You will be notified when approved. Retry sudo when notified.", result.RequestID)
 				netWriteMu.Lock()
@@ -517,6 +537,65 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				// Approved or exempt — continue normally.
 			}
 
+			sess, err = srv.openSession(start)
+			if err != nil {
+				log.Printf("open session %s: %v", start.SessionID, err)
+				return
+			}
+			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s tsid=%s",
+				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
+				sanitizeForLog(sess.command), sanitizeForLog(start.ResolvedCommand),
+				sanitizeForLog(sess.cwd), sess.writer.TSID())
+
+			netWriteMu.Lock()
+			err = protocol.WriteMessage(w, protocol.MsgServerReady, nil)
+			netWriteMu.Unlock()
+			if err != nil {
+				log.Printf("[%s] write SERVER_READY: %v", start.SessionID, err)
+				srv.closeSession(sess)
+				sess = nil
+				return
+			}
+
+			sendMu.Lock()
+			sessionID = start.SessionID
+			sendMu.Unlock()
+
+		case protocol.MsgSessionChallengeResponse:
+			if start == nil {
+				log.Printf("challenge response before session_start from %s", remote)
+				return
+			}
+			var resp protocol.SessionChallengeResponse
+			if err := json.Unmarshal(payload, &resp); err != nil {
+				log.Printf("[%s] parse challenge response: %v", start.SessionID, err)
+				return
+			}
+			start.Justification = resp.Justification
+			start.NotifyVia = resp.NotifyVia
+
+			// Re-run the check with the newly provided justification.
+			result := srv.approvalMgr.Check(start.User, start.Host, start.Command,
+				start.Justification, start.NotifyVia)
+			switch result.Result {
+			case ApprovalResultNeedReason, ApprovalResultChallenge:
+				// They already had their chance.
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte("sudo-logger: access requires justification."))
+				netWriteMu.Unlock()
+				return
+			case ApprovalResultPending:
+				msg := fmt.Sprintf("sudo-logger: approval request %s submitted. You will be notified when approved. Retry sudo when notified.", result.RequestID)
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
+				netWriteMu.Unlock()
+				log.Printf("[%s] approval: user=%s host=%s — pending request %s created (via challenge)", start.SessionID, start.User, start.Host, result.RequestID)
+				return
+			case ApprovalResultAllow:
+				// Approved or exempt — continue normally.
+			}
+
+			var err error
 			sess, err = srv.openSession(start)
 			if err != nil {
 				log.Printf("open session %s: %v", start.SessionID, err)

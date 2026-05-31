@@ -444,6 +444,8 @@ func handlePluginConn(pluginConn net.Conn) {
 
 	serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	sr := bufio.NewReader(serverConn)
+
+readHandshake:
 	hsType, hsPlen, hsErr := protocol.ReadHeader(sr)
 	serverConn.SetReadDeadline(time.Time{})
 
@@ -461,6 +463,36 @@ func handlePluginConn(pluginConn net.Conn) {
 		protocol.WriteMessage(pw, protocol.MsgSessionDenied, denyPayload)
 		serverConn.Close()
 		return
+	case protocol.MsgSessionChallenge:
+		challengePayload, _ := protocol.ReadPayload(sr, hsPlen)
+		log.Printf("[%s] session challenge from server", start.SessionID)
+		// Forward challenge to plugin
+		if err := protocol.WriteMessage(pw, protocol.MsgSessionChallenge, challengePayload); err != nil {
+			log.Printf("[%s] forward challenge: %v", start.SessionID, err)
+			return
+		}
+		// Wait for response from plugin
+		pluginConn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		respType, respPlen, respErr := protocol.ReadHeader(pr)
+		pluginConn.SetReadDeadline(time.Time{})
+		if respErr != nil {
+			log.Printf("[%s] read challenge response from plugin: %v", start.SessionID, respErr)
+			return
+		}
+		if respType != protocol.MsgSessionChallengeResponse {
+			log.Printf("[%s] expected challenge response, got 0x%02x", start.SessionID, respType)
+			return
+		}
+		respPayload, _ := protocol.ReadPayload(pr, respPlen)
+		// Forward response to server
+		if err := protocol.WriteMessage(serverBuf, protocol.MsgSessionChallengeResponse, respPayload); err != nil {
+			log.Printf("[%s] forward challenge response: %v", start.SessionID, err)
+			return
+		}
+		// Wait for next server response (Denied or ServerReady)
+		serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		goto readHandshake
+
 	case protocol.MsgServerReady:
 		_, _ = protocol.ReadPayload(sr, hsPlen)
 		cg.SetReady()

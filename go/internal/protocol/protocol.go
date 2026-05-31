@@ -61,6 +61,8 @@ const (
 	MsgSandboxAlert     = uint8(0x11) // agent→server: sandbox violation blocked by kernel LSM
 	MsgFetchConfig      = uint8(0x12) // agent→server: request named config; payload = UTF-8 key
 	MsgConfigData       = uint8(0x13) // server→agent: config response;     payload = UTF-8 YAML (empty = not found)
+	MsgSessionChallenge = uint8(0x14) // server→agent→plugin: justification required; payload = JSON (SessionChallenge)
+	MsgSessionChallengeResponse = uint8(0x15) // plugin→agent→server: user response; payload = JSON (SessionChallengeResponse)
 
 	StreamStdin   = uint8(0x00)
 
@@ -144,6 +146,17 @@ type SandboxAlert struct {
 // Disclaimer, if non-empty, is printed to the user's terminal before sudo proceeds.
 type SessionReadyBody struct {
 	Disclaimer string `json:"disclaimer,omitempty"` // optional notice shown at session start
+}
+
+// SessionChallenge is the JSON payload for MsgSessionChallenge.
+type SessionChallenge struct {
+	HasWebhook bool `json:"has_webhook"`
+}
+
+// SessionChallengeResponse is the JSON payload for MsgSessionChallengeResponse.
+type SessionChallengeResponse struct {
+	Justification string `json:"justification"`
+	NotifyVia     string `json:"notify_via,omitempty"`
 }
 
 // Chunk is a decoded CHUNK message.

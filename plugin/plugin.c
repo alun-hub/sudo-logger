@@ -63,6 +63,8 @@
 #define MSG_SESSION_ERROR  0x08
 #define MSG_SESSION_DENIED 0x0c
 #define MSG_FREEZE_TIMEOUT 0x0d
+#define MSG_SESSION_CHALLENGE 0x14
+#define MSG_SESSION_CHALLENGE_RESPONSE 0x15
 
 #define STREAM_STDIN   0x00
 #define STREAM_STDOUT  0x01
@@ -785,36 +787,11 @@ static int plugin_open(unsigned int        version,
      * Enabled via plugin option in /etc/sudo.conf:
      *   Plugin sudo_logger sudo_logger_plugin.so require_justification=1
      * Skipped automatically for non-interactive sessions (no TTY).        */
-    int require_justification = 0;
-    if (plugin_options) {
-        for (int i = 0; plugin_options[i] != NULL; i++) {
-            if (strcmp(plugin_options[i], "require_justification=1") == 0)
-                require_justification = 1;
-        }
-    }
-
+    /* ── JIT Approval ─────────────────────────────────────────────────────
+     * We no longer prompt by default. We send an empty justification and
+     * only prompt if the server challenges us. */
     char g_justification[512] = "";
     char g_notify_via[128]    = "";
-
-    if (require_justification && g_tty_fd >= 0 && conversation != NULL) {
-        struct sudo_conv_message msgs[2];
-        struct sudo_conv_reply   replies[2];
-
-        memset(msgs,    0, sizeof(msgs));
-        memset(replies, 0, sizeof(replies));
-
-        msgs[0].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
-        msgs[0].msg      = "Reason for sudo: ";
-        msgs[1].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
-        msgs[1].msg      = "Notify via (Slack handle/email, optional): ";
-
-        if (conversation(2, msgs, replies, NULL) == 0) {
-            if (replies[0].reply && replies[0].reply[0] != '\0')
-                strncpy(g_justification, replies[0].reply, sizeof(g_justification) - 1);
-            if (replies[1].reply && replies[1].reply[0] != '\0')
-                strncpy(g_notify_via, replies[1].reply, sizeof(g_notify_via) - 1);
-        }
-    }
 
     /* JSON-escape fields that may contain backslashes, quotes, or spaces */
     char resolved_j[512];
@@ -904,9 +881,71 @@ static int plugin_open(unsigned int        version,
 
     /* Wait for agent to confirm server connection before allowing sudo */
     uint8_t hdr[5];
+read_agent:
     if (read_exact(g_agent_fd, hdr, 5) < 0) {
         *errstr = "sudo-logger: no response from agent";
         return -1;
+    }
+
+    if (hdr[0] == MSG_SESSION_CHALLENGE) {
+        /* Server requires a justification. Prompt the user now. */
+        uint32_t clen;
+        memcpy(&clen, hdr + 1, 4);
+        clen = be32toh(clen);
+        int has_webhook = 0;
+        if (clen > 0 && clen < 4096) {
+            char cbuf[4096] = {0};
+            read_exact(g_agent_fd, cbuf, clen);
+            if (strstr(cbuf, "\"has_webhook\":true"))
+                has_webhook = 1;
+        }
+
+        if (g_tty_fd >= 0 && conversation != NULL) {
+            struct sudo_conv_message msgs[2];
+            struct sudo_conv_reply   replies[2];
+            memset(msgs,    0, sizeof(msgs));
+            memset(replies, 0, sizeof(replies));
+
+            msgs[0].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
+            msgs[0].msg      = "Reason for sudo: ";
+            msgs[1].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
+            msgs[1].msg      = "Notify via (Slack handle/email, optional): ";
+
+            if (conversation(2, msgs, replies, NULL) == 0) {
+                if (replies[0].reply && replies[0].reply[0] != '\0')
+                    strncpy(g_justification, replies[0].reply, sizeof(g_justification) - 1);
+                if (replies[1].reply && replies[1].reply[0] != '\0')
+                    strncpy(g_notify_via, replies[1].reply, sizeof(g_notify_via) - 1);
+            }
+        }
+
+        /* Send response back to agent */
+        char resp_j[512];
+        char notify_j[256];
+        json_escape_into(resp_j,   sizeof(resp_j),   g_justification);
+        json_escape_into(notify_j, sizeof(notify_j), g_notify_via);
+
+        char rpayload[1024];
+        int rplen = snprintf(rpayload, sizeof(rpayload),
+            "{\"justification\":\"%s\",\"notify_via\":\"%s\"}",
+            resp_j, notify_j);
+
+        if (rplen > 0 && rplen < (int)sizeof(rpayload)) {
+            send_msg(g_agent_fd, MSG_SESSION_CHALLENGE_RESPONSE, rpayload, (uint32_t)rplen);
+        }
+
+        /* Give them a hint about where to look for approval. */
+        if (g_tty_fd >= 0) {
+            if (has_webhook) {
+                const char *m = "\r\n\033[33mRequest will be sent for approval. Check chat for notifications.\033[0m\r\n";
+                write(g_tty_fd, m, strlen(m));
+            } else {
+                const char *m = "\r\n\033[33mRequest will be sent for approval. Run sudo again when granted.\033[0m\r\n";
+                write(g_tty_fd, m, strlen(m));
+            }
+        }
+
+        goto read_agent;
     }
 
     if (hdr[0] == MSG_SESSION_DENIED) {
