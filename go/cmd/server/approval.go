@@ -445,11 +445,11 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 3 {
+	if len(parts) != 4 {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
-	id, action := parts[1], parts[2]
+	id, action := parts[2], parts[3]
 	// X-Sudo-Logger-Decided-By is set by the replay-server from its authenticated
 	// session identity — never forwarded from the browser request.
 	decidedBy := r.Header.Get("X-Sudo-Logger-Decided-By")
