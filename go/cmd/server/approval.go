@@ -53,9 +53,10 @@ type exemptRule struct {
 }
 
 type approvalNotifyCfg struct {
-	WebhookURL    string `yaml:"webhook_url"`
-	WebhookSecret string `yaml:"webhook_secret"`
-	MentionUser   bool   `yaml:"mention_user"`
+	WebhookURL     string `yaml:"webhook_url"`
+	WebhookSecret  string `yaml:"webhook_secret"`
+	MentionUser    bool   `yaml:"mention_user"`
+	RequestChannel string `yaml:"request_channel"`
 }
 
 func (p *approvalPolicy) setDefaults() {
@@ -309,6 +310,7 @@ func (m *ApprovalManager) ListPending() []store.ApprovalRequest {
 // ── Webhook ───────────────────────────────────────────────────────────────────
 
 type slackPayload struct {
+	Channel     string            `json:"channel,omitempty"`
 	Text        string            `json:"text"`
 	Username    string            `json:"username"`
 	IconEmoji   string            `json:"icon_emoji"`
@@ -331,10 +333,11 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 	if cfg.WebhookURL == "" {
 		return
 	}
-	var color, header, footer string
+	var color, header, footer, channel string
 	var fields []slackField
 	switch event {
 	case "requested":
+		channel = cfg.RequestChannel
 		color = "#ff9900"
 		header = ":lock: *Sudo approval request*"
 		mention := req.User
@@ -351,6 +354,12 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 		}
 		footer = "Approve or deny in sudo-logger UI"
 	case "approved":
+		if req.NotifyVia != "" {
+			channel = req.NotifyVia
+			if !strings.HasPrefix(channel, "@") && !strings.HasPrefix(channel, "#") {
+				channel = "@" + channel
+			}
+		}
 		color = "#36a64f"
 		target := req.User
 		if cfg.MentionUser && req.NotifyVia != "" {
@@ -362,12 +371,19 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 			{Title: "Request ID", Value: req.ID, Short: true},
 		}
 	}
-	m.postSlack(cfg, header, color, fields, footer)
+	m.postSlack(cfg, channel, header, color, fields, footer)
 }
 
 func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy, reason string, cfg approvalNotifyCfg) {
 	if cfg.WebhookURL == "" {
 		return
+	}
+	var channel string
+	if req.NotifyVia != "" {
+		channel = req.NotifyVia
+		if !strings.HasPrefix(channel, "@") && !strings.HasPrefix(channel, "#") {
+			channel = "@" + channel
+		}
 	}
 	target := req.User
 	if cfg.MentionUser && req.NotifyVia != "" {
@@ -381,11 +397,12 @@ func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy,
 	if reason != "" {
 		fields = append(fields, slackField{Title: "Reason", Value: reason})
 	}
-	m.postSlack(cfg, header, "#cc0000", fields, "")
+	m.postSlack(cfg, channel, header, "#cc0000", fields, "")
 }
 
-func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, text, color string, fields []slackField, footer string) {
+func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color string, fields []slackField, footer string) {
 	p := slackPayload{
+		Channel:   channel,
 		Text:      text,
 		Username:  "sudo-logger",
 		IconEmoji: ":lock:",
