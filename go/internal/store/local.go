@@ -97,6 +97,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.SandboxTemplatesPath == "" {
 		cfg.SandboxTemplatesPath = "/etc/sudo-logger/sandbox-templates.json"
 	}
+	if cfg.ApprovalPolicyPath == "" {
+		cfg.ApprovalPolicyPath = "/etc/sudo-logger/approval-policy.yaml"
+	}
 	if cfg.ApprovalStorePath == "" {
 		cfg.ApprovalStorePath = "/etc/sudo-logger/approval-store.yaml"
 	}
@@ -362,6 +365,8 @@ func (ls *LocalStore) configFilePath(key string) string {
 		return ls.cfg.RetentionPath
 	case "sandbox_templates":
 		return ls.cfg.SandboxTemplatesPath
+	case "approval-policy.yaml":
+		return ls.cfg.ApprovalPolicyPath
 	default:
 		return ""
 	}

@@ -140,16 +140,30 @@ func (m *ApprovalManager) reloadLoop() {
 }
 
 func (m *ApprovalManager) loadPolicy() error {
-	data, err := os.ReadFile(m.policyPath)
-	if os.IsNotExist(err) {
-		m.mu.Lock()
-		m.policy = approvalPolicy{}
-		m.mu.Unlock()
-		return nil
+	ctx := context.Background()
+	var data []byte
+	var source string
+
+	// Prefer store-backed config (DB in distributed mode).
+	cfgStr, err := m.backend.GetConfig(ctx, "approval-policy.yaml")
+	if err == nil && cfgStr != "" {
+		data = []byte(cfgStr)
+		source = "store"
+	} else {
+		// Fallback to local file.
+		data, err = os.ReadFile(m.policyPath)
+		if os.IsNotExist(err) {
+			m.mu.Lock()
+			m.policy = approvalPolicy{}
+			m.mu.Unlock()
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		source = m.policyPath
 	}
-	if err != nil {
-		return err
-	}
+
 	var p approvalPolicy
 	if err := yaml.Unmarshal(data, &p); err != nil {
 		return fmt.Errorf("parse approval policy: %w", err)
@@ -159,7 +173,7 @@ func (m *ApprovalManager) loadPolicy() error {
 	m.policy = p
 	m.mu.Unlock()
 	log.Printf("approval: loaded policy from %s (enabled=%v, exempt=%d)",
-		m.policyPath, p.Enabled, len(p.Exempt))
+		source, p.Enabled, len(p.Exempt))
 	return nil
 }
 
@@ -487,8 +501,10 @@ func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "yaml marshal: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := os.WriteFile(m.policyPath, data, 0644); err != nil {
-			http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
+		// Save to store (DB if distributed, file if local)
+		if err := m.backend.SetConfig(r.Context(), "approval-policy.yaml", string(data)); err != nil {
+			log.Printf("approval: set config: %v", err)
+			http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		// Success — the reloadLoop will pick it up, or we can force it now:

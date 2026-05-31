@@ -150,6 +150,7 @@ func main() {
 		SandboxConfigPath:    *flagSandbox,
 		SandboxTemplatesPath: *flagSandboxTemplates,
 		ApprovalStorePath:    approvalStorePath(*flagApprovalPolicy),
+		ApprovalPolicyPath:   *flagApprovalPolicy,
 		S3Bucket:             *flagS3Bucket,
 		S3Region:         *flagS3Region,
 		S3Prefix:         *flagS3Prefix,

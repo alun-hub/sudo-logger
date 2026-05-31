@@ -178,6 +178,12 @@ type ApprovalStore interface {
 	// CreateApprovalWindow records a new active window, replacing any previous one
 	// for the same user@host.
 	CreateApprovalWindow(ctx context.Context, user, host, grantedBy string, expiresAt time.Time) error
+
+	// GetConfig retrieves a named configuration blob.
+	GetConfig(ctx context.Context, key string) (string, error)
+
+	// SetConfig stores a named configuration blob.
+	SetConfig(ctx context.Context, key, value string) error
 }
 
 // ApprovalRequest is a pending sudo approval waiting for an admin decision.
@@ -309,6 +315,10 @@ type Config struct {
 	// approval requests and active windows across restarts.
 	// Default: /etc/sudo-logger/approval-store.yaml
 	ApprovalStorePath string
+
+	// ApprovalPolicyPath is the path to approval-policy.yaml (LocalStore only).
+	// Default: /etc/sudo-logger/approval-policy.yaml
+	ApprovalPolicyPath string
 
 	// ── DistributedStore fields ──────────────────────────────────────────────
 
