@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.93
+Version:        1.20.94
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -210,6 +210,20 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Sun May 31 2026 sudo-logger 1.20.94-1
+- feat(approval): JIT sudo approval system with async request flow
+  Plugin prompts for justification and notify_via via sudo_conv_t;
+  sudo exits immediately with a request ID and retries after approval.
+  Slack/Mattermost webhook notification with HMAC-SHA256 signing.
+  Approval REST API with Bearer token auth; approver identity from
+  authenticated session (never from forwarded headers).
+  Per-host activation via require_justification=1 in sudo.conf Plugin line.
+  Exempt users configurable in approval-policy.yaml.
+  Time-window approval model (approve once, valid for N hours).
+  LocalStore: YAML persistence (approval-store.yaml).
+  DistributedStore: PostgreSQL backend (schema v9, two new tables).
+  Replay UI: Approvals tab with approve/deny actions and pending badge.
+
 * Fri May 30 2026 sudo-logger 1.20.93-1
 - feat(sandbox): block CAP_MAC_ADMIN (setenforce/semodule), CAP_SYS_RAWIO
   (ioperm/iopl, /dev/mem), and CAP_SYS_BOOT (kexec_load) in the eBPF LSM
