@@ -413,8 +413,14 @@ func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy,
 	}
 	m.postSlack(cfg, channel, header, "#cc0000", fields, "")
 }
-
 func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color string, fields []slackField, footer string) {
+	url := strings.TrimSpace(cfg.WebhookURL)
+	if url == "" {
+		return
+	}
+	if channel != "" {
+		log.Printf("approval: posting webhook to channel %q", channel)
+	}
 	p := slackPayload{
 		Channel:   channel,
 		Text:      text,
@@ -429,7 +435,8 @@ func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color 
 		log.Printf("approval: webhook marshal: %v", err)
 		return
 	}
-	hreq, err := http.NewRequest(http.MethodPost, cfg.WebhookURL, bytes.NewReader(body))
+
+	hreq, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("approval: webhook request: %v", err)
 		return
