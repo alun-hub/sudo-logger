@@ -507,11 +507,34 @@ readHandshake:
 		protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(cfg.Disclaimer, sessionTTL))
 		if sessionTTL > 0 {
 			go func() {
+				// Calculate when to show the 60s warning.
+				warnAfter := time.Duration(sessionTTL-60) * time.Second
+				if sessionTTL <= 60 {
+					// If window is very short, warn immediately or skip?
+					// Let's warn at 10s if window is <= 60s.
+					warnAfter = time.Duration(sessionTTL-10) * time.Second
+				}
+				if warnAfter < 0 {
+					warnAfter = 0
+				}
+
 				select {
 				case <-done:
 					return
-				case <-time.After(time.Duration(sessionTTL) * time.Second):
+				case <-time.After(warnAfter):
+					timeLeft := sessionTTL - int64(warnAfter.Seconds())
+					log.Printf("[%s] session will expire in %ds — warning user", start.SessionID, timeLeft)
+					pluginWriteMu.Lock()
+					_ = protocol.WriteMessage(pw, protocol.MsgSessionWarning, []byte(fmt.Sprintf("%d", timeLeft)))
+					pluginWriteMu.Unlock()
 				}
+
+				select {
+				case <-done:
+					return
+				case <-time.After(time.Duration(sessionTTL)*time.Second - warnAfter):
+				}
+
 				log.Printf("[%s] session TTL expired (%ds) — terminating", start.SessionID, sessionTTL)
 				cg.unfreeze()
 				pluginWriteMu.Lock()

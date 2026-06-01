@@ -64,6 +64,7 @@ const (
 	MsgSessionChallenge = uint8(0x14) // server→agent→plugin: justification required; payload = JSON (SessionChallenge)
 	MsgSessionChallengeResponse = uint8(0x15) // plugin→agent→server: user response; payload = JSON (SessionChallengeResponse)
 	MsgSessionExpired           = uint8(0x16) // agent→plugin: approval window expired, session is being terminated
+	MsgSessionWarning           = uint8(0x17) // agent→plugin: session will be terminated soon; payload = UTF-8 seconds left
 
 	StreamStdin   = uint8(0x00)
 

@@ -66,6 +66,7 @@
 #define MSG_SESSION_CHALLENGE 0x14
 #define MSG_SESSION_CHALLENGE_RESPONSE 0x15
 #define MSG_SESSION_EXPIRED 0x16
+#define MSG_SESSION_WARNING 0x17
 
 #define STREAM_STDIN   0x00
 #define STREAM_STDOUT  0x01
@@ -93,6 +94,10 @@
     "\r\n\033[41;97;1m[ SUDO-LOGGER: gave up waiting for log server — session terminated ]\033[0m\r\n"
 #define EXPIRED_MSG \
     "\r\n\033[43;30;1m[ SUDO-LOGGER: approval window expired — session terminated ]\033[0m\r\n"
+#define WARN_MSG_START \
+    "\r\n\033[43;30;1m[ SUDO-LOGGER: approval window expires in "
+#define WARN_MSG_END \
+    " seconds ]\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
 static sudo_printf_t g_printf;
@@ -245,6 +250,22 @@ static void refresh_ack_cache(void)
                 atomic_store(&g_freeze_timeout, 1);
             if (hdr[0] == MSG_SESSION_EXPIRED)
                 atomic_store(&g_session_expired, 1);
+
+            if (hdr[0] == MSG_SESSION_WARNING) {
+                if (g_tty_fd >= 0) {
+                    write(g_tty_fd, WARN_MSG_START, sizeof(WARN_MSG_START) - 1);
+                    for (uint32_t rem = plen; rem > 0; ) {
+                        uint8_t buf[64];
+                        uint32_t n = rem < (uint32_t)sizeof(buf) ? rem : (uint32_t)sizeof(buf);
+                        if (read_exact(g_agent_fd, buf, n) < 0) return;
+                        write(g_tty_fd, buf, n);
+                        rem -= n;
+                    }
+                    write(g_tty_fd, WARN_MSG_END, sizeof(WARN_MSG_END) - 1);
+                }
+                continue;
+            }
+
             for (uint32_t rem = plen; rem > 0; ) {
                 uint8_t drain[64];
                 uint32_t n = rem < (uint32_t)sizeof(drain)
@@ -933,7 +954,7 @@ read_agent:
         /* Inform the user their request has been submitted. */
         if (g_tty_fd >= 0) {
             {
-                const char *m = "\r\n\033[33mApproval request submitted. You will be notified when approved.\033[0m\r\n";
+                const char *m = "\r\n\033[33mApproval request submitted.\r\nYou will be notified when approved.\033[0m\r\n";
                 write(g_tty_fd, m, strlen(m));
             }
         }

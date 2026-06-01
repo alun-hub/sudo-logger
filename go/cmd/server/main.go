@@ -528,7 +528,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("[%s] approval: user=%s host=%s — challenge sent", start.SessionID, start.User, start.Host)
 				continue
 			case ApprovalResultPending:
-				msg := fmt.Sprintf("sudo-logger: approval request %s submitted. You will be notified when approved. Retry sudo when notified.", result.RequestID)
+				msg := fmt.Sprintf("sudo-logger: approval request %s submitted.\nYou will be notified when approved. Retry sudo when notified.", result.RequestID)
+
 				netWriteMu.Lock()
 				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
 				netWriteMu.Unlock()
@@ -586,7 +587,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				netWriteMu.Unlock()
 				return
 			case ApprovalResultPending:
-				msg := fmt.Sprintf("sudo-logger: approval request %s submitted. You will be notified when approved. Retry sudo when notified.", result.RequestID)
+				msg := fmt.Sprintf("sudo-logger: approval request %s submitted.\nYou will be notified when approved. Retry sudo when notified.", result.RequestID)
+
 				netWriteMu.Lock()
 				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
 				netWriteMu.Unlock()
