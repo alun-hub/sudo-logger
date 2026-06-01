@@ -1442,7 +1442,6 @@
           <th>Host</th>
           <th>Command</th>
           <th>Reason</th>
-          <th>Notify via</th>
           <th>Submitted</th>
           <th>Expires</th>
           <th style="width:160px"></th>
@@ -4026,13 +4025,19 @@ function makeCell(text, opts = {}) {
   return td;
 }
 
+function fmtApprovalDate(iso) {
+  const d = new Date(iso);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function renderApprovals(items) {
   const tbody = document.getElementById('approvals-tbody');
   tbody.innerHTML = '';
   if (!items.length) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 8;
+    td.colSpan = 7;
     td.setAttribute('style', 'color:var(--text-dim);text-align:center;padding:20px');
     td.textContent = 'No pending approval requests.';
     tr.appendChild(td);
@@ -4041,8 +4046,8 @@ function renderApprovals(items) {
   }
   items.forEach(req => {
     const tr = document.createElement('tr');
-    const submitted = new Date(req.submitted_at).toLocaleString();
-    const expires   = new Date(req.expires_at).toLocaleString();
+    const submitted = fmtApprovalDate(req.submitted_at);
+    const expires   = fmtApprovalDate(req.expires_at);
 
     tr.appendChild(makeCell(req.user || '', { code: true }));
     tr.appendChild(makeCell(req.host || ''));
@@ -4050,7 +4055,6 @@ function renderApprovals(items) {
       style: 'max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }));
     tr.appendChild(makeCell(req.justification || '', { title: true,
       style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }));
-    tr.appendChild(makeCell(req.notify_via || '—'));
     tr.appendChild(makeCell(submitted, { style: 'white-space:nowrap' }));
     tr.appendChild(makeCell(expires,   { style: 'white-space:nowrap' }));
 

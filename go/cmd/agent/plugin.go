@@ -510,7 +510,7 @@ readHandshake:
 				log.Printf("[%s] session TTL expired (%ds) — terminating", start.SessionID, sessionTTL)
 				cg.unfreeze()
 				pluginWriteMu.Lock()
-				_ = protocol.WriteMessage(pw, protocol.MsgFreezeTimeout, nil)
+				_ = protocol.WriteMessage(pw, protocol.MsgSessionExpired, nil)
 				pluginWriteMu.Unlock()
 				time.Sleep(200 * time.Millisecond)
 				pluginConn.Close()

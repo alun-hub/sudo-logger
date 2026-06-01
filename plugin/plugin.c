@@ -65,6 +65,7 @@
 #define MSG_FREEZE_TIMEOUT 0x0d
 #define MSG_SESSION_CHALLENGE 0x14
 #define MSG_SESSION_CHALLENGE_RESPONSE 0x15
+#define MSG_SESSION_EXPIRED 0x16
 
 #define STREAM_STDIN   0x00
 #define STREAM_STDOUT  0x01
@@ -90,6 +91,8 @@
     "\r\n\033[41;97;1m[ SUDO-LOGGER: agent lost — session terminated ]\033[0m\r\n"
 #define TIMEOUT_MSG \
     "\r\n\033[41;97;1m[ SUDO-LOGGER: gave up waiting for log server — session terminated ]\033[0m\r\n"
+#define EXPIRED_MSG \
+    "\r\n\033[43;30;1m[ SUDO-LOGGER: approval window expired — session terminated ]\033[0m\r\n"
 
 /* ---------- plugin globals ---------- */
 static sudo_printf_t g_printf;
@@ -107,6 +110,7 @@ static time_t g_last_ack_query = 0;  /* when we last queried the agent */
 static _Atomic int    g_monitor_stop   = 0;
 static _Atomic int    g_agent_dead   = 0;  /* set when socket drops; triggers session termination */
 static _Atomic int    g_freeze_timeout = 0;  /* set when agent sends MSG_FREEZE_TIMEOUT */
+static _Atomic int    g_session_expired = 0; /* set when agent sends MSG_SESSION_EXPIRED */
 static int            g_monitor_started = 0;
 static pthread_t      g_monitor_thread;
 static pthread_mutex_t g_ack_mu       = PTHREAD_MUTEX_INITIALIZER;
@@ -239,6 +243,8 @@ static void refresh_ack_cache(void)
             plen = be32toh(plen);
             if (hdr[0] == MSG_FREEZE_TIMEOUT)
                 atomic_store(&g_freeze_timeout, 1);
+            if (hdr[0] == MSG_SESSION_EXPIRED)
+                atomic_store(&g_session_expired, 1);
             for (uint32_t rem = plen; rem > 0; ) {
                 uint8_t drain[64];
                 uint32_t n = rem < (uint32_t)sizeof(drain)
@@ -466,7 +472,9 @@ static void *monitor_thread_fn(void *arg)
         /* Agent socket dropped — terminate the session immediately. */
         if (atomic_load(&g_agent_dead)) {
             if (g_tty_fd >= 0) {
-                if (atomic_load(&g_freeze_timeout))
+                if (atomic_load(&g_session_expired))
+                    write(g_tty_fd, EXPIRED_MSG, sizeof(EXPIRED_MSG) - 1);
+                else if (atomic_load(&g_freeze_timeout))
                     write(g_tty_fd, TIMEOUT_MSG, sizeof(TIMEOUT_MSG) - 1);
                 else
                     write(g_tty_fd, TERMINATE_MSG, sizeof(TERMINATE_MSG) - 1);

@@ -309,7 +309,7 @@ func (m *ApprovalManager) Approve(id, decidedBy string, window time.Duration) er
 		return fmt.Errorf("create window: %w", err)
 	}
 
-	go m.sendWebhook("approved", req, decidedBy, policy.Notifications)
+	go m.sendWebhookApproved(req, decidedBy, window, expiresAt, policy.Notifications)
 	log.Printf("approval: request %s approved by %s (window %s) for %s@%s",
 		id, decidedBy, window, req.User, req.Host)
 	return nil
@@ -386,25 +386,31 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 			{Title: "Command", Value: "`" + req.Command + "`"},
 			{Title: "Reason", Value: req.Justification},
 			{Title: "Request ID", Value: req.ID, Short: true},
-			{Title: "Expires", Value: req.ExpiresAt.Format(time.RFC3339), Short: true},
+			{Title: "Expires", Value: req.ExpiresAt.Format("2006-01-02 15:04:05"), Short: true},
 		}
 		footer = "Approve or deny in sudo-logger UI"
-	case "approved":
-		if cfg.MentionUser {
-			channel = "@" + req.User
-		}
-		color = "#36a64f"
-		target := req.User
-		if cfg.MentionUser {
-			target = "@" + req.User
-		}
-		header = fmt.Sprintf(":white_check_mark: %s — sudo approved on *%s*", target, req.Host)
-		fields = []slackField{
-			{Title: "Approved by", Value: decidedBy, Short: true},
-			{Title: "Request ID", Value: req.ID, Short: true},
-		}
 	}
 	m.postSlack(cfg, channel, header, color, fields, footer)
+}
+
+func (m *ApprovalManager) sendWebhookApproved(req *store.ApprovalRequest, decidedBy string, window time.Duration, expiresAt time.Time, cfg approvalNotifyCfg) {
+	if cfg.WebhookURL == "" {
+		return
+	}
+	var channel string
+	target := req.User
+	if cfg.MentionUser {
+		channel = "@" + req.User
+		target = "@" + req.User
+	}
+	header := fmt.Sprintf(":white_check_mark: %s — sudo approved on *%s*", target, req.Host)
+	fields := []slackField{
+		{Title: "Approved by", Value: decidedBy, Short: true},
+		{Title: "Window", Value: window.String(), Short: true},
+		{Title: "Session expires", Value: expiresAt.Format("2006-01-02 15:04:05"), Short: true},
+		{Title: "Notification", Value: "Mattermost webhook", Short: true},
+	}
+	m.postSlack(cfg, channel, header, "#36a64f", fields, "")
 }
 
 func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy, reason string, cfg approvalNotifyCfg) {

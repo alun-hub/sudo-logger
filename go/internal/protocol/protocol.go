@@ -63,6 +63,7 @@ const (
 	MsgConfigData       = uint8(0x13) // server→agent: config response;     payload = UTF-8 YAML (empty = not found)
 	MsgSessionChallenge = uint8(0x14) // server→agent→plugin: justification required; payload = JSON (SessionChallenge)
 	MsgSessionChallengeResponse = uint8(0x15) // plugin→agent→server: user response; payload = JSON (SessionChallengeResponse)
+	MsgSessionExpired           = uint8(0x16) // agent→plugin: approval window expired, session is being terminated
 
 	StreamStdin   = uint8(0x00)
 
