@@ -795,6 +795,9 @@
           <label>Request channel</label>
           <input type="text" id="appr-request-channel" placeholder="sudo-logger">
 
+          <label>Replay Web App URL</label>
+          <input type="text" id="appr-replay-web-url" placeholder="http://gnarg.alun.se:30080">
+
           <label>Webhook secret</label>
           <input type="password" id="appr-webhook-secret" placeholder="(optional)">
 
@@ -3149,6 +3152,7 @@ async function fetchApprovalConfig() {
     document.getElementById('appr-pending-ttl').value       = c.pending_ttl     || '24h';
     document.getElementById('appr-webhook-url').value       = (c.notifications && c.notifications.webhook_url)    || '';
     document.getElementById('appr-request-channel').value   = (c.notifications && c.notifications.request_channel) || '';
+    document.getElementById('appr-replay-web-url').value    = (c.notifications && c.notifications.replay_web_app_url) || '';
     document.getElementById('appr-webhook-secret').value    = (c.notifications && c.notifications.webhook_secret) || '';
     document.getElementById('appr-mention-user').checked    = !!(c.notifications && c.notifications.mention_user);
   } catch (err) {
@@ -3162,10 +3166,11 @@ async function saveApprovalConfig() {
     default_window: document.getElementById('appr-default-window').value.trim(),
     pending_ttl:    document.getElementById('appr-pending-ttl').value.trim(),
     notifications: {
-      webhook_url:     document.getElementById('appr-webhook-url').value.trim(),
-      request_channel: document.getElementById('appr-request-channel').value.trim(),
-      webhook_secret:  document.getElementById('appr-webhook-secret').value.trim(),
-      mention_user:    document.getElementById('appr-mention-user').checked,
+      webhook_url:         document.getElementById('appr-webhook-url').value.trim(),
+      request_channel:     document.getElementById('appr-request-channel').value.trim(),
+      replay_web_app_url:  document.getElementById('appr-replay-web-url').value.trim(),
+      webhook_secret:      document.getElementById('appr-webhook-secret').value.trim(),
+      mention_user:        document.getElementById('appr-mention-user').checked,
     },
     exempt: [], // preserved server-side if we only send what we have, but policy is the full struct.
     // To be safe, we should probably fetch the existing policy and only update the fields we have in the UI.

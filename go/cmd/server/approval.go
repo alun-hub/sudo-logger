@@ -54,9 +54,11 @@ type exemptRule struct {
 }
 
 type approvalNotifyCfg struct {
-	WebhookURL    string `yaml:"webhook_url" json:"webhook_url"`
-	WebhookSecret string `yaml:"webhook_secret" json:"webhook_secret"`
-	MentionUser   bool   `yaml:"mention_user" json:"mention_user"`
+	WebhookURL      string `yaml:"webhook_url" json:"webhook_url"`
+	WebhookSecret   string `yaml:"webhook_secret" json:"webhook_secret"`
+	MentionUser     bool   `yaml:"mention_user" json:"mention_user"`
+	RequestChannel  string `yaml:"request_channel" json:"request_channel"`
+	ReplayWebAppURL string `yaml:"replay_web_app_url" json:"replay_web_app_url"`
 }
 
 func (p *approvalPolicy) setDefaults() {
@@ -389,6 +391,10 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 			{Title: "Expires", Value: req.ExpiresAt.Format("2006-01-02 15:04:05"), Short: true},
 		}
 		footer = "Approve or deny in sudo-logger UI"
+		if cfg.ReplayWebAppURL != "" {
+			footer = fmt.Sprintf("<%s/approvals|Approve or deny in sudo-logger UI>", strings.TrimSuffix(cfg.ReplayWebAppURL, "/"))
+		}
+		channel = cfg.RequestChannel
 	}
 	m.postSlack(cfg, channel, header, color, fields, footer)
 }
