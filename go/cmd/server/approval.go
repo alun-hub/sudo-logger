@@ -370,7 +370,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 	if cfg.WebhookURL == "" {
 		return
 	}
-	var color, header, footer string
+	var color, header, footer, channel string
 	var fields []slackField
 	switch event {
 	case "requested":
@@ -390,6 +390,9 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 		}
 		footer = "Approve or deny in sudo-logger UI"
 	case "approved":
+		if cfg.MentionUser {
+			channel = "@" + req.User
+		}
 		color = "#36a64f"
 		target := req.User
 		if cfg.MentionUser {
@@ -401,15 +404,17 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 			{Title: "Request ID", Value: req.ID, Short: true},
 		}
 	}
-	m.postSlack(cfg, "", header, color, fields, footer)
+	m.postSlack(cfg, channel, header, color, fields, footer)
 }
 
 func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy, reason string, cfg approvalNotifyCfg) {
 	if cfg.WebhookURL == "" {
 		return
 	}
+	var channel string
 	target := req.User
 	if cfg.MentionUser {
+		channel = "@" + req.User
 		target = "@" + req.User
 	}
 	header := fmt.Sprintf(":x: %s — sudo request denied on *%s*", target, req.Host)
@@ -420,7 +425,7 @@ func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy,
 	if reason != "" {
 		fields = append(fields, slackField{Title: "Reason", Value: reason})
 	}
-	m.postSlack(cfg, "", header, "#cc0000", fields, "")
+	m.postSlack(cfg, channel, header, "#cc0000", fields, "")
 }
 func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color string, fields []slackField, footer string) {
 	url := strings.TrimSpace(cfg.WebhookURL)
