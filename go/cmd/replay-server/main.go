@@ -812,8 +812,13 @@ func main() {
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("/approvals/", func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = "/"
-		mux.ServeHTTP(w, r)
+		index, err := staticFiles.ReadFile("static/index.html")
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(index)
 	})
 
 	// Pre-warm the session cache so the first request is served from cache.
