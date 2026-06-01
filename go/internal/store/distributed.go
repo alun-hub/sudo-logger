@@ -1018,19 +1018,23 @@ RETURNING id, username, host, command, justification, notify_via, submitted_at, 
 	return &r, nil
 }
 
-func (d *DistributedStore) HasApprovalWindow(ctx context.Context, user, host string) (bool, error) {
-	var expiresAt int64
+func (d *DistributedStore) HasApprovalWindow(ctx context.Context, user, host string) (time.Time, bool, error) {
+	var expiresAtUnix int64
 	err := d.db.QueryRow(ctx, `
 SELECT expires_at FROM sudo_approval_windows
 WHERE username = $1 AND host = $2`,
-		user, host).Scan(&expiresAt)
+		user, host).Scan(&expiresAtUnix)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return time.Time{}, false, nil
 	}
 	if err != nil {
-		return false, err
+		return time.Time{}, false, err
 	}
-	return time.Unix(expiresAt, 0).After(time.Now()), nil
+	exp := time.Unix(expiresAtUnix, 0)
+	if !exp.After(time.Now()) {
+		return time.Time{}, false, nil
+	}
+	return exp, true, nil
 }
 
 func (d *DistributedStore) CreateApprovalWindow(ctx context.Context, user, host, grantedBy string, expiresAt time.Time) error {

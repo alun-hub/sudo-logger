@@ -494,9 +494,28 @@ readHandshake:
 		goto readHandshake
 
 	case protocol.MsgServerReady:
-		_, _ = protocol.ReadPayload(sr, hsPlen)
+		srPayload, _ := protocol.ReadPayload(sr, hsPlen)
+		var serverReady protocol.ServerReadyBody
+		_ = json.Unmarshal(srPayload, &serverReady)
+		sessionTTL := serverReady.SessionTTL
 		cg.SetReady()
-		protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(cfg.Disclaimer))
+		protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(cfg.Disclaimer, sessionTTL))
+		if sessionTTL > 0 {
+			go func() {
+				select {
+				case <-done:
+					return
+				case <-time.After(time.Duration(sessionTTL) * time.Second):
+				}
+				log.Printf("[%s] session TTL expired (%ds) — terminating", start.SessionID, sessionTTL)
+				cg.unfreeze()
+				pluginWriteMu.Lock()
+				_ = protocol.WriteMessage(pw, protocol.MsgFreezeTimeout, nil)
+				pluginWriteMu.Unlock()
+				time.Sleep(200 * time.Millisecond)
+				pluginConn.Close()
+			}()
+		}
 	default:
 		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
 		markDead()
@@ -784,11 +803,14 @@ func applyColor(text, color string) string {
 	return text
 }
 
-func sessionReadyBody(disclaimer string) []byte {
-	if disclaimer == "" {
+func sessionReadyBody(disclaimer string, sessionTTL int64) []byte {
+	if disclaimer == "" && sessionTTL == 0 {
 		return nil
 	}
-	body, _ := json.Marshal(protocol.SessionReadyBody{Disclaimer: applyColor(disclaimer, cfg.DisclaimerColor)})
+	body, _ := json.Marshal(protocol.SessionReadyBody{
+		Disclaimer: applyColor(disclaimer, cfg.DisclaimerColor),
+		SessionTTL: sessionTTL,
+	})
 	return body
 }
 

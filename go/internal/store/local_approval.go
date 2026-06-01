@@ -120,16 +120,16 @@ func (ls *LocalStore) DeleteApprovalRequest(_ context.Context, id string) (*Appr
 	return &copy, nil
 }
 
-func (ls *LocalStore) HasApprovalWindow(_ context.Context, user, host string) (bool, error) {
+func (ls *LocalStore) HasApprovalWindow(_ context.Context, user, host string) (time.Time, bool, error) {
 	now := time.Now()
 	ls.approvalMu.RLock()
 	defer ls.approvalMu.RUnlock()
 	for _, w := range ls.approvalWindows {
 		if w.User == user && w.Host == host && w.ExpiresAt.After(now) {
-			return true, nil
+			return w.ExpiresAt, true, nil
 		}
 	}
-	return false, nil
+	return time.Time{}, false, nil
 }
 
 func (ls *LocalStore) CreateApprovalWindow(_ context.Context, user, host, grantedBy string, expiresAt time.Time) error {

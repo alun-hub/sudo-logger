@@ -40,11 +40,12 @@ import (
 // ── Policy ────────────────────────────────────────────────────────────────────
 
 type approvalPolicy struct {
-	Enabled       bool              `yaml:"enabled" json:"enabled"`
-	DefaultWindow time.Duration     `yaml:"default_window" json:"default_window"`
-	PendingTTL    time.Duration     `yaml:"pending_ttl" json:"pending_ttl"`
-	Exempt        []exemptRule      `yaml:"exempt" json:"exempt"`
-	Notifications approvalNotifyCfg `yaml:"notifications" json:"notifications"`
+	Enabled            bool              `yaml:"enabled" json:"enabled"`
+	DefaultWindow      time.Duration     `yaml:"default_window" json:"default_window"`
+	PendingTTL         time.Duration     `yaml:"pending_ttl" json:"pending_ttl"`
+	MaxSessionDuration time.Duration     `yaml:"max_session_duration" json:"max_session_duration"`
+	Exempt             []exemptRule      `yaml:"exempt" json:"exempt"`
+	Notifications      approvalNotifyCfg `yaml:"notifications" json:"notifications"`
 }
 
 type exemptRule struct {
@@ -53,10 +54,9 @@ type exemptRule struct {
 }
 
 type approvalNotifyCfg struct {
-	WebhookURL     string `yaml:"webhook_url" json:"webhook_url"`
-	WebhookSecret  string `yaml:"webhook_secret" json:"webhook_secret"`
-	MentionUser    bool   `yaml:"mention_user" json:"mention_user"`
-	RequestChannel string `yaml:"request_channel" json:"request_channel"`
+	WebhookURL    string `yaml:"webhook_url" json:"webhook_url"`
+	WebhookSecret string `yaml:"webhook_secret" json:"webhook_secret"`
+	MentionUser   bool   `yaml:"mention_user" json:"mention_user"`
 }
 
 func (p *approvalPolicy) setDefaults() {
@@ -102,6 +102,7 @@ type CheckResult struct {
 	Result     ApprovalResult
 	RequestID  string // set when Result == ApprovalResultPending
 	HasWebhook bool   // set when Result == ApprovalResultChallenge or ApprovalResultNeedReason
+	SessionTTL int64  // seconds the session may live; 0 = unlimited
 }
 
 // ── Manager ───────────────────────────────────────────────────────────────────
@@ -191,7 +192,7 @@ func (m *ApprovalManager) HasWebhook() bool {
 
 // Check evaluates whether the SESSION_START should be allowed, pending, or denied.
 // Returns ApprovalResultAllow immediately if the manager is nil (feature not configured).
-func (m *ApprovalManager) Check(user, host, command, justification, notifyVia string) CheckResult {
+func (m *ApprovalManager) Check(user, host, command, justification string) CheckResult {
 	if m == nil {
 		return CheckResult{Result: ApprovalResultAllow}
 	}
@@ -203,16 +204,18 @@ func (m *ApprovalManager) Check(user, host, command, justification, notifyVia st
 		return CheckResult{Result: ApprovalResultAllow}
 	}
 	if policy.isExempt(user, host) {
-		return CheckResult{Result: ApprovalResultAllow}
+		ttl := sessionTTL(time.Time{}, policy.MaxSessionDuration)
+		return CheckResult{Result: ApprovalResultAllow, SessionTTL: ttl}
 	}
 
 	ctx := context.Background()
-	hasWindow, err := m.backend.HasApprovalWindow(ctx, user, host)
+	windowExp, hasWindow, err := m.backend.HasApprovalWindow(ctx, user, host)
 	if err != nil {
 		log.Printf("approval: HasApprovalWindow: %v", err)
 	}
 	if hasWindow {
-		return CheckResult{Result: ApprovalResultAllow}
+		ttl := sessionTTL(windowExp, policy.MaxSessionDuration)
+		return CheckResult{Result: ApprovalResultAllow, SessionTTL: ttl}
 	}
 
 	if strings.TrimSpace(justification) == "" {
@@ -230,7 +233,6 @@ func (m *ApprovalManager) Check(user, host, command, justification, notifyVia st
 		Host:          host,
 		Command:       command,
 		Justification: justification,
-		NotifyVia:     notifyVia,
 		SubmittedAt:   now,
 		ExpiresAt:     now.Add(policy.PendingTTL),
 	}
@@ -240,6 +242,27 @@ func (m *ApprovalManager) Check(user, host, command, justification, notifyVia st
 
 	go m.sendWebhook("requested", &req, "", policy.Notifications)
 	return CheckResult{Result: ApprovalResultPending, RequestID: id, HasWebhook: policy.Notifications.WebhookURL != ""}
+}
+
+// sessionTTL returns the session lifetime in seconds given the window expiry and
+// an optional max-session cap. Zero means unlimited.
+func sessionTTL(windowExp time.Time, maxDur time.Duration) int64 {
+	var ttl int64
+	if !windowExp.IsZero() {
+		remaining := time.Until(windowExp)
+		if remaining > 0 {
+			ttl = int64(remaining.Seconds())
+		} else {
+			ttl = 1
+		}
+	}
+	if maxDur > 0 {
+		cap := int64(maxDur.Seconds())
+		if ttl == 0 || cap < ttl {
+			ttl = cap
+		}
+	}
+	return ttl
 }
 
 // RetryMessage returns the SESSION_DENIED message shown when user retries sudo.
@@ -347,16 +370,15 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 	if cfg.WebhookURL == "" {
 		return
 	}
-	var color, header, footer, channel string
+	var color, header, footer string
 	var fields []slackField
 	switch event {
 	case "requested":
-		channel = cfg.RequestChannel
 		color = "#ff9900"
 		header = ":lock: *Sudo approval request*"
 		mention := req.User
-		if cfg.MentionUser && req.NotifyVia != "" {
-			mention = "@" + req.NotifyVia
+		if cfg.MentionUser {
+			mention = "@" + req.User
 		}
 		fields = []slackField{
 			{Title: "User", Value: mention, Short: true},
@@ -368,16 +390,10 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 		}
 		footer = "Approve or deny in sudo-logger UI"
 	case "approved":
-		if req.NotifyVia != "" {
-			channel = req.NotifyVia
-			if !strings.HasPrefix(channel, "@") && !strings.HasPrefix(channel, "#") {
-				channel = "@" + channel
-			}
-		}
 		color = "#36a64f"
 		target := req.User
-		if cfg.MentionUser && req.NotifyVia != "" {
-			target = "@" + req.NotifyVia
+		if cfg.MentionUser {
+			target = "@" + req.User
 		}
 		header = fmt.Sprintf(":white_check_mark: %s — sudo approved on *%s*", target, req.Host)
 		fields = []slackField{
@@ -385,23 +401,16 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 			{Title: "Request ID", Value: req.ID, Short: true},
 		}
 	}
-	m.postSlack(cfg, channel, header, color, fields, footer)
+	m.postSlack(cfg, "", header, color, fields, footer)
 }
 
 func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy, reason string, cfg approvalNotifyCfg) {
 	if cfg.WebhookURL == "" {
 		return
 	}
-	var channel string
-	if req.NotifyVia != "" {
-		channel = req.NotifyVia
-		if !strings.HasPrefix(channel, "@") && !strings.HasPrefix(channel, "#") {
-			channel = "@" + channel
-		}
-	}
 	target := req.User
-	if cfg.MentionUser && req.NotifyVia != "" {
-		target = "@" + req.NotifyVia
+	if cfg.MentionUser {
+		target = "@" + req.User
 	}
 	header := fmt.Sprintf(":x: %s — sudo request denied on *%s*", target, req.Host)
 	fields := []slackField{
@@ -411,7 +420,7 @@ func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy,
 	if reason != "" {
 		fields = append(fields, slackField{Title: "Reason", Value: reason})
 	}
-	m.postSlack(cfg, channel, header, "#cc0000", fields, "")
+	m.postSlack(cfg, "", header, "#cc0000", fields, "")
 }
 func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color string, fields []slackField, footer string) {
 	url := strings.TrimSpace(cfg.WebhookURL)

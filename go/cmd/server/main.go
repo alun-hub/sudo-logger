@@ -492,7 +492,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 			// ── JIT approval check ─────────────────────────────────────────────
 			result := srv.approvalMgr.Check(start.User, start.Host, start.Command,
-				start.Justification, start.NotifyVia)
+				start.Justification)
 			switch result.Result {
 			case ApprovalResultNeedReason:
 				// Check if there's already a pending request for this user@host
@@ -548,8 +548,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				sanitizeForLog(sess.command), sanitizeForLog(start.ResolvedCommand),
 				sanitizeForLog(sess.cwd), sess.writer.TSID())
 
+			readyBody, _ := json.Marshal(protocol.ServerReadyBody{SessionTTL: result.SessionTTL})
 			netWriteMu.Lock()
-			err = protocol.WriteMessage(w, protocol.MsgServerReady, nil)
+			err = protocol.WriteMessage(w, protocol.MsgServerReady, readyBody)
 			netWriteMu.Unlock()
 			if err != nil {
 				log.Printf("[%s] write SERVER_READY: %v", start.SessionID, err)
@@ -573,11 +574,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				return
 			}
 			start.Justification = resp.Justification
-			start.NotifyVia = resp.NotifyVia
 
 			// Re-run the check with the newly provided justification.
 			result := srv.approvalMgr.Check(start.User, start.Host, start.Command,
-				start.Justification, start.NotifyVia)
+				start.Justification)
 			switch result.Result {
 			case ApprovalResultNeedReason, ApprovalResultChallenge:
 				// They already had their chance.
@@ -607,8 +607,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				sanitizeForLog(sess.command), sanitizeForLog(start.ResolvedCommand),
 				sanitizeForLog(sess.cwd), sess.writer.TSID())
 
+			readyBody2, _ := json.Marshal(protocol.ServerReadyBody{SessionTTL: result.SessionTTL})
 			netWriteMu.Lock()
-			err = protocol.WriteMessage(w, protocol.MsgServerReady, nil)
+			err = protocol.WriteMessage(w, protocol.MsgServerReady, readyBody2)
 			netWriteMu.Unlock()
 			if err != nil {
 				log.Printf("[%s] write SERVER_READY: %v", start.SessionID, err)

@@ -173,7 +173,8 @@ type ApprovalStore interface {
 	DeleteApprovalRequest(ctx context.Context, id string) (*ApprovalRequest, error)
 
 	// HasApprovalWindow reports whether user@host has an active (non-expired) window.
-	HasApprovalWindow(ctx context.Context, user, host string) (bool, error)
+	// Returns the expiry time and found=true when a valid window exists.
+	HasApprovalWindow(ctx context.Context, user, host string) (expiresAt time.Time, found bool, err error)
 
 	// CreateApprovalWindow records a new active window, replacing any previous one
 	// for the same user@host.

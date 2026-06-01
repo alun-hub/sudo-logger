@@ -791,7 +791,6 @@ static int plugin_open(unsigned int        version,
      * We no longer prompt by default. We send an empty justification and
      * only prompt if the server challenges us. */
     char g_justification[512] = "";
-    char g_notify_via[128]    = "";
 
     /* JSON-escape fields that may contain backslashes, quotes, or spaces */
     char resolved_j[512];
@@ -801,7 +800,6 @@ static int plugin_open(unsigned int        version,
     char host_j[256];
     char ttypath_j[128];
     char justification_j[512];
-    char notify_via_j[256];
     json_escape_into(resolved_j,      sizeof(resolved_j),      raw_resolved);
     json_escape_into(cwd_j,           sizeof(cwd_j),           raw_cwd);
     json_escape_into(runas_user_j,    sizeof(runas_user_j),    runas_user);
@@ -809,7 +807,6 @@ static int plugin_open(unsigned int        version,
     json_escape_into(host_j,          sizeof(host_j),          host);
     json_escape_into(ttypath_j,       sizeof(ttypath_j),       g_tty_path);
     json_escape_into(justification_j, sizeof(justification_j), g_justification);
-    json_escape_into(notify_via_j,    sizeof(notify_via_j),    g_notify_via);
 
     char cmd[256];
     if (argc > 0)
@@ -858,7 +855,7 @@ static int plugin_open(unsigned int        version,
         "\"tty_path\":\"%s\","
         "\"user_uid\":%d,\"user_gid\":%d,"
         "\"ts\":%lld,\"pid\":%d,"
-        "\"justification\":\"%s\",\"notify_via\":\"%s\"}",
+        "\"justification\":\"%s\"}",
         session_id_j, user_j, host_j, cmd,
         resolved_j, runas_user_j,
         runas_uid, runas_gid,
@@ -867,7 +864,7 @@ static int plugin_open(unsigned int        version,
         ttypath_j,
         user_uid, user_gid,
         (long long)now_sec(), (int)getpid(),
-        justification_j, notify_via_j);
+        justification_j);
 
     /* Prevent sending malformed/truncated JSON if the buffer was too small. */
     if (plen < 0 || plen >= (int)sizeof(payload)) {
@@ -892,55 +889,43 @@ read_agent:
         uint32_t clen;
         memcpy(&clen, hdr + 1, 4);
         clen = be32toh(clen);
-        int has_webhook = 0;
         if (clen > 0 && clen < 4096) {
             char cbuf[4096] = {0};
             read_exact(g_agent_fd, cbuf, clen);
-            if (strstr(cbuf, "\"has_webhook\":true"))
-                has_webhook = 1;
+            /* challenge body consumed; content unused */
         }
 
         if (g_tty_fd >= 0 && conversation != NULL) {
-            struct sudo_conv_message msgs[2];
-            struct sudo_conv_reply   replies[2];
+            struct sudo_conv_message msgs[1];
+            struct sudo_conv_reply   replies[1];
             memset(msgs,    0, sizeof(msgs));
             memset(replies, 0, sizeof(replies));
 
             msgs[0].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
             msgs[0].msg      = "Reason for sudo: ";
-            msgs[1].msg_type = SUDO_CONV_PROMPT_ECHO_ON;
-            msgs[1].msg      = "Notify via (Slack handle/email, optional): ";
 
-            if (conversation(2, msgs, replies, NULL) == 0) {
+            if (conversation(1, msgs, replies, NULL) == 0) {
                 if (replies[0].reply && replies[0].reply[0] != '\0')
                     strncpy(g_justification, replies[0].reply, sizeof(g_justification) - 1);
-                if (replies[1].reply && replies[1].reply[0] != '\0')
-                    strncpy(g_notify_via, replies[1].reply, sizeof(g_notify_via) - 1);
             }
         }
 
         /* Send response back to agent */
         char resp_j[512];
-        char notify_j[256];
-        json_escape_into(resp_j,   sizeof(resp_j),   g_justification);
-        json_escape_into(notify_j, sizeof(notify_j), g_notify_via);
+        json_escape_into(resp_j, sizeof(resp_j), g_justification);
 
         char rpayload[1024];
         int rplen = snprintf(rpayload, sizeof(rpayload),
-            "{\"justification\":\"%s\",\"notify_via\":\"%s\"}",
-            resp_j, notify_j);
+            "{\"justification\":\"%s\"}", resp_j);
 
         if (rplen > 0 && rplen < (int)sizeof(rpayload)) {
             send_msg(g_agent_fd, MSG_SESSION_CHALLENGE_RESPONSE, rpayload, (uint32_t)rplen);
         }
 
-        /* Give them a hint about where to look for approval. */
+        /* Inform the user their request has been submitted. */
         if (g_tty_fd >= 0) {
-            if (has_webhook) {
-                const char *m = "\r\n\033[33mRequest will be sent for approval. Check chat for notifications.\033[0m\r\n";
-                write(g_tty_fd, m, strlen(m));
-            } else {
-                const char *m = "\r\n\033[33mRequest will be sent for approval. Run sudo again when granted.\033[0m\r\n";
+            {
+                const char *m = "\r\n\033[33mApproval request submitted. You will be notified when approved.\033[0m\r\n";
                 write(g_tty_fd, m, strlen(m));
             }
         }

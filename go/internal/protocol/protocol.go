@@ -142,10 +142,18 @@ type SandboxAlert struct {
 	Ts        int64  `json:"ts"`
 }
 
+// ServerReadyBody is the optional JSON payload in a SERVER_READY message (server→agent).
+// SessionTTL, when non-zero, is the number of seconds the session may remain active
+// before the agent forcibly terminates it (approval-window or max_session_duration).
+type ServerReadyBody struct {
+	SessionTTL int64 `json:"session_ttl,omitempty"`
+}
+
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.
 // Disclaimer, if non-empty, is printed to the user's terminal before sudo proceeds.
 type SessionReadyBody struct {
 	Disclaimer string `json:"disclaimer,omitempty"` // optional notice shown at session start
+	SessionTTL int64  `json:"session_ttl,omitempty"` // mirrors ServerReadyBody; plugin may display a warning
 }
 
 // SessionChallenge is the JSON payload for MsgSessionChallenge.
@@ -156,7 +164,6 @@ type SessionChallenge struct {
 // SessionChallengeResponse is the JSON payload for MsgSessionChallengeResponse.
 type SessionChallengeResponse struct {
 	Justification string `json:"justification"`
-	NotifyVia     string `json:"notify_via,omitempty"`
 }
 
 // Chunk is a decoded CHUNK message.
