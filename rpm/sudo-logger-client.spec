@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.94
+Version:        1.20.95
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -210,6 +210,15 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Sun Jun 01 2026 sudo-logger 1.20.95-1
+- feat(approval): session TTL enforcement — agent kills session when approval
+  window or max_session_duration expires; prevents sudo bash from outliving
+  the approval window
+- feat(approval): new max_session_duration field in approval-policy.yaml
+  caps individual session lifetime independent of window duration
+- fix(approval): remove "Notify via" prompt; notification goes to webhook
+  channel; @mention derived from Linux username when mention_user: true
+
 * Sun May 31 2026 sudo-logger 1.20.94-1
 - feat(approval): JIT sudo approval system with async request flow
   Plugin prompts for justification and notify_via via sudo_conv_t;
