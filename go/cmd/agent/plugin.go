@@ -22,8 +22,7 @@ import (
 	"sudo-logger/internal/protocol"
 )
 
-const freezeMsgTTY = "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable — input frozen ]\033[0m\r\n" +
-	"\033[33mWaiting for log server to come back...\033[0m\r\n"
+const freezeMsgHeader = "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable — input frozen ]\033[0m\r\n"
 
 var validTTYPath = regexp.MustCompile(`^/dev/(pts/\d{1,6}|tty[a-zA-Z0-9]{0,10})$`)
 
@@ -47,7 +46,7 @@ func resolveTTYPath(ttyPath string, sudoPID int) string {
 	return ttyPath
 }
 
-func writeTTYFreezeMsg(ttyPath string) {
+func writeTTYFreezeMsg(ttyPath string, freezeTimeout time.Duration) {
 	if ttyPath == "" || !validTTYPath.MatchString(ttyPath) {
 		return
 	}
@@ -57,7 +56,13 @@ func writeTTYFreezeMsg(ttyPath string) {
 		return
 	}
 	defer f.Close()
-	_, _ = f.WriteString(freezeMsgTTY)
+	msg := freezeMsgHeader
+	if freezeTimeout > 0 {
+		msg += fmt.Sprintf("\033[33mWaiting for log server to come back... (session terminates in %s if unreachable)\033[0m\r\n", freezeTimeout)
+	} else {
+		msg += "\033[33mWaiting for log server to come back...\033[0m\r\n"
+	}
+	_, _ = f.WriteString(msg)
 }
 
 func writeTTYIdleWarnMsg(ttyPath string, remaining time.Duration) {
@@ -295,7 +300,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		sessionAckMu.Unlock()
 		cg.freeze()
 		if firstFreeze {
-			go writeTTYFreezeMsg(ttyPath)
+			go writeTTYFreezeMsg(ttyPath, cfg.FreezeTimeout)
 			go reportSessionFreezing(cfg.Server, tlsCfg, start.SessionID)
 		}
 	}
@@ -804,12 +809,17 @@ func applyColor(text, color string) string {
 }
 
 func sessionReadyBody(disclaimer string, sessionTTL int64) []byte {
-	if disclaimer == "" && sessionTTL == 0 {
+	var freezeSecs int64
+	if cfg.FreezeTimeout > 0 {
+		freezeSecs = int64(cfg.FreezeTimeout.Seconds())
+	}
+	if disclaimer == "" && sessionTTL == 0 && freezeSecs == 0 {
 		return nil
 	}
 	body, _ := json.Marshal(protocol.SessionReadyBody{
-		Disclaimer: applyColor(disclaimer, cfg.DisclaimerColor),
-		SessionTTL: sessionTTL,
+		Disclaimer:        applyColor(disclaimer, cfg.DisclaimerColor),
+		SessionTTL:        sessionTTL,
+		FreezeTimeoutSecs: freezeSecs,
 	})
 	return body
 }

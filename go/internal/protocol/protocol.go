@@ -153,8 +153,9 @@ type ServerReadyBody struct {
 // SessionReadyBody is the optional JSON payload in a SESSION_READY message.
 // Disclaimer, if non-empty, is printed to the user's terminal before sudo proceeds.
 type SessionReadyBody struct {
-	Disclaimer string `json:"disclaimer,omitempty"` // optional notice shown at session start
-	SessionTTL int64  `json:"session_ttl,omitempty"` // mirrors ServerReadyBody; plugin may display a warning
+	Disclaimer      string `json:"disclaimer,omitempty"`       // optional notice shown at session start
+	SessionTTL      int64  `json:"session_ttl,omitempty"`      // mirrors ServerReadyBody; plugin may display a warning
+	FreezeTimeoutSecs int64 `json:"freeze_timeout_secs,omitempty"` // seconds until frozen session is terminated
 }
 
 // SessionChallenge is the JSON payload for MsgSessionChallenge.
