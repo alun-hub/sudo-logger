@@ -4105,6 +4105,10 @@ async function denyRequest(id) {
 
 document.getElementById('btn-refresh-approvals').addEventListener('click', fetchApprovals);
 
+if (window.location.pathname === '/approvals') {
+  switchTab('approvals');
+}
+
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
