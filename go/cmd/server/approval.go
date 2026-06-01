@@ -392,7 +392,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 		}
 		footer = "Approve or deny in sudo-logger UI"
 		if cfg.ReplayWebAppURL != "" {
-			footer = fmt.Sprintf("<%s/approvals|Approve or deny in sudo-logger UI>", strings.TrimSuffix(cfg.ReplayWebAppURL, "/"))
+			footer = fmt.Sprintf("[Approve or deny in sudo-logger UI](%s/approvals)", strings.TrimSuffix(cfg.ReplayWebAppURL, "/"))
 		}
 		channel = cfg.RequestChannel
 	}
