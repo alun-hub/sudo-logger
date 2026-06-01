@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.95
+Version:        1.20.96
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -210,6 +210,11 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Sun Jun 01 2026 sudo-logger 1.20.96-1
+- fix(approval): show amber "approval window expired" banner when session
+  is terminated due to TTL expiry (distinct from freeze-timeout banner)
+- fix(approval): new MsgSessionExpired protocol message (0x16)
+
 * Sun Jun 01 2026 sudo-logger 1.20.95-1
 - feat(approval): session TTL enforcement — agent kills session when approval
   window or max_session_duration expires; prevents sudo bash from outliving
