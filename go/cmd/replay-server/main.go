@@ -811,7 +811,7 @@ func main() {
 		log.Fatalf("embed static: %v", err)
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
-	mux.HandleFunc("/approvals", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/approvals/", func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/"
 		mux.ServeHTTP(w, r)
 	})
