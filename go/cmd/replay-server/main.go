@@ -814,6 +814,10 @@ func main() {
 			tail := strings.TrimPrefix(r.URL.Path, "/api/approvals/")
 			proxyToLogServer(w, r, adminBase+"/api/approvals/"+tail, adminToken, viewerFromContext(r))
 		})
+		mux.HandleFunc("/api/approvals/callback", func(w http.ResponseWriter, r *http.Request) {
+			// No decidedBy passed — identity is in the callback payload verified by HMAC
+			proxyToLogServer(w, r, adminBase+"/api/approvals/callback", adminToken, "")
+		})
 		mux.HandleFunc("/api/approval-config", func(w http.ResponseWriter, r *http.Request) {
 			proxyToLogServer(w, r, adminBase+"/api/approval-config", adminToken, viewerFromContext(r))
 		})
