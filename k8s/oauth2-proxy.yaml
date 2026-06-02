@@ -150,3 +150,13 @@ spec:
                 name: oauth2-proxy
                 port:
                   number: 4180
+    - host: 10.42.0.1
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  number: 4180
