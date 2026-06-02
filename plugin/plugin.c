@@ -1122,13 +1122,12 @@ static void plugin_close(int exit_status, int error)
 /*
  * log_ttyin — called for every byte typed by the user (terminal → child).
  *
- * Returns 1 (pass the input through) under normal operation.  When the agent
- * connection is dead, always returns 1 (silent discard) regardless of whether
- * the death was a natural TTL expiry or unexpected.  Returning 0 causes sudo
- * to log "command rejected by I/O plugin" and send SIGHUP — both spurious,
- * since the session is already being terminated via SIGTERM from the monitor
- * thread.  Agent logs provide better context on why the session ended.
- * Freeze enforcement is handled entirely by cgroup.freeze in sudo-logger-agent.
+ * Returns 1 (pass the input through) under normal operation; returns 0 only
+ * when the agent connection has died to prevent further I/O logging.  Freeze
+ * enforcement is handled entirely by cgroup.freeze in sudo-logger-agent.  Returning
+ * 0 during a freeze would permanently disable this hook rather than drop a
+ * single byte, and caused sudo to send SIGHUP to the session on the first
+ * keypress.
  *
  * Input typed during a freeze is buffered in the pty; bash cannot process it
  * until the cgroup unfreezes.
@@ -1137,7 +1136,7 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return 1;
+        return 0;
     ship_chunk(STREAM_TTYIN, buf, len);
     return 1;
 }
@@ -1147,7 +1146,7 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return 1;
+        return 0;
     ship_chunk(STREAM_TTYOUT, buf, len);
     return 1;
 }
@@ -1157,7 +1156,7 @@ static int log_stdin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return 1;
+        return 0;
     ship_chunk(STREAM_STDIN, buf, len);
     return 1;
 }
@@ -1167,7 +1166,7 @@ static int log_stdout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return 1;
+        return 0;
     ship_chunk(STREAM_STDOUT, buf, len);
     return 1;
 }
@@ -1177,7 +1176,7 @@ static int log_stderr(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return 1;
+        return 0;
     ship_chunk(STREAM_STDERR, buf, len);
     return 1;
 }
