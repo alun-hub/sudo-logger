@@ -1123,13 +1123,12 @@ static void plugin_close(int exit_status, int error)
  * log_ttyin — called for every byte typed by the user (terminal → child).
  *
  * Returns 1 (pass the input through) under normal operation.  When the agent
- * dies due to a natural TTL expiry (g_session_expired), returns 1 to silently
- * discard I/O — the session is already being terminated by SIGTERM from the
- * monitor thread, and returning 0 would cause sudo to additionally log
- * "command rejected by I/O plugin" and send SIGHUP, both unnecessary.
- * Returns 0 only on unexpected agent death (no prior expiry signal), which
- * preserves the rejection log as a genuine anomaly indicator.  Freeze
- * enforcement is handled entirely by cgroup.freeze in sudo-logger-agent.
+ * connection is dead, always returns 1 (silent discard) regardless of whether
+ * the death was a natural TTL expiry or unexpected.  Returning 0 causes sudo
+ * to log "command rejected by I/O plugin" and send SIGHUP — both spurious,
+ * since the session is already being terminated via SIGTERM from the monitor
+ * thread.  Agent logs provide better context on why the session ended.
+ * Freeze enforcement is handled entirely by cgroup.freeze in sudo-logger-agent.
  *
  * Input typed during a freeze is buffered in the pty; bash cannot process it
  * until the cgroup unfreezes.
@@ -1138,7 +1137,7 @@ static int log_ttyin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return atomic_load(&g_session_expired) ? 1 : 0;
+        return 1;
     ship_chunk(STREAM_TTYIN, buf, len);
     return 1;
 }
@@ -1148,7 +1147,7 @@ static int log_ttyout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return atomic_load(&g_session_expired) ? 1 : 0;
+        return 1;
     ship_chunk(STREAM_TTYOUT, buf, len);
     return 1;
 }
@@ -1158,7 +1157,7 @@ static int log_stdin(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return atomic_load(&g_session_expired) ? 1 : 0;
+        return 1;
     ship_chunk(STREAM_STDIN, buf, len);
     return 1;
 }
@@ -1168,7 +1167,7 @@ static int log_stdout(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return atomic_load(&g_session_expired) ? 1 : 0;
+        return 1;
     ship_chunk(STREAM_STDOUT, buf, len);
     return 1;
 }
@@ -1178,7 +1177,7 @@ static int log_stderr(const char *buf, unsigned int len, const char **errstr)
 {
     (void)errstr;
     if (atomic_load(&g_agent_dead))
-        return atomic_load(&g_session_expired) ? 1 : 0;
+        return 1;
     ship_chunk(STREAM_STDERR, buf, len);
     return 1;
 }

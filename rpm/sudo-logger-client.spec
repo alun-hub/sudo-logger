@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.97
+Version:        1.20.98
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -210,6 +210,11 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Mon Jun 02 2026 sudo-logger 1.20.98-1
+- fix(plugin): suppress spurious "command rejected by I/O plugin" syslog
+  entries on session teardown — I/O callbacks now return 1 (silent discard)
+  when the agent connection is dead, avoiding false rejection logs and SIGHUP
+
 * Sun Jun 01 2026 sudo-logger 1.20.96-1
 - fix(approval): show amber "approval window expired" banner when session
   is terminated due to TTL expiry (distinct from freeze-timeout banner)
