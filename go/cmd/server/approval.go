@@ -730,7 +730,7 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 
 	reqID := payload.Context["request_id"]
 	action := payload.Context["action"]
-	token := payload.Context["token"]
+	token := strings.TrimSpace(payload.Context["token"])
 
 	decidedBy := "@" + payload.UserName + " (via Mattermost)"
 	log.Printf("approval: callback received: user=%s, request=%s, action=%s, decidedBy=%s", payload.UserName, reqID, action, decidedBy)
