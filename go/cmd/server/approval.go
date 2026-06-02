@@ -710,7 +710,8 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	action := payload.Context["action"]
 	token := payload.Context["token"]
 
-	log.Printf("approval: callback received: user=%s, request=%s, action=%s", payload.UserName, reqID, action)
+	decidedBy := "@" + payload.UserName + " (via Mattermost)"
+	log.Printf("approval: callback received: user=%s, request=%s, action=%s, decidedBy=%s", payload.UserName, reqID, action, decidedBy)
 
 	m.mu.RLock()
 	secret := m.policy.Notifications.WebhookSecret // pragma: allowlist secret
@@ -723,8 +724,6 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-
-	decidedBy := "@" + payload.UserName + " (via Mattermost)"
 
 	var err error
 	verb := "denied"
