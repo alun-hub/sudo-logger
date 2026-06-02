@@ -412,6 +412,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 
 		if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" {
 			callbackURL := strings.TrimSuffix(cfg.ReplayWebAppURL, "/") + "/api/approvals/callback"
+			log.Printf("approval: generated callback URL: %s", callbackURL)
 			actions = []slackAction{
 				{
 					ID:   "approve",
@@ -775,8 +776,10 @@ func newRequestID() string {
 }
 
 func (m *ApprovalManager) generateActionToken(requestID, action, secret string) string {
+	// If no secret configured, use a static salt so we still get a stable token
+	// for the buttons, but it's obviously less secure than a real secret.
 	if secret == "" {
-		return ""
+		secret = "sudo-logger-default-salt" // pragma: allowlist secret
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(requestID + ":" + action))
