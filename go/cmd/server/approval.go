@@ -551,6 +551,7 @@ func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) 
 	mux.HandleFunc("/api/approvals", auth(m.handleList))
 	mux.HandleFunc("/api/approvals/", auth(m.handleDecision))
 	mux.HandleFunc("/api/approval-config", auth(m.handleConfig))
+	mux.HandleFunc("/api/approvals/callback", m.handleCallback)
 }
 
 func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -692,6 +693,57 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		UserName string            `json:"user_name"`
+		Context  map[string]string `json:"context"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	reqID := payload.Context["request_id"]
+	action := payload.Context["action"]
+	token := payload.Context["token"]
+
+	m.mu.RLock()
+	secret := m.policy.Notifications.WebhookSecret // pragma: allowlist secret
+	m.mu.RUnlock()
+
+	// Verify HMAC
+	expected := m.generateActionToken(reqID, action, secret)
+	if secret == "" || token == "" || !hmac.Equal([]byte(token), []byte(expected)) {
+		log.Printf("approval: callback unauthorized: invalid token for request %s", reqID)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	decidedBy := "@" + payload.UserName + " (via Mattermost)"
+
+	var err error
+	verb := "denied"
+	if action == "approve" {
+		verb = "approved"
+		err = m.Approve(reqID, decidedBy, 0)
+	} else {
+		err = m.Deny(reqID, decidedBy, "Denied via Mattermost")
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Response to Mattermost to update the message
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"update": map[string]interface{}{
+			"message": fmt.Sprintf("Request %s %s by @%s.", reqID, verb, payload.UserName),
+		},
+	})
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

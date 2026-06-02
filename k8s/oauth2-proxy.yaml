@@ -67,6 +67,7 @@ spec:
             - --client-id=$(GITHUB_CLIENT_ID)
             - --client-secret=$(GITHUB_CLIENT_SECRET)
             - --cookie-secret=$(COOKIE_SECRET)
+            - --skip-auth-route=^/api/approvals/callback$
 
           env:
             - name: GITHUB_CLIENT_ID
