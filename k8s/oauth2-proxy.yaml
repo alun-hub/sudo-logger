@@ -140,8 +140,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: replay.192.168.2.163.nip.io
-      http:
+    - http:
         paths:
           - path: /
             pathType: Prefix
@@ -150,7 +149,7 @@ spec:
                 name: oauth2-proxy
                 port:
                   number: 4180
-    - host: 10.42.0.1
+    - host: replay.192.168.2.163.nip.io
       http:
         paths:
           - path: /
