@@ -138,7 +138,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	7 — added sandbox_violation column to sudo_sessions
 //	8 — added tty_cols, tty_rows to capture terminal dimensions
 //	9 — added sudo_approval_requests and sudo_approval_windows for JIT approval
-const currentSchemaVersion = 9
+//	10 — added sudo_whitelisted_users for JIT approval bypass
+const currentSchemaVersion = 10
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -274,6 +275,15 @@ CREATE TABLE IF NOT EXISTS sudo_approval_windows (
 );
 
 CREATE TABLE IF NOT EXISTS sudo_schema_version (version INT NOT NULL);
+
+-- migration v10: whitelisted users for JIT approval bypass
+CREATE TABLE IF NOT EXISTS sudo_whitelisted_users (
+    username TEXT NOT NULL,
+    host     TEXT,
+    reason   TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sudo_whitelisted_users_uk
+    ON sudo_whitelisted_users (username, COALESCE(host, ''));
 `); err != nil {
 		return err
 	}
@@ -953,6 +963,108 @@ INSERT INTO sudo_config (key, value) VALUES ('block_message', $1)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
 		policy.BlockMessage); err != nil {
 		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// IsWhitelisted implements SessionStore.
+func (d *DistributedStore) IsWhitelisted(ctx context.Context, user, host string) (bool, error) {
+	var dummy int
+	err := d.db.QueryRow(ctx, `
+SELECT 1 FROM sudo_whitelisted_users
+WHERE username=$1 AND (host=$2 OR host IS NULL)
+LIMIT 1`, user, host).Scan(&dummy)
+	if err != nil {
+		return false, nil // no match
+	}
+	return true, nil
+}
+
+// GetWhitelistPolicy reads all whitelisted-user rows and returns them as a WhitelistPolicy.
+func (d *DistributedStore) GetWhitelistPolicy(ctx context.Context) (WhitelistPolicy, error) {
+	rows, err := d.db.Query(ctx, `
+SELECT username, host, reason
+FROM sudo_whitelisted_users
+ORDER BY username, host NULLS FIRST`)
+	if err != nil {
+		return WhitelistPolicy{}, err
+	}
+	defer rows.Close()
+
+	type row struct {
+		username string
+		host     *string
+		reason   *string
+	}
+	userMap := make(map[string]*WhitelistedUserEntry)
+	var order []string
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.username, &r.host, &r.reason); err != nil {
+			return WhitelistPolicy{}, err
+		}
+		if _, exists := userMap[r.username]; !exists {
+			reason := ""
+			if r.reason != nil {
+				reason = *r.reason
+			}
+			userMap[r.username] = &WhitelistedUserEntry{
+				Username: r.username,
+				Reason:   reason,
+			}
+			order = append(order, r.username)
+		}
+		if r.host != nil && *r.host != "" {
+			userMap[r.username].Hosts = append(userMap[r.username].Hosts, *r.host)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return WhitelistPolicy{}, err
+	}
+
+	var p WhitelistPolicy
+	for _, u := range order {
+		e := *userMap[u]
+		if e.Hosts == nil {
+			e.Hosts = []string{}
+		}
+		p.Users = append(p.Users, e)
+	}
+	if p.Users == nil {
+		p.Users = []WhitelistedUserEntry{}
+	}
+	return p, nil
+}
+
+// SaveWhitelistPolicy replaces the full whitelisted-users list in a single transaction.
+func (d *DistributedStore) SaveWhitelistPolicy(ctx context.Context, policy WhitelistPolicy) error {
+	tx, err := d.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM sudo_whitelisted_users`); err != nil {
+		return err
+	}
+
+	for _, u := range policy.Users {
+		if len(u.Hosts) == 0 {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO sudo_whitelisted_users (username, host, reason) VALUES ($1, NULL, $2)`,
+				u.Username, u.Reason); err != nil {
+				return err
+			}
+		} else {
+			for _, h := range u.Hosts {
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO sudo_whitelisted_users (username, host, reason) VALUES ($1, $2, $3)`,
+					u.Username, h, u.Reason); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	return tx.Commit(ctx)

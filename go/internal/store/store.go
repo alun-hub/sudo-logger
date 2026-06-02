@@ -116,6 +116,15 @@ type SessionStore interface {
 	// LocalStore writes blocked-users.yaml; DistributedStore updates sudo_blocked_users.
 	SaveBlockedPolicy(ctx context.Context, policy BlockedPolicy) error
 
+	// IsWhitelisted reports whether user@host should bypass JIT approval.
+	IsWhitelisted(ctx context.Context, user, host string) (bool, error)
+
+	// GetWhitelistPolicy returns the full whitelisted-users policy for the GUI.
+	GetWhitelistPolicy(ctx context.Context) (WhitelistPolicy, error)
+
+	// SaveWhitelistPolicy replaces the full whitelisted-users policy.
+	SaveWhitelistPolicy(ctx context.Context, policy WhitelistPolicy) error
+
 	// MarkSessionNetworkOutage upgrades a session's termination reason from
 	// generic INCOMPLETE to NETWORK_OUTAGE.  Called by the log-server when it
 	// receives SESSION_FREEZING or SESSION_ABANDON from the agent after the
@@ -262,6 +271,19 @@ type BlockedPolicy struct {
 	Users        []BlockedUserEntry
 }
 
+// WhitelistedUserEntry is a single entry in the whitelisted-users policy.
+// Users on this list bypass JIT approval entirely.
+type WhitelistedUserEntry struct {
+	Username string
+	Hosts    []string // empty = all hosts
+	Reason   string
+}
+
+// WhitelistPolicy is the full whitelisted-users configuration.
+type WhitelistPolicy struct {
+	Users []WhitelistedUserEntry
+}
+
 // RiskCache is the persisted result of a risk-scoring run.
 type RiskCache struct {
 	RulesHash string
@@ -291,6 +313,10 @@ type Config struct {
 	// BlockedUsersPath is the YAML file listing blocked users.
 	// Default: /etc/sudo-logger/blocked-users.yaml
 	BlockedUsersPath string
+
+	// WhitelistedUsersPath is the YAML file listing users who bypass JIT approval.
+	// Default: /etc/sudo-logger/whitelisted-users.yaml
+	WhitelistedUsersPath string
 
 	// SiemConfigPath is the path to siem.yaml (LocalStore only).
 	// Default: /etc/sudo-logger/siem.yaml

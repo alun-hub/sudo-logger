@@ -36,6 +36,10 @@ type LocalStore struct {
 	blockedMu  sync.RWMutex
 	blockedCfg blockedUsersConfig
 
+	// whitelisted-users state — reloaded every 30 s in background goroutine.
+	whitelistMu  sync.RWMutex
+	whitelistCfg whitelistedUsersConfig
+
 	// access log — bounded in-memory ring buffer (same behaviour as before
 	// the store abstraction was introduced).
 	viewMu  sync.Mutex
@@ -73,6 +77,17 @@ type blockedUser struct {
 	BlockedAt int64    `yaml:"blocked_at"`
 }
 
+// whitelistedUsersConfig mirrors the YAML structure of whitelisted-users.yaml.
+type whitelistedUsersConfig struct {
+	Users []whitelistedUser `yaml:"users"`
+}
+
+type whitelistedUser struct {
+	Username string   `yaml:"username"`
+	Hosts    []string `yaml:"hosts"` // empty = all hosts
+	Reason   string   `yaml:"reason"`
+}
+
 // newLocalStore creates a LocalStore and starts the background reload goroutine
 // for blocked-users.yaml.
 func newLocalStore(cfg Config) (*LocalStore, error) {
@@ -81,6 +96,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	}
 	if cfg.BlockedUsersPath == "" {
 		cfg.BlockedUsersPath = "/etc/sudo-logger/blocked-users.yaml"
+	}
+	if cfg.WhitelistedUsersPath == "" {
+		cfg.WhitelistedUsersPath = "/etc/sudo-logger/whitelisted-users.yaml"
 	}
 	if cfg.SiemConfigPath == "" {
 		cfg.SiemConfigPath = "/etc/sudo-logger/siem.yaml"
@@ -114,6 +132,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if err := ls.loadBlockedUsers(); err != nil {
 		log.Printf("store/local: blocked-users initial load: %v", err)
 	}
+	if err := ls.loadWhitelistedUsers(); err != nil {
+		log.Printf("store/local: whitelisted-users initial load: %v", err)
+	}
 	if err := ls.loadApprovalStore(); err != nil {
 		log.Printf("store/local: approval-store initial load: %v", err)
 	}
@@ -127,6 +148,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 			case <-t.C:
 				if err := ls.loadBlockedUsers(); err != nil {
 					log.Printf("store/local: blocked-users reload: %v", err)
+				}
+				if err := ls.loadWhitelistedUsers(); err != nil {
+					log.Printf("store/local: whitelisted-users reload: %v", err)
 				}
 			case <-ls.stopCh:
 				return
@@ -451,6 +475,104 @@ func (ls *LocalStore) SaveBlockedPolicy(_ context.Context, policy BlockedPolicy)
 		return err
 	}
 	return os.WriteFile(ls.cfg.BlockedUsersPath, append([]byte(localBlockedUsersHeader), data...), 0o640)
+}
+
+// ── Whitelisted-users policy API ─────────────────────────────────────────────
+
+const localWhitelistedUsersHeader = "# Whitelisted users config — managed by sudo-replay GUI\n" +
+	"# Users on this list bypass JIT approval entirely.\n" +
+	"# Log server reloads this file automatically every 30 seconds.\n\n"
+
+func (ls *LocalStore) loadWhitelistedUsers() error {
+	data, err := os.ReadFile(ls.cfg.WhitelistedUsersPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ls.whitelistMu.Lock()
+			ls.whitelistCfg = whitelistedUsersConfig{}
+			ls.whitelistMu.Unlock()
+			return nil
+		}
+		return err
+	}
+	var cfg whitelistedUsersConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse whitelisted-users: %w", err)
+	}
+	ls.whitelistMu.Lock()
+	ls.whitelistCfg = cfg
+	ls.whitelistMu.Unlock()
+	log.Printf("store/local: whitelisted-users: loaded %d entry/entries from %s",
+		len(cfg.Users), ls.cfg.WhitelistedUsersPath)
+	return nil
+}
+
+// IsWhitelisted implements SessionStore.
+func (ls *LocalStore) IsWhitelisted(_ context.Context, user, host string) (bool, error) {
+	ls.whitelistMu.RLock()
+	cfg := ls.whitelistCfg
+	ls.whitelistMu.RUnlock()
+
+	for _, wu := range cfg.Users {
+		if wu.Username != user {
+			continue
+		}
+		if len(wu.Hosts) == 0 {
+			return true, nil
+		}
+		for _, h := range wu.Hosts {
+			if h == host {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// GetWhitelistPolicy returns the in-memory whitelisted-users policy.
+func (ls *LocalStore) GetWhitelistPolicy(_ context.Context) (WhitelistPolicy, error) {
+	ls.whitelistMu.RLock()
+	cur := ls.whitelistCfg
+	ls.whitelistMu.RUnlock()
+	var p WhitelistPolicy
+	for _, u := range cur.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
+		}
+		p.Users = append(p.Users, WhitelistedUserEntry{
+			Username: u.Username,
+			Hosts:    hosts,
+			Reason:   u.Reason,
+		})
+	}
+	if p.Users == nil {
+		p.Users = []WhitelistedUserEntry{}
+	}
+	return p, nil
+}
+
+// SaveWhitelistPolicy writes the whitelisted-users policy to whitelisted-users.yaml.
+func (ls *LocalStore) SaveWhitelistPolicy(_ context.Context, policy WhitelistPolicy) error {
+	raw := whitelistedUsersConfig{}
+	for _, u := range policy.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
+		}
+		raw.Users = append(raw.Users, whitelistedUser{
+			Username: u.Username,
+			Hosts:    hosts,
+			Reason:   u.Reason,
+		})
+	}
+	if raw.Users == nil {
+		raw.Users = []whitelistedUser{}
+	}
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(ls.cfg.WhitelistedUsersPath, append([]byte(localWhitelistedUsersHeader), data...), 0o640)
 }
 
 // MarkSessionNetworkOutage implements SessionStore.

@@ -70,6 +70,8 @@ var (
 			"Requires per-machine client certificates. Off by default to support shared-cert setups.")
 	flagBlockedUsers = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml",
 		"Blocked users config file (managed by sudo-replay GUI; reloaded every 30 s)")
+	flagWhitelistedUsers = flag.String("whitelisted-users", "/etc/sudo-logger/whitelisted-users.yaml",
+		"Whitelisted users config file — these users bypass JIT approval (managed by sudo-replay GUI; reloaded every 30 s)")
 	flagApprovalPolicy = flag.String("approval-policy", "/etc/sudo-logger/approval-policy.yaml",
 		"JIT approval policy file (reloaded every 30 s; feature disabled when file absent)")
 	flagApprovalToken = flag.String("approval-token", "",
@@ -146,7 +148,8 @@ func main() {
 	sessionStore, err := store.New(store.Config{
 		Backend:              *flagStorage,
 		LogDir:               *flagLogDir,
-		BlockedUsersPath:     *flagBlockedUsers,
+		BlockedUsersPath:        *flagBlockedUsers,
+		WhitelistedUsersPath:    *flagWhitelistedUsers,
 		SandboxConfigPath:    *flagSandbox,
 		SandboxTemplatesPath: *flagSandboxTemplates,
 		ApprovalStorePath:    approvalStorePath(*flagApprovalPolicy),
@@ -491,52 +494,57 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 
 			// ── JIT approval check ─────────────────────────────────────────────
-			result := srv.approvalMgr.Check(start.User, start.Host, start.Command,
-				start.Justification)
-			switch result.Result {
-			case ApprovalResultNeedReason:
-				// Check if there's already a pending request for this user@host
-				// so we can give a more informative retry message.
-				if msg := srv.approvalMgr.RetryMessage(start.User, start.Host); msg != "" {
+			var result CheckResult
+			if whitelisted, _ := srv.sessionStore.IsWhitelisted(context.Background(), start.User, start.Host); whitelisted {
+				log.Printf("[%s] whitelist: user=%s host=%s — bypassing JIT approval", start.SessionID, start.User, start.Host)
+			} else {
+				result = srv.approvalMgr.Check(start.User, start.Host, start.Command,
+					start.Justification)
+				switch result.Result {
+				case ApprovalResultNeedReason:
+					// Check if there's already a pending request for this user@host
+					// so we can give a more informative retry message.
+					if msg := srv.approvalMgr.RetryMessage(start.User, start.Host); msg != "" {
+						netWriteMu.Lock()
+						_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
+						netWriteMu.Unlock()
+					} else {
+						netWriteMu.Lock()
+						_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
+							"sudo-logger: access requires justification. Run sudo again and provide a reason when prompted."))
+						netWriteMu.Unlock()
+					}
+					log.Printf("[%s] approval: user=%s host=%s — no justification provided", start.SessionID, start.User, start.Host)
+					return
+				case ApprovalResultChallenge:
+					if start.TtyPath == "" {
+						// Non-TTY session (cron, script): cannot challenge for justification.
+						// Fall back to a standard denial with instructions.
+						netWriteMu.Lock()
+						_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
+							"sudo-logger: access requires justification. Provide reason via sudo-logger-agent or retry interactively."))
+						netWriteMu.Unlock()
+						log.Printf("[%s] approval: user=%s host=%s — non-TTY session requires justification", start.SessionID, start.User, start.Host)
+						return
+					}
+					challenge := protocol.SessionChallenge{HasWebhook: result.HasWebhook}
+					body, _ := json.Marshal(challenge)
+					netWriteMu.Lock()
+					_ = protocol.WriteMessage(w, protocol.MsgSessionChallenge, body)
+					netWriteMu.Unlock()
+					log.Printf("[%s] approval: user=%s host=%s — challenge sent", start.SessionID, start.User, start.Host)
+					continue
+				case ApprovalResultPending:
+					msg := fmt.Sprintf("sudo-logger: approval request %s submitted.\nYou will be notified when approved. Retry sudo when notified.", result.RequestID)
+
 					netWriteMu.Lock()
 					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
 					netWriteMu.Unlock()
-				} else {
-					netWriteMu.Lock()
-					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
-						"sudo-logger: access requires justification. Run sudo again and provide a reason when prompted."))
-					netWriteMu.Unlock()
-				}
-				log.Printf("[%s] approval: user=%s host=%s — no justification provided", start.SessionID, start.User, start.Host)
-				return
-			case ApprovalResultChallenge:
-				if start.TtyPath == "" {
-					// Non-TTY session (cron, script): cannot challenge for justification.
-					// Fall back to a standard denial with instructions.
-					netWriteMu.Lock()
-					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
-						"sudo-logger: access requires justification. Provide reason via sudo-logger-agent or retry interactively."))
-					netWriteMu.Unlock()
-					log.Printf("[%s] approval: user=%s host=%s — non-TTY session requires justification", start.SessionID, start.User, start.Host)
+					log.Printf("[%s] approval: user=%s host=%s — pending request %s created", start.SessionID, start.User, start.Host, result.RequestID)
 					return
+				case ApprovalResultAllow:
+					// Approved or exempt — continue normally.
 				}
-				challenge := protocol.SessionChallenge{HasWebhook: result.HasWebhook}
-				body, _ := json.Marshal(challenge)
-				netWriteMu.Lock()
-				_ = protocol.WriteMessage(w, protocol.MsgSessionChallenge, body)
-				netWriteMu.Unlock()
-				log.Printf("[%s] approval: user=%s host=%s — challenge sent", start.SessionID, start.User, start.Host)
-				continue
-			case ApprovalResultPending:
-				msg := fmt.Sprintf("sudo-logger: approval request %s submitted.\nYou will be notified when approved. Retry sudo when notified.", result.RequestID)
-
-				netWriteMu.Lock()
-				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
-				netWriteMu.Unlock()
-				log.Printf("[%s] approval: user=%s host=%s — pending request %s created", start.SessionID, start.User, start.Host, result.RequestID)
-				return
-			case ApprovalResultAllow:
-				// Approved or exempt — continue normally.
 			}
 
 			sess, err = srv.openSession(start)

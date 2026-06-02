@@ -58,7 +58,8 @@ var (
 	flagSandbox           = flag.String("sandbox", "/etc/sudo-logger/sandbox.yaml", "Process sandbox config file (served to agents)")
 	flagSandboxTemplates  = flag.String("sandbox-templates", "/etc/sudo-logger/sandbox-templates.json", "Sandbox templates file (LocalStore only)")
 	flagSiemConfig        = flag.String("siem-config", "/etc/sudo-logger/siem.yaml", "SIEM forwarding config file (shared with log server)")
-	flagBlockedUsers      = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml", "Blocked users config file (shared with log server)")
+	flagBlockedUsers        = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml", "Blocked users config file (shared with log server)")
+	flagWhitelistedUsers    = flag.String("whitelisted-users", "/etc/sudo-logger/whitelisted-users.yaml", "Whitelisted users config file — these users bypass JIT approval (shared with log server)")
 	flagLogServerAdmin    = flag.String("logserver-admin", "", "Log server admin address for approval API (e.g. http://localhost:9877); empty disables approvals tab")
 	flagLogServerAdminToken = flag.String("logserver-admin-token", "", "Shared bearer token for the log server approval API (must match -approval-token on the log server)")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
@@ -394,6 +395,18 @@ type BlockedUsersConfig struct {
 	Users        []BlockedUser `yaml:"users"         json:"users"`
 }
 
+// WhitelistedUser describes a single whitelisted user entry in whitelisted-users.yaml.
+type WhitelistedUser struct {
+	Username string   `yaml:"username" json:"username"`
+	Hosts    []string `yaml:"hosts"    json:"hosts"`
+	Reason   string   `yaml:"reason"   json:"reason"`
+}
+
+// WhitelistedUsersConfig is the top-level structure of whitelisted-users.yaml.
+type WhitelistedUsersConfig struct {
+	Users []WhitelistedUser `yaml:"users" json:"users"`
+}
+
 // maxTtyOutBytes is the maximum number of ttyout bytes read for content scanning.
 const maxTtyOutBytes = 512 * 1024
 
@@ -579,6 +592,72 @@ func handlePutBlockedUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
+func handleGetWhitelistedUsers(w http.ResponseWriter, r *http.Request) {
+	policy, err := sessionStore.GetWhitelistPolicy(r.Context())
+	if err != nil {
+		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	cfg := WhitelistedUsersConfig{}
+	for _, u := range policy.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
+		}
+		cfg.Users = append(cfg.Users, WhitelistedUser{
+			Username: u.Username,
+			Hosts:    hosts,
+			Reason:   u.Reason,
+		})
+	}
+	if cfg.Users == nil {
+		cfg.Users = []WhitelistedUser{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"path":   *flagWhitelistedUsers,
+		"config": cfg,
+	})
+}
+
+func handlePutWhitelistedUsers(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Config WhitelistedUsersConfig `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	for i, u := range body.Config.Users {
+		if u.Username == "" {
+			http.Error(w, fmt.Sprintf("user[%d]: username required", i), http.StatusBadRequest)
+			return
+		}
+	}
+	if body.Config.Users == nil {
+		body.Config.Users = []WhitelistedUser{}
+	}
+	var policy store.WhitelistPolicy
+	for _, u := range body.Config.Users {
+		hosts := u.Hosts
+		if hosts == nil {
+			hosts = []string{}
+		}
+		policy.Users = append(policy.Users, store.WhitelistedUserEntry{
+			Username: u.Username,
+			Hosts:    hosts,
+			Reason:   u.Reason,
+		})
+	}
+	if err := sessionStore.SaveWhitelistPolicy(r.Context(), policy); err != nil {
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("whitelisted-users: config updated via GUI (%d whitelisted users)", len(body.Config.Users))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
 func handleGetHosts(w http.ResponseWriter, r *http.Request) {
 	all, err := cache.get(r.Context())
 	if err != nil {
@@ -608,7 +687,8 @@ func main() {
 	sessionStore, storeErr = store.New(store.Config{
 		Backend:          *flagStorage,
 		LogDir:           *flagLogDir,
-		BlockedUsersPath: *flagBlockedUsers,
+		BlockedUsersPath:     *flagBlockedUsers,
+		WhitelistedUsersPath: *flagWhitelistedUsers,
 		SiemConfigPath:   *flagSiemConfig,
 		RiskRulesPath:    *flagRules,
 		SandboxConfigPath: *flagSandbox,
@@ -745,6 +825,16 @@ func main() {
 			handleGetBlockedUsers(w, r)
 		case http.MethodPut:
 			handlePutBlockedUsers(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/whitelisted-users", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetWhitelistedUsers(w, r)
+		case http.MethodPut:
+			handlePutWhitelistedUsers(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
