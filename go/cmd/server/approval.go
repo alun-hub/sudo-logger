@@ -410,7 +410,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 		}
 		channel = cfg.RequestChannel
 
-		if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" && cfg.WebhookSecret != "" {
+		if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" {
 			callbackURL := strings.TrimSuffix(cfg.ReplayWebAppURL, "/") + "/api/approvals/callback"
 			actions = []slackAction{
 				{
