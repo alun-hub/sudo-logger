@@ -701,10 +701,27 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 		UserName string            `json:"user_name"`
 		Context  map[string]string `json:"context"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		log.Printf("approval: callback: decode error: %v", err)
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
+
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		if err := r.ParseForm(); err != nil {
+			log.Printf("approval: callback: parse form error: %v", err)
+			http.Error(w, "invalid form data", http.StatusBadRequest)
+			return
+		}
+		payload.UserName = r.FormValue("user_name")
+		ctxJSON := r.FormValue("context")
+		if ctxJSON != "" {
+			if err := json.Unmarshal([]byte(ctxJSON), &payload.Context); err != nil {
+				log.Printf("approval: callback: unmarshal context from form error: %v", err)
+			}
+		}
+	} else {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			log.Printf("approval: callback: decode json error: %v", err)
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
 	}
 
 	reqID := payload.Context["request_id"]
