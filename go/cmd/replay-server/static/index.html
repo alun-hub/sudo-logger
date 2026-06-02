@@ -4106,7 +4106,8 @@ async function denyRequest(id) {
 
 document.getElementById('btn-refresh-approvals').addEventListener('click', fetchApprovals);
 
-if (window.location.pathname === '/approvals') {
+const path = window.location.pathname.replace(/\/$/, '');
+if (path === '/approvals') {
   switchTab('approvals');
 }
 
