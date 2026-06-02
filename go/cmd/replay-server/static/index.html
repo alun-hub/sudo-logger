@@ -1442,6 +1442,7 @@
       </p>
       <table class="report-table" style="margin-top:12px" id="approvals-table">
         <thead><tr>
+          <th style="width:80px">ID</th>
           <th>User</th>
           <th>Host</th>
           <th>Command</th>
@@ -4055,6 +4056,7 @@ function renderApprovals(items) {
     const submitted = fmtApprovalDate(req.submitted_at);
     const expires   = fmtApprovalDate(req.expires_at);
 
+    tr.appendChild(makeCell(req.id || '', { code: true, style: 'font-size:10px' }));
     tr.appendChild(makeCell(req.user || '', { code: true }));
     tr.appendChild(makeCell(req.host || ''));
     tr.appendChild(makeCell(req.command || '', { code: true, title: true,
