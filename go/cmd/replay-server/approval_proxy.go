@@ -14,7 +14,7 @@ import (
 //     from the authenticated replay-server session (not from request headers).
 //   - Adds the shared bearer token so the log server can authenticate the call.
 func proxyToLogServer(w http.ResponseWriter, r *http.Request, targetURL, token, decidedBy string) {
-	log.Printf("approval proxy: %s %s -> %s", r.Method, r.URL.Path, targetURL)
+	log.Printf("approval proxy: %s %s Host=%s -> %s", r.Method, r.URL.Path, r.Host, targetURL)
 	if q := r.URL.RawQuery; q != "" {
 		targetURL += "?" + q
 	}
