@@ -386,6 +386,8 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 	}
 	var color, header, footer, channel string
 	var fields []slackField
+	var actions []slackAction
+
 	switch event {
 	case "requested":
 		color = "#ff9900"
@@ -407,8 +409,38 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 			footer = fmt.Sprintf("[Approve or deny in sudo-logger UI](%s/approvals)", strings.TrimSuffix(cfg.ReplayWebAppURL, "/"))
 		}
 		channel = cfg.RequestChannel
+
+		if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" && cfg.WebhookSecret != "" {
+			callbackURL := strings.TrimSuffix(cfg.ReplayWebAppURL, "/") + "/api/approvals/callback"
+			actions = []slackAction{
+				{
+					ID:   "approve",
+					Name: "Approve",
+					Integration: slackIntegration{
+						URL: callbackURL,
+						Context: map[string]string{
+							"action":     "approve",
+							"request_id": req.ID,
+							"token":      m.generateActionToken(req.ID, "approve", cfg.WebhookSecret),
+						},
+					},
+				},
+				{
+					ID:   "deny",
+					Name: "Deny",
+					Integration: slackIntegration{
+						URL: callbackURL,
+						Context: map[string]string{
+							"action":     "deny",
+							"request_id": req.ID,
+							"token":      m.generateActionToken(req.ID, "deny", cfg.WebhookSecret),
+						},
+					},
+				},
+			}
+		}
 	}
-	m.postSlack(cfg, channel, header, color, fields, footer)
+	m.postSlack(cfg, channel, header, color, fields, footer, actions)
 }
 
 func (m *ApprovalManager) sendWebhookApproved(req *store.ApprovalRequest, decidedBy string, window time.Duration, expiresAt time.Time, cfg approvalNotifyCfg) {
@@ -428,7 +460,7 @@ func (m *ApprovalManager) sendWebhookApproved(req *store.ApprovalRequest, decide
 		{Title: "Session expires", Value: expiresAt.Format("2006-01-02 15:04:05"), Short: true},
 		{Title: "Notification", Value: "Mattermost webhook", Short: true},
 	}
-	m.postSlack(cfg, channel, header, "#36a64f", fields, "")
+	m.postSlack(cfg, channel, header, "#36a64f", fields, "", nil)
 }
 
 func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy, reason string, cfg approvalNotifyCfg) {
@@ -449,9 +481,9 @@ func (m *ApprovalManager) sendWebhookDeny(req *store.ApprovalRequest, decidedBy,
 	if reason != "" {
 		fields = append(fields, slackField{Title: "Reason", Value: reason})
 	}
-	m.postSlack(cfg, channel, header, "#cc0000", fields, "")
+	m.postSlack(cfg, channel, header, "#cc0000", fields, "", nil)
 }
-func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color string, fields []slackField, footer string) {
+func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color string, fields []slackField, footer string, actions []slackAction) {
 	url := strings.TrimSpace(cfg.WebhookURL)
 	if url == "" {
 		return
@@ -465,7 +497,7 @@ func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color 
 		Username:  "sudo-logger",
 		IconEmoji: ":lock:",
 		Attachments: []slackAttachment{
-			{Color: color, Fields: fields, Footer: footer},
+			{Color: color, Fields: fields, Footer: footer, Actions: actions},
 		},
 	}
 	body, err := json.Marshal(p)
