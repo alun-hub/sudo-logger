@@ -534,6 +534,7 @@ func (m *ApprovalManager) postSlack(cfg approvalNotifyCfg, channel, text, color 
 // RegisterApprovalAPI mounts the approval REST endpoints on mux.
 // token is a shared secret (Authorization: Bearer). If empty, endpoints are not registered.
 func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) {
+	mux.HandleFunc("/api/approvals/callback", m.handleCallback)
 	if token == "" {
 		log.Printf("approval: WARNING: -approval-token not set — approval REST API disabled. " +
 			"Set -approval-token to enable the UI approval panel.")
@@ -551,7 +552,6 @@ func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) 
 	mux.HandleFunc("/api/approvals", auth(m.handleList))
 	mux.HandleFunc("/api/approvals/", auth(m.handleDecision))
 	mux.HandleFunc("/api/approval-config", auth(m.handleConfig))
-	mux.HandleFunc("/api/approvals/callback", m.handleCallback)
 }
 
 func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -696,6 +696,7 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 }
 
 func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request) {
+	log.Printf("approval: callback: method=%s, content-type=%s", r.Method, r.Header.Get("Content-Type"))
 	var payload struct {
 		UserName string            `json:"user_name"`
 		Context  map[string]string `json:"context"`
