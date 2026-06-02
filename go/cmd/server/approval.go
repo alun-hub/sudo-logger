@@ -701,6 +701,7 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 		Context  map[string]string `json:"context"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Printf("approval: callback: decode error: %v", err)
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}
@@ -709,6 +710,8 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	action := payload.Context["action"]
 	token := payload.Context["token"]
 
+	log.Printf("approval: callback received: user=%s, request=%s, action=%s", payload.UserName, reqID, action)
+
 	m.mu.RLock()
 	secret := m.policy.Notifications.WebhookSecret // pragma: allowlist secret
 	m.mu.RUnlock()
@@ -716,7 +719,7 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	// Verify HMAC
 	expected := m.generateActionToken(reqID, action, secret)
 	if secret == "" || token == "" || !hmac.Equal([]byte(token), []byte(expected)) {
-		log.Printf("approval: callback unauthorized: invalid token for request %s", reqID)
+		log.Printf("approval: callback unauthorized: token mismatch for request %s. expected=%s, got=%s", reqID, expected, token)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
