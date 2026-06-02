@@ -2,7 +2,6 @@ package main
 
 import (
 	"io"
-	"log"
 	"net/http"
 )
 
@@ -14,13 +13,11 @@ import (
 //     from the authenticated replay-server session (not from request headers).
 //   - Adds the shared bearer token so the log server can authenticate the call.
 func proxyToLogServer(w http.ResponseWriter, r *http.Request, targetURL, token, decidedBy string) {
-	log.Printf("approval proxy: %s %s Host=%s -> %s", r.Method, r.URL.Path, r.Host, targetURL)
 	if q := r.URL.RawQuery; q != "" {
 		targetURL += "?" + q
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
 	if err != nil {
-		log.Printf("approval proxy: build request error: %v", err)
 		http.Error(w, "approval proxy: build request: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -37,13 +34,10 @@ func proxyToLogServer(w http.ResponseWriter, r *http.Request, targetURL, token, 
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("approval proxy: do request error: %v", err)
 		http.Error(w, "approval proxy: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
-
-	log.Printf("approval proxy: response status %d", resp.StatusCode)
 
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 	w.WriteHeader(resp.StatusCode)

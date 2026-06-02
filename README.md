@@ -240,7 +240,7 @@ migrate-sessions \
 ## Features
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
-- **Just-In-Time (JIT) sudo approval**: require human justification and admin approval before sudo proceeds. Supports asynchronous requests with Mattermost/Slack notifications and time-limited approval windows.
+- **Just-In-Time (JIT) sudo approval**: require human justification and admin approval before sudo proceeds. Supports asynchronous requests with Mattermost/Slack notifications, interactive Approve/Deny buttons, and time-limited approval windows.
 - **Automatic secret redaction**: the agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `agent.conf`.
 - Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the agent was killed mid-recording
@@ -613,7 +613,8 @@ The JIT approval system allows security teams to enforce a "four-eyes" principle
 - **Challenge-Response**: If enabled, the plugin prompts for a justification (e.g., Jira ticket ID).
 - **Approval Windows**: Admins grant access for a specific duration (e.g., 30m). During this window, the user can run `sudo` on that host without further prompts.
 - **Session TTL Enforcement**: Active sessions are automatically terminated by the agent when the approval window expires. A warning is shown in the terminal 60 seconds before termination.
-- **Mattermost/Slack Integration**: New requests are posted to a channel with a direct link to the approval UI. Outcome notifications (Approve/Deny) are sent as DMs to the user.
+- **Mattermost/Slack Integration**: New requests are posted to a channel. Admins can click **Approve** or **Deny** buttons directly in the chat.
+- **Secure Callbacks**: Interactive buttons use HMAC-SHA256 signatures to verify that the request originated from the log server. No shared secrets or proxy authentication are required for the callback endpoint.
 - **Exempt Rules**: Whitelist specific users or hosts that do not require approval (e.g., `root` or automated service accounts).
 
 #### Configuration (Local mode)
@@ -626,9 +627,19 @@ exempt:
 notifications:
   webhook_url: "http://mattermost.internal:8065/hooks/..."
   request_channel: "sudo-logger"
+  # URL where the callback should land. Must be reachable by the Mattermost server.
+  # For internal/containerized deployments, use an internal IP (e.g., 10.42.0.1).
   replay_web_app_url: "http://replay.internal:8080"
+  webhook_secret: "optional-signing-secret"  # pragma: allowlist secret
   mention_user: true
 ```
+
+#### Network Requirements for Interactive Buttons
+For the **Approve/Deny** buttons to work:
+1.  **Mattermost Access**: The Mattermost server must be able to reach the `replay_web_app_url`.
+2.  **Internal IPs**: If using a local IP (e.g., `192.168.x.x` or `10.x.x.x`), ensure **Allow Untrusted Internal Connections to** is configured in the Mattermost System Console.
+3.  **Auth Bypass**: The `/api/approvals/callback` route must be exempted from any reverse-proxy authentication (e.g., `oauth2-proxy`). It is secured by its own HMAC verification.
+4.  **Host Headers**: If using IP-based URLs, ensure the Ingress controller allows requests without a matching DNS Host header for the callback path.
 
 #### Configuration (Distributed mode)
 In distributed mode, settings are managed via the **Settings -> JIT Approval** tab in the Replay UI and stored in PostgreSQL. This allows dynamic updates without modifying ConfigMaps or restarting pods.

@@ -700,7 +700,6 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 }
 
 func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request) {
-	log.Printf("approval: callback: method=%s, content-type=%s", r.Method, r.Header.Get("Content-Type"))
 	var payload struct {
 		UserName string            `json:"user_name"`
 		Context  map[string]string `json:"context"`
@@ -709,20 +708,16 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	contentType := r.Header.Get("Content-Type")
 	if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
 		if err := r.ParseForm(); err != nil {
-			log.Printf("approval: callback: parse form error: %v", err)
 			http.Error(w, "invalid form data", http.StatusBadRequest)
 			return
 		}
 		payload.UserName = r.FormValue("user_name")
 		ctxJSON := r.FormValue("context")
 		if ctxJSON != "" {
-			if err := json.Unmarshal([]byte(ctxJSON), &payload.Context); err != nil {
-				log.Printf("approval: callback: unmarshal context from form error: %v", err)
-			}
+			_ = json.Unmarshal([]byte(ctxJSON), &payload.Context)
 		}
 	} else {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			log.Printf("approval: callback: decode json error: %v", err)
 			http.Error(w, "invalid payload", http.StatusBadRequest)
 			return
 		}
@@ -733,7 +728,6 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	token := strings.TrimSpace(payload.Context["token"])
 
 	decidedBy := "@" + payload.UserName + " (via Mattermost)"
-	log.Printf("approval: callback received: user=%s, request=%s, action=%s, decidedBy=%s", payload.UserName, reqID, action, decidedBy)
 
 	m.mu.RLock()
 	secret := m.policy.Notifications.WebhookSecret // pragma: allowlist secret
@@ -742,8 +736,7 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	// Verify HMAC
 	expected := m.generateActionToken(reqID, action, secret)
 	if token == "" || !hmac.Equal([]byte(token), []byte(expected)) {
-		log.Printf("approval: callback unauthorized: token mismatch for request %s. expected=%s (len %d), got=%s (len %d)",
-			reqID, expected, len(expected), token, len(token))
+		log.Printf("approval: callback unauthorized: token mismatch for request %s", reqID)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
