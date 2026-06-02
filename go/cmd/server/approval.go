@@ -356,10 +356,22 @@ type slackPayload struct {
 	Attachments []slackAttachment `json:"attachments,omitempty"`
 }
 
+type slackIntegration struct {
+	URL     string            `json:"url"`
+	Context map[string]string `json:"context"`
+}
+
+type slackAction struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Integration slackIntegration `json:"integration"`
+}
+
 type slackAttachment struct {
-	Color  string       `json:"color"`
-	Fields []slackField `json:"fields"`
-	Footer string       `json:"footer,omitempty"`
+	Color   string        `json:"color"`
+	Fields  []slackField  `json:"fields"`
+	Footer  string        `json:"footer,omitempty"`
+	Actions []slackAction `json:"actions,omitempty"`
 }
 
 type slackField struct {
@@ -656,6 +668,15 @@ func newRequestID() string {
 	b := make([]byte, 4)
 	rand.Read(b)
 	return strings.ToUpper(hex.EncodeToString(b))
+}
+
+func (m *ApprovalManager) generateActionToken(requestID, action, secret string) string {
+	if secret == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(requestID + ":" + action))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func matchGlob(pattern, s string) bool {
