@@ -142,6 +142,13 @@ spec:
   rules:
     - http:
         paths:
+          - path: /api/approvals/callback
+            pathType: Exact
+            backend:
+              service:
+                name: sudo-replay-server
+                port:
+                  number: 8080
           - path: /
             pathType: Prefix
             backend:
