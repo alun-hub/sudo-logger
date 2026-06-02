@@ -2140,8 +2140,53 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 14: DISTRIBUTED STORAGE ░░ -->
+  <!-- ░░ SLIDE 14: JIT APPROVAL ░░ -->
   <div class="slide" id="s14">
+    <div class="s-features" style="max-width:960px">
+      <h2>JUST-IN-TIME<br>APPROVAL</h2>
+      <div class="sub">▸ Human-in-the-loop · time-limited windows · async notifications</div>
+
+      <div class="feat-grid" style="grid-template-columns:1.2fr 1fr;gap:20px 48px;margin-top:28px;font-size:13px">
+
+        <div style="border-left:2px solid var(--amber);padding-left:16px">
+          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">FEATURES</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Challenge-Response flow — user prompted for justification</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Time-limited approval windows — access expires automatically</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Session TTL enforcement — active sessions terminated on expiry</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Pre-termination warning — amber banner shown 60s before logout</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Exempt rules — whitelist root or service accounts by host</div>
+        </div>
+
+        <div style="border-left:2px solid var(--green);padding-left:16px">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">INTEGRATION</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--green)">⚡</span> Mattermost / Slack incoming webhooks</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--green)">⚡</span> Direct links to JIT UI in chat notifications</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--green)">⚡</span> Result notifications sent as DMs to the user</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--green)">⚡</span> Dynamic config stored in DB (distributed mode)</div>
+        </div>
+
+      </div>
+
+      <div style="margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:12px 16px;text-align:left;max-width:820px;display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+        <div>
+          <span style="color:var(--green-dim)"># terminal output</span><br>
+          <span style="color:var(--text)">Reason for sudo: Jira SEC-101</span><br>
+          <span style="color:var(--amber)">Approval request 4F8F6951 submitted.</span><br>
+          <span style="color:var(--text-dim)">You will be notified when approved.</span>
+        </div>
+        <div>
+          <span style="color:var(--green-dim)"># chat notification (Mattermost/Slack)</span><br>
+          <span style="color:var(--text)">🔓 <b>Sudo approval request</b></span><br>
+          <span style="color:var(--text)">User: @alun &nbsp; Host: prod-db-01</span><br>
+          <span style="color:var(--text)">Command: <code style="background:rgba(255,255,255,0.05)">id</code></span><br>
+          <span style="color:var(--amber)"><u>Approve or deny in sudo-logger UI</u></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ SLIDE 15: DISTRIBUTED STORAGE ░░ -->
+  <div class="slide" id="s15">
     <div class="s-features" style="max-width:900px">
       <h2>DISTRIBUTED<br>STORAGE</h2>
       <div class="sub">▸ S3 · PostgreSQL · horizontal scaling · Kubernetes</div>
@@ -2339,7 +2384,8 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Summary / Anomalies / Settings tabs</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if agent killed (&lt;150 ms)</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt;30 s propagation</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · < 30 s propagation</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> JIT approval — challenge-response · time windows · chat bot notifications</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> eBPF agent — divergence detection · outage buffering · pkexec tracking</div>

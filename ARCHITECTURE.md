@@ -56,20 +56,28 @@ plugin_open()
   │               │
   │               │             log server
   │               │               ├─ validate session (user/host names, TLS cert)
-  │               │               ├─ check blocked-users policy
-  │               │               │   ├─ blocked → send SESSION_DENIED, close
-  │               │               │   └─ allowed → send SERVER_READY
+  │               │               ├─ check JIT approval policy
+  │               │               │   ├─ exempt/window active → send SERVER_READY
+  │               │               │   ├─ challenge required → send MSG_SESSION_CHALLENGE
+  │               │               │   └─ denied → send SESSION_DENIED
   │               │               └─ open session directory + ACTIVE file
   │               │
-  │               ├─ receive SERVER_READY or SESSION_DENIED from server
+  │               ├─ receive handshake from server
   │               │   ├─ SESSION_DENIED → forward to plugin, abort
-  │               │   └─ SERVER_READY  → send SESSION_READY to plugin
+  │               │   ├─ MSG_SESSION_CHALLENGE → forward to plugin
+  │               │   │    │
+  │               │   │    └─ plugin: prompt user for justification
+  │               │   │       → send MSG_CHALLENGE_RESPONSE
+  │               │   │       → agent forwards to server
+  │               │   │       → server creates pending request, sends SESSION_DENIED (wait)
+  │               │   │
+  │               │   └─ SERVER_READY → send SESSION_READY to plugin
   │
   └─ receive SESSION_READY → sudo forks child (inherits cgroup)
      (or SESSION_DENIED / SESSION_ERROR → sudo blocked, message shown)
 ```
 
-sudo is blocked at the prompt until the agent responds. If the log server is unreachable or denies the session, sudo never executes the command.
+sudo is blocked at the prompt until the agent responds. If the log server requires JIT approval, the plugin will prompt the user for a justification (shown only once per host/window). If the session is denied or the request is pending, sudo never executes the command.
 
 ### 2. Recording (concurrent)
 
@@ -120,7 +128,28 @@ To handle 500+ concurrent sessions and massive I/O bursts (e.g., `cat` of multi-
 - **Thread-Safe Networking**: All network writes on the server are protected by a `netWriteMu` mutex, and the C plugin uses `g_send_mu`. This prevents interleaved bytes from different messages (e.g., an ACK and a Heartbeat) that would otherwise corrupt the protocol stream.
 - **Precise Deadlines (Agent)**: Write deadlines are applied only to explicit `Flush()` calls. This prevents the TCP stream from being truncated mid-message by an automatic buffered write timeout.
 
-### 6. Shutdown
+### 6. JIT Approval Window & Session TTL
+
+If JIT approval is enabled, the log server includes a `session_ttl` in the `SERVER_READY` message. This value is derived from the remaining time in the user's approval window.
+
+```
+agent (TTL timer)               plugin (monitor)             terminal
+  │                              │                           │
+  ├─ 60s remaining               │                           │
+  ├─ send MSG_SESSION_WARNING ──►│                           │
+  │                              ├─ print amber banner ─────►│ [ SUDO-LOGGER: window expires in 60s ]
+  │                              │                           │
+  ├─ 0s remaining                │                           │
+  ├─ unfreeze cgroup             │                           │
+  ├─ send MSG_SESSION_EXPIRED ──►│                           │
+  │                              ├─ print red banner ───────►│ [ SUDO-LOGGER: session expired ]
+  │                              ├─ send SIGTERM to sudo     │
+  └─ close plugin connection     └─ exit                     │
+```
+
+The agent enforces the TTL at the kernel level by unfreezing and then terminating all processes in the session cgroup. This prevents users from outliving their approved window by leaving a `sudo bash` open.
+
+### 7. Shutdown
 
 ```
 plugin_close()
@@ -330,6 +359,10 @@ Who viewed which session is recorded in the access log:
 | `GET/PUT` | `/api/siem-config` | SIEM forwarding configuration |
 | `POST` | `/api/siem-cert` | Upload TLS certificate for SIEM (local mode only) |
 | `GET/PUT` | `/api/blocked-users` | Blocked users policy |
+| `GET` | `/api/approvals` | List pending approval requests |
+| `POST` | `/api/approvals/{id}/approve` | Approve a request (param: `window`) |
+| `POST` | `/api/approvals/{id}/deny` | Deny a request (body: `{reason}`) |
+| `GET/PUT` | `/api/approval-config` | JIT approval policy configuration |
 | `GET` | `/api/hosts` | Unique host names seen in session history |
 | `GET` | `/metrics` | Prometheus metrics |
 

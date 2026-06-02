@@ -240,6 +240,7 @@ migrate-sessions \
 ## Features
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
+- **Just-In-Time (JIT) sudo approval**: require human justification and admin approval before sudo proceeds. Supports asynchronous requests with Mattermost/Slack notifications and time-limited approval windows.
 - **Automatic secret redaction**: the agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `agent.conf`.
 - Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the agent was killed mid-recording
@@ -603,6 +604,36 @@ mask_pattern = (?i)acme-token-[a-z0-9]{16}
 ```
 
 Each `mask_pattern` line adds one additional Go-compatible regex. The entire match is replaced with `***`. Patterns are also applied to the `command` field in session metadata, preventing secrets passed as CLI arguments from appearing in the replay header.
+
+### Just-In-Time (JIT) Sudo Approval
+
+The JIT approval system allows security teams to enforce a "four-eyes" principle for sudo access. When enabled, sudo is blocked until an administrator grants access via the Replay UI or a webhook integration.
+
+#### Features
+- **Challenge-Response**: If enabled, the plugin prompts for a justification (e.g., Jira ticket ID).
+- **Approval Windows**: Admins grant access for a specific duration (e.g., 30m). During this window, the user can run `sudo` on that host without further prompts.
+- **Session TTL Enforcement**: Active sessions are automatically terminated by the agent when the approval window expires. A warning is shown in the terminal 60 seconds before termination.
+- **Mattermost/Slack Integration**: New requests are posted to a channel with a direct link to the approval UI. Outcome notifications (Approve/Deny) are sent as DMs to the user.
+- **Exempt Rules**: Whitelist specific users or hosts that do not require approval (e.g., `root` or automated service accounts).
+
+#### Configuration (Local mode)
+Edit `/etc/sudo-logger/approval-policy.yaml`:
+```yaml
+enabled: true
+default_window: 30m
+exempt:
+  - user: root
+notifications:
+  webhook_url: "http://mattermost.internal:8065/hooks/..."
+  request_channel: "sudo-logger"
+  replay_web_app_url: "http://replay.internal:8080"
+  mention_user: true
+```
+
+#### Configuration (Distributed mode)
+In distributed mode, settings are managed via the **Settings -> JIT Approval** tab in the Replay UI and stored in PostgreSQL. This allows dynamic updates without modifying ConfigMaps or restarting pods.
+
+---
 
 ### Distributed storage (S3 + PostgreSQL)
 
