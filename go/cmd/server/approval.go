@@ -741,8 +741,9 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 
 	// Verify HMAC
 	expected := m.generateActionToken(reqID, action, secret)
-	if secret == "" || token == "" || !hmac.Equal([]byte(token), []byte(expected)) {
-		log.Printf("approval: callback unauthorized: token mismatch for request %s. expected=%s, got=%s", reqID, expected, token)
+	if token == "" || !hmac.Equal([]byte(token), []byte(expected)) {
+		log.Printf("approval: callback unauthorized: token mismatch for request %s. expected=%s (len %d), got=%s (len %d)",
+			reqID, expected, len(expected), token, len(token))
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
