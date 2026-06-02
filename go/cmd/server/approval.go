@@ -363,6 +363,7 @@ type slackIntegration struct {
 
 type slackAction struct {
 	ID          string           `json:"id"`
+	Type        string           `json:"type"`
 	Name        string           `json:"name"`
 	Integration slackIntegration `json:"integration"`
 }
@@ -416,6 +417,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 			actions = []slackAction{
 				{
 					ID:   "approve",
+					Type: "button",
 					Name: "Approve",
 					Integration: slackIntegration{
 						URL: callbackURL,
@@ -428,6 +430,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 				},
 				{
 					ID:   "deny",
+					Type: "button",
 					Name: "Deny",
 					Integration: slackIntegration{
 						URL: callbackURL,
