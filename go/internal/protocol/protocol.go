@@ -22,6 +22,7 @@
 //	                      agent→plugin
 //	0x12  FETCH_CONFIG    agent→server          UTF-8 config key (e.g. "sandbox.yaml")
 //	0x13  CONFIG_DATA     server→agent          UTF-8 YAML content (empty = not found)
+//	0x18  SUDOERS_SNAPSHOT agent→server         JSON payload (SudoersSnapshot)
 //
 // CHUNK stream types map to sudo's iolog event types (see iolog/iolog.go):
 //
@@ -65,6 +66,7 @@ const (
 	MsgSessionChallengeResponse = uint8(0x15) // plugin→agent→server: user response; payload = JSON (SessionChallengeResponse)
 	MsgSessionExpired           = uint8(0x16) // agent→plugin: approval window expired, session is being terminated
 	MsgSessionWarning           = uint8(0x17) // agent→plugin: session will be terminated soon; payload = UTF-8 seconds left
+	MsgSudoersSnapshot          = uint8(0x18) // agent→server: sudoers state snapshot; payload = JSON (SudoersSnapshot)
 
 	StreamStdin   = uint8(0x00)
 
@@ -169,6 +171,24 @@ type SessionChallengeResponse struct {
 	Justification string `json:"justification"`
 }
 
+// SudoersSnapshot is the JSON payload for MsgSudoersSnapshot.
+// The agent sends one on startup and again whenever /etc/sudoers or
+// /etc/sudoers.d/* changes. Content is a concatenation of all sudoers files
+// separated by "# --- <path> ---" section headers.
+type SudoersSnapshot struct {
+	Host    string        `json:"host"`
+	Content string        `json:"content"` // full concatenated text of all files
+	SHA256  string        `json:"sha256"`  // hex sha256 of Content
+	Files   []SudoersFile `json:"files"`
+}
+
+// SudoersFile is a single file included in a SudoersSnapshot.
+type SudoersFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	SHA256  string `json:"sha256"`
+}
+
 // Chunk is a decoded CHUNK message.
 type Chunk struct {
 	Seq       uint64
@@ -236,6 +256,10 @@ const maxPayloadSize = uint32(1 * 1024 * 1024) // 1 MB
 // Callers must check this before calling ReadPayload to prevent a malicious
 // (mTLS-authenticated) agent from triggering a 1 MB allocation per connection.
 const MaxSessionStartPayload = uint32(64 * 1024) // 64 KB
+
+// MaxSudoersPayload is the per-type size limit for SUDOERS_SNAPSHOT messages.
+// Sudoers files are text-only; 256 KB is generous for even large deployments.
+const MaxSudoersPayload = uint32(256 * 1024) // 256 KB
 
 // ReadPayload reads exactly payloadLen bytes from r.
 // Returns an error if payloadLen exceeds maxPayloadSize to prevent

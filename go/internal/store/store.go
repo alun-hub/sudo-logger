@@ -163,6 +163,19 @@ type SessionStore interface {
 	// for the session identified by tsid.
 	HasSandboxViolation(ctx context.Context, tsid string) (bool, error)
 
+	// SaveSudoersSnapshot persists a sudoers snapshot from an agent.
+	// Deduplicates by (host, sha256): a snapshot with the same content as a
+	// previously stored one for that host is silently ignored.
+	SaveSudoersSnapshot(ctx context.Context, snap *protocol.SudoersSnapshot) error
+
+	// ListSudoersSnapshots returns the most recent `limit` snapshots for host,
+	// newest first. Used by the replay-server to show history and current state.
+	ListSudoersSnapshots(ctx context.Context, host string, limit int) ([]SudoersSnapshotRecord, error)
+
+	// ListSudoersHosts returns the distinct hostnames that have sent at least
+	// one snapshot. Used to populate the host list in the Sudoers UI tab.
+	ListSudoersHosts(ctx context.Context) ([]string, error)
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }
@@ -282,6 +295,14 @@ type WhitelistedUserEntry struct {
 // WhitelistPolicy is the full whitelisted-users configuration.
 type WhitelistPolicy struct {
 	Users []WhitelistedUserEntry
+}
+
+// SudoersSnapshotRecord is a single stored sudoers snapshot.
+type SudoersSnapshotRecord struct {
+	Host       string
+	SHA256     string
+	UploadedAt int64 // unix seconds
+	Content    string
 }
 
 // RiskCache is the persisted result of a risk-scoring run.

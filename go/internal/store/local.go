@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -396,8 +399,25 @@ func (ls *LocalStore) configFilePath(key string) string {
 	}
 }
 
+// sudoersConfigPath returns the filesystem path for a sudoers config key of
+// the form "sudoers/<subkey>". path.Base is used to prevent directory traversal.
+func (ls *LocalStore) sudoersConfigPath(key string) string {
+	sub := filepath.Base(key[len("sudoers/"):])
+	return filepath.Join(ls.cfg.LogDir, ".sudoers-config", sub)
+}
+
 // GetConfig reads a named config file from disk.
 func (ls *LocalStore) GetConfig(_ context.Context, key string) (string, error) {
+	if strings.HasPrefix(key, "sudoers/") {
+		data, err := os.ReadFile(ls.sudoersConfigPath(key))
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
 	path := ls.configFilePath(key)
 	if path == "" {
 		return "", fmt.Errorf("unknown config key %q", key)
@@ -414,6 +434,19 @@ func (ls *LocalStore) GetConfig(_ context.Context, key string) (string, error) {
 
 // SetConfig writes a named config file to disk.
 func (ls *LocalStore) SetConfig(_ context.Context, key, value string) error {
+	if strings.HasPrefix(key, "sudoers/") {
+		p := ls.sudoersConfigPath(key)
+		if value == "" {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			return err
+		}
+		return os.WriteFile(p, []byte(value), 0o640)
+	}
 	path := ls.configFilePath(key)
 	if path == "" {
 		return fmt.Errorf("unknown config key %q", key)
@@ -1088,4 +1121,105 @@ func (ls *LocalStore) doCleanup(ctx context.Context) {
 	if removed > 0 {
 		log.Printf("store/local: cleanup: removed %d session(s)", removed)
 	}
+}
+
+// ── Sudoers snapshot API ──────────────────────────────────────────────────────
+
+// SaveSudoersSnapshot implements SessionStore.
+// Snapshots are stored as <logdir>/.sudoers/<host>/<unix_ts>.conf.
+// If a file with the same sha256 already exists for the host, the write is
+// skipped (deduplication).
+func (ls *LocalStore) SaveSudoersSnapshot(_ context.Context, snap *protocol.SudoersSnapshot) error {
+	dir := filepath.Join(ls.cfg.LogDir, ".sudoers", snap.Host)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("sudoers snapshot dir: %w", err)
+	}
+
+	// Scan for an existing file with the same sha256.
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		h := sha256.Sum256(data)
+		if hex.EncodeToString(h[:]) == snap.SHA256 {
+			return nil // already stored
+		}
+	}
+
+	path := filepath.Join(dir, fmt.Sprintf("%d.conf", time.Now().Unix()))
+	return os.WriteFile(path, []byte(snap.Content), 0o640)
+}
+
+// ListSudoersSnapshots implements SessionStore.
+func (ls *LocalStore) ListSudoersSnapshots(_ context.Context, host string, limit int) ([]SudoersSnapshotRecord, error) {
+	dir := filepath.Join(ls.cfg.LogDir, ".sudoers", host)
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	type entry struct {
+		name    string
+		modTime time.Time
+	}
+	var files []entry
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, entry{e.Name(), info.ModTime()})
+	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].modTime.After(files[j].modTime)
+	})
+
+	var out []SudoersSnapshotRecord
+	for _, f := range files {
+		if len(out) >= limit {
+			break
+		}
+		data, err := os.ReadFile(filepath.Join(dir, f.name))
+		if err != nil {
+			continue
+		}
+		h := sha256.Sum256(data)
+		out = append(out, SudoersSnapshotRecord{
+			Host:       host,
+			SHA256:     hex.EncodeToString(h[:]),
+			UploadedAt: f.modTime.Unix(),
+			Content:    string(data),
+		})
+	}
+	return out, nil
+}
+
+// ListSudoersHosts implements SessionStore.
+func (ls *LocalStore) ListSudoersHosts(_ context.Context) ([]string, error) {
+	dir := filepath.Join(ls.cfg.LogDir, ".sudoers")
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var hosts []string
+	for _, e := range entries {
+		if e.IsDir() {
+			hosts = append(hosts, e.Name())
+		}
+	}
+	return hosts, nil
 }

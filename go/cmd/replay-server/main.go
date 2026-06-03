@@ -900,6 +900,33 @@ func main() {
 		fmt.Fprintf(w, `{"user":%q,"logoutUrl":%q}`, user, logoutURL)
 	})
 
+	mux.HandleFunc("/api/sudoers/hosts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleGetSudoersHosts(w, r)
+	})
+	mux.HandleFunc("/api/sudoers/snapshots", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleGetSudoersSnapshots(w, r)
+	})
+	mux.HandleFunc("/api/sudoers/config", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetSudoersConfig(w, r)
+		case http.MethodPut:
+			handlePutSudoersConfig(w, r)
+		case http.MethodDelete:
+			handleDeleteSudoersConfig(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		log.Fatalf("embed static: %v", err)
@@ -1801,6 +1828,142 @@ func handlePutSandboxTemplates(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ── Sudoers API ───────────────────────────────────────────────────────────────
+
+// handleGetSudoersHosts returns the union of hosts that have sent snapshots
+// and hosts that have recorded sessions.
+func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
+	snapHosts, err := sessionStore.ListSudoersHosts(r.Context())
+	if err != nil {
+		http.Error(w, "list hosts: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Merge with session hosts so operators can stage config before first snapshot.
+	sessions, err := sessionStore.ListSessions(r.Context())
+	if err == nil {
+		seen := make(map[string]struct{}, len(snapHosts))
+		for _, h := range snapHosts {
+			seen[h] = struct{}{}
+		}
+		for _, s := range sessions {
+			if _, ok := seen[s.Host]; !ok {
+				seen[s.Host] = struct{}{}
+				snapHosts = append(snapHosts, s.Host)
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(snapHosts); err != nil {
+		log.Printf("sudoers hosts encode: %v", err)
+	}
+}
+
+// handleGetSudoersSnapshots returns the most recent 20 snapshots for a host.
+func handleGetSudoersSnapshots(w http.ResponseWriter, r *http.Request) {
+	host := r.URL.Query().Get("host")
+	if host == "" {
+		http.Error(w, "host required", http.StatusBadRequest)
+		return
+	}
+	snaps, err := sessionStore.ListSudoersSnapshots(r.Context(), host, 20)
+	if err != nil {
+		http.Error(w, "list snapshots: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type snapJSON struct {
+		SHA256     string `json:"sha256"`
+		UploadedAt int64  `json:"uploaded_at"`
+		Content    string `json:"content"`
+	}
+	var out []snapJSON
+	for _, s := range snaps {
+		out = append(out, snapJSON{s.SHA256, s.UploadedAt, s.Content})
+	}
+	if out == nil {
+		out = []snapJSON{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"host": host, "snapshots": out}); err != nil {
+		log.Printf("sudoers snapshots encode: %v", err)
+	}
+}
+
+// handleGetSudoersConfig returns the staged (desired) config for a host,
+// falling back to the _default template if no host-specific config is set.
+func handleGetSudoersConfig(w http.ResponseWriter, r *http.Request) {
+	host := r.URL.Query().Get("host")
+	key := "sudoers/_default"
+	isOverride := false
+	if host != "" {
+		key = "sudoers/" + host
+	}
+	content, err := sessionStore.GetConfig(r.Context(), key)
+	if err != nil {
+		http.Error(w, "get config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if host != "" && content == "" {
+		// No host-specific config — fall back to _default.
+		content, err = sessionStore.GetConfig(r.Context(), "sudoers/_default")
+		if err != nil {
+			http.Error(w, "get default config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else if host != "" && content != "" {
+		isOverride = true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"host":        host,
+		"content":     content,
+		"is_override": isOverride,
+	}); err != nil {
+		log.Printf("sudoers config encode: %v", err)
+	}
+}
+
+// handlePutSudoersConfig stores a desired sudoers config for a host (or the
+// global _default when host is empty).
+func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, int64(256*1024))
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	host := r.URL.Query().Get("host")
+	key := "sudoers/_default"
+	if host != "" {
+		key = "sudoers/" + host
+	}
+	if err := sessionStore.SetConfig(r.Context(), key, body.Content); err != nil {
+		http.Error(w, "set config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("sudoers: config updated key=%s by %s", key, viewerFromContext(r))
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// handleDeleteSudoersConfig removes a host-specific config override, causing
+// the agent to fall back to the _default template.
+func handleDeleteSudoersConfig(w http.ResponseWriter, r *http.Request) {
+	host := r.URL.Query().Get("host")
+	if host == "" {
+		http.Error(w, "host required for delete", http.StatusBadRequest)
+		return
+	}
+	if err := sessionStore.SetConfig(r.Context(), "sudoers/"+host, ""); err != nil {
+		http.Error(w, "delete config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("sudoers: config deleted for host=%s by %s", host, viewerFromContext(r))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }

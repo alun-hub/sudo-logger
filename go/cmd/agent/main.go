@@ -120,6 +120,10 @@ func main() {
 		startSandboxPoller()
 	}
 
+	// Snapshot sudoers state and watch for changes; also poll for desired config.
+	go startSudoersWatcher(ctx, hostname)
+	startSudoersPoller(hostname)
+
 	// Remove stale socket from previous run.
 	if err := os.Remove(cfg.Socket); err != nil && !os.IsNotExist(err) {
 		log.Printf("remove stale socket: %v", err)

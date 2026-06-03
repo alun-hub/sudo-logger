@@ -752,6 +752,22 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			_ = protocol.WriteMessage(w, protocol.MsgConfigData, []byte(content))
 			netWriteMu.Unlock()
 
+		case protocol.MsgSudoersSnapshot:
+			if plen > protocol.MaxSudoersPayload {
+				log.Printf("SECURITY: MsgSudoersSnapshot too large from %s: %d bytes (max %d) — dropping",
+					remote, plen, protocol.MaxSudoersPayload)
+				return
+			}
+			var snap protocol.SudoersSnapshot
+			if err := json.Unmarshal(payload, &snap); err != nil {
+				log.Printf("parse MsgSudoersSnapshot from %s: %v", remote, err)
+				return
+			}
+			if err := srv.sessionStore.SaveSudoersSnapshot(context.Background(), &snap); err != nil {
+				log.Printf("save sudoers snapshot host=%s: %v", snap.Host, err)
+			}
+			return
+
 		case protocol.MsgDivergenceAlert:
 			// Agent detected a sudo/pkexec execve with no plugin SESSION_START.
 			// This indicates sudo.conf was tampered with (Plugin line removed).

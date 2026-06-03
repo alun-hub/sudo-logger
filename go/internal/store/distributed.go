@@ -139,7 +139,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	8 — added tty_cols, tty_rows to capture terminal dimensions
 //	9 — added sudo_approval_requests and sudo_approval_windows for JIT approval
 //	10 — added sudo_whitelisted_users for JIT approval bypass
-const currentSchemaVersion = 10
+//	11 — added sudo_sudoers_snapshots for sudoers state tracking
+const currentSchemaVersion = 11
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -284,6 +285,19 @@ CREATE TABLE IF NOT EXISTS sudo_whitelisted_users (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS sudo_whitelisted_users_uk
     ON sudo_whitelisted_users (username, COALESCE(host, ''));
+
+-- migration v11: sudoers state snapshots
+CREATE TABLE IF NOT EXISTS sudo_sudoers_snapshots (
+    id          BIGSERIAL PRIMARY KEY,
+    host        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    sha256      TEXT NOT NULL,
+    uploaded_at BIGINT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sudo_sudoers_snapshots_host_sha256
+    ON sudo_sudoers_snapshots (host, sha256);
+CREATE INDEX IF NOT EXISTS sudo_sudoers_snapshots_host_ts
+    ON sudo_sudoers_snapshots (host, uploaded_at DESC);
 `); err != nil {
 		return err
 	}
@@ -1280,4 +1294,59 @@ func (dw *distributedWriter) doUpload(bufPath string) error {
 		ContentType:   aws.String("application/octet-stream"),
 	})
 	return err
+}
+
+// ── Sudoers snapshot API ──────────────────────────────────────────────────────
+
+// SaveSudoersSnapshot implements SessionStore.
+func (d *DistributedStore) SaveSudoersSnapshot(ctx context.Context, snap *protocol.SudoersSnapshot) error {
+	_, err := d.db.Exec(ctx, `
+INSERT INTO sudo_sudoers_snapshots (host, content, sha256, uploaded_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (host, sha256) DO NOTHING`,
+		snap.Host, snap.Content, snap.SHA256, time.Now().Unix())
+	return err
+}
+
+// ListSudoersSnapshots implements SessionStore.
+func (d *DistributedStore) ListSudoersSnapshots(ctx context.Context, host string, limit int) ([]SudoersSnapshotRecord, error) {
+	rows, err := d.db.Query(ctx, `
+SELECT host, sha256, uploaded_at, content
+FROM sudo_sudoers_snapshots
+WHERE host = $1
+ORDER BY uploaded_at DESC
+LIMIT $2`, host, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []SudoersSnapshotRecord
+	for rows.Next() {
+		var r SudoersSnapshotRecord
+		if err := rows.Scan(&r.Host, &r.SHA256, &r.UploadedAt, &r.Content); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListSudoersHosts implements SessionStore.
+func (d *DistributedStore) ListSudoersHosts(ctx context.Context) ([]string, error) {
+	rows, err := d.db.Query(ctx, `SELECT DISTINCT host FROM sudo_sudoers_snapshots ORDER BY host`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var hosts []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, h)
+	}
+	return hosts, rows.Err()
 }
