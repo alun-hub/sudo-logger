@@ -85,7 +85,8 @@ allow sudo_agent_t file_type:dir { open read getattr search watch };
 # File/symlink/socket: getattr (stat) needed when sandbox config loader
 # enumerates protected paths recursively.  sock_file covers sockets such as
 # /var/lib/sss/pipes/private/sbus-master (sssd_var_lib_t, a sock_file).
-allow sudo_agent_t file_type:file { getattr };
+# file:watch is the kernel 5.x+ permission required by inotify_add_watch(2).
+allow sudo_agent_t file_type:file { getattr watch };
 allow sudo_agent_t file_type:lnk_file { getattr read };
 allow sudo_agent_t file_type:sock_file { getattr };
 # proc_security_t (/proc/sys/fs/suid_dumpable etc.) is not in file_type.
