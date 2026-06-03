@@ -4720,6 +4720,63 @@ function renderSudoersMain(snaps) {
   `;
 }
 
+// ── Card component renderer ───────────────────────────────────────────────────
+
+function renderAccessCard(r, i) {
+  const isGroup = r.principalType === 'group';
+  const icon = isGroup ? '👥' : '👤';
+
+  const cmdsHtml = r.cmds.map((c, ci) =>
+    `<div class="sudoers-chip">
+      <span>${esc(c)}</span>
+      <button class="sudoers-chip-rm" onclick="removeCmd(${i},${ci})">×</button>
+    </div>`
+  ).join('');
+
+  return `
+    <div class="sudoers-card">
+      <div class="sudoers-card-header">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:18px">${icon}</span>
+          <strong style="color:var(--text);font-size:15px">${esc(isGroup ? '%' + r.principalName : r.principalName)}</strong>
+        </div>
+        <button class="sudoers-del-btn" onclick="removeRule(${i})">Delete</button>
+      </div>
+
+      <div class="sudoers-card-body">
+        <div style="margin-bottom:12px">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase">Commands</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${cmdsHtml}
+            <button class="sudoers-chip-add" onclick="addCmd(${i})">+ Add</button>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:20px;align-items:center;background:rgba(255,255,255,0.03);padding:10px;border-radius:6px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" ${r.nopasswd?'checked':''} onchange="sudoersRules[${i}].nopasswd=this.checked;refreshVisual()" style="accent-color:var(--green)">
+            <span style="font-size:13px">No password required</span>
+          </label>
+
+          <details style="font-size:12px">
+            <summary style="cursor:pointer;color:var(--text-dim)">Advanced Settings</summary>
+            <div style="padding-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div>
+                <div style="font-size:10px;color:var(--text-dim)">RUN AS</div>
+                <input class="sudoers-cell-input" value="${esc(r.runasUser)}" oninput="sudoersRules[${i}].runasUser=this.value" placeholder="root">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--text-dim)">HOSTS</div>
+                <input class="sudoers-cell-input" value="${esc(r.hosts)}" oninput="sudoersRules[${i}].hosts=this.value" placeholder="ALL">
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ── Visual editor renderer ────────────────────────────────────────────────────
 
 function renderVisualEditor() {
