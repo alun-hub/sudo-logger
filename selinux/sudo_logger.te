@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.17)
+policy_module(sudo_logger, 1.1.18)
 
 ########################################
 #
@@ -43,7 +43,6 @@ require {
     type bin_t;
     type init_t;
     type cgroup_t;
-    type sudoers_conf_t;
     type etc_t;
     class dbus { send_msg };
     class bpf { map_create map_read map_write prog_load prog_run };
@@ -137,9 +136,10 @@ auth_read_passwd(sudo_agent_t)
 systemd_userdbd_stream_connect(sudo_agent_t)
 
 # Manage sudoers configuration (for sudoers management feature)
-# Explicit raw rules for both types
-allow sudo_agent_t { sudoers_conf_t etc_t }:dir { getattr search write add_name remove_name watch };
-allow sudo_agent_t { sudoers_conf_t etc_t }:file { getattr open read write create unlink rename watch };
+# Explicit raw rules for etc_t (covers /etc/sudoers.d on Fedora).
+# Removed sudoers_conf_t which does not exist in the target base policy.
+allow sudo_agent_t etc_t:dir { getattr search write add_name remove_name watch };
+allow sudo_agent_t etc_t:file { getattr open read write create unlink rename watch };
 
 # Logging
 logging_send_syslog_msg(sudo_agent_t)
