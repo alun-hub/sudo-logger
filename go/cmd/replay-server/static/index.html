@@ -4796,6 +4796,19 @@ async function saveSudoersConfig() {
     const raw = document.getElementById('sudoers-raw-area');
     content = raw ? raw.value : sudoersCurrentConfig;
   } else {
+    // Basic visual editor validation
+    for (const a of sudoersAliases) {
+      if (!a.name || !a.members) {
+        alert('Validation error: Alias name and members cannot be empty.');
+        return;
+      }
+    }
+    for (const r of sudoersRules) {
+      if (!r.principal) {
+        alert('Validation error: Rule principal (user/group) cannot be empty.');
+        return;
+      }
+    }
     content = serializeSudoers(sudoersRules, sudoersAliases, sudoersAdvanced, sudoersCurrentHost, '');
   }
   const host = sudoersCurrentHost === '_default' ? '' : sudoersCurrentHost;
