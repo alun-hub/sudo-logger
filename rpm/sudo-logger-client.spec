@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.111
+Version:        1.20.112
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
