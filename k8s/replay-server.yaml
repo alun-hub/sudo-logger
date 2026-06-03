@@ -71,6 +71,8 @@ spec:
           volumeMounts:
             - name: buffer
               mountPath: /var/lib/sudo-logger/buffer
+            - name: tmp
+              mountPath: /tmp
 
           securityContext:
             allowPrivilegeEscalation: false
@@ -103,6 +105,8 @@ spec:
 
       volumes:
         - name: buffer
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}
 ---
 apiVersion: v1

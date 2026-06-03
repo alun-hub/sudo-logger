@@ -13,11 +13,19 @@ RUN CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /usr/local/bin/sudo-l
     CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /usr/local/bin/sudo-replay-server ./cmd/replay-server
 
 # ---- Runtime stage ----
-# distroless/static-debian12:nonroot contains only minimal binaries,
-# certs, and a non-privileged user (UID 65532).
-FROM gcr.io/distroless/static-debian12:nonroot
-# wget from busybox enables docker-compose healthchecks inside distroless.
-COPY --from=busybox:stable /bin/wget /usr/local/bin/wget
+# Use debian:12-slim to provide a shell and package manager (needed for sudo/visudo).
+FROM debian:12-slim
+
+# Install sudo (for visudo validation) and ca-certificates (for S3 TLS).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends sudo ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create a nonroot user (UID 65532) to match distroless behavior.
+RUN groupadd -g 65532 nonroot && \
+    useradd -u 65532 -g nonroot -s /sbin/nologin nonroot
+
+USER nonroot:nonroot
 
 # Copy both server binaries to the runtime image.
 COPY --from=builder /usr/local/bin/sudo-logserver /usr/local/bin/sudo-logserver
