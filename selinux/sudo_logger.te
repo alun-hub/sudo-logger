@@ -176,7 +176,6 @@ allow sudo_agent_t sudoers_conf_t:file watch;
 
 # Use system interfaces for generic /etc management (resolves denials on etc_t)
 files_manage_etc_files(sudo_agent_t)
-files_etc_filetrans_etc(sudo_agent_t, file)
 
 # Logging
 logging_send_syslog_msg(sudo_agent_t)
