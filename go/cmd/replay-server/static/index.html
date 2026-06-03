@@ -4476,6 +4476,29 @@ let sudoersRules = [];          // parsed rule objects
 let sudoersAliases = [];        // { type, name, members }
 let sudoersAdvanced = '';       // unparseable lines (raw section)
 let sudoersSearchQuery = '';
+let sudoersOpenDetails = new Set();
+
+function toggleSudoersDetails(id, open) {
+  if (open) sudoersOpenDetails.add(id);
+  else sudoersOpenDetails.delete(id);
+}
+
+function saveSudoersFocus() {
+  const active = document.activeElement;
+  if (!active || !active.id || !active.id.startsWith('sudoers-')) return null;
+  return { id: active.id, start: active.selectionStart, end: active.selectionEnd };
+}
+
+function restoreSudoersFocus(f) {
+  if (!f) return;
+  const el = document.getElementById(f.id);
+  if (el) {
+    el.focus();
+    if (f.start !== undefined && el.setSelectionRange) {
+      el.setSelectionRange(f.start, f.end);
+    }
+  }
+}
 
 function highlightSudoers(text) {
   return text.split('\n').map(line => {
@@ -4663,6 +4686,7 @@ function formatTS(unixSec) {
 }
 
 function renderSudoersMain(snaps) {
+  const f = saveSudoersFocus();
   const main = document.getElementById('sudoers-main');
   const host = sudoersCurrentHost;
 
@@ -4723,6 +4747,7 @@ function renderSudoersMain(snaps) {
     <div class="sudoers-section-hdr" style="margin-top:20px">Snapshot history</div>
     <div class="sudoers-history">${historyRows || '<span style="color:var(--text-dim);font-size:12px">No snapshots received yet.</span>'}</div>
   `;
+  restoreSudoersFocus(f);
 }
 
 // ── Card component renderer ───────────────────────────────────────────────────
@@ -4730,6 +4755,8 @@ function renderSudoersMain(snaps) {
 function renderAccessCard(r, i) {
   const isGroup = r.principalType === 'group';
   const icon = isGroup ? '👥' : '👤';
+  const detailsId = `sudoers-details-rule-${i}`;
+  const isOpen = sudoersOpenDetails.has(detailsId) ? 'open' : '';
 
   const cmdsHtml = r.cmds.map((c, ci) =>
     `<div class="sudoers-chip">
@@ -4759,33 +4786,33 @@ function renderAccessCard(r, i) {
 
         <div style="display:flex;gap:20px;align-items:center;background:rgba(255,255,255,0.03);padding:10px;border-radius:6px">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="checkbox" ${r.nopasswd?'checked':''} onchange="sudoersRules[${i}].nopasswd=this.checked;refreshVisual()" style="accent-color:var(--green)">
+            <input id="sudoers-rule-${i}-nopasswd" type="checkbox" ${r.nopasswd?'checked':''} onchange="sudoersRules[${i}].nopasswd=this.checked;refreshVisual()" style="accent-color:var(--green)">
             <span style="font-size:13px">No password required</span>
           </label>
 
-          <details style="font-size:12px">
+          <details id="${detailsId}" ${isOpen} ontoggle="toggleSudoersDetails('${detailsId}', this.open)" style="font-size:12px">
             <summary style="cursor:pointer;color:var(--text-dim)">Advanced Settings</summary>
             <div style="padding-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div>
                 <div style="font-size:10px;color:var(--text-dim)">RUN AS USER</div>
-                <input class="sudoers-cell-input" value="${esc(r.runasUser)}" oninput="sudoersRules[${i}].runasUser=this.value" placeholder="root">
+                <input id="sudoers-rule-${i}-runasUser" class="sudoers-cell-input" value="${esc(r.runasUser)}" oninput="sudoersRules[${i}].runasUser=this.value" placeholder="root">
               </div>
               <div>
                 <div style="font-size:10px;color:var(--text-dim)">RUN AS GROUP</div>
-                <input class="sudoers-cell-input" value="${esc(r.runasGroup)}" oninput="sudoersRules[${i}].runasGroup=this.value" placeholder="(group)">
+                <input id="sudoers-rule-${i}-runasGroup" class="sudoers-cell-input" value="${esc(r.runasGroup)}" oninput="sudoersRules[${i}].runasGroup=this.value" placeholder="(group)">
               </div>
               <div>
                 <div style="font-size:10px;color:var(--text-dim)">HOSTS</div>
-                <input class="sudoers-cell-input" value="${esc(r.hosts)}" oninput="sudoersRules[${i}].hosts=this.value" placeholder="ALL">
+                <input id="sudoers-rule-${i}-hosts" class="sudoers-cell-input" value="${esc(r.hosts)}" oninput="sudoersRules[${i}].hosts=this.value" placeholder="ALL">
               </div>
             </div>
             <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                <input type="checkbox" ${r.noexec?'checked':''} onchange="sudoersRules[${i}].noexec=this.checked;refreshVisual()" style="accent-color:var(--amber)">
+                <input id="sudoers-rule-${i}-noexec" type="checkbox" ${r.noexec?'checked':''} onchange="sudoersRules[${i}].noexec=this.checked;refreshVisual()" style="accent-color:var(--amber)">
                 <span>Disable shell escape (NOEXEC)</span>
               </label>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                <input type="checkbox" ${r.setenv?'checked':''} onchange="sudoersRules[${i}].setenv=this.checked;refreshVisual()" style="accent-color:var(--blue)">
+                <input id="sudoers-rule-${i}-setenv" type="checkbox" ${r.setenv?'checked':''} onchange="sudoersRules[${i}].setenv=this.checked;refreshVisual()" style="accent-color:var(--blue)">
                 <span>Allow environment variables (SETENV)</span>
               </label>
             </div>
@@ -4805,18 +4832,21 @@ function renderVisualEditor() {
 
   const cardsHtml = filteredRules.map(({ r, i }) => renderAccessCard(r, i)).join('');
 
+  const aliasDetailsId = 'sudoers-advanced-details';
+  const isAliasOpen = sudoersOpenDetails.has(aliasDetailsId) ? 'open' : '';
+
   const aliasRows = sudoersAliases.map((a, i) => `
     <div class="sudoers-alias-row">
       <span class="sudoers-alias-type">${esc(a.type)}</span>
-      <input class="sudoers-alias-name" value="${esc(a.name)}" oninput="sudoersAliases[${i}].name=this.value" placeholder="NAME">
+      <input id="sudoers-alias-${i}-name" class="sudoers-alias-name" value="${esc(a.name)}" oninput="sudoersAliases[${i}].name=this.value" placeholder="NAME">
       <span style="color:var(--text-dim);font-size:12px;padding:0 4px">=</span>
-      <input class="sudoers-alias-members" value="${esc(a.members)}" oninput="sudoersAliases[${i}].members=this.value" placeholder="member1, member2">
+      <input id="sudoers-alias-${i}-members" class="sudoers-alias-members" value="${esc(a.members)}" oninput="sudoersAliases[${i}].members=this.value" placeholder="member1, member2">
       <button class="sudoers-del-btn" onclick="removeAlias(${i})" title="Delete">✕</button>
     </div>`).join('');
 
   return `
     <div class="sudoers-search-container">
-      <input type="text" class="sudoers-search-input" placeholder="Search users or groups..." value="${esc(sudoersSearchQuery)}"
+      <input type="text" id="sudoers-search-input" class="sudoers-search-input" placeholder="Search users or groups..." value="${esc(sudoersSearchQuery)}"
              oninput="sudoersSearchQuery=this.value;renderSudoersMain(null)">
     </div>
 
@@ -4830,7 +4860,7 @@ function renderVisualEditor() {
     </div>
 
     <div class="sudoers-section-hdr" style="margin-top:24px">Templates & Advanced</div>
-    <details>
+    <details id="${aliasDetailsId}" ${isAliasOpen} ontoggle="toggleSudoersDetails('${aliasDetailsId}', this.open)">
       <summary style="cursor:pointer;font-size:12px;color:var(--text-dim)">Aliases & Raw Advanced Rules</summary>
 
       <div style="margin-top:12px">
@@ -4845,15 +4875,17 @@ function renderVisualEditor() {
 
       <div style="margin-top:18px">
         <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Raw Advanced Rules</div>
-        <textarea class="sudoers-raw-area" style="height:120px;margin-top:6px" oninput="sudoersAdvanced=this.value">${esc(sudoersAdvanced)}</textarea>
+        <textarea id="sudoers-advanced-text" class="sudoers-raw-area" style="height:120px;margin-top:6px" oninput="sudoersAdvanced=this.value">${esc(sudoersAdvanced)}</textarea>
       </div>
     </details>
   `;
 }
 
 function refreshVisual() {
+  const f = saveSudoersFocus();
   const el = document.getElementById('sudoers-visual-editor');
   if (el) el.innerHTML = renderVisualEditor();
+  restoreSudoersFocus(f);
 }
 
 function switchSudoersMode(mode) {
