@@ -691,6 +691,16 @@
       font-family: var(--font-mono); font-size: 12px; padding: 10px 12px;
       border-radius: var(--radius); resize: vertical; }
     .sudoers-raw-area:focus { border-color: var(--blue); outline: none; }
+    .sudoers-highlighted { width: 100%; min-height: 340px; box-sizing: border-box;
+      background: var(--card); border: 1px solid var(--border-mid);
+      font-family: var(--font-mono); font-size: 12px; padding: 10px 12px;
+      border-radius: var(--radius); white-space: pre; overflow: auto; margin: 0;
+      cursor: default; }
+    .sh-comment { color: var(--text-dim); font-style: italic; }
+    .sh-alias-kw { color: var(--blue); font-weight: 700; }
+    .sh-defaults { color: var(--blue); font-weight: 700; }
+    .sh-kw { color: #e8a44d; font-weight: 700; }
+    .sh-group { color: #73c991; }
     /* Alias rows */
     .sudoers-alias-row { display: flex; gap: 6px; align-items: center; margin-bottom: 5px; }
     .sudoers-alias-type { font-size: 11px; font-weight: 700; color: var(--text-dim);
@@ -4421,9 +4431,21 @@ let sudoersCurrentSnap = null;  // latest snapshot content
 let sudoersCurrentConfig = '';  // staged (desired) content
 let sudoersIsOverride = false;
 let sudoersMode = 'visual';     // 'visual' | 'raw'
+let sudoersRawEditing = false;  // raw mode: false = highlighted view, true = textarea
 let sudoersRules = [];          // parsed rule objects
 let sudoersAliases = [];        // { type, name, members }
 let sudoersAdvanced = '';       // unparseable lines (raw section)
+
+function highlightSudoers(text) {
+  return text.split('\n').map(line => {
+    const h = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (/^\s*#/.test(line)) return `<span class="sh-comment">${h}</span>`;
+    return h
+      .replace(/\b(User_Alias|Host_Alias|Cmnd_Alias|Runas_Alias|Defaults)\b/g, '<span class="sh-alias-kw">$1</span>')
+      .replace(/\b(NOPASSWD|NOEXEC|SETENV|NOSETENV|LOG_INPUT|LOG_OUTPUT|FOLLOW|MAIL|ALL)\b/g, '<span class="sh-kw">$1</span>')
+      .replace(/(%[a-zA-Z][a-zA-Z0-9_-]*)/g, '<span class="sh-group">$1</span>');
+  }).join('\n');
+}
 
 // ── Sudoers parser ────────────────────────────────────────────────────────────
 
@@ -4626,8 +4648,15 @@ function renderSudoersMain(snaps) {
       ${renderVisualEditor()}
     </div>
     <div id="sudoers-raw-editor" ${sudoersMode!=='raw'?'style="display:none"':''}>
-      <div class="sudoers-section-hdr">Raw sudoers content</div>
-      <textarea class="sudoers-raw-area" id="sudoers-raw-area">${esc(sudoersCurrentConfig)}</textarea>
+      <div class="sudoers-section-hdr" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Raw sudoers content</span>
+        ${sudoersRawEditing
+          ? `<button class="btn-secondary" style="font-size:11px;padding:2px 8px" onclick="const r=document.getElementById('sudoers-raw-area');if(r)sudoersCurrentConfig=r.value;sudoersRawEditing=false;renderSudoersMain(null)">Done editing</button>`
+          : `<button class="btn-secondary" style="font-size:11px;padding:2px 8px" onclick="sudoersRawEditing=true;renderSudoersMain(null)">Edit</button>`}
+      </div>
+      ${sudoersRawEditing
+        ? `<textarea class="sudoers-raw-area" id="sudoers-raw-area">${esc(sudoersCurrentConfig)}</textarea>`
+        : `<pre class="sudoers-highlighted">${highlightSudoers(sudoersCurrentConfig)}</pre>`}
     </div>
 
     <div class="sudoers-action-bar">
@@ -4737,6 +4766,7 @@ function switchSudoersMode(mode) {
     sudoersRules = parsed.rules; sudoersAliases = parsed.aliases; sudoersAdvanced = parsed.advanced;
   }
   sudoersMode = mode;
+  sudoersRawEditing = false;
   renderSudoersMain(null);
 }
 
