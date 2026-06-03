@@ -4512,7 +4512,9 @@ function serializeSudoers(rules, aliases, advanced, host, viewer) {
     if (r.noexec)   opts.push('NOEXEC:');
     if (r.setenv)   opts.push('SETENV:');
     const cmds = r.cmds.length ? r.cmds.join(', ') : 'ALL';
-    lines.push(`${principal} ${r.hosts || 'ALL'} = ${runas} ${opts.join(' ')} ${cmds}`.replace(/\s+/g, ' ').trim());
+    // Ensure one space before opts and no space between NOPASSWD: and cmds if opts exist
+    const optStr = opts.length ? opts.join(' ') : '';
+    lines.push(`${principal} ${r.hosts || 'ALL'} = ${runas} ${optStr} ${cmds}`.replace(/\s+/g, ' ').trim());
   }
   if (advanced && advanced.trim()) {
     lines.push('');
