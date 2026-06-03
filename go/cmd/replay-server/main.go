@@ -1938,6 +1938,11 @@ func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host := r.URL.Query().Get("host")
+	if host != "" && (len(host) > 255 || host[0] == '.' ||
+		strings.ContainsAny(host, "/\\") || strings.Contains(host, "..")) {
+		http.Error(w, "invalid host", http.StatusBadRequest)
+		return
+	}
 	key := "sudoers/_default"
 	if host != "" {
 		key = "sudoers/" + host
@@ -1957,6 +1962,11 @@ func handleDeleteSudoersConfig(w http.ResponseWriter, r *http.Request) {
 	host := r.URL.Query().Get("host")
 	if host == "" {
 		http.Error(w, "host required for delete", http.StatusBadRequest)
+		return
+	}
+	if len(host) > 255 || host[0] == '.' ||
+		strings.ContainsAny(host, "/\\") || strings.Contains(host, "..") {
+		http.Error(w, "invalid host", http.StatusBadRequest)
 		return
 	}
 	if err := sessionStore.SetConfig(r.Context(), "sudoers/"+host, ""); err != nil {

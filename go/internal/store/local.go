@@ -1126,10 +1126,22 @@ func (ls *LocalStore) doCleanup(ctx context.Context) {
 // ── Sudoers snapshot API ──────────────────────────────────────────────────────
 
 // SaveSudoersSnapshot implements SessionStore.
+// validSudoersHost rejects host values that could escape the .sudoers/
+// directory via path traversal (e.g. "../", absolute paths, embedded slashes).
+func validSudoersHost(host string) bool {
+	if host == "" || len(host) > 255 || host[0] == '.' {
+		return false
+	}
+	return !strings.ContainsAny(host, "/\\") && !strings.Contains(host, "..")
+}
+
 // Snapshots are stored as <logdir>/.sudoers/<host>/<unix_ts>.conf.
 // If a file with the same sha256 already exists for the host, the write is
 // skipped (deduplication).
 func (ls *LocalStore) SaveSudoersSnapshot(_ context.Context, snap *protocol.SudoersSnapshot) error {
+	if !validSudoersHost(snap.Host) {
+		return fmt.Errorf("invalid host: %q", snap.Host)
+	}
 	dir := filepath.Join(ls.cfg.LogDir, ".sudoers", snap.Host)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("sudoers snapshot dir: %w", err)
@@ -1157,6 +1169,9 @@ func (ls *LocalStore) SaveSudoersSnapshot(_ context.Context, snap *protocol.Sudo
 
 // ListSudoersSnapshots implements SessionStore.
 func (ls *LocalStore) ListSudoersSnapshots(_ context.Context, host string, limit int) ([]SudoersSnapshotRecord, error) {
+	if !validSudoersHost(host) {
+		return nil, fmt.Errorf("invalid host: %q", host)
+	}
 	dir := filepath.Join(ls.cfg.LogDir, ".sudoers", host)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {

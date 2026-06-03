@@ -763,6 +763,11 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("parse MsgSudoersSnapshot from %s: %v", remote, err)
 				return
 			}
+			if snap.Host == "" || len(snap.Host) > 255 || snap.Host[0] == '.' ||
+				strings.ContainsAny(snap.Host, "/\\") || strings.Contains(snap.Host, "..") {
+				log.Printf("SECURITY: MsgSudoersSnapshot invalid host %q from %s — dropping", snap.Host, remote)
+				return
+			}
 			if err := srv.sessionStore.SaveSudoersSnapshot(context.Background(), &snap); err != nil {
 				log.Printf("save sudoers snapshot host=%s: %v", snap.Host, err)
 			}
