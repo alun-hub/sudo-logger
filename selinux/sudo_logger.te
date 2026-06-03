@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.16)
+policy_module(sudo_logger, 1.1.17)
 
 ########################################
 #
@@ -27,21 +27,41 @@ files_type(sudo_logger_plugin_t)
 # sudo_agent_t local policy
 #
 
+# Required types and attributes from base policy
+require {
+    attribute file_type;
+    attribute sysctl_type;
+    attribute domain;
+    type debugfs_t;
+    type tracefs_t;
+    type proc_security_t;
+    type sysfs_t;
+    type proc_kcore_t;
+    type memory_device_t;
+    type fixed_disk_device_t;
+    type user_devpts_t;
+    type bin_t;
+    type init_t;
+    type cgroup_t;
+    type sudoers_conf_t;
+    type etc_t;
+    class dbus { send_msg };
+    class bpf { map_create map_read map_write prog_load prog_run };
+    class perf_event { open read write tracepoint cpu kernel };
+}
+
 # Basic self permissions
 allow sudo_agent_t self:fifo_file rw_fifo_file_perms;
 allow sudo_agent_t self:unix_stream_socket create_stream_socket_perms;
 allow sudo_agent_t self:tcp_socket create_stream_socket_perms;
 allow sudo_agent_t self:process { fork sigchld sigkill sigstop signull signal };
 allow sudo_agent_t self:capability { kill net_bind_service sys_admin sys_ptrace setuid setgid dac_override dac_read_search chown fowner };
-# CAP_BPF and CAP_PERFMON required by cilium/ebpf when loading BPF programs and
-# attaching to tracepoints/kprobes/LSM hooks (kernel ≥ 5.8 splits CAP_SYS_ADMIN).
 allow sudo_agent_t self:capability2 { bpf perfmon };
 
-# BPF syscall operations: creating and using maps and programs.
+# BPF syscall operations
 allow sudo_agent_t self:bpf { map_create map_read map_write prog_load prog_run };
 
-# perf_event_open(2) for tracepoint attachment (sys_enter_write kprobe).
-# cilium/ebpf opens a perf_event fd per-CPU to attach the tracepoint program.
+# perf_event_open(2) for tracepoint attachment
 allow sudo_agent_t self:perf_event { open read write tracepoint cpu kernel };
 
 # Manage the Unix socket and PID file in /run/sudo-logger/
@@ -61,129 +81,70 @@ corenet_tcp_connect_generic_port(sudo_agent_t)
 corenet_sendrecv_generic_client_packets(sudo_agent_t)
 sysnet_dns_name_resolve(sudo_agent_t)
 
-# Write to cgroup files for session freeze (Delegate=yes in service unit)
+# Write to cgroup files for session freeze
 fs_manage_cgroup_dirs(sudo_agent_t)
 fs_rw_cgroup_files(sudo_agent_t)
-# Create and remove per-session sub-cgroups under the delegated subtree.
-require { type cgroup_t; }
 allow sudo_agent_t cgroup_t:dir { write add_name remove_name create rmdir };
 allow sudo_agent_t cgroup_t:file { create };
 
-# Allow inotify watches on any directory — the sandbox watcher (fsnotify) calls
-# inotify_add_watch on parent directories of all protected paths, which span many
-# SELinux types (etc_t, cert_t, pam_etc_t, bin_t, var_log_t, sysctl_t, etc.).
-# The dir:watch permission (kernel 5.x+) is distinct from dir:read/search.
-# The sandbox config loader (loadSandboxConfig) recursively scans protected
-# directories, and the inotify watcher (startWatcher) adds watches on their
-# parent dirs.  These paths span many types: etc_t, cert_t, pam_etc_t, bin_t,
-# var_log_t, sysctl_t, system_conf_t, etc.
-# dir:watch is the kernel 5.x+ permission required by inotify_add_watch(2).
-require { attribute file_type; attribute sysctl_type;
-          type debugfs_t; type tracefs_t; }
-# Dir: open/read for recursive sandbox config scan; watch for inotify watcher.
+# Dir/File/Lnk/Sock permissions
 allow sudo_agent_t file_type:dir { open read getattr search watch };
-# File/symlink/socket: getattr (stat) needed when sandbox config loader
-# enumerates protected paths recursively.  sock_file covers sockets such as
-# /var/lib/sss/pipes/private/sbus-master (sssd_var_lib_t, a sock_file).
-# file:watch is the kernel 5.x+ permission required by inotify_add_watch(2).
 allow sudo_agent_t file_type:file { getattr watch };
 allow sudo_agent_t file_type:lnk_file { getattr read };
 allow sudo_agent_t file_type:sock_file { getattr };
-# proc_security_t (/proc/sys/fs/suid_dumpable etc.) is not in file_type.
-require { type proc_security_t; }
 allow sudo_agent_t proc_security_t:file { getattr };
-# sysctl types lack file_type — cover explicitly.
 allow sudo_agent_t sysctl_type:dir { open read getattr search watch };
 allow sudo_agent_t sysctl_type:file { getattr };
-# debugfs/tracefs: needed by cilium/ebpf to attach kprobes and tracepoints.
-# The library probes /sys/kernel/tracing (tracefs_t) and
-# /sys/kernel/debug/tracing (debugfs_t) to find the events directory.
+
+# debugfs/tracefs for eBPF
 allow sudo_agent_t debugfs_t:dir { search read open getattr };
 allow sudo_agent_t debugfs_t:file { read open getattr };
 allow sudo_agent_t tracefs_t:dir { search read open getattr write add_name remove_name };
 allow sudo_agent_t tracefs_t:file { read open getattr write create unlink };
-# cilium/ebpf calls statfs() on the tracefs/debugfs mount point to verify the
-# filesystem type before accessing kprobe_events.  filesystem:getattr is the
-# permission backing statfs(2) — without it the library reports
-# "neither debugfs nor tracefs are mounted" and aborts kprobe attachment.
 allow sudo_agent_t tracefs_t:filesystem getattr;
 allow sudo_agent_t debugfs_t:filesystem getattr;
 
-# mmap /sys/kernel/btf/vmlinux for CO-RE BTF type information.
-# sysfs_t is in file_type but domain_can_mmap_files boolean is off, so the
-# conditional domain:file_type:file:map rule never fires.  Unconditional rule.
-require { type sysfs_t; }
+# mmap /sys/kernel/btf/vmlinux
 allow sudo_agent_t sysfs_t:file { read open getattr map };
 
-# getattr on device/proc paths that sandbox.yaml may list as protected.
-# loadSandboxConfig() calls stat() on every entry during startup.
-require { type proc_kcore_t; type memory_device_t; type fixed_disk_device_t; }
+# getattr on device/proc paths
 allow sudo_agent_t proc_kcore_t:file { getattr };
 allow sudo_agent_t memory_device_t:chr_file { getattr };
 allow sudo_agent_t fixed_disk_device_t:blk_file { getattr };
 
-# Read /proc/<pid> entries for tracked session processes.
+# Read /proc/<pid> entries
 allow sudo_agent_t domain:dir { search getattr };
 allow sudo_agent_t domain:file { read open getattr };
-# Read /proc/<pid>/fd/* symlinks to resolve the actual PTY device path.
 allow sudo_agent_t domain:lnk_file { read getattr };
 
-# Write to user PTY devices for session banner messages (freeze, idle warning).
-require { type user_devpts_t; }
+# Write to user PTY devices
 allow sudo_agent_t user_devpts_t:chr_file { open write getattr };
 
-# getpgid: used by cgroup tracker before deciding whether SIGSTOP is safe.
-allow sudo_agent_t domain:process { getpgid };
+# Signals and process info
+allow sudo_agent_t domain:process { getpgid signal sigstop };
 
-# Send signals (including SIGSTOP/SIGCONT) to session processes.
-allow sudo_agent_t domain:process { signal sigstop };
-
-# Execute loginctl to query session metadata for the eBPF session tracker
-# (loginctlSession in ebpf.go).  No domain transition: subprocess inherits
-# sudo_agent_t.  /usr/bin/loginctl is labeled bin_t by the distro policy so
-# this rule is intentionally broad; relabeling loginctl to a custom type would
-# break any other domain that executes it via bin_t.  Acceptable because
-# sudo_agent_t is already a tightly constrained privileged domain.
-require { type bin_t; }
+# Execute loginctl
 allow sudo_agent_t bin_t:file { read open execute execute_no_trans map getattr };
 
-# Connect to the D-Bus system bus for polkit CheckAuthorization monitoring.
+# D-Bus and systemd
 dbus_system_bus_client(sudo_agent_t)
-
-# D-Bus chat with logind — loginctl calls GetSession via the system bus.
-# Grants bidirectional send_msg so logind can reply.
 systemd_dbus_chat_logind(sudo_agent_t)
-
-# Allow chatting with systemd (init_t) for DynamicUser and other services
-require { type init_t; class dbus send_msg; }
 allow sudo_agent_t init_t:dbus send_msg;
 allow init_t sudo_agent_t:dbus send_msg;
 
-# Read /etc/passwd for UID→username resolution during session tracking.
-# Also enables optional SSSD public file reads and SSSD stream connect.
+# NSS and passwd
 auth_read_passwd(sudo_agent_t)
-
-# Connect to systemd-userdbd sockets (/run/systemd/userdb/io.systemd.*)
-# for NSS user lookups triggered by loginctl and getpwuid().
 systemd_userdbd_stream_connect(sudo_agent_t)
 
-# Manage sudoers configuration files and directories (for sudoers management feature)
-# Handles both specific sudoers_conf_t and generic etc_t labels.
-require {
-    type sudoers_conf_t;
-    type etc_t;
-}
-# Sudoers specific
-allow sudo_agent_t sudoers_conf_t:dir { getattr search write add_name remove_name watch };
-allow sudo_agent_t sudoers_conf_t:file { getattr open read write create unlink rename watch };
-# Generic etc_t (resolves denials on /etc/sudoers.d if not labeled sudoers_conf_t)
-allow sudo_agent_t etc_t:dir { getattr search write add_name remove_name watch };
-allow sudo_agent_t etc_t:file { getattr open read write create unlink rename watch };
+# Manage sudoers configuration (for sudoers management feature)
+# Explicit raw rules for both types
+allow sudo_agent_t { sudoers_conf_t etc_t }:dir { getattr search write add_name remove_name watch };
+allow sudo_agent_t { sudoers_conf_t etc_t }:file { getattr open read write create unlink rename watch };
 
 # Logging
 logging_send_syslog_msg(sudo_agent_t)
 
-# Read /proc for process state (pids, cgroup membership)
+# Read /proc for process state
 kernel_read_system_state(sudo_agent_t)
 kernel_read_network_state(sudo_agent_t)
 kernel_read_net_sysctls(sudo_agent_t)
@@ -197,11 +158,7 @@ optional_policy(`
     gen_require(`
         type sudo_t;
     ')
-
-    # Allow sudo to read/mmap the plugin .so
     allow sudo_t sudo_logger_plugin_t:file { read open execute map getattr };
-
-    # Allow sudo (running plugin) to connect to agent socket
     allow sudo_t sudo_agent_var_run_t:dir search;
     allow sudo_t sudo_agent_var_run_t:sock_file write;
     allow sudo_t sudo_agent_t:unix_stream_socket connectto;
