@@ -154,6 +154,10 @@ dbus_system_bus_client(sudo_agent_t)
 # Grants bidirectional send_msg so logind can reply.
 systemd_dbus_chat_logind(sudo_agent_t)
 
+# Allow chatting with systemd (init_t) for DynamicUser and other services
+require { type init_t; }
+dbus_chat_sysbus(sudo_agent_t, init_t)
+
 # Read /etc/passwd for UID→username resolution during session tracking.
 # Also enables optional SSSD public file reads and SSSD stream connect.
 auth_read_passwd(sudo_agent_t)
@@ -161,8 +165,6 @@ auth_read_passwd(sudo_agent_t)
 # Connect to systemd-userdbd sockets (/run/systemd/userdb/io.systemd.*)
 # for NSS user lookups triggered by loginctl and getpwuid().
 systemd_userdbd_stream_connect(sudo_agent_t)
-# Chat with userdbd for DynamicUser support (resolves write denial on io.systemd.DynamicUser)
-systemd_dbus_chat_userdbd(sudo_agent_t)
 
 # Manage sudoers configuration files and directories (for sudoers management feature)
 require { type sudoers_conf_t; }
