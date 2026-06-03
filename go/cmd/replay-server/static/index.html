@@ -31,9 +31,6 @@
       --font:        'JetBrains Mono', 'Fira Code', monospace;
       --font-ui:     'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --radius:      5px;
-      --card-bg: #1e1e1e;
-      --card-border: #333;
-      --card-radius: 8px;
       --card-shadow: 0 4px 12px rgba(0,0,0,0.3);
       --input-bg: var(--card);
     }
@@ -54,6 +51,7 @@
       --green-glow:  rgba(13, 159, 88, 0.12);
       --blue:        #3874d8;
       --red:         #d93f50;
+      --card-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
 
     html, body { height: 100%; background: var(--bg); color: var(--text);
@@ -642,9 +640,9 @@
 
     /* ── Sudoers tab ─────────────────────────────────────────────────────────── */
     .sudoers-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: var(--card-radius);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
       padding: 16px;
       margin-bottom: 16px;
       box-shadow: var(--card-shadow);
@@ -655,7 +653,7 @@
       align-items: center;
       justify-content: space-between;
       margin-bottom: 12px;
-      border-bottom: 1px solid var(--card-border);
+      border-bottom: 1px solid var(--border);
       padding-bottom: 8px;
     }
 
@@ -667,7 +665,7 @@
       width: 100%;
       padding: 10px 16px;
       background: var(--input-bg);
-      border: 1px solid var(--card-border);
+      border: 1px solid var(--border);
       border-radius: 20px;
       color: var(--text);
       font-size: 14px;
