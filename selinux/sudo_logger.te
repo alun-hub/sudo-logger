@@ -155,8 +155,9 @@ dbus_system_bus_client(sudo_agent_t)
 systemd_dbus_chat_logind(sudo_agent_t)
 
 # Allow chatting with systemd (init_t) for DynamicUser and other services
-require { type init_t; }
-dbus_system_bus_chat(sudo_agent_t, init_t)
+require { type init_t; class dbus send_msg; }
+allow sudo_agent_t init_t:dbus send_msg;
+allow init_t sudo_agent_t:dbus send_msg;
 
 # Read /etc/passwd for UID→username resolution during session tracking.
 # Also enables optional SSSD public file reads and SSSD stream connect.
