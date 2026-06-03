@@ -4762,13 +4762,27 @@ function renderAccessCard(r, i) {
             <summary style="cursor:pointer;color:var(--text-dim)">Advanced Settings</summary>
             <div style="padding-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
               <div>
-                <div style="font-size:10px;color:var(--text-dim)">RUN AS</div>
+                <div style="font-size:10px;color:var(--text-dim)">RUN AS USER</div>
                 <input class="sudoers-cell-input" value="${esc(r.runasUser)}" oninput="sudoersRules[${i}].runasUser=this.value" placeholder="root">
+              </div>
+              <div>
+                <div style="font-size:10px;color:var(--text-dim)">RUN AS GROUP</div>
+                <input class="sudoers-cell-input" value="${esc(r.runasGroup)}" oninput="sudoersRules[${i}].runasGroup=this.value" placeholder="(group)">
               </div>
               <div>
                 <div style="font-size:10px;color:var(--text-dim)">HOSTS</div>
                 <input class="sudoers-cell-input" value="${esc(r.hosts)}" oninput="sudoersRules[${i}].hosts=this.value" placeholder="ALL">
               </div>
+            </div>
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" ${r.noexec?'checked':''} onchange="sudoersRules[${i}].noexec=this.checked;refreshVisual()" style="accent-color:var(--amber)">
+                <span>Disable shell escape (NOEXEC)</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" ${r.setenv?'checked':''} onchange="sudoersRules[${i}].setenv=this.checked;refreshVisual()" style="accent-color:var(--blue)">
+                <span>Allow environment variables (SETENV)</span>
+              </label>
             </div>
           </details>
         </div>
