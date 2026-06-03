@@ -4511,7 +4511,7 @@ function serializeSudoers(rules, aliases, advanced, host, viewer) {
     if (r.nopasswd) opts.push('NOPASSWD:');
     if (r.noexec)   opts.push('NOEXEC:');
     if (r.setenv)   opts.push('SETENV:');
-    const cmds = r.cmds.length ? r.cmds.join(', ') : 'ALL';
+    const cmds = r.cmds.length ? r.cmds.map(c => c.replace(/^\(ALL\)\s+/i, '')).join(', ') : 'ALL';
     // Ensure one space before opts and no space between NOPASSWD: and cmds if opts exist
     const optStr = opts.length ? opts.join(' ') : '';
     lines.push(`${principal} ${r.hosts || 'ALL'} = ${runas} ${optStr} ${cmds}`.replace(/\s+/g, ' ').trim());
