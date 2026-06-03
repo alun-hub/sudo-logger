@@ -21,6 +21,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"hash/fnv"
@@ -30,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -1937,6 +1939,15 @@ func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Validate sudoers syntax before saving
+	if body.Content != "" {
+		if err := validateSudoers(body.Content); err != nil {
+			http.Error(w, "invalid sudoers syntax: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	host := r.URL.Query().Get("host")
 	if host != "" && (len(host) > 255 || host[0] == '.' ||
 		strings.ContainsAny(host, "/\\") || strings.Contains(host, "..")) {
@@ -1954,6 +1965,32 @@ func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
 	log.Printf("sudoers: config updated key=%s by %s", key, viewerFromContext(r))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// validateSudoers checks the syntax of content using visudo -c.
+func validateSudoers(content string) error {
+	tmpFile, err := os.CreateTemp("", "sudoers-valid-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		return fmt.Errorf("write temp: %w", err)
+	}
+	_ = tmpFile.Close()
+
+	// visudo -c -f <file> checks syntax without affecting the system.
+	cmd := exec.Command("visudo", "-c", "-f", tmpFile.Name())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Clean up output to remove the temp filename and just show the error.
+		msg := strings.ReplaceAll(string(out), tmpFile.Name(), "sudoers")
+		msg = strings.TrimSpace(msg)
+		return errors.New(msg)
+	}
+	return nil
 }
 
 // handleDeleteSudoersConfig removes a host-specific config override, causing
