@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.14)
+policy_module(sudo_logger, 1.1.15)
 
 ########################################
 #
@@ -168,14 +168,13 @@ auth_read_passwd(sudo_agent_t)
 systemd_userdbd_stream_connect(sudo_agent_t)
 
 # Manage sudoers configuration files and directories (for sudoers management feature)
-require { type sudoers_conf_t; }
+require { type sudoers_conf_t; type etc_t; }
 manage_dirs_pattern(sudo_agent_t, sudoers_conf_t, sudoers_conf_t)
 manage_files_pattern(sudo_agent_t, sudoers_conf_t, sudoers_conf_t)
-allow sudo_agent_t sudoers_conf_t:dir watch;
-allow sudo_agent_t sudoers_conf_t:file watch;
-
-# Use system interfaces for generic /etc management (resolves denials on etc_t)
-files_manage_etc_files(sudo_agent_t)
+manage_dirs_pattern(sudo_agent_t, etc_t, etc_t)
+manage_files_pattern(sudo_agent_t, etc_t, etc_t)
+allow sudo_agent_t { sudoers_conf_t etc_t }:dir watch;
+allow sudo_agent_t { sudoers_conf_t etc_t }:file watch;
 
 # Logging
 logging_send_syslog_msg(sudo_agent_t)
