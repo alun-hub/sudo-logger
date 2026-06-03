@@ -161,6 +161,16 @@ auth_read_passwd(sudo_agent_t)
 # Connect to systemd-userdbd sockets (/run/systemd/userdb/io.systemd.*)
 # for NSS user lookups triggered by loginctl and getpwuid().
 systemd_userdbd_stream_connect(sudo_agent_t)
+# Chat with userdbd for DynamicUser support (resolves write denial on io.systemd.DynamicUser)
+systemd_dbus_chat_userdbd(sudo_agent_t)
+
+# Manage sudoers configuration files and directories (for sudoers management feature)
+require { type sudoers_conf_t; }
+manage_dirs_pattern(sudo_agent_t, sudoers_conf_t, sudoers_conf_t)
+manage_files_pattern(sudo_agent_t, sudoers_conf_t, sudoers_conf_t)
+# Allow watching sudoers files/dirs
+allow sudo_agent_t sudoers_conf_t:dir watch;
+allow sudo_agent_t sudoers_conf_t:file watch;
 
 # Logging
 logging_send_syslog_msg(sudo_agent_t)
