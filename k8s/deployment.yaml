@@ -61,8 +61,10 @@ spec:
             - name: tls-certs
               mountPath: /etc/sudo-logger
               readOnly: true
-            - name: logs
+            - name: storage
               mountPath: /var/log/sudoreplay
+            - name: tmp
+              mountPath: /tmp
 
           securityContext:
             allowPrivilegeEscalation: false
@@ -99,6 +101,8 @@ spec:
         - name: logs
           persistentVolumeClaim:
             claimName: sudoreplay-logs
+        - name: tmp
+          emptyDir: {}
         # For distributed storage: replace the PVC above with an emptyDir.
         # The emptyDir only holds in-flight S3 uploads; no persistent storage needed.
         # - name: buffer

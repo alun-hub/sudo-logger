@@ -89,6 +89,8 @@ spec:
               readOnly: true
             - name: buffer
               mountPath: /var/lib/sudo-logger/buffer
+            - name: tmp
+              mountPath: /tmp
 
           securityContext:
             allowPrivilegeEscalation: false
@@ -129,4 +131,6 @@ spec:
           configMap:
             name: sudo-logger-approval-policy
         - name: buffer
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}
