@@ -4581,10 +4581,11 @@ async function selectSudoersHost(host) {
   // Update status badge
   const badge = document.querySelector(`.sudoers-host-badge[data-host="${CSS.escape(host)}"]`);
   if (badge) {
-    if (!sudoersCurrentConfig) {
+    if (host === '_default') {
+      badge.textContent = 'M'; badge.className = 'sudoers-host-badge sudoers-badge-none'; // 'M' for Template/Main
+    } else if (!sudoersCurrentConfig) {
       badge.textContent = '–'; badge.className = 'sudoers-host-badge sudoers-badge-none';
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
-      // Compare sha256 of config vs latest snapshot sha256
       const cfgHash = await hashText(sudoersCurrentConfig);
       const snapHash = snaps[0] ? snaps[0].sha256 : '';
       if (cfgHash === snapHash) {
