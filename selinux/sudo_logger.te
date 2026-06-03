@@ -168,12 +168,16 @@ auth_read_passwd(sudo_agent_t)
 systemd_userdbd_stream_connect(sudo_agent_t)
 
 # Manage sudoers configuration files and directories (for sudoers management feature)
-require { type sudoers_conf_t; }
+# Handles both specific sudoers_conf_t and generic etc_t labels.
+require { type sudoers_conf_t; type etc_t; }
 manage_dirs_pattern(sudo_agent_t, sudoers_conf_t, sudoers_conf_t)
 manage_files_pattern(sudo_agent_t, sudoers_conf_t, sudoers_conf_t)
+manage_dirs_pattern(sudo_agent_t, etc_t, etc_t)
+manage_files_pattern(sudo_agent_t, etc_t, etc_t)
+
 # Allow watching sudoers files/dirs
-allow sudo_agent_t sudoers_conf_t:dir watch;
-allow sudo_agent_t sudoers_conf_t:file watch;
+allow sudo_agent_t { sudoers_conf_t etc_t }:dir watch;
+allow sudo_agent_t { sudoers_conf_t etc_t }:file watch;
 
 # Logging
 logging_send_syslog_msg(sudo_agent_t)
