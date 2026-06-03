@@ -4804,8 +4804,8 @@ async function saveSudoersConfig() {
       }
     }
     for (const r of sudoersRules) {
-      if (!r.principal) {
-        alert('Validation error: Rule principal (user/group) cannot be empty.');
+      if (!r.principalName) {
+        alert('Validation error: Rule principal (user/group name) cannot be empty.');
         return;
       }
     }
