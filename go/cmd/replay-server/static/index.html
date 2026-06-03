@@ -4794,6 +4794,12 @@ function renderAccessCard(r, i) {
 // ── Visual editor renderer ────────────────────────────────────────────────────
 
 function renderVisualEditor() {
+  const filteredRules = sudoersRules
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => !sudoersSearchQuery || r.principalName.toLowerCase().includes(sudoersSearchQuery.toLowerCase()));
+
+  const cardsHtml = filteredRules.map(({ r, i }) => renderAccessCard(r, i)).join('');
+
   const aliasRows = sudoersAliases.map((a, i) => `
     <div class="sudoers-alias-row">
       <span class="sudoers-alias-type">${esc(a.type)}</span>
@@ -4803,66 +4809,41 @@ function renderVisualEditor() {
       <button class="sudoers-del-btn" onclick="removeAlias(${i})" title="Delete">✕</button>
     </div>`).join('');
 
-  const ruleRows = sudoersRules.map((r, i) => {
-    const cmdsHtml = r.cmds.map((c, ci) =>
-      `<span class="sudoers-chip">${esc(c)}<button class="sudoers-chip-rm" onclick="removeCmd(${i},${ci})" title="Remove">×</button></span>`
-    ).join('') +
-    `<button class="sudoers-chip-add" onclick="addCmd(${i})">+ cmd</button>`;
-    return `<tr>
-      <td>
-        <select class="sudoers-cell-select" onchange="sudoersRules[${i}].principalType=this.value;refreshVisual()">
-          <option value="user"  ${r.principalType==='user' ?'selected':''}>User</option>
-          <option value="group" ${r.principalType==='group'?'selected':''}>%Group</option>
-        </select>
-        <input class="sudoers-cell-input" style="margin-top:3px" value="${esc(r.principalName)}" oninput="sudoersRules[${i}].principalName=this.value" placeholder="name">
-      </td>
-      <td><input class="sudoers-cell-input" value="${esc(r.hosts)}" oninput="sudoersRules[${i}].hosts=this.value" placeholder="ALL"></td>
-      <td>
-        <input class="sudoers-cell-input" value="${esc(r.runasUser)}" oninput="sudoersRules[${i}].runasUser=this.value" placeholder="ALL" style="width:70px">
-        <input class="sudoers-cell-input" value="${esc(r.runasGroup)}" oninput="sudoersRules[${i}].runasGroup=this.value" placeholder="(group)" style="width:60px;margin-top:2px">
-      </td>
-      <td><div class="sudoers-chip-list">${cmdsHtml}</div></td>
-      <td style="white-space:nowrap">
-        <label style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:3px">
-          <input type="checkbox" ${r.nopasswd?'checked':''} onchange="sudoersRules[${i}].nopasswd=this.checked" style="accent-color:var(--green)"> NOPASSWD
-        </label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:3px">
-          <input type="checkbox" ${r.noexec?'checked':''} onchange="sudoersRules[${i}].noexec=this.checked" style="accent-color:var(--amber)"> NOEXEC
-        </label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:11px">
-          <input type="checkbox" ${r.setenv?'checked':''} onchange="sudoersRules[${i}].setenv=this.checked" style="accent-color:var(--blue)"> SETENV
-        </label>
-      </td>
-      <td><button class="sudoers-del-btn" onclick="removeRule(${i})" title="Delete rule">✕</button></td>
-    </tr>`;
-  }).join('');
-
-  const advSection = `
-    <details style="margin-top:8px">
-      <summary style="cursor:pointer;font-size:11px;color:var(--text-dim);font-family:var(--font-ui);user-select:none">Advanced / raw lines (${sudoersAdvanced.trim().split('\n').filter(Boolean).length} line(s))</summary>
-      <textarea class="sudoers-raw-area" style="height:120px;margin-top:6px" oninput="sudoersAdvanced=this.value">${esc(sudoersAdvanced)}</textarea>
-    </details>`;
-
   return `
-    <div class="sudoers-section-hdr">Rules</div>
-    <table class="sudoers-rules-table">
-      <thead><tr>
-        <th>Principal</th><th>Hosts</th><th>Run As</th><th>Commands</th><th>Options</th><th></th>
-      </tr></thead>
-      <tbody>${ruleRows}</tbody>
-    </table>
-    <div class="sudoers-add-row">
-      <button class="sudoers-chip-add" onclick="addRule()">+ Add rule</button>
+    <div class="sudoers-search-container">
+      <input type="text" class="sudoers-search-input" placeholder="Search users or groups..." value="${esc(sudoersSearchQuery)}"
+             oninput="sudoersSearchQuery=this.value;renderSudoersMain(null)">
     </div>
 
-    <div class="sudoers-section-hdr" style="margin-top:18px">Aliases</div>
-    <div id="sudoers-alias-list">${aliasRows}</div>
-    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-      <button class="sudoers-chip-add" onclick="addAlias('User_Alias')">+ User_Alias</button>
-      <button class="sudoers-chip-add" onclick="addAlias('Cmnd_Alias')">+ Cmnd_Alias</button>
-      <button class="sudoers-chip-add" onclick="addAlias('Host_Alias')">+ Host_Alias</button>
+    <div class="sudoers-section-hdr" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Access Permissions</span>
+      <button class="btn-primary" style="font-size:12px;padding:4px 12px" onclick="addRule()">+ Grant Access</button>
     </div>
-    ${advSection}`;
+
+    <div style="margin-top:12px">
+      ${cardsHtml || '<div style="text-align:center;padding:40px;color:var(--text-dim)">No permissions found matching your search.</div>'}
+    </div>
+
+    <div class="sudoers-section-hdr" style="margin-top:24px">Templates & Advanced</div>
+    <details>
+      <summary style="cursor:pointer;font-size:12px;color:var(--text-dim)">Aliases & Raw Advanced Rules</summary>
+
+      <div style="margin-top:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Aliases</div>
+        <div id="sudoers-alias-list">${aliasRows}</div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button class="sudoers-chip-add" onclick="addAlias('User_Alias')">+ User_Alias</button>
+          <button class="sudoers-chip-add" onclick="addAlias('Cmnd_Alias')">+ Cmnd_Alias</button>
+          <button class="sudoers-chip-add" onclick="addAlias('Host_Alias')">+ Host_Alias</button>
+        </div>
+      </div>
+
+      <div style="margin-top:18px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Raw Advanced Rules</div>
+        <textarea class="sudoers-raw-area" style="height:120px;margin-top:6px" oninput="sudoersAdvanced=this.value">${esc(sudoersAdvanced)}</textarea>
+      </div>
+    </details>
+  `;
 }
 
 function refreshVisual() {
