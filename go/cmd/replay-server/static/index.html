@@ -646,6 +646,11 @@
       padding: 16px;
       margin-bottom: 16px;
       box-shadow: var(--card-shadow);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .sudoers-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.4);
     }
 
     .sudoers-card-header {
@@ -4870,7 +4875,15 @@ function switchSudoersMode(mode) {
 // ── Rule / alias mutations ────────────────────────────────────────────────────
 
 function addRule() {
-  sudoersRules.push({ principalType:'user', principalName:'', hosts:'ALL', runasUser:'ALL', runasGroup:'', nopasswd:false, noexec:false, setenv:false, cmds:['ALL'] });
+  const name = prompt('Enter User or %Group name:');
+  if (!name) return;
+  const isGroup = name.startsWith('%');
+  sudoersRules.unshift({
+    principalType: isGroup ? 'group' : 'user',
+    principalName: isGroup ? name.slice(1) : name,
+    hosts:'ALL', runasUser:'ALL', runasGroup:'',
+    nopasswd:false, noexec:false, setenv:false, cmds:['ALL']
+  });
   refreshVisual();
 }
 function removeRule(i) { sudoersRules.splice(i, 1); refreshVisual(); }
