@@ -2030,6 +2030,33 @@ func validateSudoers(content string) error {
 	return nil
 }
 
+func stripSudoersHeader(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "# Managed by sudo-logger") ||
+			strings.HasPrefix(trimmed, "# Generated:") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+func extractManagedSudoers(full string) string {
+	marker := "# --- /etc/sudoers.d/sudo-logger-managed ---"
+	idx := strings.Index(full, marker)
+	if idx == -1 {
+		return ""
+	}
+	content := full[idx+len(marker):]
+	if endIdx := strings.Index(content, "# --- "); endIdx != -1 {
+		content = content[:endIdx]
+	}
+	return stripSudoersHeader(content)
+}
+
 // handleDeleteSudoersConfig removes a host-specific config override, causing
 // the agent to fall back to the _default template.
 func handleDeleteSudoersConfig(w http.ResponseWriter, r *http.Request) {
