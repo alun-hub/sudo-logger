@@ -4580,12 +4580,13 @@ function saveSudoersFocus() {
 }
 
 function restoreSudoersFocus(f) {
-  if (!f) return;
+  if (!f || !f.id) return;
   const el = document.getElementById(f.id);
   if (el) {
     el.focus();
-    if (f.start !== undefined && el.setSelectionRange) {
-      el.setSelectionRange(f.start, f.end);
+    if (f.start !== undefined && el.setSelectionRange &&
+        ['text', 'search', 'url', 'tel', 'password'].includes(el.type || 'text')) {
+      try { el.setSelectionRange(f.start, f.end); } catch(e) {}
     }
   }
 }
@@ -4896,7 +4897,7 @@ function renderSudoersMain(snaps) {
 
   const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
   const diffHtml = managedSnap && sudoersCurrentConfig
-    ? renderDiff(managedSnap, sudoersCurrentConfig)
+    ? renderDiff(managedSnap, stripSudoersHeader(sudoersCurrentConfig))
     : (sudoersCurrentSnap
         ? '<span class="diff-eq">(managed file not yet present on host)</span>'
         : '<span class="diff-eq">(no active snapshot from host yet)</span>');

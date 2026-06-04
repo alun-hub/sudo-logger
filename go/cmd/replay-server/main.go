@@ -1880,15 +1880,22 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 
 	var out []hostJSON
 	for _, h := range snapHosts {
+		if h == "_default" {
+			continue
+		}
 		var errMsg string
 		if serr, err := sessionStore.GetSudoersError(r.Context(), h); err == nil && serr != nil {
 			errMsg = serr.Error
 		}
 
 		staged := cleanDefault
+		isOverride := false
 		if configs[h] {
 			cfg, _ := sessionStore.GetConfig(r.Context(), "sudoers/"+h)
-			staged = stripSudoersHeader(cfg)
+			if cfg != "" {
+				staged = stripSudoersHeader(cfg)
+				isOverride = true
+			}
 		}
 
 		inSync := false
@@ -1899,7 +1906,7 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 			inSync = (staged == managed)
 		}
 
-		out = append(out, hostJSON{h, configs[h], errMsg, inSync, isOffline})
+		out = append(out, hostJSON{h, isOverride, errMsg, inSync, isOffline})
 	}
 	// Also ensure _default status is correct (it's never an "override", it's the base)
 	// but the UI might want to know if it exists.
@@ -2049,6 +2056,7 @@ func stripSudoersHeader(text string) string {
 	var out []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		// Match prefixes loosely to handle different dash types or suffixes
 		if strings.HasPrefix(trimmed, "# Managed by sudo-logger") ||
 			strings.HasPrefix(trimmed, "# Generated:") {
 			continue
