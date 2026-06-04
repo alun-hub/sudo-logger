@@ -684,10 +684,13 @@
       font-family: var(--font-ui); border-radius: 0; user-select: none; }
     .sudoers-host-item:hover { background: var(--card-hover); color: var(--text); }
     .sudoers-host-item.active { background: var(--card); color: var(--green); }
-    .sudoers-host-badge { font-size: 11px; font-weight: 700; }
-    .sudoers-badge-ok   { color: var(--green); }
-    .sudoers-badge-warn { color: var(--amber, #e6a817); }
-    .sudoers-badge-none { color: var(--text-dim); }
+    .sudoers-host-badge { font-size: 9px; font-weight: 700; text-transform: uppercase;
+      padding: 1px 4px; border-radius: 3px; margin-left: 6px; }
+    .sudoers-badge-default { background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid var(--border); }
+    .sudoers-badge-modified { background: var(--amber-dim, rgba(232, 164, 77, 0.15)); color: var(--amber); border: 1px solid var(--amber); }
+    .sudoers-badge-ok   { color: var(--green); margin-left: 4px; }
+    .sudoers-badge-warn { color: var(--amber); margin-left: 4px; }
+    .sudoers-badge-none { color: var(--text-dim); margin-left: 4px; }
     .sudoers-main { flex: 1; overflow-y: auto; padding: 20px 24px; }
     .sudoers-mode-bar { display: flex; gap: 6px; margin-bottom: 16px; align-items: center; }
     .sudoers-mode-btn { background: var(--card); border: 1px solid var(--border-mid);
@@ -1500,6 +1503,36 @@
           <div class="help-tip"><span><strong>Propagation:</strong> Save in the UI → stored in the shared config backend → agents poll every 60 s → BPF maps updated live. No agent restart required.</span></div>
           <div class="help-tip"><span><strong>Local override:</strong> If <code>sandbox_config = /path/to/sandbox.yaml</code> is set in <code>agent.conf</code>, that file is loaded at startup. The server-managed config is still fetched and applied on top during the first poll.</span></div>
           <div class="help-tip"><span><strong>Violation alerts:</strong> Blocked operations are logged as <code>SANDBOX VIOLATION</code> in the agent log and forwarded to the log server as structured SIEM events with <code>action=</code> (e.g. <code>FILE_WRITE</code>, <code>CAPABLE</code>, <code>EXEC_BLOCK</code>), <code>path=</code>, <code>comm=</code>, and session context.</span></div>
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>Sudoers Management</h3>
+        <p class="help-intro" style="margin-bottom:12px">Centrally manage <code>/etc/sudoers.d/sudo-logger-managed</code> across your infrastructure. The UI uses a hierarchical model to simplify configuration deployment.</p>
+
+        <div class="help-logic">
+          <div class="help-logic-row">
+            <span class="sudoers-host-badge sudoers-badge-default" style="width:60px;text-align:center">Default</span>
+            <div><strong>Inherited Configuration:</strong> The host follows the <code>_default</code> template. Any changes made to the "Main" template are automatically pushed to all hosts with this badge.</div>
+          </div>
+          <div class="help-logic-row">
+            <span class="sudoers-host-badge sudoers-badge-modified" style="width:60px;text-align:center">Modified</span>
+            <div><strong>Host Override:</strong> This host has its own specific configuration. It ignores the <code>_default</code> template until the override is removed.</div>
+          </div>
+          <div class="help-logic-row">
+            <span style="color:var(--green);font-weight:700;width:60px;text-align:center">✓</span>
+            <div><strong>In Sync:</strong> The agent on the host has successfully applied and verified the latest configuration.</div>
+          </div>
+          <div class="help-logic-row">
+            <span style="color:var(--amber);font-weight:700;width:60px;text-align:center">⚠</span>
+            <div><strong>Diverged:</strong> The host is running an older or different configuration than what is saved on the server. This is normal for up to 60 seconds after a save.</div>
+          </div>
+        </div>
+
+        <div class="help-tips" style="margin-top:16px">
+          <div class="help-tip"><span><strong>Safety First:</strong> Every save is validated with <code>visudo -c</code> on the server and again on the agent before being applied. If validation fails, the change is rejected and the previous configuration is kept.</span></div>
+          <div class="help-tip"><span><strong>Deployment:</strong> Agents poll for new configuration every 60 seconds. You don't need to manually push or restart services.</span></div>
+          <div class="help-tip"><span><strong>Cleanup:</strong> Click "Remove override" to make a host return to following the global template.</span></div>
         </div>
       </div>
 
@@ -4609,16 +4642,32 @@ function renderDiff(a, b) {
 
 // ── Host list ─────────────────────────────────────────────────────────────────
 
+let sudoersHostsInfo = [];
+
 async function loadSudoersHosts() {
   const list = document.getElementById('sudoers-host-list');
   if (!list) return;
   try {
     const hosts = await fetch('/api/sudoers/hosts').then(r => r.json());
-    const items = ['_default', ...(hosts || []).filter(h => h !== '_default')];
+    sudoersHostsInfo = hosts;
+
+    const items = ['_default', ...hosts.map(h => h.name).filter(h => h !== '_default')];
     list.innerHTML = items.map(h => {
-      const badge = `<span class="sudoers-host-badge sudoers-badge-none" data-host="${esc(h)}">–</span>`;
-      return `<div class="sudoers-host-item" data-host="${esc(h)}" onclick="selectSudoersHost('${esc(h)}')">${esc(h)} ${badge}</div>`;
+      const info = hosts.find(x => x.name === h);
+      const isOverride = info ? info.isOverride : false;
+      const typeLabel = h === '_default' ? 'Main' : (isOverride ? 'Modified' : 'Default');
+      const typeClass = isOverride ? 'sudoers-badge-modified' : 'sudoers-badge-default';
+
+      return `<div class="sudoers-host-item" data-host="${esc(h)}" onclick="selectSudoersHost('${esc(h)}')">
+        <span>${esc(h)}</span>
+        <div style="display:flex;align-items:center">
+          <span class="sudoers-host-badge ${typeClass}">${typeLabel}</span>
+          <span class="sudoers-sync-badge" data-host="${esc(h)}"></span>
+        </div>
+      </div>`;
     }).join('');
+
+    if (sudoersCurrentHost) selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
     list.innerHTML = '<p style="padding:10px;color:var(--red);font-size:12px">Failed to load hosts</p>';
   }
@@ -4642,23 +4691,23 @@ async function selectSudoersHost(host) {
   sudoersCurrentConfig = (cfgRes && cfgRes.content) || '';
   sudoersIsOverride = !!(cfgRes && cfgRes.is_override);
 
-  // Update status badge
-  const badge = document.querySelector(`.sudoers-host-badge[data-host="${CSS.escape(host)}"]`);
-  if (badge) {
+  // Update sync status badge (the small dot/icon next to the label)
+  const syncBadge = document.querySelector(`.sudoers-sync-badge[data-host="${CSS.escape(host)}"]`);
+  if (syncBadge) {
     if (host === '_default') {
-      badge.textContent = 'M'; badge.className = 'sudoers-host-badge sudoers-badge-none'; // 'M' for Template/Main
+      syncBadge.innerHTML = '';
     } else if (!sudoersCurrentConfig) {
-      badge.textContent = '–'; badge.className = 'sudoers-host-badge sudoers-badge-none';
+      syncBadge.innerHTML = '<span class="sudoers-badge-none">–</span>';
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
       const cfgHash = await hashText(sudoersCurrentConfig);
       const snapHash = snaps[0] ? snaps[0].sha256 : '';
       if (cfgHash === snapHash) {
-        badge.textContent = '✓'; badge.className = 'sudoers-host-badge sudoers-badge-ok';
+        syncBadge.innerHTML = '<span class="sudoers-badge-ok">✓</span>';
       } else {
-        badge.textContent = '⚠'; badge.className = 'sudoers-host-badge sudoers-badge-warn';
+        syncBadge.innerHTML = '<span class="sudoers-badge-warn">⚠</span>';
       }
     } else {
-      badge.textContent = '⚠'; badge.className = 'sudoers-host-badge sudoers-badge-warn';
+      syncBadge.innerHTML = '<span class="sudoers-badge-warn">⚠</span>';
     }
   }
 
@@ -4690,9 +4739,11 @@ function renderSudoersMain(snaps) {
   const main = document.getElementById('sudoers-main');
   const host = sudoersCurrentHost;
 
-  const statusText = sudoersCurrentConfig
-    ? (sudoersIsOverride ? `Host-specific config` : `Using _default template`)
-    : `No config staged — snapshot only`;
+  const statusText = host === '_default'
+    ? 'Editing the global base configuration'
+    : (sudoersCurrentConfig
+        ? (sudoersIsOverride ? `Using custom rules for ${host}` : `Following global template`)
+        : `No configuration staged for this host`);
 
   const historyRows = (snaps || []).slice(0, 5).map(s => {
     const ts = formatTS(s.uploaded_at);
@@ -4705,17 +4756,17 @@ function renderSudoersMain(snaps) {
 
   const diffHtml = sudoersCurrentSnap && sudoersCurrentConfig
     ? renderDiff(sudoersCurrentSnap, sudoersCurrentConfig)
-    : '<span class="diff-eq">(no snapshot yet)</span>';
+    : '<span class="diff-eq">(no active snapshot from host yet)</span>';
 
   main.innerHTML = `
     <div class="sudoers-status">
-      <strong style="color:var(--text)">${esc(host)}</strong>
-      <span>${esc(statusText)}</span>
+      <strong style="color:var(--text);font-size:16px">${esc(host === '_default' ? 'Main Template' : host)}</strong>
+      <span style="font-size:12px;color:var(--text-sub)">${esc(statusText)}</span>
     </div>
 
     <div class="sudoers-mode-bar">
-      <button class="sudoers-mode-btn ${sudoersMode==='visual'?'active':''}" onclick="switchSudoersMode('visual')">Visual</button>
-      <button class="sudoers-mode-btn ${sudoersMode==='raw'?'active':''}" onclick="switchSudoersMode('raw')">Raw</button>
+      <button class="sudoers-mode-btn ${sudoersMode==='visual'?'active':''}" onclick="switchSudoersMode('visual')">Visual Editor</button>
+      <button class="sudoers-mode-btn ${sudoersMode==='raw'?'active':''}" onclick="switchSudoersMode('raw')">Technical View (Raw)</button>
     </div>
 
     <div id="sudoers-visual-editor" ${sudoersMode!=='visual'?'style="display:none"':''}>
@@ -4851,15 +4902,15 @@ function renderVisualEditor() {
     </div>
 
     <div class="sudoers-section-hdr" style="display:flex;justify-content:space-between;align-items:center">
-      <span>Access Permissions</span>
+      <span>Who can do what</span>
       <button class="btn-primary" style="font-size:12px;padding:4px 12px" onclick="addRule()">+ Grant Access</button>
     </div>
 
     <div style="margin-top:12px">
-      ${cardsHtml || '<div style="text-align:center;padding:40px;color:var(--text-dim)">No permissions found matching your search.</div>'}
+      ${cardsHtml || '<div style="text-align:center;padding:40px;color:var(--text-dim)">No permissions defined. Click "Grant Access" to start.</div>'}
     </div>
 
-    <div class="sudoers-section-hdr" style="margin-top:24px">Templates & Advanced</div>
+    <div class="sudoers-section-hdr" style="margin-top:24px">Inheritance & Technical Rules</div>
     <details id="${aliasDetailsId}" ${isAliasOpen} ontoggle="toggleSudoersDetails('${aliasDetailsId}', this.open)">
       <summary style="cursor:pointer;font-size:12px;color:var(--text-dim)">Aliases & Raw Advanced Rules</summary>
 

@@ -1350,3 +1350,21 @@ func (d *DistributedStore) ListSudoersHosts(ctx context.Context) ([]string, erro
 	}
 	return hosts, rows.Err()
 }
+
+// ListSudoersConfigs implements SessionStore.
+func (d *DistributedStore) ListSudoersConfigs(ctx context.Context) (map[string]bool, error) {
+	rows, err := d.db.Query(ctx, `SELECT key FROM sudo_config WHERE key LIKE 'sudoers/%'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		out[strings.TrimPrefix(key, "sudoers/")] = true
+	}
+	return out, rows.Err()
+}

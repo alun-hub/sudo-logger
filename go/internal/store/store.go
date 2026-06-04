@@ -176,6 +176,10 @@ type SessionStore interface {
 	// one snapshot. Used to populate the host list in the Sudoers UI tab.
 	ListSudoersHosts(ctx context.Context) ([]string, error)
 
+	// ListSudoersConfigs returns a map of key names (without "sudoers/" prefix)
+	// that have a stored configuration.
+	ListSudoersConfigs(ctx context.Context) (map[string]bool, error)
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }

@@ -1238,3 +1238,22 @@ func (ls *LocalStore) ListSudoersHosts(_ context.Context) ([]string, error) {
 	}
 	return hosts, nil
 }
+
+// ListSudoersConfigs implements SessionStore.
+func (ls *LocalStore) ListSudoersConfigs(_ context.Context) (map[string]bool, error) {
+	dir := filepath.Join(ls.cfg.LogDir, ".sudoers-config")
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return make(map[string]bool), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool)
+	for _, e := range entries {
+		if !e.IsDir() {
+			out[e.Name()] = true
+		}
+	}
+	return out, nil
+}

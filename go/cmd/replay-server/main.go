@@ -1837,13 +1837,19 @@ func handlePutSandboxTemplates(w http.ResponseWriter, r *http.Request) {
 // ── Sudoers API ───────────────────────────────────────────────────────────────
 
 // handleGetSudoersHosts returns the union of hosts that have sent snapshots
-// and hosts that have recorded sessions.
+// and hosts that have recorded sessions, including their override status.
 func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 	snapHosts, err := sessionStore.ListSudoersHosts(r.Context())
 	if err != nil {
 		http.Error(w, "list hosts: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	configs, err := sessionStore.ListSudoersConfigs(r.Context())
+	if err != nil {
+		log.Printf("sudoers configs list: %v", err)
+		configs = make(map[string]bool)
+	}
+
 	// Merge with session hosts so operators can stage config before first snapshot.
 	sessions, err := sessionStore.ListSessions(r.Context())
 	if err == nil {
@@ -1858,8 +1864,20 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	type hostJSON struct {
+		Name       string `json:"name"`
+		IsOverride bool   `json:"isOverride"`
+	}
+	var out []hostJSON
+	for _, h := range snapHosts {
+		out = append(out, hostJSON{h, configs[h]})
+	}
+	// Also ensure _default status is correct (it's never an "override", it's the base)
+	// but the UI might want to know if it exists.
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(snapHosts); err != nil {
+	if err := json.NewEncoder(w).Encode(out); err != nil {
 		log.Printf("sudoers hosts encode: %v", err)
 	}
 }
