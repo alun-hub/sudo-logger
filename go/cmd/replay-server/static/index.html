@@ -4708,12 +4708,13 @@ async function loadSudoersHosts() {
     const hosts = await fetch('/api/sudoers/hosts').then(r => r.json());
     sudoersHostsInfo = hosts;
 
+    const now = Math.floor(Date.now() / 1000);
     const items = ['_default', ...hosts.map(h => h.name).filter(h => h !== '_default')];
     list.innerHTML = items.map(h => {
       const info = hosts.find(x => x.name === h);
       const isOverride = info ? info.isOverride : false;
       const hostError = info ? info.error : null;
-      const inSync = info ? info.inSync : false;
+      const lastSeen = info ? info.lastSeen : 0;
       const typeLabel = h === '_default' ? 'Main' : (isOverride ? 'Modified' : 'Default');
       const typeClass = isOverride ? 'sudoers-badge-modified' : 'sudoers-badge-default';
 
@@ -4721,10 +4722,12 @@ async function loadSudoersHosts() {
       if (h !== '_default') {
         if (hostError) {
           syncIcon = `<span class="sudoers-badge-err" title="${esc(hostError)}">✖</span>`;
-        } else if (inSync) {
-          syncIcon = `<span class="sudoers-badge-ok">✓</span>`;
+        } else if (lastSeen > 0 && (now - lastSeen) > 300) {
+          syncIcon = `<span class="sudoers-badge-warn" title="Agent offline (last seen ${Math.round((now-lastSeen)/60)}m ago)">⚠</span>`;
+        } else if (lastSeen === 0) {
+          syncIcon = `<span class="sudoers-badge-warn" title="No contact from agent">⚠</span>`;
         } else {
-          syncIcon = `<span class="sudoers-badge-warn" title="Waiting for deployment">⏳</span>`;
+          syncIcon = `<span class="sudoers-sync-badge" data-host="${esc(h)}">⏳</span>`;
         }
       }
 
@@ -4764,31 +4767,27 @@ async function selectSudoersHost(host) {
 
   const info = sudoersHostsInfo.find(x => x.name === host);
   const hostError = info ? info.error : null;
+  const lastSeen = info ? info.lastSeen : 0;
+  const now = Math.floor(Date.now() / 1000);
 
-  // Update sync status badge (the small dot/icon next to the label)
-  const syncBadge = document.querySelector(`.sudoers-sync-badge[data-host="${CSS.escape(host)}"]`);
-  if (syncBadge) {
-    if (host === '_default') {
-      syncBadge.innerHTML = '';
-    } else if (hostError) {
-      syncBadge.innerHTML = `<span class="sudoers-badge-err" title="${esc(hostError)}">✖</span>`;
-    } else if (!sudoersCurrentConfig) {
-      syncBadge.innerHTML = '<span class="sudoers-badge-none">–</span>';
+  // Update sync status badge
+  const itemIcon = document.querySelector(`.sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-ok, .sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-warn, .sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-sync-badge`);
+
+  if (itemIcon && host !== '_default') {
+    if (hostError) {
+      // Keep error state
+    } else if (lastSeen === 0 || (now - lastSeen) > 300) {
+      itemIcon.textContent = '⚠'; itemIcon.className = 'sudoers-badge-warn';
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
-      // Trim both strings before hashing to ensure minor whitespace differences (newlines) don't break the match.
-      const cfgHash = await hashText(sudoersCurrentConfig.trim());
+      const cfgHash = await hashText(stripSudoersHeader(sudoersCurrentConfig));
       const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
       const snapHash = await hashText(managedSnap);
 
-      const itemIcon = document.querySelector(`.sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-ok, .sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-warn`);
-
       if (cfgHash === snapHash) {
-        if (itemIcon) { itemIcon.textContent = '✓'; itemIcon.className = 'sudoers-badge-ok'; }
+        itemIcon.textContent = '✓'; itemIcon.className = 'sudoers-badge-ok';
       } else {
-        if (itemIcon) { itemIcon.textContent = '⏳'; itemIcon.className = 'sudoers-badge-warn'; }
+        itemIcon.textContent = '⏳'; itemIcon.className = 'sudoers-badge-warn';
       }
-    } else {
-      syncBadge.innerHTML = '<span class="sudoers-badge-warn" title="Waiting for deployment">⏳</span>';
     }
   }
 
@@ -4807,7 +4806,14 @@ function extractManagedSudoers(fullContent) {
   if (parts.length < 2) return ''; // Not found
   // Take everything after the marker until the next marker or end
   let managed = parts[1].split('# --- ')[0];
-  return managed.trim();
+  return stripSudoersHeader(managed);
+}
+
+function stripSudoersHeader(text) {
+  return text.split('\n').filter(line =>
+    !line.startsWith('# Managed by sudo-logger') &&
+    !line.startsWith('# Generated:')
+  ).join('\n').trim();
 }
 
 async function hashText(text) {
