@@ -1901,16 +1901,19 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 		inSync := false
 		isOffline := true
 
+		// Check last seen activity (heartbeats)
+		lastSeen, _ := sessionStore.GetLastSeen(r.Context(), h)
+
 		// Check last sudoers activity
-		var lastSudoersActivity int64
 		if snaps, err := sessionStore.ListSudoersSnapshots(r.Context(), h, 1); err == nil && len(snaps) > 0 {
-			lastSudoersActivity = snaps[0].UploadedAt
+			if snaps[0].UploadedAt > lastSeen {
+				lastSeen = snaps[0].UploadedAt
+			}
 			managed := extractManagedSudoers(snaps[0].Content)
 			inSync = (staged == managed)
 		}
 
-		// Also check last session activity for better "online" detection
-		var lastSessionActivity int64
+		// Also check last session activity as fallback
 		if sessions, err := sessionStore.ListSessions(r.Context()); err == nil {
 			for _, s := range sessions {
 				if s.Host == h {
@@ -1918,16 +1921,11 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 					if s.Duration == 0 && (now-s.StartTime) < 600 {
 						ts = now // session recently started, likely still in progress
 					}
-					if ts > lastSessionActivity {
-						lastSessionActivity = ts
+					if ts > lastSeen {
+						lastSeen = ts
 					}
 				}
 			}
-		}
-
-		lastSeen := lastSudoersActivity
-		if lastSessionActivity > lastSeen {
-			lastSeen = lastSessionActivity
 		}
 
 		if lastSeen > 0 {

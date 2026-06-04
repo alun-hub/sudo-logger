@@ -186,6 +186,12 @@ type SessionStore interface {
 	// GetSudoersError returns the most recent error for a host, if any.
 	GetSudoersError(ctx context.Context, host string) (*protocol.SudoersError, error)
 
+	// SaveHeartbeat updates the "last seen" timestamp for host.
+	SaveHeartbeat(ctx context.Context, host string) error
+
+	// GetLastSeen returns the unix timestamp (seconds) of the host's last activity.
+	GetLastSeen(ctx context.Context, host string) (int64, error)
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }

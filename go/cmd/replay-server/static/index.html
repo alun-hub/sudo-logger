@@ -4580,12 +4580,14 @@ function saveSudoersFocus() {
   if (!active || !active.id || !active.id.startsWith('sudoers-')) return null;
 
   // Only save selection for text-supporting elements to avoid InvalidStateError
-  const isText = ['text', 'search', 'url', 'tel', 'password'].includes(active.type || 'text') || active.tagName === 'TEXTAREA';
-  return {
-    id: active.id,
-    start: isText ? active.selectionStart : undefined,
-    end: isText ? active.selectionEnd : undefined
-  };
+  let start, end;
+  try {
+    start = active.selectionStart;
+    end = active.selectionEnd;
+  } catch (e) {
+    // Not a text element or doesn't support selection
+  }
+  return { id: active.id, start, end };
 }
 
 function restoreSudoersFocus(f) {
@@ -4919,7 +4921,7 @@ function renderSudoersMain(snaps) {
         : '<span class="diff-eq">(no active snapshot from host yet)</span>');
 
   if (isOffline && managedSnap) {
-    diffHtml = `<div style="color:var(--amber);font-size:11px;margin-bottom:8px">⚠️ Agent may be offline. Showing diff against last known state from ${formatTS(snaps[0].uploaded_at)}.</div>` + diffHtml;
+    diffHtml = `<div style="color:var(--amber);font-size:11px;margin-bottom:8px;background:rgba(232,164,77,0.1);padding:6px;border-radius:4px;border:1px solid rgba(232,164,77,0.2)">⚠️ Agent is offline or not polling. Showing diff against last known state from ${formatTS(snaps[0].uploaded_at)}. The actual host state may differ.</div>` + diffHtml;
   }
 
   main.innerHTML = `

@@ -116,9 +116,27 @@ func trySendSudoersSnapshot(payload []byte) error {
 	return w.Flush()
 }
 
+// startHeartbeatLoop sends MsgHeartbeatAgent to the server every 30 seconds
+// to signal that the agent is alive and polling for config.
+func startHeartbeatLoop(host string) {
+	go func() {
+		// Send initial heartbeat
+		_ = trySendMessage(protocol.MsgHeartbeatAgent, []byte(host))
+
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			<-ticker.C
+			if err := trySendMessage(protocol.MsgHeartbeatAgent, []byte(host)); err != nil {
+				debugLog("sudoers heartbeat: %v", err)
+			}
+		}
+	}()
+}
+
 // startSudoersWatcher sends an initial snapshot and then watches /etc/sudoers
 // and /etc/sudoers.d/ for changes, sending a new snapshot whenever the content
-// changes. Exits when ctx is cancelled.
+// changes. It also sends a snapshot every 10 minutes regardless of changes.
 func startSudoersWatcher(ctx context.Context, host string) {
 	snap, err := collectSudoers(host)
 	if err != nil {
@@ -146,10 +164,19 @@ func startSudoersWatcher(ctx context.Context, host string) {
 		lastHash = snap.SHA256
 	}
 
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			newSnap, err := collectSudoers(host)
+			if err == nil {
+				lastHash = newSnap.SHA256
+				go sendSudoersSnapshot(newSnap)
+			}
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return

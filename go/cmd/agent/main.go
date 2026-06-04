@@ -123,6 +123,7 @@ func main() {
 	// Snapshot sudoers state and watch for changes; also poll for desired config.
 	go startSudoersWatcher(ctx, hostname)
 	startSudoersPoller(hostname)
+	startHeartbeatLoop(hostname)
 
 	// Remove stale socket from previous run.
 	if err := os.Remove(cfg.Socket); err != nil && !os.IsNotExist(err) {

@@ -1400,6 +1400,31 @@ func (d *DistributedStore) GetSudoersError(ctx context.Context, host string) (*p
 	return &serr, nil
 }
 
+// SaveHeartbeat implements SessionStore.
+func (d *DistributedStore) SaveHeartbeat(ctx context.Context, host string) error {
+	_, err := d.db.Exec(ctx, `
+INSERT INTO sudo_config (key, value)
+VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		"sudoers_seen/"+host, fmt.Sprintf("%d", time.Now().Unix()))
+	return err
+}
+
+// GetLastSeen implements SessionStore.
+func (d *DistributedStore) GetLastSeen(ctx context.Context, host string) (int64, error) {
+	var val string
+	err := d.db.QueryRow(ctx, `SELECT value FROM sudo_config WHERE key = $1`, "sudoers_seen/"+host).Scan(&val)
+	if err == pgx.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var ts int64
+	_, err = fmt.Sscanf(val, "%d", &ts)
+	return ts, err
+}
+
 func toJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b

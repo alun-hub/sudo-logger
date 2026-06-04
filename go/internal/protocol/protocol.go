@@ -68,6 +68,7 @@ const (
 	MsgSessionWarning           = uint8(0x17) // agent→plugin: session will be terminated soon; payload = UTF-8 seconds left
 	MsgSudoersSnapshot          = uint8(0x18) // agent→server: sudoers state snapshot; payload = JSON (SudoersSnapshot)
 	MsgSudoersError             = uint8(0x19) // agent→server: failed to apply config; payload = JSON (SudoersError)
+	MsgHeartbeatAgent           = uint8(0x1a) // agent→server: periodic liveness signal; payload = UTF-8 host
 
 	StreamStdin   = uint8(0x00)
 

@@ -784,6 +784,15 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			return
 
+		case protocol.MsgHeartbeatAgent:
+			host := string(payload)
+			if host != "" {
+				if err := srv.sessionStore.SaveHeartbeat(context.Background(), host); err != nil {
+					log.Printf("save heartbeat host=%s: %v", host, err)
+				}
+			}
+			return
+
 		case protocol.MsgDivergenceAlert:
 			// Agent detected a sudo/pkexec execve with no plugin SESSION_START.
 			// This indicates sudo.conf was tampered with (Plugin line removed).
