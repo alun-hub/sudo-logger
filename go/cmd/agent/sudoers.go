@@ -230,6 +230,12 @@ func startSudoersPoller(host string) {
 				} else {
 					lastApplied = content
 					log.Printf("sudoers: applied managed config to %s", sudoersManagedPath)
+					// Proactively send a snapshot so the server reflects the new
+					// state immediately, without waiting for the inotify watcher
+					// (which can miss rename events in some environments).
+					if snap, err := collectSudoers(host); err == nil {
+						go sendSudoersSnapshot(snap)
+					}
 				}
 			}
 

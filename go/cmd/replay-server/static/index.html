@@ -5252,8 +5252,8 @@ async function saveSudoersConfig() {
     sudoersRules = parsed.rules; sudoersAliases = parsed.aliases; sudoersAdvanced = parsed.advanced;
     // Re-load hosts to refresh sidebar badges (Modified/Default)
     await loadSudoersHosts(true);
-    // Re-select to refresh sync icons
-    selectSudoersHost(sudoersCurrentHost);
+    // Re-select to refresh sync icons and diff
+    await selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
     alert('Save failed: ' + e.message);
   }
@@ -5277,7 +5277,7 @@ async function deleteSudoersOverride() {
     const res = await fetch(`/api/sudoers/config?host=${encodeURIComponent(sudoersCurrentHost)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
     await loadSudoersHosts(true);
-    selectSudoersHost(sudoersCurrentHost);
+    await selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
     alert('Delete failed: ' + e.message);
   }
