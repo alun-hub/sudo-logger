@@ -1870,8 +1870,13 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		IsOverride bool   `json:"isOverride"`
 		Error      string `json:"error,omitempty"`
-		LastSeen   int64  `json:"lastSeen"`
+		InSync     bool   `json:"inSync"`
+		IsOffline  bool   `json:"isOffline"`
 	}
+
+	defaultCfg, _ := sessionStore.GetConfig(r.Context(), "sudoers/_default")
+	cleanDefault := stripSudoersHeader(defaultCfg)
+	now := time.Now().Unix()
 
 	var out []hostJSON
 	for _, h := range snapHosts {
@@ -1880,12 +1885,21 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 			errMsg = serr.Error
 		}
 
-		var lastSeen int64
-		if snaps, err := sessionStore.ListSudoersSnapshots(r.Context(), h, 1); err == nil && len(snaps) > 0 {
-			lastSeen = snaps[0].UploadedAt
+		staged := cleanDefault
+		if configs[h] {
+			cfg, _ := sessionStore.GetConfig(r.Context(), "sudoers/"+h)
+			staged = stripSudoersHeader(cfg)
 		}
 
-		out = append(out, hostJSON{h, configs[h], errMsg, lastSeen})
+		inSync := false
+		isOffline := true
+		if snaps, err := sessionStore.ListSudoersSnapshots(r.Context(), h, 1); err == nil && len(snaps) > 0 {
+			isOffline = (now - snaps[0].UploadedAt) > 300
+			managed := extractManagedSudoers(snaps[0].Content)
+			inSync = (staged == managed)
+		}
+
+		out = append(out, hostJSON{h, configs[h], errMsg, inSync, isOffline})
 	}
 	// Also ensure _default status is correct (it's never an "override", it's the base)
 	// but the UI might want to know if it exists.
