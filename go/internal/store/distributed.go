@@ -858,6 +858,10 @@ func (d *DistributedStore) GetConfig(ctx context.Context, key string) (string, e
 
 // SetConfig upserts a named config blob into sudo_config.
 func (d *DistributedStore) SetConfig(ctx context.Context, key, value string) error {
+	if value == "" {
+		_, err := d.db.Exec(ctx, `DELETE FROM sudo_config WHERE key = $1`, key)
+		return err
+	}
 	_, err := d.db.Exec(ctx, `
 INSERT INTO sudo_config (key, value) VALUES ($1, $2)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
