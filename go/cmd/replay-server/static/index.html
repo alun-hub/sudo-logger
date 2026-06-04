@@ -3089,6 +3089,7 @@ document.querySelector('#tab-anomalies thead').addEventListener('click', e => {
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
+  localStorage.setItem('sudo_replay_tab', tab);
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
   document.querySelectorAll('.report-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
@@ -3099,6 +3100,7 @@ function switchTab(tab) {
   }
   if (tab === 'blocked') { fetchBlockedUsers(); fetchWhitelistedUsers(); }
   if (tab === 'approvals') fetchApprovals();
+  if (tab === 'sudoers') loadSudoersHosts();
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
@@ -4545,11 +4547,6 @@ async function denyRequest(id) {
 
 document.getElementById('btn-refresh-approvals').addEventListener('click', fetchApprovals);
 
-const path = window.location.pathname.replace(/\/$/, '');
-if (path === '/approvals') {
-  switchTab('approvals');
-}
-
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -4747,6 +4744,7 @@ async function loadSudoersHosts() {
 
 async function selectSudoersHost(host) {
   sudoersCurrentHost = host;
+  localStorage.setItem('sudo_sudoers_host', host);
   sudoersIsEditing = false;
   document.querySelectorAll('.sudoers-host-item').forEach(el =>
     el.classList.toggle('active', el.dataset.host === host));
@@ -5172,7 +5170,9 @@ async function saveSudoersConfig() {
     sudoersIsEditing = false;
     const parsed = parseSudoers(content);
     sudoersRules = parsed.rules; sudoersAliases = parsed.aliases; sudoersAdvanced = parsed.advanced;
-    // Re-select to refresh status badges
+    // Re-load hosts to refresh sidebar badges (Modified/Default)
+    await loadSudoersHosts();
+    // Re-select to refresh sync icons
     selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
     alert('Save failed: ' + e.message);
@@ -5196,6 +5196,7 @@ async function deleteSudoersOverride() {
   try {
     const res = await fetch(`/api/sudoers/config?host=${encodeURIComponent(sudoersCurrentHost)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
+    await loadSudoersHosts();
     selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
     alert('Delete failed: ' + e.message);
@@ -5212,6 +5213,31 @@ function sudoersViewSnapshot(sha256) {
 // Load sudoers hosts when the tab is activated
 document.querySelectorAll('.tab-btn[data-tab="sudoers"]').forEach(btn => {
   btn.addEventListener('click', () => { loadSudoersHosts(); });
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  const path = window.location.pathname.replace(/\/$/, '');
+  let activeTab = localStorage.getItem('sudo_replay_tab');
+
+  if (path === '/approvals') {
+    activeTab = 'approvals';
+  }
+
+  if (activeTab) {
+    switchTab(activeTab);
+    if (activeTab === 'sudoers') {
+      const lastHost = localStorage.getItem('sudo_sudoers_host');
+      if (lastHost) {
+        const checkHosts = setInterval(() => {
+          if (sudoersHostsInfo.length > 0 || document.querySelector('.sudoers-host-item')) {
+            clearInterval(checkHosts);
+            selectSudoersHost(lastHost);
+          }
+        }, 100);
+        setTimeout(() => clearInterval(checkHosts), 5000);
+      }
+    }
+  }
 });
 
 </script>
