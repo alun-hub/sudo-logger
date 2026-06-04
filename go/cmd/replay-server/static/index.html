@@ -4785,11 +4785,10 @@ async function selectSudoersHost(host) {
       itemIcon.textContent = '⚠'; itemIcon.className = 'sudoers-badge-warn';
       itemIcon.title = 'Agent offline';
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
-      const cfgHash = await hashText(stripSudoersHeader(sudoersCurrentConfig));
       const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
-      const snapHash = await hashText(managedSnap);
+      const inSync = managedSnap === stripSudoersHeader(sudoersCurrentConfig);
 
-      if (cfgHash === snapHash) {
+      if (inSync) {
         itemIcon.textContent = '✓'; itemIcon.className = 'sudoers-badge-ok';
         itemIcon.title = 'In sync';
       } else {
