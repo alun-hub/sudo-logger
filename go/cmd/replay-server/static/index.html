@@ -4579,14 +4579,15 @@ function saveSudoersFocus() {
   const active = document.activeElement;
   if (!active || !active.id || !active.id.startsWith('sudoers-')) return null;
 
-  // Only save selection for text-supporting elements to avoid InvalidStateError
+  // Extremely robust check for text-supporting inputs to avoid InvalidStateError
   let start, end;
   try {
-    start = active.selectionStart;
-    end = active.selectionEnd;
-  } catch (e) {
-    // Not a text element or doesn't support selection
-  }
+    if (['text', 'search', 'url', 'tel', 'password'].includes(active.type) || active.tagName === 'TEXTAREA') {
+      start = active.selectionStart;
+      end = active.selectionEnd;
+    }
+  } catch (e) { /* ignore if not supported */ }
+
   return { id: active.id, start, end };
 }
 
@@ -4870,10 +4871,16 @@ function extractManagedSudoers(fullContent) {
 }
 
 function stripSudoersHeader(text) {
-  return text.split('\n').filter(line => {
-    const t = line.trim();
-    return !t.startsWith('# Managed by sudo-logger') && !t.startsWith('# Generated:');
-  }).join('\n').trim();
+  return (text || '').split('\n').map(line => {
+    let t = line.trim();
+    if (!t || t.startsWith('# Managed by sudo-logger') || t.startsWith('# Generated:') || t.startsWith('# ---')) return null;
+    // Normalize: remove (ALL) prefix and extra spaces as they are often redundant/added by visudo
+    t = t.replace(/\s+/g, ' ');
+    t = t.replace(/\(ALL\)\s+/g, '');
+    t = t.replace(/\(ALL:ALL\)\s+/g, '');
+    t = t.replace(/\b(NOPASSWD|NOEXEC|SETENV):\s+/g, '$1:');
+    return t;
+  }).filter(l => l !== null).join('\n').trim();
 }
 
 async function hashText(text) {
@@ -4886,6 +4893,7 @@ async function hashText(text) {
 // ── Main panel renderer ───────────────────────────────────────────────────────
 
 function formatTS(unixSec) {
+  if (!unixSec) return 'never';
   const d = new Date(unixSec * 1000);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -4968,7 +4976,7 @@ function renderSudoersMain(snaps) {
         ? '<span class="diff-eq">(managed file not yet present on host)</span>'
         : '<span class="diff-eq">(no active snapshot from host yet)</span>');
 
-  if (isOffline && managedSnap) {
+  if (isOffline && managedSnap && snaps && snaps.length > 0) {
     diffHtml = `<div style="color:var(--amber);font-size:11px;margin-bottom:8px;background:rgba(232,164,77,0.1);padding:6px;border-radius:4px;border:1px solid rgba(232,164,77,0.2)">⚠️ Agent is offline or not polling. Showing diff against last known state from ${formatTS(snaps[0].uploaded_at)}. The actual host state may differ.</div>` + diffHtml;
   }
 

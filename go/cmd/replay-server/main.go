@@ -2082,14 +2082,22 @@ func stripSudoersHeader(text string) string {
 	var out []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Match prefixes loosely to handle different dash types or suffixes
-		if strings.HasPrefix(trimmed, "# Managed by sudo-logger") ||
-			strings.HasPrefix(trimmed, "# Generated:") {
+		if trimmed == "" ||
+			strings.HasPrefix(trimmed, "# Managed by sudo-logger") ||
+			strings.HasPrefix(trimmed, "# Generated:") ||
+			strings.HasPrefix(trimmed, "# ---") {
 			continue
 		}
-		out = append(out, line)
+		// Normalize line: internal spacing and redundant (ALL)
+		l := strings.Join(strings.Fields(trimmed), " ")
+		l = strings.ReplaceAll(l, "(ALL) ", "")
+		l = strings.ReplaceAll(l, "(ALL:ALL) ", "")
+		l = strings.ReplaceAll(l, "NOPASSWD: ", "NOPASSWD:")
+		l = strings.ReplaceAll(l, "NOEXEC: ", "NOEXEC:")
+		l = strings.ReplaceAll(l, "SETENV: ", "SETENV:")
+		out = append(out, l)
 	}
-	return strings.TrimSpace(strings.Join(out, "\n"))
+	return strings.Join(out, "\n")
 }
 
 func extractManagedSudoers(full string) string {
