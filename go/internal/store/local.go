@@ -1147,7 +1147,10 @@ func (ls *LocalStore) SaveSudoersSnapshot(_ context.Context, snap *protocol.Sudo
 		return fmt.Errorf("sudoers snapshot dir: %w", err)
 	}
 
-	// Scan for an existing file with the same sha256.
+	// If a file with the same sha256 exists, remove it so the new write
+	// below gets the current timestamp. Re-applying a previous config
+	// (e.g. reverting to default) must become the most-recent snapshot so
+	// that ListSudoersSnapshots returns it first and inSync is recomputed.
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		if e.IsDir() {
@@ -1159,7 +1162,8 @@ func (ls *LocalStore) SaveSudoersSnapshot(_ context.Context, snap *protocol.Sudo
 		}
 		h := sha256.Sum256(data)
 		if hex.EncodeToString(h[:]) == snap.SHA256 {
-			return nil // already stored
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+			break
 		}
 	}
 

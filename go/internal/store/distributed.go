@@ -1307,7 +1307,7 @@ func (d *DistributedStore) SaveSudoersSnapshot(ctx context.Context, snap *protoc
 	_, err := d.db.Exec(ctx, `
 INSERT INTO sudo_sudoers_snapshots (host, content, sha256, uploaded_at)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (host, sha256) DO NOTHING`,
+ON CONFLICT (host, sha256) DO UPDATE SET uploaded_at = excluded.uploaded_at`,
 		snap.Host, snap.Content, snap.SHA256, time.Now().Unix())
 	return err
 }
