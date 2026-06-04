@@ -1915,6 +1915,9 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 			for _, s := range sessions {
 				if s.Host == h {
 					ts := s.StartTime + int64(s.Duration)
+					if s.Duration == 0 {
+						ts = now // session still in progress
+					}
 					if ts > lastSessionActivity {
 						lastSessionActivity = ts
 					}

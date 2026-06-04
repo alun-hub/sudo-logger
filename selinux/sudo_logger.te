@@ -88,7 +88,7 @@ allow sudo_agent_t cgroup_t:file { create };
 
 # Dir/File/Lnk/Sock permissions
 allow sudo_agent_t file_type:dir { open read getattr search watch };
-allow sudo_agent_t file_type:file { getattr watch };
+allow sudo_agent_t file_type:file { getattr };
 allow sudo_agent_t file_type:lnk_file { getattr read };
 allow sudo_agent_t file_type:sock_file { getattr };
 allow sudo_agent_t proc_security_t:file { getattr };

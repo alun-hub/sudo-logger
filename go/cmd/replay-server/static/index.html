@@ -688,6 +688,7 @@
     .sudoers-host-item.active .sudoers-badge-ok { color: var(--green); }
     .sudoers-host-item.active .sudoers-badge-warn { color: var(--amber); }
     .sudoers-host-item.active .sudoers-badge-err { color: var(--red); }
+    .sudoers-host-item.active .sudoers-sync-badge { color: var(--amber); }
     .sudoers-host-badge { font-size: 9px; font-weight: 700; text-transform: uppercase;
       padding: 1px 4px; border-radius: 3px; margin-left: 6px; }
     .sudoers-badge-default { background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid var(--border); }
@@ -4795,6 +4796,9 @@ async function selectSudoersHost(host) {
         itemIcon.textContent = '⏳'; itemIcon.className = 'sudoers-badge-warn';
         itemIcon.title = 'Waiting for deployment';
       }
+    } else if (!sudoersCurrentSnap) {
+      itemIcon.textContent = '⏳'; itemIcon.className = 'sudoers-badge-warn';
+      itemIcon.title = 'Waiting for first snapshot';
     }
   }
 
