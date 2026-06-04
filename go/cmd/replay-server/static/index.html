@@ -4577,7 +4577,14 @@ function toggleSudoersDetails(id, open) {
 function saveSudoersFocus() {
   const active = document.activeElement;
   if (!active || !active.id || !active.id.startsWith('sudoers-')) return null;
-  return { id: active.id, start: active.selectionStart, end: active.selectionEnd };
+
+  // Only save selection for text-supporting elements to avoid InvalidStateError
+  const isText = ['text', 'search', 'url', 'tel', 'password'].includes(active.type || 'text') || active.tagName === 'TEXTAREA';
+  return {
+    id: active.id,
+    start: isText ? active.selectionStart : undefined,
+    end: isText ? active.selectionEnd : undefined
+  };
 }
 
 function restoreSudoersFocus(f) {
@@ -4585,13 +4592,11 @@ function restoreSudoersFocus(f) {
   const el = document.getElementById(f.id);
   if (el) {
     el.focus();
-    if (f.start !== undefined && el.setSelectionRange &&
-        ['text', 'search', 'url', 'tel', 'password'].includes(el.type || 'text')) {
+    if (f.start !== undefined && el.setSelectionRange) {
       try { el.setSelectionRange(f.start, f.end); } catch(e) {}
     }
   }
 }
-
 function highlightSudoers(text) {
   return text.split('\n').map(line => {
     const h = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -4900,12 +4905,19 @@ function renderSudoersMain(snaps) {
     </div>`;
   }).join('');
 
+  const info = sudoersHostsInfo.find(x => x.name === host);
+  const isOffline = info ? info.isOffline : false;
+
   const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
-  const diffHtml = managedSnap && sudoersCurrentConfig
+  let diffHtml = managedSnap && sudoersCurrentConfig
     ? renderDiff(managedSnap, stripSudoersHeader(sudoersCurrentConfig))
     : (sudoersCurrentSnap
         ? '<span class="diff-eq">(managed file not yet present on host)</span>'
         : '<span class="diff-eq">(no active snapshot from host yet)</span>');
+
+  if (isOffline && managedSnap) {
+    diffHtml = `<div style="color:var(--amber);font-size:11px;margin-bottom:8px">⚠️ Agent may be offline. Showing diff against last known state from ${formatTS(snaps[0].uploaded_at)}.</div>` + diffHtml;
+  }
 
   main.innerHTML = `
     ${bannerHtml}
