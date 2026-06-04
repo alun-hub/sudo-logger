@@ -4713,6 +4713,7 @@ async function loadSudoersHosts() {
       const info = hosts.find(x => x.name === h);
       const isOverride = info ? info.isOverride : false;
       const hostError = info ? info.error : null;
+      const inSync = info ? info.inSync : false;
       const typeLabel = h === '_default' ? 'Main' : (isOverride ? 'Modified' : 'Default');
       const typeClass = isOverride ? 'sudoers-badge-modified' : 'sudoers-badge-default';
 
@@ -4720,8 +4721,10 @@ async function loadSudoersHosts() {
       if (h !== '_default') {
         if (hostError) {
           syncIcon = `<span class="sudoers-badge-err" title="${esc(hostError)}">✖</span>`;
+        } else if (inSync) {
+          syncIcon = `<span class="sudoers-badge-ok">✓</span>`;
         } else {
-          syncIcon = `<span class="sudoers-sync-badge" data-host="${esc(h)}"></span>`;
+          syncIcon = `<span class="sudoers-badge-warn" title="Waiting for deployment">⏳</span>`;
         }
       }
 
@@ -4774,11 +4777,15 @@ async function selectSudoersHost(host) {
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
       // Trim both strings before hashing to ensure minor whitespace differences (newlines) don't break the match.
       const cfgHash = await hashText(sudoersCurrentConfig.trim());
-      const snapHash = await hashText(sudoersCurrentSnap.trim());
+      const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
+      const snapHash = await hashText(managedSnap);
+
+      const itemIcon = document.querySelector(`.sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-ok, .sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-warn`);
+
       if (cfgHash === snapHash) {
-        syncBadge.innerHTML = '<span class="sudoers-badge-ok">✓</span>';
+        if (itemIcon) { itemIcon.textContent = '✓'; itemIcon.className = 'sudoers-badge-ok'; }
       } else {
-        syncBadge.innerHTML = '<span class="sudoers-badge-warn" title="Waiting for deployment (diverged)">⏳</span>';
+        if (itemIcon) { itemIcon.textContent = '⏳'; itemIcon.className = 'sudoers-badge-warn'; }
       }
     } else {
       syncBadge.innerHTML = '<span class="sudoers-badge-warn" title="Waiting for deployment">⏳</span>';
@@ -4791,6 +4798,16 @@ async function selectSudoersHost(host) {
   sudoersAdvanced = parsed.advanced;
 
   renderSudoersMain(snaps);
+}
+
+function extractManagedSudoers(fullContent) {
+  if (!fullContent) return '';
+  const marker = '# --- /etc/sudoers.d/sudo-logger-managed ---';
+  const parts = fullContent.split(marker);
+  if (parts.length < 2) return ''; // Not found
+  // Take everything after the marker until the next marker or end
+  let managed = parts[1].split('# --- ')[0];
+  return managed.trim();
 }
 
 async function hashText(text) {
@@ -4876,9 +4893,12 @@ function renderSudoersMain(snaps) {
     </div>`;
   }).join('');
 
-  const diffHtml = sudoersCurrentSnap && sudoersCurrentConfig
-    ? renderDiff(sudoersCurrentSnap, sudoersCurrentConfig)
-    : '<span class="diff-eq">(no active snapshot from host yet)</span>';
+  const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
+  const diffHtml = managedSnap && sudoersCurrentConfig
+    ? renderDiff(managedSnap, sudoersCurrentConfig)
+    : (sudoersCurrentSnap
+        ? '<span class="diff-eq">(managed file not yet present on host)</span>'
+        : '<span class="diff-eq">(no active snapshot from host yet)</span>');
 
   main.innerHTML = `
     ${bannerHtml}

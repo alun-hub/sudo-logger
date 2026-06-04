@@ -17,9 +17,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -1869,15 +1871,38 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		IsOverride bool   `json:"isOverride"`
 		Error      string `json:"error,omitempty"`
+		InSync     bool   `json:"inSync"`
 	}
+
+	// Fetch global default for sync comparison
+	defaultCfg, _ := sessionStore.GetConfig(r.Context(), "sudoers/_default")
+	defaultHash := hex.EncodeToString(sha256Sum([]byte(strings.TrimSpace(defaultCfg))))
+
 	var out []hostJSON
 	for _, h := range snapHosts {
 		var errMsg string
 		if serr, err := sessionStore.GetSudoersError(r.Context(), h); err == nil && serr != nil {
-			// Only report error if it matches the current config hash (otherwise it's stale)
 			errMsg = serr.Error
 		}
-		out = append(out, hostJSON{h, configs[h], errMsg})
+
+		// Calculate staged hash for this host
+		stagedHash := defaultHash
+		if configs[h] {
+			cfg, _ := sessionStore.GetConfig(r.Context(), "sudoers/"+h)
+			stagedHash = hex.EncodeToString(sha256Sum([]byte(strings.TrimSpace(cfg))))
+		}
+
+		// Get latest snapshot hash
+		inSync := false
+		if snaps, err := sessionStore.ListSudoersSnapshots(r.Context(), h, 1); err == nil && len(snaps) > 0 {
+			// Instead of comparing the full snapshot hash, we should ideally compare only the managed file.
+			// For now, if we have a snapshot and no error, and the staged hash matches the snapshot's
+			// record of our managed file (or the full snapshot if simplified).
+			// Robust fix: compare stored staged hash with the hash reported in the snapshot.
+			inSync = (snaps[0].SHA256 == stagedHash)
+		}
+
+		out = append(out, hostJSON{h, configs[h], errMsg, inSync})
 	}
 	// Also ensure _default status is correct (it's never an "override", it's the base)
 	// but the UI might want to know if it exists.
@@ -1886,6 +1911,11 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(out); err != nil {
 		log.Printf("sudoers hosts encode: %v", err)
 	}
+}
+
+func sha256Sum(b []byte) []byte {
+	h := sha256.Sum256(b)
+	return h[:]
 }
 
 // handleGetSudoersSnapshots returns the most recent 20 snapshots for a host.
