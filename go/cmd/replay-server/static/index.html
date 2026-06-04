@@ -683,7 +683,11 @@
       padding: 7px 14px; cursor: pointer; font-size: 13px; color: var(--text-sub);
       font-family: var(--font-ui); border-radius: 0; user-select: none; }
     .sudoers-host-item:hover { background: var(--card-hover); color: var(--text); }
-    .sudoers-host-item.active { background: var(--card); color: var(--green); }
+    .sudoers-host-item.active { background: var(--card); }
+    .sudoers-host-item.active span:first-child { color: var(--green); }
+    .sudoers-host-item.active .sudoers-badge-ok { color: var(--green); }
+    .sudoers-host-item.active .sudoers-badge-warn { color: var(--amber); }
+    .sudoers-host-item.active .sudoers-badge-err { color: var(--red); }
     .sudoers-host-badge { font-size: 9px; font-weight: 700; text-transform: uppercase;
       padding: 1px 4px; border-radius: 3px; margin-left: 6px; }
     .sudoers-badge-default { background: rgba(255,255,255,0.05); color: var(--text-dim); border: 1px solid var(--border); }
@@ -4773,6 +4777,7 @@ async function selectSudoersHost(host) {
       // Keep error state
     } else if (info && info.isOffline) {
       itemIcon.textContent = '⚠'; itemIcon.className = 'sudoers-badge-warn';
+      itemIcon.title = 'Agent offline';
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
       const cfgHash = await hashText(stripSudoersHeader(sudoersCurrentConfig));
       const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
@@ -4780,8 +4785,10 @@ async function selectSudoersHost(host) {
 
       if (cfgHash === snapHash) {
         itemIcon.textContent = '✓'; itemIcon.className = 'sudoers-badge-ok';
+        itemIcon.title = 'In sync';
       } else {
         itemIcon.textContent = '⏳'; itemIcon.className = 'sudoers-badge-warn';
+        itemIcon.title = 'Waiting for deployment';
       }
     }
   }

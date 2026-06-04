@@ -1901,7 +1901,7 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 		inSync := false
 		isOffline := true
 		if snaps, err := sessionStore.ListSudoersSnapshots(r.Context(), h, 1); err == nil && len(snaps) > 0 {
-			isOffline = (now - snaps[0].UploadedAt) > 300
+			isOffline = (now - snaps[0].UploadedAt) > 600
 			managed := extractManagedSudoers(snaps[0].Content)
 			inSync = (staged == managed)
 		}
