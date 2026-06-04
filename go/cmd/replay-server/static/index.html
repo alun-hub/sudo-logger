@@ -3105,7 +3105,7 @@ function switchTab(tab) {
   }
   if (tab === 'blocked') { fetchBlockedUsers(); fetchWhitelistedUsers(); }
   if (tab === 'approvals') fetchApprovals();
-  if (tab === 'sudoers') loadSudoersHosts();
+  if (tab === 'sudoers') { loadSudoersHosts(true); startSudoersPolling(); }
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
@@ -4711,7 +4711,7 @@ function renderDiff(a, b) {
 
 let sudoersHostsInfo = [];
 
-async function loadSudoersHosts() {
+async function loadSudoersHosts(skipSelect = false) {
   const list = document.getElementById('sudoers-host-list');
   if (!list) return;
   try {
@@ -4739,7 +4739,7 @@ async function loadSudoersHosts() {
         }
       }
 
-      return `<div class="sudoers-host-item" data-host="${esc(h)}" onclick="selectSudoersHost('${esc(h)}')">
+      return `<div class="sudoers-host-item ${sudoersCurrentHost === h ? 'active' : ''}" data-host="${esc(h)}" onclick="selectSudoersHost('${esc(h)}')">
         <span>${esc(h)}</span>
         <div style="display:flex;align-items:center">
           <span class="sudoers-host-badge ${typeClass}">${typeLabel}</span>
@@ -4748,10 +4748,49 @@ async function loadSudoersHosts() {
       </div>`;
     }).join('');
 
-    if (sudoersCurrentHost) selectSudoersHost(sudoersCurrentHost);
+    if (sudoersCurrentHost && !skipSelect) selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
     list.innerHTML = '<p style="padding:10px;color:var(--red);font-size:12px">Failed to load hosts</p>';
   }
+}
+
+let sudoersPollTimer = null;
+
+function startSudoersPolling() {
+  if (sudoersPollTimer) return;
+  sudoersPollTimer = setInterval(async () => {
+    const tab = document.querySelector('.tab-btn[data-tab="sudoers"]');
+    if (!tab || !tab.classList.contains('active')) return;
+
+    // Refresh host list badges
+    await loadSudoersHosts(true);
+
+    // If we have a selected host, refresh its snapshot and diff (but don't clear UI)
+    if (sudoersCurrentHost && !sudoersIsEditing) {
+      const host = sudoersCurrentHost;
+      const [snapRes, cfgRes] = await Promise.all([
+        fetch(`/api/sudoers/snapshots?host=${encodeURIComponent(host)}`).then(r => r.json()).catch(() => null),
+        fetch(`/api/sudoers/config?host=${encodeURIComponent(host)}`).then(r => r.json()).catch(() => null),
+      ]);
+      if (snapRes && cfgRes && host === sudoersCurrentHost) {
+        const snaps = snapRes.snapshots || [];
+        const newSnap = snaps[0] ? snaps[0].content : null;
+        const newCfg = cfgRes.content || '';
+
+        // Only re-render if content changed (to avoid losing focus/scroll)
+        if (newSnap !== sudoersCurrentSnap || newCfg !== sudoersCurrentConfig) {
+          sudoersCurrentSnap = newSnap;
+          sudoersCurrentConfig = newCfg;
+          sudoersIsOverride = !!cfgRes.is_override;
+          const parsed = parseSudoers(sudoersCurrentConfig);
+          sudoersRules = parsed.rules;
+          sudoersAliases = parsed.aliases;
+          sudoersAdvanced = parsed.advanced;
+          renderSudoersMain(snaps);
+        }
+      }
+    }
+  }, 5000);
 }
 
 async function selectSudoersHost(host) {
@@ -5195,7 +5234,7 @@ async function saveSudoersConfig() {
     const parsed = parseSudoers(content);
     sudoersRules = parsed.rules; sudoersAliases = parsed.aliases; sudoersAdvanced = parsed.advanced;
     // Re-load hosts to refresh sidebar badges (Modified/Default)
-    await loadSudoersHosts();
+    await loadSudoersHosts(true);
     // Re-select to refresh sync icons
     selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
@@ -5220,7 +5259,7 @@ async function deleteSudoersOverride() {
   try {
     const res = await fetch(`/api/sudoers/config?host=${encodeURIComponent(sudoersCurrentHost)}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
-    await loadSudoersHosts();
+    await loadSudoersHosts(true);
     selectSudoersHost(sudoersCurrentHost);
   } catch(e) {
     alert('Delete failed: ' + e.message);
@@ -5250,6 +5289,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (activeTab) {
     switchTab(activeTab);
     if (activeTab === 'sudoers') {
+      startSudoersPolling();
       const lastHost = localStorage.getItem('sudo_sudoers_host');
       if (lastHost) {
         const checkHosts = setInterval(() => {
