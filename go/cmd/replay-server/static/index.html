@@ -690,6 +690,7 @@
     .sudoers-badge-modified { background: var(--amber-dim, rgba(232, 164, 77, 0.15)); color: var(--amber); border: 1px solid var(--amber); }
     .sudoers-badge-ok   { color: var(--green); margin-left: 4px; }
     .sudoers-badge-warn { color: var(--amber); margin-left: 4px; }
+    .sudoers-badge-err  { color: var(--red); margin-left: 4px; }
     .sudoers-badge-none { color: var(--text-dim); margin-left: 4px; }
     .sudoers-main { flex: 1; overflow-y: auto; padding: 20px 24px; }
     .sudoers-mode-bar { display: flex; gap: 6px; margin-bottom: 16px; align-items: center; }
@@ -1524,8 +1525,12 @@
             <div><strong>In Sync:</strong> The agent on the host has successfully applied and verified the latest configuration.</div>
           </div>
           <div class="help-logic-row">
-            <span style="color:var(--amber);font-weight:700;width:60px;text-align:center">⚠</span>
-            <div><strong>Diverged:</strong> The host is running an older or different configuration than what is saved on the server. This is normal for up to 60 seconds after a save.</div>
+            <span style="color:var(--amber);font-weight:700;width:60px;text-align:center">⏳</span>
+            <div><strong>Pending:</strong> The host is waiting to fetch the latest configuration (agents poll every 60 seconds).</div>
+          </div>
+          <div class="help-logic-row">
+            <span style="color:var(--red);font-weight:700;width:60px;text-align:center">✖</span>
+            <div><strong>Sync Error:</strong> The agent failed to apply the configuration (e.g. <code>visudo -c</code> syntax error). Hover for details.</div>
           </div>
         </div>
 
@@ -1535,6 +1540,51 @@
           <div class="help-tip"><span><strong>Cleanup:</strong> Click "Remove override" to make a host return to following the global template.</span></div>
         </div>
       </div>
+
+      <div class="help-section">
+        <h3>How to Write Sudoers Rules</h3>
+        <p class="help-intro" style="margin-bottom:12px">The visual editor follows standard sudoers syntax but simplifies it into an "Identity-First" card layout.</p>
+
+        <table class="help-table">
+          <thead>
+            <tr>
+              <th style="width:120px">Field</th>
+              <th>Description & Examples</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Identity</strong></td>
+              <td>User or Group that the rule applies to. Groups should be prefixed with <code>%</code> (e.g., <code>%wheel</code>, <code>%admins</code>). Users are written as-is (e.g., <code>alun</code>).</td>
+            </tr>
+            <tr>
+              <td><strong>Hosts</strong></td>
+              <td>Where the command can be run. Use <code>ALL</code> for all hosts, or specify a list (e.g., <code>localhost, fedora</code>).</td>
+            </tr>
+            <tr>
+              <td><strong>Run As</strong></td>
+              <td>Which user the command is executed as. Usually <code>(ALL)</code> or <code>(root)</code>. You can also specify <code>(ALL : ALL)</code> to allow running as any user/group.</td>
+            </tr>
+            <tr>
+              <td><strong>Options</strong></td>
+              <td>Control execution behavior. <code>NOPASSWD</code> allows running without a password. <code>SETENV</code> allows preserving environment variables.</td>
+            </tr>
+            <tr>
+              <td><strong>Commands</strong></td>
+              <td>The full path to the allowed binary (e.g., <code>/usr/bin/dnf</code>). Use <code>ALL</code> for everything. You can restrict commands by adding arguments (e.g., <code>/usr/bin/systemctl restart nginx</code>).</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="help-tips" style="margin-top:16px">
+          <div class="help-tip"><span><strong>Best Practice:</strong> Always use full paths for commands (<code>/usr/bin/id</code> instead of just <code>id</code>) to prevent path-injection attacks.</span></div>
+          <div class="help-tip"><span><strong>Aliases:</strong> If you need to reuse lists of users or commands, define them in the <strong>Aliases</strong> section at the bottom and then use the Alias name in your rules.</span></div>
+          <div class="help-tip"><span><strong>Global vs Local:</strong> Write common rules in the <strong>Main</strong> template. Use host overrides only for rules that are truly unique to a single machine.</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
 
     </div>
   </div>
@@ -4655,14 +4705,24 @@ async function loadSudoersHosts() {
     list.innerHTML = items.map(h => {
       const info = hosts.find(x => x.name === h);
       const isOverride = info ? info.isOverride : false;
+      const hostError = info ? info.error : null;
       const typeLabel = h === '_default' ? 'Main' : (isOverride ? 'Modified' : 'Default');
       const typeClass = isOverride ? 'sudoers-badge-modified' : 'sudoers-badge-default';
+
+      let syncIcon = '';
+      if (h !== '_default') {
+        if (hostError) {
+          syncIcon = `<span class="sudoers-badge-err" title="${esc(hostError)}">✖</span>`;
+        } else {
+          syncIcon = `<span class="sudoers-sync-badge" data-host="${esc(h)}"></span>`;
+        }
+      }
 
       return `<div class="sudoers-host-item" data-host="${esc(h)}" onclick="selectSudoersHost('${esc(h)}')">
         <span>${esc(h)}</span>
         <div style="display:flex;align-items:center">
           <span class="sudoers-host-badge ${typeClass}">${typeLabel}</span>
-          <span class="sudoers-sync-badge" data-host="${esc(h)}"></span>
+          ${syncIcon}
         </div>
       </div>`;
     }).join('');
@@ -4691,23 +4751,29 @@ async function selectSudoersHost(host) {
   sudoersCurrentConfig = (cfgRes && cfgRes.content) || '';
   sudoersIsOverride = !!(cfgRes && cfgRes.is_override);
 
+  const info = sudoersHostsInfo.find(x => x.name === host);
+  const hostError = info ? info.error : null;
+
   // Update sync status badge (the small dot/icon next to the label)
   const syncBadge = document.querySelector(`.sudoers-sync-badge[data-host="${CSS.escape(host)}"]`);
   if (syncBadge) {
     if (host === '_default') {
       syncBadge.innerHTML = '';
+    } else if (hostError) {
+      syncBadge.innerHTML = `<span class="sudoers-badge-err" title="${esc(hostError)}">✖</span>`;
     } else if (!sudoersCurrentConfig) {
       syncBadge.innerHTML = '<span class="sudoers-badge-none">–</span>';
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
-      const cfgHash = await hashText(sudoersCurrentConfig);
-      const snapHash = snaps[0] ? snaps[0].sha256 : '';
+      // Trim both strings before hashing to ensure minor whitespace differences (newlines) don't break the match.
+      const cfgHash = await hashText(sudoersCurrentConfig.trim());
+      const snapHash = await hashText(sudoersCurrentSnap.trim());
       if (cfgHash === snapHash) {
         syncBadge.innerHTML = '<span class="sudoers-badge-ok">✓</span>';
       } else {
-        syncBadge.innerHTML = '<span class="sudoers-badge-warn">⚠</span>';
+        syncBadge.innerHTML = '<span class="sudoers-badge-warn" title="Waiting for deployment (diverged)">⏳</span>';
       }
     } else {
-      syncBadge.innerHTML = '<span class="sudoers-badge-warn">⚠</span>';
+      syncBadge.innerHTML = '<span class="sudoers-badge-warn" title="Waiting for deployment">⏳</span>';
     }
   }
 

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -198,6 +199,7 @@ func startSudoersPoller(host string) {
 			if content != "" && content != lastApplied {
 				if err := applySudoers(content); err != nil {
 					log.Printf("sudoers poller: apply: %v", err)
+					sendSudoersError(host, err.Error(), content)
 				} else {
 					lastApplied = content
 					log.Printf("sudoers: applied managed config to %s", sudoersManagedPath)
@@ -207,6 +209,42 @@ func startSudoersPoller(host string) {
 			<-ticker.C
 		}
 	}()
+}
+
+func sendSudoersError(host, errMsg, content string) {
+	h := sha256.Sum256([]byte(content))
+	errPayload, _ := json.Marshal(protocol.SudoersError{
+		Host:   host,
+		Error:  errMsg,
+		SHA256: hex.EncodeToString(h[:]),
+		Ts:     time.Now().Unix(),
+	})
+	// Just a one-shot attempt; if it fails we'll try again next poll if it still fails.
+	go func() {
+		_ = trySendMessage(protocol.MsgSudoersError, errPayload)
+	}()
+}
+
+func trySendMessage(msgType uint8, payload []byte) error {
+	tcpAddr, err := net.ResolveTCPAddr("tcp", cfg.Server)
+	if err != nil {
+		return err
+	}
+	rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
+	if err != nil {
+		return err
+	}
+	defer rawTCP.Close()
+
+	conn := tls.Client(rawTCP, tlsClientFor(tlsCfg, cfg.Server))
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	defer conn.Close()
+
+	if err := conn.Handshake(); err != nil {
+		return err
+	}
+	w := bufio.NewWriter(conn)
+	return protocol.WriteMessage(w, msgType, payload)
 }
 
 // applySudoers validates content with visudo -c, then atomically writes it to

@@ -773,6 +773,17 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			}
 			return
 
+		case protocol.MsgSudoersError:
+			var serr protocol.SudoersError
+			if err := json.Unmarshal(payload, &serr); err != nil {
+				log.Printf("parse MsgSudoersError from %s: %v", remote, err)
+				return
+			}
+			if err := srv.sessionStore.SaveSudoersError(context.Background(), serr); err != nil {
+				log.Printf("save sudoers error host=%s: %v", serr.Host, err)
+			}
+			return
+
 		case protocol.MsgDivergenceAlert:
 			// Agent detected a sudo/pkexec execve with no plugin SESSION_START.
 			// This indicates sudo.conf was tampered with (Plugin line removed).

@@ -1368,3 +1368,35 @@ func (d *DistributedStore) ListSudoersConfigs(ctx context.Context) (map[string]b
 	}
 	return out, rows.Err()
 }
+
+// SaveSudoersError implements SessionStore.
+func (d *DistributedStore) SaveSudoersError(ctx context.Context, serr protocol.SudoersError) error {
+	_, err := d.db.Exec(ctx, `
+INSERT INTO sudo_config (key, value)
+VALUES ($1, $2)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		"sudoers_err/"+serr.Host, string(toJSON(serr)))
+	return err
+}
+
+// GetSudoersError implements SessionStore.
+func (d *DistributedStore) GetSudoersError(ctx context.Context, host string) (*protocol.SudoersError, error) {
+	var val string
+	err := d.db.QueryRow(ctx, `SELECT value FROM sudo_config WHERE key = $1`, "sudoers_err/"+host).Scan(&val)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var serr protocol.SudoersError
+	if err := json.Unmarshal([]byte(val), &serr); err != nil {
+		return nil, err
+	}
+	return &serr, nil
+}
+
+func toJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}

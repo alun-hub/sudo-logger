@@ -67,6 +67,7 @@ const (
 	MsgSessionExpired           = uint8(0x16) // agent→plugin: approval window expired, session is being terminated
 	MsgSessionWarning           = uint8(0x17) // agent→plugin: session will be terminated soon; payload = UTF-8 seconds left
 	MsgSudoersSnapshot          = uint8(0x18) // agent→server: sudoers state snapshot; payload = JSON (SudoersSnapshot)
+	MsgSudoersError             = uint8(0x19) // agent→server: failed to apply config; payload = JSON (SudoersError)
 
 	StreamStdin   = uint8(0x00)
 
@@ -187,6 +188,15 @@ type SudoersFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 	SHA256  string `json:"sha256"`
+}
+
+// SudoersError is the JSON payload for MsgSudoersError.
+// Sent by the agent when it fails to apply a received configuration (e.g. visudo -c fails).
+type SudoersError struct {
+	Host    string `json:"host"`
+	Error   string `json:"error"`
+	SHA256  string `json:"sha256"` // the sha256 of the config that failed to apply
+	Ts      int64  `json:"ts"`     // unix seconds
 }
 
 // Chunk is a decoded CHUNK message.

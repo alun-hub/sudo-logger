@@ -1257,3 +1257,27 @@ func (ls *LocalStore) ListSudoersConfigs(_ context.Context) (map[string]bool, er
 	}
 	return out, nil
 }
+
+// SaveSudoersError implements SessionStore.
+func (ls *LocalStore) SaveSudoersError(_ context.Context, serr protocol.SudoersError) error {
+	p := filepath.Join(ls.cfg.LogDir, ".sudoers-config", ".err-"+serr.Host)
+	data, _ := json.Marshal(serr)
+	return os.WriteFile(p, data, 0o640)
+}
+
+// GetSudoersError implements SessionStore.
+func (ls *LocalStore) GetSudoersError(_ context.Context, host string) (*protocol.SudoersError, error) {
+	p := filepath.Join(ls.cfg.LogDir, ".sudoers-config", ".err-"+host)
+	data, err := os.ReadFile(p)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var serr protocol.SudoersError
+	if err := json.Unmarshal(data, &serr); err != nil {
+		return nil, err
+	}
+	return &serr, nil
+}

@@ -180,6 +180,12 @@ type SessionStore interface {
 	// that have a stored configuration.
 	ListSudoersConfigs(ctx context.Context) (map[string]bool, error)
 
+	// SaveSudoersError persists a configuration application failure.
+	SaveSudoersError(ctx context.Context, err protocol.SudoersError) error
+
+	// GetSudoersError returns the most recent error for a host, if any.
+	GetSudoersError(ctx context.Context, host string) (*protocol.SudoersError, error)
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }

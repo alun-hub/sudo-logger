@@ -1868,10 +1868,16 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 	type hostJSON struct {
 		Name       string `json:"name"`
 		IsOverride bool   `json:"isOverride"`
+		Error      string `json:"error,omitempty"`
 	}
 	var out []hostJSON
 	for _, h := range snapHosts {
-		out = append(out, hostJSON{h, configs[h]})
+		var errMsg string
+		if serr, err := sessionStore.GetSudoersError(r.Context(), h); err == nil && serr != nil {
+			// Only report error if it matches the current config hash (otherwise it's stale)
+			errMsg = serr.Error
+		}
+		out = append(out, hostJSON{h, configs[h], errMsg})
 	}
 	// Also ensure _default status is correct (it's never an "override", it's the base)
 	// but the UI might want to know if it exists.
