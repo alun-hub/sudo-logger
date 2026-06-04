@@ -207,7 +207,7 @@ func startSudoersWatcher(ctx context.Context, host string) {
 func startSudoersPoller(host string) {
 	go func() {
 		var lastApplied string
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 
 		// Poll immediately on startup, then every 60 s.

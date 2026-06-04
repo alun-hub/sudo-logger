@@ -4777,8 +4777,16 @@ function startSudoersPolling() {
         const newSnap = snaps[0] ? snaps[0].content : null;
         const newCfg = cfgRes.content || '';
 
-        // Only re-render if content changed (to avoid losing focus/scroll)
-        if (newSnap !== sudoersCurrentSnap || newCfg !== sudoersCurrentConfig) {
+        const oldManaged = extractManagedSudoers(sudoersCurrentSnap);
+        const newManaged = extractManagedSudoers(newSnap);
+        const oldCleanCfg = stripSudoersHeader(sudoersCurrentConfig);
+        const newCleanCfg = stripSudoersHeader(newCfg);
+
+        // Re-render if managed content OR staged config changed, or if we transitioned to/from sync
+        const wasInSync = oldManaged === oldCleanCfg;
+        const nowInSync = newManaged === newCleanCfg;
+
+        if (newSnap !== sudoersCurrentSnap || newCfg !== sudoersCurrentConfig || wasInSync !== nowInSync) {
           sudoersCurrentSnap = newSnap;
           sudoersCurrentConfig = newCfg;
           sudoersIsOverride = !!cfgRes.is_override;
@@ -4790,6 +4798,7 @@ function startSudoersPolling() {
         }
       }
     }
+
   }, 5000);
 }
 
