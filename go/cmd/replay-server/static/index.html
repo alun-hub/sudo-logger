@@ -4708,13 +4708,11 @@ async function loadSudoersHosts() {
     const hosts = await fetch('/api/sudoers/hosts').then(r => r.json());
     sudoersHostsInfo = hosts;
 
-    const now = Math.floor(Date.now() / 1000);
     const items = ['_default', ...hosts.map(h => h.name).filter(h => h !== '_default')];
     list.innerHTML = items.map(h => {
       const info = hosts.find(x => x.name === h);
       const isOverride = info ? info.isOverride : false;
       const hostError = info ? info.error : null;
-      const lastSeen = info ? info.lastSeen : 0;
       const typeLabel = h === '_default' ? 'Main' : (isOverride ? 'Modified' : 'Default');
       const typeClass = isOverride ? 'sudoers-badge-modified' : 'sudoers-badge-default';
 
@@ -4722,10 +4720,10 @@ async function loadSudoersHosts() {
       if (h !== '_default') {
         if (hostError) {
           syncIcon = `<span class="sudoers-badge-err" title="${esc(hostError)}">✖</span>`;
-        } else if (lastSeen > 0 && (now - lastSeen) > 300) {
-          syncIcon = `<span class="sudoers-badge-warn" title="Agent offline (last seen ${Math.round((now-lastSeen)/60)}m ago)">⚠</span>`;
-        } else if (lastSeen === 0) {
-          syncIcon = `<span class="sudoers-badge-warn" title="No contact from agent">⚠</span>`;
+        } else if (info && info.isOffline) {
+          syncIcon = `<span class="sudoers-badge-warn" title="Agent offline">⚠</span>`;
+        } else if (info && info.inSync) {
+          syncIcon = `<span class="sudoers-badge-ok">✓</span>`;
         } else {
           syncIcon = `<span class="sudoers-sync-badge" data-host="${esc(h)}">⏳</span>`;
         }
@@ -4767,8 +4765,6 @@ async function selectSudoersHost(host) {
 
   const info = sudoersHostsInfo.find(x => x.name === host);
   const hostError = info ? info.error : null;
-  const lastSeen = info ? info.lastSeen : 0;
-  const now = Math.floor(Date.now() / 1000);
 
   // Update sync status badge
   const itemIcon = document.querySelector(`.sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-ok, .sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-badge-warn, .sudoers-host-item[data-host="${CSS.escape(host)}"] .sudoers-sync-badge`);
@@ -4776,7 +4772,7 @@ async function selectSudoersHost(host) {
   if (itemIcon && host !== '_default') {
     if (hostError) {
       // Keep error state
-    } else if (lastSeen === 0 || (now - lastSeen) > 300) {
+    } else if (info && info.isOffline) {
       itemIcon.textContent = '⚠'; itemIcon.className = 'sudoers-badge-warn';
     } else if (sudoersCurrentSnap && sudoersCurrentConfig) {
       const cfgHash = await hashText(stripSudoersHeader(sudoersCurrentConfig));
@@ -4810,10 +4806,10 @@ function extractManagedSudoers(fullContent) {
 }
 
 function stripSudoersHeader(text) {
-  return text.split('\n').filter(line =>
-    !line.startsWith('# Managed by sudo-logger') &&
-    !line.startsWith('# Generated:')
-  ).join('\n').trim();
+  return text.split('\n').filter(line => {
+    const t = line.trim();
+    return !t.startsWith('# Managed by sudo-logger') && !t.startsWith('# Generated:');
+  }).join('\n').trim();
 }
 
 async function hashText(text) {
