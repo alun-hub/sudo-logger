@@ -88,6 +88,29 @@ var (
 // sessionStore is the active storage backend, initialised in main().
 var sessionStore store.SessionStore
 
+// sessionsCache caches the result of ListSessions to avoid an expensive
+// full directory walk on every /api/sudoers/hosts poll (called every 15 s).
+var sessionsCache struct {
+	mu      sync.Mutex
+	records []store.SessionRecord
+	expiry  time.Time
+}
+
+func cachedListSessions(ctx context.Context) []store.SessionRecord {
+	sessionsCache.mu.Lock()
+	defer sessionsCache.mu.Unlock()
+	if time.Now().Before(sessionsCache.expiry) {
+		return sessionsCache.records
+	}
+	records, err := sessionStore.ListSessions(ctx)
+	if err != nil {
+		return sessionsCache.records // return stale on error
+	}
+	sessionsCache.records = records
+	sessionsCache.expiry = time.Now().Add(60 * time.Second)
+	return records
+}
+
 // ctxKey is the unexported type for context keys in this package.
 type ctxKey int
 
@@ -1852,8 +1875,8 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Merge with session hosts so operators can stage config before first snapshot.
-	sessions, err := sessionStore.ListSessions(r.Context())
-	if err == nil {
+	sessions := cachedListSessions(r.Context())
+	{
 		seen := make(map[string]struct{}, len(snapHosts))
 		for _, h := range snapHosts {
 			seen[h] = struct{}{}
