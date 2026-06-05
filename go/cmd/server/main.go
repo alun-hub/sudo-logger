@@ -779,6 +779,11 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("parse MsgSudoersError from %s: %v", remote, err)
 				return
 			}
+			if serr.Host == "" || len(serr.Host) > 255 || serr.Host[0] == '.' ||
+				strings.ContainsAny(serr.Host, "/\\") || strings.Contains(serr.Host, "..") {
+				log.Printf("SECURITY: MsgSudoersError invalid host %q from %s — dropping", serr.Host, remote)
+				return
+			}
 			if err := srv.sessionStore.SaveSudoersError(context.Background(), serr); err != nil {
 				log.Printf("save sudoers error host=%s: %v", serr.Host, err)
 			}
@@ -786,10 +791,13 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 		case protocol.MsgHeartbeatAgent:
 			host := string(payload)
-			if host != "" {
-				if err := srv.sessionStore.SaveHeartbeat(context.Background(), host); err != nil {
-					log.Printf("save heartbeat host=%s: %v", host, err)
-				}
+			if host == "" || len(host) > 255 || host[0] == '.' ||
+				strings.ContainsAny(host, "/\\") || strings.Contains(host, "..") {
+				log.Printf("SECURITY: MsgHeartbeatAgent invalid host %q from %s — dropping", host, remote)
+				return
+			}
+			if err := srv.sessionStore.SaveHeartbeat(context.Background(), host); err != nil {
+				log.Printf("save heartbeat host=%s: %v", host, err)
 			}
 			return
 
