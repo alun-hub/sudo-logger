@@ -5099,7 +5099,7 @@ function renderSudoersMain(snaps) {
             <div class="sudoers-history-row">
               <span class="sudoers-history-ts">${esc(formatTS(s.uploaded_at))}</span>
               <span class="sudoers-history-sha">${esc(s.sha256.slice(0,16))}…</span>
-              <button class="btn-sm" onclick="sudoersViewSnapshot('${esc(s.sha256)}')">View</button>
+              <button class="btn-secondary" onclick="sudoersViewSnapshot('${esc(s.sha256)}')">View</button>
             </div>
           `).join('') || '<span style="color:var(--text-dim)">No snapshots received yet.</span>'}
         </div>
