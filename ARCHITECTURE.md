@@ -195,6 +195,9 @@ Defined in `go/internal/protocol/protocol.go` (Go) and inline in `plugin/plugin.
 | `0x0d` | `FREEZE_TIMEOUT` | agent→plugin | empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
 | `0x0e` | `SESSION_ABANDON` | agent→server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session `freeze_timeout` |
 | `0x0f` | `SESSION_FREEZING` | agent→server (new conn) | UTF-8 session_id — session is being frozen due to network loss |
+| `0x18` | `MsgSudoersSnapshot` | agent→server | JSON `SudoersSnapshot` — full snapshot of `/etc/sudoers` + `/etc/sudoers.d/` |
+| `0x19` | `MsgSudoersError` | agent→server | JSON `SudoersError` — `visudo -c` validation failure when applying a pushed config |
+| `0x1a` | `MsgHeartbeatAgent` | agent→server | UTF-8 host name — sudoers liveness keepalive, every 30 s |
 
 CHUNK stream types: `0x00` stdin, `0x01` stdout, `0x02` stderr, `0x03` tty-in, `0x04` tty-out.
 
@@ -365,6 +368,9 @@ Who viewed which session is recorded in the access log:
 | `GET/PUT` | `/api/approval-config` | JIT approval policy configuration |
 | `GET` | `/api/hosts` | Unique host names seen in session history |
 | `GET` | `/metrics` | Prometheus metrics |
+| `GET` | `/api/sudoers/hosts` | All hosts with sudoers snapshot or session history; includes `inSync`, `isOffline`, `isOverride`, and `error` fields |
+| `GET` | `/api/sudoers/snapshots` | Latest snapshots for a host (`?host=`) |
+| `GET/PUT/DELETE` | `/api/sudoers/config` | Desired sudoers config for a host or `_default` template |
 
 ---
 
@@ -392,6 +398,73 @@ next sudo attempt by blocked user
 ```
 
 Blocking is per-user and optionally per-host. An empty host list means "all hosts". The block message is configurable from the GUI.
+
+---
+
+## Sudoers management
+
+Operators push desired sudoers rules to managed hosts from the **Sudoers** tab in the replay UI. The agent applies the config locally and reports sync status back in near-real time.
+
+### Data flow
+
+```
+replay UI
+  PUT /api/sudoers/config?host=_default   ← global template
+  PUT /api/sudoers/config?host=<hostname> ← per-host override
+       │
+       stored in SessionStore (file: .sudoers/<key> / distributed: sudo_config table)
+
+agent (every 15 s, MsgFetchConfig)
+  ├─ fetch "sudoers/<host>" → fallback "sudoers/_default"
+  ├─ content changed AND previous content didn't fail validation?
+  │    └─ write tmpfile → visudo -c tmpfile
+  │         ├─ success → rename onto /etc/sudoers.d/sudo-logger-managed
+  │         │            send MsgSudoersSnapshot (0x18)
+  │         └─ failure → remove tmpfile
+  │                       send MsgSudoersError (0x19)
+  ├─ content empty AND no fetch error?
+  │    └─ remove /etc/sudoers.d/sudo-logger-managed
+  │       send MsgSudoersSnapshot (0x18)
+  └─ fetch error → leave existing file untouched
+
+agent inotify watcher + 10-min periodic tick
+  └─ send MsgSudoersSnapshot whenever /etc/sudoers or /etc/sudoers.d changes
+
+agent MsgHeartbeatAgent (0x1a, every 30 s)
+  └─ log server updates last_seen timestamp for this host
+```
+
+### Sync computation
+
+`handleGetSudoersHosts` in the replay server computes sync state per host:
+
+```go
+staged  = stripSudoersHeader(hostConfig ?? defaultConfig)
+managed = extractManagedSudoers(latestSnapshot.Content)
+inSync  = (staged == managed)
+```
+
+`stripSudoersHeader` normalises the config: strips `# sudo-logger` header lines and
+whitespace around operators so minor formatting differences do not cause false diffs.
+`extractManagedSudoers` extracts the `# --- /etc/sudoers.d/sudo-logger-managed ---`
+block from the concatenated snapshot.
+
+### Snapshot storage
+
+Each snapshot is stored keyed by `(host, sha256)`. When an agent re-sends an
+identical snapshot (e.g. after reverting to a previously-seen config), the
+`uploaded_at` timestamp is refreshed so `ListSudoersSnapshots ORDER BY uploaded_at DESC`
+returns the correct most-recent entry — preventing stale diffs in the UI.
+
+### Security
+
+- Host names in `MsgSudoersSnapshot`, `MsgSudoersError`, and `MsgHeartbeatAgent` are
+  validated against a strict allowlist: non-empty, ≤ 255 chars, no `/`, `\`, `..`,
+  or leading `.`. Rejects path traversal attempts against the local snapshot store.
+- Config is validated by `visudo -c` on the agent before any write.
+- The managed file is written atomically (tmp + `rename`).
+- `/etc/sudoers` is never touched — the agent only manages
+  `/etc/sudoers.d/sudo-logger-managed`.
 
 ---
 

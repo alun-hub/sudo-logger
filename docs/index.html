@@ -1194,7 +1194,7 @@ body::after {
   <div class="slide active" id="s0">
     <div class="title-grid"></div>
     <div class="s-title">
-      <div class="title-eyebrow">▶ session recording &nbsp;·&nbsp; mTLS &nbsp;·&nbsp; mandatory acknowledgement &nbsp;·&nbsp; process sandbox</div>
+      <div class="title-eyebrow">▶ session recording &nbsp;·&nbsp; mTLS &nbsp;·&nbsp; mandatory acknowledgement &nbsp;·&nbsp; process sandbox &nbsp;·&nbsp; sudoers management</div>
       <div class="title-main">
         SUDO<span class="dash">-</span>LOGGER<span class="title-cursor"></span>
       </div>
@@ -1614,6 +1614,7 @@ body::after {
             and serves a full terminal player — no database, no dependencies.
           </p>
           <ul class="replay-feat-list">
+            <li class="new">Sudoers tab — push rules to hosts; visual card editor; real-time diff &amp; sync badges</li>
             <li class="new">Risk scoring 0–100 — configurable YAML rules</li>
             <li class="new">SIEM forwarding — JSON / CEF / OCSF · HTTPS · Syslog UDP/TCP/TLS</li>
             <li class="new">Summary tab — per-user stats, sortable, filterable</li>
@@ -1655,6 +1656,7 @@ body::after {
             <div class="ui-tab on">Sessions</div>
             <div class="ui-tab">Summary</div>
             <div class="ui-tab">Anomalies</div>
+            <div class="ui-tab">Sudoers</div>
             <div class="ui-tab">Settings</div>
             <div class="ui-tab">Help</div>
           </div>
@@ -2384,7 +2386,8 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Summary / Anomalies / Settings tabs</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Browser replay — full command + args</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Session terminated if agent killed (&lt;150 ms)</div>
-        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · < 30 s propagation</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Sudoers management — push rules from UI · visudo-validated · atomic apply · real-time sync badges</div>
+        <div class="feat"><span class="arr" style="color:var(--amber)">★</span> Central sudo block — per user/host · GUI managed · &lt; 30 s propagation</div>
         <div class="feat"><span class="arr" style="color:var(--amber)">★</span> JIT approval — challenge-response · time windows · chat bot notifications</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Secret redaction — AWS keys, JWTs, Bearer tokens masked before leaving the machine</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>

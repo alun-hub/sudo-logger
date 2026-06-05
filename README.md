@@ -27,6 +27,7 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Distributed storage (S3 + PostgreSQL)](#distributed-storage-s3--postgresql)
 - [Web replay interface](#web-replay-interface)
   - [Authentication](#authentication)
+- [Sudoers management](#sudoers-management)
 - [Viewing and replaying sessions](#viewing-and-replaying-sessions)
 - [Developer guide](#developer-guide)
   - [Repository layout](#repository-layout)
@@ -162,6 +163,18 @@ from several restrictions to allow PAM modules to complete session setup.
 Session cgroups and root PIDs are registered on session start and removed on
 session end. See [Process sandbox](#process-sandbox).
 
+**Sudoers management** — polls the log server every 15 seconds for a desired
+sudoers config (`sudoers/<host>` with `sudoers/_default` as fallback). When the
+content changes it validates the new config with `visudo -c`, then atomically
+renames a tmp file onto `/etc/sudoers.d/sudo-logger-managed` (server-wins). After
+a successful apply it immediately sends a `MsgSudoersSnapshot` so the replay UI
+reflects the new state within one poll cycle. An inotify watcher on `/etc/sudoers`
+and `/etc/sudoers.d/` sends snapshots on any local change; a periodic 10-minute
+tick guarantees at-least-once delivery. A `MsgHeartbeatAgent` keepalive every 30 s
+drives the online/offline badge in the Sudoers tab. If the server returns no config
+(not a network error), the managed file is removed and the host falls back to its
+local `/etc/sudoers` alone.
+
 Reads all settings from `/etc/sudo-logger/agent.conf` (key = value format).
 
 ### Go log server (`go/cmd/server/`)
@@ -240,6 +253,7 @@ migrate-sessions \
 ## Features
 
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
+- **Centralised sudoers management**: push sudoers rules to all managed hosts from the replay UI; agents validate and apply atomically via `visudo -c` and report sync status in real time. Global default template with per-host overrides; visual card editor and raw editor with syntax highlighting.
 - **Just-In-Time (JIT) sudo approval**: require human justification and admin approval before sudo proceeds. Supports asynchronous requests with Mattermost/Slack notifications, interactive Approve/Deny buttons, and time-limited approval windows.
 - **Automatic secret redaction**: the agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `agent.conf`.
 - Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
@@ -1022,6 +1036,13 @@ xdg-open http://localhost:8080
 - **SIEM forwarding** — completed sessions are forwarded to an external SIEM
   after the session closes. Risk score and reasons are included in every event.
   See [SIEM forwarding](#siem-forwarding) below.
+- **Sudoers tab** — view and edit sudoers rules for every managed host. A global
+  `_default` template applies to all hosts; per-host overrides show a **Modified**
+  badge. A visual card editor presents rules as identity cards (one per user or
+  group) with inline fields for hosts, run-as, commands, and options. A raw editor
+  with syntax highlighting is also available. A real-time diff compares the staged
+  config against the latest snapshot from the agent and shows a sync badge:
+  ✓ in sync · ⏳ pending · ⚠ agent offline · ✖ apply error.
 - **Auto-refresh** — session list polls for new sessions every 15 seconds and
   immediately on tab focus; no manual browser refresh needed.
 - **Prometheus metrics** — `/metrics` endpoint with session counts, risk level
@@ -1462,6 +1483,79 @@ sudoreplay_session_views_total 567
 
 ---
 
+## Sudoers management
+
+The **Sudoers** tab in the replay UI lets operators push sudoers rules to all
+managed hosts centrally — without logging into individual machines.
+
+### Data flow
+
+```
+Replay UI (browser)
+  ├─ PUT /api/sudoers/config?host=_default   ← global template
+  └─ PUT /api/sudoers/config?host=<hostname> ← per-host override
+       │
+       log server stores config in SessionStore
+       │
+       agent polls /api/sudoers/<host> every 15 s (MsgFetchConfig)
+         │
+         ├─ content changed?
+         │    └─ visudo -c validates → atomic rename onto
+         │       /etc/sudoers.d/sudo-logger-managed
+         │         ├─ success → sends MsgSudoersSnapshot (0x18)
+         │         └─ failure → sends MsgSudoersError   (0x19)
+         │
+         └─ no content? (server confirmed, not a network error)
+              └─ removes /etc/sudoers.d/sudo-logger-managed
+                 host falls back to local /etc/sudoers alone
+
+agent inotify watcher (/etc/sudoers, /etc/sudoers.d/)
+  └─ sends MsgSudoersSnapshot on any local file change
+
+agent periodic tick (every 10 min)
+  └─ sends MsgSudoersSnapshot regardless of changes (at-least-once)
+
+agent MsgHeartbeatAgent (every 30 s)
+  └─ drives online/offline badge in the Sudoers tab
+```
+
+### Editors
+
+**Visual editor** — presents rules as identity cards, one per user or group. Each
+card shows allowed hosts, run-as user/group, commands, and options (NOPASSWD,
+NOEXEC, SETENV). Click **+ Grant Access** to add a rule; expand a card to edit
+or remove it. Search filters cards by principal name.
+
+**Technical View (Raw)** — the raw sudoers text with syntax highlighting for
+comments, alias keywords, tag options (`NOPASSWD:`, `ALL`), and group names.
+Toggle **Edit** to type directly; toggle **Done** to return to the highlighted view.
+
+### Sync badges
+
+| Badge | Meaning |
+|-------|---------|
+| ✓ green | Agent's `/etc/sudoers.d/sudo-logger-managed` matches the staged config |
+| ⏳ amber | Change pending — agent has not yet applied or reported back |
+| ⚠ amber | Agent offline — no heartbeat or snapshot for > 10 min |
+| ✖ red | `visudo -c` rejected the config on the agent; hover for error detail |
+
+### Inheritance
+
+The `_default` template applies to every host that has no override. The host list
+shows a **Default** badge (inheriting) or a **Modified** badge (has override).
+Deleting a host override reverts it to the default template; the agent picks this
+up within one 15-second poll cycle.
+
+### Safety guarantees
+
+- Config is validated by `visudo -c` on the agent before any file is written.
+- The managed file is written atomically (write tmp → `rename`) — no partial writes.
+- Agent leaves the existing file untouched if it cannot reach the server (network error).
+- Host names are validated server-side against a strict allowlist to prevent path traversal.
+- The managed file is separate from `/etc/sudoers` — the system sudoers is never touched.
+
+---
+
 ## Viewing and replaying sessions
 
 Sessions are stored on the server as asciinema v2 recordings under
@@ -1599,6 +1693,9 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `SESSION_DENIED` | `0x0c` | server → agent → plugin | String block message — policy denial, sudo blocked |
 | `FREEZE_TIMEOUT` | `0x0d` | agent → plugin | Empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
 | `SESSION_ABANDON` | `0x0e` | agent → server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session as `freeze_timeout` |
+| `MsgSudoersSnapshot` | `0x18` | agent → server | JSON `SudoersSnapshot` — full snapshot of `/etc/sudoers` and `/etc/sudoers.d/` on the agent host |
+| `MsgSudoersError` | `0x19` | agent → server | JSON `SudoersError` — `visudo -c` validation failure when applying a config pushed from the server |
+| `MsgHeartbeatAgent` | `0x1a` | agent → server | UTF-8 host name — sudoers liveness keepalive sent every 30 s; drives online/offline badge in the Sudoers tab |
 
 **CHUNK stream types:**
 
