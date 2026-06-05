@@ -789,6 +789,31 @@
     .sudoers-banner-btn:hover { background: rgba(255,255,255,0.2); }
     .sudoers-banner-btn-danger { background: rgba(255,80,80,0.1); border-color: rgba(255,80,80,0.3); color: #ff8080; }
     .sudoers-banner-btn-danger:hover { background: rgba(255,80,80,0.2); }
+
+    .sudoers-main-split { display: flex; flex: 1; overflow: hidden; height: 100%; }
+    .sudoers-rules-column { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: #0e1017; }
+    .sudoers-column-header { padding: 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+    .sudoers-column-header input { flex: 1; padding: 6px 10px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; outline: none; }
+    .sudoers-rule-list { flex: 1; overflow-y: auto; }
+
+    .sudoers-rule-item { padding: 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); display: flex; justify-content: space-between; align-items: start; transition: background 0.15s ease; }
+    .sudoers-rule-item:hover { background: var(--card-hover); }
+    .sudoers-rule-item.active { background: rgba(77, 168, 255, 0.06); border-left: 4px solid var(--blue); }
+    .sudoers-rule-item-title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--text); }
+    .sudoers-rule-item.active .sudoers-rule-item-title { color: var(--blue); }
+    .sudoers-rule-item-desc { font-size: 11px; color: var(--text-dim); margin-top: 4px; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+    .sudoers-rule-item-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+
+    .sudoers-inspector-column { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: #0c0d14; }
+    .sudoers-inspector-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .sudoers-inspector-title { font-weight: bold; font-size: 14px; color: var(--text); }
+    .sudoers-inspector-subtitle { color: var(--text-dim); font-size: 11px; margin-left: 8px; font-family: monospace; }
+    .sudoers-inspector-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+
+    .tab-group { display: flex; gap: 4px; background: rgba(0,0,0,0.2); padding: 2px; border-radius: 6px; }
+    .tab-item { flex: 1; padding: 6px; font-size: 11px; background: none; border: none; border-radius: 4px; color: var(--text-dim); cursor: pointer; transition: all 0.15s ease; text-align: center; }
+    .tab-item.active { background: var(--card); border: 1px solid var(--border-mid); color: var(--blue); font-weight: bold; }
+
     /* Focus & keyboard navigation ────────────────────────────────────────── */
     :focus { outline: none; }
     :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 3px; }
@@ -1715,9 +1740,21 @@
       <!-- Host list -->
       <div class="sudoers-host-list" id="sudoers-host-list"></div>
 
-      <!-- Main editor area -->
-      <div class="sudoers-main" id="sudoers-main">
-        <p style="color:var(--text-dim);font-family:var(--font-ui);font-size:13px">Select a host to manage its sudoers rules.</p>
+      <!-- Main Split container -->
+      <div class="sudoers-main-split">
+        <!-- Rule List Column (Left) -->
+        <div class="sudoers-rules-column">
+          <div class="sudoers-column-header">
+            <input type="text" id="sudoers-rule-filter" placeholder="Search rules..." oninput="sudoersSearchQuery=this.value;renderSudoersRulesList()">
+            <button class="btn-primary" onclick="addRule()">+ New</button>
+          </div>
+          <div class="sudoers-rule-list" id="sudoers-rule-list"></div>
+        </div>
+
+        <!-- Inspector Panel Column (Right) -->
+        <div class="sudoers-inspector-column" id="sudoers-inspector-panel">
+          <!-- Populated dynamically via JS -->
+        </div>
       </div>
     </div>
   </div>
