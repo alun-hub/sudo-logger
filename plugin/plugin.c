@@ -262,6 +262,14 @@ static void refresh_ack_cache(void)
                         rem -= n;
                     }
                     write(g_tty_fd, WARN_MSG_END, sizeof(WARN_MSG_END) - 1);
+                } else {
+                    /* No tty — drain payload to keep protocol stream in sync. */
+                    for (uint32_t rem = plen; rem > 0; ) {
+                        uint8_t discard[64];
+                        uint32_t n = rem < (uint32_t)sizeof(discard) ? rem : (uint32_t)sizeof(discard);
+                        if (read_exact(g_agent_fd, discard, n) < 0) return;
+                        rem -= n;
+                    }
                 }
                 continue;
             }

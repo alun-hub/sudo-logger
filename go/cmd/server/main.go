@@ -297,6 +297,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		payload []byte
 	}
 	diskQueue := make(chan diskTask, 50000)
+	diskDone  := make(chan struct{})
 	var diskWg sync.WaitGroup
 	diskWg.Add(1)
 
@@ -406,6 +407,11 @@ func (srv *server) handleConn(conn *tls.Conn) {
 	var diskCloseOnce sync.Once
 	closeDisk := func() {
 		diskCloseOnce.Do(func() {
+			// Signal overflow goroutines to abort before closing diskQueue.
+			// Overflow goroutines select on diskQueue or diskDone; closing
+			// diskDone unblocks them without triggering a "send on closed
+			// channel" panic that would crash the server.
+			close(diskDone)
 			close(diskQueue)
 			diskWg.Wait()
 		})
@@ -651,7 +657,12 @@ func (srv *server) handleConn(conn *tls.Conn) {
 					go func(t diskTask) {
 						defer diskWg.Done()
 						defer overflowCount.Add(-1)
-						diskQueue <- t // This may block, but in a background thread
+						// Use select so that closing diskDone (shutdown) unblocks
+						// the goroutine instead of panicking on a closed channel.
+						select {
+						case diskQueue <- t:
+						case <-diskDone:
+						}
 					}(task)
 				} else {
 					// Hard limit reached (VULN-001 protection). Apply backpressure by blocking
