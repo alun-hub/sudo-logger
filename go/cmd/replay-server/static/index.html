@@ -4632,7 +4632,7 @@ function highlightSudoers(text) {
     return h
       .replace(/\b(User_Alias|Host_Alias|Cmnd_Alias|Runas_Alias|Defaults)\b/g, '<span class="sh-alias-kw">$1</span>')
       .replace(/\b(NOPASSWD|NOEXEC|SETENV|NOSETENV|LOG_INPUT|LOG_OUTPUT|FOLLOW|MAIL|ALL|CWD|CHROOT|TIMEOUT)\b/g, '<span class="sh-kw">$1</span>')
-      .replace(/(%[a-zA-Z][a-zA-Z0-9_-]*|%"[^"]+")/g, '<span class="sh-group">$1</span>');
+      .replace(/(%"[^"]+")|(%[a-zA-Z][a-zA-Z0-9_-]*(?:\\ [a-zA-Z0-9_-]+)*)/g, '<span class="sh-group">$1$2</span>');
   }).join('\n');
 }
 
@@ -4660,7 +4660,7 @@ function parseSudoers(text) {
       const left = trimmed.slice(0, eqIndex).trim();
       const right = trimmed.slice(eqIndex + 1).trim();
 
-      const principalMatch = left.match(/^(%?"[^"]+"|\S+)\s+(.+)$/);
+      const principalMatch = left.match(/^(%?"[^"]+"|\S+(?:\\ \S+)*)\s+(.+)$/);
       if (principalMatch) {
         const principal = principalMatch[1];
         const hosts = principalMatch[2];
@@ -4668,14 +4668,16 @@ function parseSudoers(text) {
         let principalType = 'user';
         let principalName = principal;
         if (principal.startsWith('%"')) {
+          // Legacy %"name" format — keep as ad-group for round-trip compat
           principalType = 'ad-group';
           principalName = principal.slice(2, -1);
         } else if (principal.startsWith('"')) {
           principalType = 'user';
           principalName = principal.slice(1, -1);
         } else if (principal.startsWith('%')) {
-          principalType = 'group';
-          principalName = principal.slice(1);
+          const rawName = principal.slice(1).replace(/\\ /g, ' ');
+          principalType = rawName.includes(' ') ? 'ad-group' : 'group';
+          principalName = rawName;
         }
 
         // Extract runas
@@ -4774,10 +4776,10 @@ function serializeSudoers(rules, aliases, advanced, host, viewer) {
   for (const r of rules) {
     let principal = r.principalName;
     if (r.principalType === 'ad-group') {
-      principal = `%"${r.principalName}"`;
+      principal = '%' + r.principalName.replace(/ /g, '\\ ');
     } else if (r.principalType === 'group') {
       if (r.principalName.includes(' ')) {
-        principal = `%"${r.principalName}"`;
+        principal = '%' + r.principalName.replace(/ /g, '\\ ');
       } else {
         principal = `%${r.principalName}`;
       }
@@ -5219,7 +5221,7 @@ function renderSudoersInspector() {
   const adHint = r.principalType === 'ad-group'
     ? `<div style="font-size: 11px; color: var(--text-dim); margin-top: 4px; background: rgba(0, 140, 255, 0.05); border: 1px solid rgba(0, 140, 255, 0.15); padding: 8px 12px; border-radius: 6px; display: flex; align-items: start; gap: 8px; line-height: 1.4;">
         <span style="color: var(--blue);">ℹ️</span>
-        <span>Active Directory groups are escaped as <code>%"${esc(r.principalName || '')}"</code> to correctly query SSSD.</span>
+        <span>Active Directory groups are written as <code>%${esc((r.principalName || '').replace(/ /g, '\\ '))}</code> — spaces are backslash-escaped so SSSD resolves the group correctly.</span>
        </div>`
     : '';
 
