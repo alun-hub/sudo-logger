@@ -210,7 +210,8 @@ func startSudoersPoller(host string) {
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 
-		// Poll immediately on startup, then every 60 s.
+		var lastFailedHash string
+		// Poll immediately on startup, then every 15 s.
 		for {
 			content, err := fetchConfigFromServer(cfg.Server, "sudoers/"+host)
 			if err != nil {
@@ -223,16 +224,34 @@ func startSudoersPoller(host string) {
 					debugLog("sudoers poller: fetch default config: %v", err)
 				}
 			}
-			if content != "" && content != lastApplied {
+
+			h := sha256.Sum256([]byte(content))
+			currentHash := hex.EncodeToString(h[:])
+
+			if content == "" {
+				// No config available — ensure managed file is removed
+				if _, err := os.Stat(sudoersManagedPath); err == nil {
+					if err := os.Remove(sudoersManagedPath); err != nil {
+						log.Printf("sudoers poller: failed to remove %s: %v", sudoersManagedPath, err)
+					} else {
+						log.Printf("sudoers: removed managed config (no rules active)")
+						lastApplied = ""
+						if snap, err := collectSudoers(host); err == nil {
+							go sendSudoersSnapshot(snap)
+						}
+					}
+				}
+			} else if content != lastApplied && currentHash != lastFailedHash {
 				if err := applySudoers(content); err != nil {
 					log.Printf("sudoers poller: apply: %v", err)
 					sendSudoersError(host, err.Error(), content)
+					lastFailedHash = currentHash
 				} else {
 					lastApplied = content
+					lastFailedHash = ""
 					log.Printf("sudoers: applied managed config to %s", sudoersManagedPath)
 					// Proactively send a snapshot so the server reflects the new
-					// state immediately, without waiting for the inotify watcher
-					// (which can miss rename events in some environments).
+					// state immediately, without waiting for the inotify watcher.
 					if snap, err := collectSudoers(host); err == nil {
 						go sendSudoersSnapshot(snap)
 					}
@@ -241,6 +260,7 @@ func startSudoersPoller(host string) {
 
 			<-ticker.C
 		}
+
 	}()
 }
 

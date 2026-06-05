@@ -4878,7 +4878,11 @@ function stripSudoersHeader(text) {
     t = t.replace(/\s+/g, ' ');
     t = t.replace(/\(ALL\)\s+/g, '');
     t = t.replace(/\(ALL:ALL\)\s+/g, '');
-    t = t.replace(/\b(NOPASSWD|NOEXEC|SETENV):\s+/g, '$1:');
+    t = t.replace(/\(ALL\)/g, '');
+    t = t.replace(/\(ALL:ALL\)/g, '');
+    // Strip spaces around operators
+    t = t.replace(/\s*=\s*/g, '=');
+    t = t.replace(/\s*:\s*/g, ':');
     return t;
   }).filter(l => l !== null).join('\n').trim();
 }

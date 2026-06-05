@@ -1914,16 +1914,14 @@ func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Also check last session activity as fallback
-		if sessions, err := sessionStore.ListSessions(r.Context()); err == nil {
-			for _, s := range sessions {
-				if s.Host == h {
-					ts := s.StartTime + int64(s.Duration)
-					if s.Duration == 0 && (now-s.StartTime) < 600 {
-						ts = now // session recently started, likely still in progress
-					}
-					if ts > lastSeen {
-						lastSeen = ts
-					}
+		for _, s := range sessions {
+			if s.Host == h {
+				ts := s.StartTime + int64(s.Duration)
+				if s.Duration == 0 && (now-s.StartTime) < 600 {
+					ts = now // session recently started, likely still in progress
+				}
+				if ts > lastSeen {
+					lastSeen = ts
 				}
 			}
 		}
@@ -2092,9 +2090,15 @@ func stripSudoersHeader(text string) string {
 		l := strings.Join(strings.Fields(trimmed), " ")
 		l = strings.ReplaceAll(l, "(ALL) ", "")
 		l = strings.ReplaceAll(l, "(ALL:ALL) ", "")
-		l = strings.ReplaceAll(l, "NOPASSWD: ", "NOPASSWD:")
-		l = strings.ReplaceAll(l, "NOEXEC: ", "NOEXEC:")
-		l = strings.ReplaceAll(l, "SETENV: ", "SETENV:")
+		l = strings.ReplaceAll(l, "(ALL)", "")
+		l = strings.ReplaceAll(l, "(ALL:ALL)", "")
+		// Strip spaces around operators to match visudo variations
+		l = strings.ReplaceAll(l, " = ", "=")
+		l = strings.ReplaceAll(l, "= ", "=")
+		l = strings.ReplaceAll(l, " =", "=")
+		l = strings.ReplaceAll(l, " : ", ":")
+		l = strings.ReplaceAll(l, ": ", ":")
+		l = strings.ReplaceAll(l, " :", ":")
 		out = append(out, l)
 	}
 	return strings.Join(out, "\n")
