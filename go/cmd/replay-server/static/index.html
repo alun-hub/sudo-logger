@@ -5051,7 +5051,7 @@ function renderSudoersMain(snaps) {
   if (sudoersCurrentHost === '_default') {
     bannerHtml = `<div class="sudoers-banner sudoers-banner-main" style="margin:16px;margin-bottom:0">🌐 <strong>Global Template (Main)</strong> - Applies to all default hosts.</div>`;
   } else if (!sudoersIsOverride && !sudoersIsEditing) {
-    bannerHtml = `<div class="sudoers-banner sudoers-banner-inherited" style="margin:16px;margin-bottom:0">🔗 <strong>Inheriting Rules</strong>. <button class="btn-sm" onclick="startSudoersCustomizing()" style="margin-left:12px">Create Custom Rules</button></div>`;
+    bannerHtml = `<div class="sudoers-banner sudoers-banner-inherited" style="margin:16px;margin-bottom:0">🔗 <strong>Inheriting Rules</strong>. <button class="btn-secondary" onclick="startSudoersCustomizing()" style="margin-left:12px;font-size:12px;padding:3px 10px">Create custom rules for ${esc(host)}</button></div>`;
   } else if (sudoersIsOverride) {
     bannerHtml = `<div class="sudoers-banner sudoers-banner-custom" style="margin:16px;margin-bottom:0">⚡ <strong>Custom Rules</strong>. <button class="btn-sm btn-danger" onclick="deleteSudoersOverride()" style="margin-left:12px">Discard Custom Rules</button></div>`;
   }
@@ -5252,7 +5252,7 @@ function renderSudoersInspector() {
         </div>
         <div style="flex:2;">
           <label style="display:block; font-size:10.5px; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px; font-weight:600;">Name</label>
-          <input type="text" id="inspector-name-input" value="${esc(r.principalName)}" oninput="updateRuleField('principalName', this.value)" style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:13px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:6px; outline:none;">
+          <input type="text" id="inspector-name-input" value="${esc(r.principalName)}" placeholder="username or %group" oninput="updateRuleField('principalName', this.value)" style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:13px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:6px; outline:none;">
         </div>
       </div>
 
@@ -5369,7 +5369,7 @@ function handleCommandKeydown(event, ruleIdx) {
 function addRule() {
   sudoersRules.unshift({
     principalType: 'user',
-    principalName: 'new_rule',
+    principalName: '',
     hosts: 'ALL', runasUser: 'ALL', runasGroup: '',
     nopasswd: false, noexec: false, setenv: false,
     cwd: '', chroot: '', timeout: '',
