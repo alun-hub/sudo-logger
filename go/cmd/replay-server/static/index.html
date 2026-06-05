@@ -5044,11 +5044,12 @@ function renderSudoersMain(snaps) {
   main.style.height = 'calc(100vh - 130px)';
   main.style.overflow = 'hidden';
 
+  const host = sudoersCurrentHost;
   const isOverride = sudoersIsOverride || sudoersIsEditing;
-  const canEdit = (sudoersCurrentHost === '_default') || isOverride;
+  const canEdit = (host === '_default') || isOverride;
 
   let bannerHtml = '';
-  if (sudoersCurrentHost === '_default') {
+  if (host === '_default') {
     bannerHtml = `<div class="sudoers-banner sudoers-banner-main" style="margin:16px;margin-bottom:0">🌐 <strong>Global Template (Main)</strong> - Applies to all default hosts.</div>`;
   } else if (!sudoersIsOverride && !sudoersIsEditing) {
     bannerHtml = `<div class="sudoers-banner sudoers-banner-inherited" style="margin:16px;margin-bottom:0">🔗 <strong>Inheriting Rules</strong>. <button class="btn-secondary" onclick="startSudoersCustomizing()" style="margin-left:12px;font-size:12px;padding:3px 10px">Create custom rules for ${esc(host)}</button></div>`;
@@ -5056,7 +5057,6 @@ function renderSudoersMain(snaps) {
     bannerHtml = `<div class="sudoers-banner sudoers-banner-custom" style="margin:16px;margin-bottom:0">⚡ <strong>Custom Rules</strong>. <button class="btn-sm btn-danger" onclick="deleteSudoersOverride()" style="margin-left:12px">Discard Custom Rules</button></div>`;
   }
 
-  const host = sudoersCurrentHost;
   const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
   const diffHtml = managedSnap && sudoersCurrentConfig
     ? renderDiff(managedSnap, stripSudoersHeader(sudoersCurrentConfig))
