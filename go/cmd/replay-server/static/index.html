@@ -5324,6 +5324,7 @@ function renderSudoersInspector() {
 
 function updateRuleField(field, val) {
   if (sudoersCurrentRuleIdx >= 0 && sudoersCurrentRuleIdx < sudoersRules.length) {
+    sudoersIsEditing = true; // prevent poller from overwriting unsaved changes
     sudoersRules[sudoersCurrentRuleIdx][field] = val;
 
     // Update UI preview & list
