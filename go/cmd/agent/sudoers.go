@@ -213,23 +213,31 @@ func startSudoersPoller(host string) {
 		var lastFailedHash string
 		// Poll immediately on startup, then every 15 s.
 		for {
-			content, err := fetchConfigFromServer(cfg.Server, "sudoers/"+host)
-			if err != nil {
-				debugLog("sudoers poller: fetch host config: %v", err)
+			hostContent, hostErr := fetchConfigFromServer(cfg.Server, "sudoers/"+host)
+			if hostErr != nil {
+				debugLog("sudoers poller: fetch host config: %v", hostErr)
 			}
-			if content == "" {
+
+			content := hostContent
+			var defErr error
+			if content == "" && hostErr == nil {
 				// No host-specific config — fall back to global default.
-				content, err = fetchConfigFromServer(cfg.Server, "sudoers/_default")
-				if err != nil {
-					debugLog("sudoers poller: fetch default config: %v", err)
+				content, defErr = fetchConfigFromServer(cfg.Server, "sudoers/_default")
+				if defErr != nil {
+					debugLog("sudoers poller: fetch default config: %v", defErr)
 				}
 			}
+
+			// fetchFailed is true when we couldn't reach the server; distinguish
+			// from ("", nil) which means the server genuinely has no config for us.
+			fetchFailed := hostErr != nil || defErr != nil
 
 			h := sha256.Sum256([]byte(content))
 			currentHash := hex.EncodeToString(h[:])
 
-			if content == "" {
-				// No config available — ensure managed file is removed
+			if content == "" && !fetchFailed {
+				// Server confirmed no config exists — remove the managed file so
+				// the host falls back to its local /etc/sudoers only.
 				if _, err := os.Stat(sudoersManagedPath); err == nil {
 					if err := os.Remove(sudoersManagedPath); err != nil {
 						log.Printf("sudoers poller: failed to remove %s: %v", sudoersManagedPath, err)
@@ -241,7 +249,7 @@ func startSudoersPoller(host string) {
 						}
 					}
 				}
-			} else if content != lastApplied && currentHash != lastFailedHash {
+			} else if content != "" && content != lastApplied && currentHash != lastFailedHash {
 				if err := applySudoers(content); err != nil {
 					log.Printf("sudoers poller: apply: %v", err)
 					sendSudoersError(host, err.Error(), content)
