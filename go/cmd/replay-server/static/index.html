@@ -1740,22 +1740,8 @@
       <!-- Host list -->
       <div class="sudoers-host-list" id="sudoers-host-list"></div>
 
-      <!-- Main Split container -->
-      <div class="sudoers-main-split">
-        <!-- Rule List Column (Left) -->
-        <div class="sudoers-rules-column">
-          <div class="sudoers-column-header">
-            <input type="text" id="sudoers-rule-filter" placeholder="Search rules..." oninput="sudoersSearchQuery=this.value;renderSudoersRulesList()">
-            <button class="btn-primary" onclick="addRule()">+ New</button>
-          </div>
-          <div class="sudoers-rule-list" id="sudoers-rule-list"></div>
-        </div>
-
-        <!-- Inspector Panel Column (Right) -->
-        <div class="sudoers-inspector-column" id="sudoers-inspector-panel">
-          <!-- Populated dynamically via JS -->
-        </div>
-      </div>
+      <!-- Main content area — fully populated by renderSudoersMain() -->
+      <div id="sudoers-main" class="sudoers-main" style="flex:1;overflow:hidden;display:flex;flex-direction:column;"></div>
     </div>
   </div>
 
