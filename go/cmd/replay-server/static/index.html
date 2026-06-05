@@ -4604,6 +4604,7 @@ let sudoersRawEditing = false;  // raw mode: false = highlighted view, true = te
 let sudoersRules = [];          // parsed rule objects
 let sudoersAliases = [];        // { type, name, members }
 let sudoersAdvanced = '';       // unparseable lines (raw section)
+let sudoersCurrentRuleIdx = -1;
 let sudoersSearchQuery = '';
 let sudoersOpenDetails = new Set();
 
@@ -5048,124 +5049,96 @@ function formatTS(unixSec) {
 let sudoersIsEditing = false;
 
 function renderSudoersMain(snaps) {
-  const f = saveSudoersFocus();
   const main = document.getElementById('sudoers-main');
-  const host = sudoersCurrentHost;
+  if (!main) return;
+
+  // Clear old container styles to support flex split
+  main.style.padding = '0';
+  main.style.display = 'flex';
+  main.style.height = 'calc(100vh - 130px)';
+  main.style.overflow = 'hidden';
+
+  const isOverride = sudoersIsOverride || sudoersIsEditing;
+  const canEdit = (sudoersCurrentHost === '_default') || isOverride;
 
   let bannerHtml = '';
-  let canEdit = true;
-
-  if (host === '_default') {
-    bannerHtml = `
-      <div class="sudoers-banner sudoers-banner-main">
-        <span class="sudoers-banner-icon">🌐</span>
-        <div>
-          <strong>Global Template (Main)</strong><br>
-          Changes made here apply to all hosts marked as "Default".
-        </div>
-      </div>`;
+  if (sudoersCurrentHost === '_default') {
+    bannerHtml = `<div class="sudoers-banner sudoers-banner-main" style="margin:16px;margin-bottom:0">🌐 <strong>Global Template (Main)</strong> - Applies to all default hosts.</div>`;
   } else if (!sudoersIsOverride && !sudoersIsEditing) {
-    canEdit = false;
-    bannerHtml = `
-      <div class="sudoers-banner sudoers-banner-inherited">
-        <span class="sudoers-banner-icon">🔗</span>
-        <div>
-          <strong>Inheriting Rules</strong><br>
-          This host is following the global template.
-        </div>
-        <div class="sudoers-banner-actions">
-          <button class="sudoers-banner-btn" onclick="startSudoersCustomizing()">Create custom rules for ${esc(host)}</button>
-        </div>
-      </div>`;
+    bannerHtml = `<div class="sudoers-banner sudoers-banner-inherited" style="margin:16px;margin-bottom:0">🔗 <strong>Inheriting Rules</strong>. <button class="btn-sm" onclick="startSudoersCustomizing()" style="margin-left:12px">Create Custom Rules</button></div>`;
   } else if (sudoersIsOverride) {
-    bannerHtml = `
-      <div class="sudoers-banner sudoers-banner-custom">
-        <span class="sudoers-banner-icon">⚡</span>
-        <div>
-          <strong>Custom Configuration</strong><br>
-          This host has unique rules and ignores the global template.
-        </div>
-        <div class="sudoers-banner-actions">
-          <button class="sudoers-banner-btn sudoers-banner-btn-danger" onclick="deleteSudoersOverride()">Discard custom rules</button>
-        </div>
-      </div>`;
-  } else if (sudoersIsEditing) {
-    bannerHtml = `
-      <div class="sudoers-banner sudoers-banner-custom">
-        <span class="sudoers-banner-icon">✍️</span>
-        <div>
-          <strong>Drafting Custom Rules</strong><br>
-          You are preparing a host-specific configuration. It will not be active until you click Save.
-        </div>
-        <div class="sudoers-banner-actions">
-          <button class="sudoers-banner-btn sudoers-banner-btn-danger" onclick="sudoersIsEditing=false;selectSudoersHost(sudoersCurrentHost)">Cancel</button>
-        </div>
-      </div>`;
+    bannerHtml = `<div class="sudoers-banner sudoers-banner-custom" style="margin:16px;margin-bottom:0">⚡ <strong>Custom Rules</strong>. <button class="btn-sm btn-danger" onclick="deleteSudoersOverride()" style="margin-left:12px">Discard Custom Rules</button></div>`;
   }
 
-  const historyRows = (snaps || []).slice(0, 5).map(s => {
-    const ts = formatTS(s.uploaded_at);
-    return `<div class="sudoers-history-row">
-      <span class="sudoers-history-ts">${esc(ts)}</span>
-      <span class="sudoers-history-sha">${esc(s.sha256.slice(0,16))}…</span>
-      <button class="btn-sm" onclick="sudoersViewSnapshot('${esc(s.sha256)}')">View</button>
-    </div>`;
-  }).join('');
-
-  const info = sudoersHostsInfo.find(x => x.name === host);
-  const isOffline = info ? info.isOffline : false;
-
+  const host = sudoersCurrentHost;
   const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
-  let diffHtml = managedSnap && sudoersCurrentConfig
+  const diffHtml = managedSnap && sudoersCurrentConfig
     ? renderDiff(managedSnap, stripSudoersHeader(sudoersCurrentConfig))
-    : (sudoersCurrentSnap
-        ? '<span class="diff-eq">(managed file not yet present on host)</span>'
-        : '<span class="diff-eq">(no active snapshot from host yet)</span>');
-
-  if (isOffline && managedSnap && snaps && snaps.length > 0) {
-    diffHtml = `<div style="color:var(--amber);font-size:11px;margin-bottom:8px;background:rgba(232,164,77,0.1);padding:6px;border-radius:4px;border:1px solid rgba(232,164,77,0.2)">⚠️ Agent is offline or not polling. Showing diff against last known state from ${formatTS(snaps[0].uploaded_at)}. The actual host state may differ.</div>` + diffHtml;
-  }
+    : '<span class="diff-eq">(no diff available)</span>';
 
   main.innerHTML = `
-    ${bannerHtml}
+    <div style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+      ${bannerHtml}
 
-    <div style="opacity: ${canEdit ? '1' : '0.6'}; pointer-events: ${canEdit ? 'auto' : 'none'}">
-      <div class="sudoers-mode-bar">
-        <button class="sudoers-mode-btn ${sudoersMode==='visual'?'active':''}" onclick="switchSudoersMode('visual')">Visual Editor</button>
-        <button class="sudoers-mode-btn ${sudoersMode==='raw'?'active':''}" onclick="switchSudoersMode('raw')">Technical View (Raw)</button>
+      <div style="display:flex; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); align-items:center;">
+        <div class="sudoers-mode-bar" style="margin-bottom:0">
+          <button class="sudoers-mode-btn ${sudoersMode==='visual'?'active':''}" onclick="switchSudoersMode('visual')">Visual Editor</button>
+          <button class="sudoers-mode-btn ${sudoersMode==='raw'?'active':''}" onclick="switchSudoersMode('raw')">Technical View (Raw)</button>
+        </div>
+        <div style="flex:1"></div>
+        ${canEdit ? `<button class="btn-primary" onclick="saveSudoersConfig()">Save Configuration</button>` : ''}
       </div>
 
-      <div id="sudoers-visual-editor" ${sudoersMode!=='visual'?'style="display:none"':''}>
-        ${renderVisualEditor()}
+      <div class="sudoers-main-split" style="opacity: ${canEdit ? '1' : '0.65'}; pointer-events: ${canEdit ? 'auto' : 'none'}">
+        <!-- Left Column: Rule list -->
+        <div class="sudoers-rules-column">
+          <div class="sudoers-column-header">
+            <input type="text" id="sudoers-rule-filter" placeholder="Search rules..." value="${esc(sudoersSearchQuery)}" oninput="sudoersSearchQuery=this.value;renderSudoersRulesList()">
+            <button class="btn-primary" onclick="addRule()">+ New</button>
+          </div>
+          <div class="sudoers-rule-list" id="sudoers-rule-list"></div>
+        </div>
+
+        <!-- Right Column: Inspector or Raw code editor -->
+        <div class="sudoers-inspector-column" id="sudoers-inspector-panel"></div>
       </div>
-      <div id="sudoers-raw-editor" ${sudoersMode!=='raw'?'style="display:none"':''}>
-        <div class="sudoers-section-hdr" style="display:flex;align-items:center;justify-content:space-between">
+
+      <!-- Footers: Diff and history -->
+      <div style="border-top:1px solid var(--border); padding:16px; overflow-y:auto; max-height:180px; background:#08090e">
+        <div style="font-size:11px; font-weight:bold; color:var(--text-dim); text-transform:uppercase; margin-bottom:8px">Real-time Diff — Host vs Server</div>
+        <div class="sudoers-diff" style="margin-bottom:12px">${diffHtml}</div>
+        <div style="font-size:11px; font-weight:bold; color:var(--text-dim); text-transform:uppercase; margin-bottom:8px">Snapshot History</div>
+        <div class="sudoers-history">
+          ${(snaps || []).slice(0, 3).map(s => `
+            <div class="sudoers-history-row">
+              <span class="sudoers-history-ts">${esc(formatTS(s.uploaded_at))}</span>
+              <span class="sudoers-history-sha">${esc(s.sha256.slice(0,16))}…</span>
+              <button class="btn-sm" onclick="sudoersViewSnapshot('${esc(s.sha256)}')">View</button>
+            </div>
+          `).join('') || '<span style="color:var(--text-dim)">No snapshots received yet.</span>'}
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (sudoersMode === 'raw') {
+    document.getElementById('sudoers-inspector-panel').innerHTML = `
+      <div style="padding:20px; display:flex; flex-direction:column; flex:1">
+        <div class="sudoers-section-hdr" style="margin-top:0; display:flex; justify-content:space-between; align-items:center">
           <span>Raw sudoers content</span>
           ${sudoersRawEditing
-            ? `<button class="btn-secondary" style="font-size:11px;padding:2px 8px" onclick="const r=document.getElementById('sudoers-raw-area');if(r)sudoersCurrentConfig=r.value;sudoersRawEditing=false;renderSudoersMain(null)">Done editing</button>`
-            : `<button class="btn-secondary" style="font-size:11px;padding:2px 8px" onclick="sudoersRawEditing=true;renderSudoersMain(null)">Edit</button>`}
+            ? `<button class="btn-sm btn-primary" onclick="const r=document.getElementById('sudoers-raw-area');if(r)sudoersCurrentConfig=r.value;sudoersRawEditing=false;renderSudoersMain(null)">Done editing</button>`
+            : `<button class="btn-sm btn-secondary" onclick="sudoersRawEditing=true;renderSudoersMain(null)">Edit</button>`}
         </div>
         ${sudoersRawEditing
-          ? `<textarea class="sudoers-raw-area" id="sudoers-raw-area">${esc(sudoersCurrentConfig)}</textarea>`
-          : `<pre class="sudoers-highlighted">${highlightSudoers(sudoersCurrentConfig)}</pre>`}
+          ? `<textarea class="sudoers-raw-area" id="sudoers-raw-area" style="flex:1">${esc(sudoersCurrentConfig)}</textarea>`
+          : `<pre class="sudoers-highlighted" style="flex:1; overflow:auto">${highlightSudoers(sudoersCurrentConfig)}</pre>`}
       </div>
-
-      ${canEdit ? `
-      <div class="sudoers-action-bar">
-        <button class="btn-primary" onclick="saveSudoersConfig()">Save Configuration</button>
-      </div>
-      ` : ''}
-    </div>
-
-    <div class="sudoers-section-hdr" style="margin-top:24px">
-      Real-time Diff — Host vs Server
-    </div>
-    <div class="sudoers-diff">${diffHtml}</div>
-
-    <div class="sudoers-section-hdr" style="margin-top:20px">Snapshot history from ${esc(host === '_default' ? 'all hosts' : host)}</div>
-    <div class="sudoers-history">${historyRows || '<span style="color:var(--text-dim);font-size:12px">No snapshots received yet.</span>'}</div>
-  `;
-  restoreSudoersFocus(f);
+    `;
+  } else {
+    renderSudoersRulesList();
+    renderSudoersInspector();
+  }
 }
 
 async function startSudoersCustomizing() {
@@ -5179,165 +5152,6 @@ async function startSudoersCustomizing() {
   } catch(e) {
     alert('Could not load template: ' + e.message);
   }
-}
-
-// ── Card component renderer ───────────────────────────────────────────────────
-
-function renderAccessCard(r, i) {
-  const isGroup = r.principalType === 'group' || r.principalType === 'ad-group';
-  const icon = isGroup ? '👥' : '👤';
-  const detailsId = `sudoers-details-rule-${i}`;
-  const isOpen = sudoersOpenDetails.has(detailsId) ? 'open' : '';
-
-  let displayName = r.principalName;
-  if (r.principalType === 'group') {
-    displayName = '%' + r.principalName;
-  } else if (r.principalType === 'ad-group') {
-    displayName = '%"' + r.principalName + '"';
-  } else if (r.principalType === 'user' && r.principalName.includes(' ')) {
-    displayName = '"' + r.principalName + '"';
-  }
-
-  const cmdsHtml = r.cmds.map((c, ci) =>
-    `<div class="sudoers-chip">
-      <span>${esc(c)}</span>
-      <button class="sudoers-chip-rm" onclick="removeCmd(${i},${ci})">×</button>
-    </div>`
-  ).join('');
-
-  return `
-    <div class="sudoers-card">
-      <div class="sudoers-card-header">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:18px">${icon}</span>
-          <strong style="color:var(--text);font-size:15px">${esc(displayName)}</strong>
-        </div>
-        <button class="sudoers-del-btn" onclick="removeRule(${i})">Delete</button>
-      </div>
-
-      <div class="sudoers-card-body">
-        <div style="margin-bottom:12px">
-          <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase">Commands</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${cmdsHtml}
-            <button class="sudoers-chip-add" onclick="addCmd(${i})">+ Add</button>
-          </div>
-        </div>
-
-        <div style="display:flex;gap:20px;align-items:center;background:rgba(255,255,255,0.03);padding:10px;border-radius:6px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input id="sudoers-rule-${i}-nopasswd" type="checkbox" ${r.nopasswd?'checked':''} onchange="sudoersRules[${i}].nopasswd=this.checked;refreshVisual()" style="accent-color:var(--green)">
-            <span style="font-size:13px">No password required</span>
-          </label>
-
-          <details id="${detailsId}" ${isOpen} ontoggle="toggleSudoersDetails('${detailsId}', this.open)" style="font-size:12px">
-            <summary style="cursor:pointer;color:var(--text-dim)">Advanced Settings</summary>
-            <div style="padding-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-              <div>
-                <div style="font-size:10px;color:var(--text-dim)">RUN AS USER</div>
-                <input id="sudoers-rule-${i}-runasUser" class="sudoers-cell-input" value="${esc(r.runasUser)}" oninput="sudoersRules[${i}].runasUser=this.value" placeholder="root">
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--text-dim)">RUN AS GROUP</div>
-                <input id="sudoers-rule-${i}-runasGroup" class="sudoers-cell-input" value="${esc(r.runasGroup)}" oninput="sudoersRules[${i}].runasGroup=this.value" placeholder="(group)">
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--text-dim)">HOSTS</div>
-                <input id="sudoers-rule-${i}-hosts" class="sudoers-cell-input" value="${esc(r.hosts)}" oninput="sudoersRules[${i}].hosts=this.value" placeholder="ALL">
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--text-dim)">CWD</div>
-                <input id="sudoers-rule-${i}-cwd" class="sudoers-cell-input" value="${esc(r.cwd || '')}" oninput="sudoersRules[${i}].cwd=this.value || undefined" placeholder="/var/www">
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--text-dim)">CHROOT</div>
-                <input id="sudoers-rule-${i}-chroot" class="sudoers-cell-input" value="${esc(r.chroot || '')}" oninput="sudoersRules[${i}].chroot=this.value || undefined" placeholder="/chroot">
-              </div>
-              <div>
-                <div style="font-size:10px;color:var(--text-dim)">TIMEOUT (seconds)</div>
-                <input id="sudoers-rule-${i}-timeout" class="sudoers-cell-input" type="number" value="${r.timeout || ''}" oninput="sudoersRules[${i}].timeout=this.value ? parseInt(this.value, 10) : undefined" placeholder="120">
-              </div>
-            </div>
-            <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                <input id="sudoers-rule-${i}-noexec" type="checkbox" ${r.noexec?'checked':''} onchange="sudoersRules[${i}].noexec=this.checked;refreshVisual()" style="accent-color:var(--amber)">
-                <span>Disable shell escape (NOEXEC)</span>
-              </label>
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                <input id="sudoers-rule-${i}-setenv" type="checkbox" ${r.setenv?'checked':''} onchange="sudoersRules[${i}].setenv=this.checked;refreshVisual()" style="accent-color:var(--blue)">
-                <span>Allow environment variables (SETENV)</span>
-              </label>
-            </div>
-          </details>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-// ── Visual editor renderer ────────────────────────────────────────────────────
-
-function renderVisualEditor() {
-  const filteredRules = sudoersRules
-    .map((r, i) => ({ r, i }))
-    .filter(({ r }) => !sudoersSearchQuery || r.principalName.toLowerCase().includes(sudoersSearchQuery.toLowerCase()));
-
-  const cardsHtml = filteredRules.map(({ r, i }) => renderAccessCard(r, i)).join('');
-
-  const aliasDetailsId = 'sudoers-advanced-details';
-  const isAliasOpen = sudoersOpenDetails.has(aliasDetailsId) ? 'open' : '';
-
-  const aliasRows = sudoersAliases.map((a, i) => `
-    <div class="sudoers-alias-row">
-      <span class="sudoers-alias-type">${esc(a.type)}</span>
-      <input id="sudoers-alias-${i}-name" class="sudoers-alias-name" value="${esc(a.name)}" oninput="sudoersAliases[${i}].name=this.value" placeholder="NAME">
-      <span style="color:var(--text-dim);font-size:12px;padding:0 4px">=</span>
-      <input id="sudoers-alias-${i}-members" class="sudoers-alias-members" value="${esc(a.members)}" oninput="sudoersAliases[${i}].members=this.value" placeholder="member1, member2">
-      <button class="sudoers-del-btn" onclick="removeAlias(${i})" title="Delete">✕</button>
-    </div>`).join('');
-
-  return `
-    <div class="sudoers-search-container">
-      <input type="text" id="sudoers-search-input" class="sudoers-search-input" placeholder="Search users or groups..." value="${esc(sudoersSearchQuery)}"
-             oninput="sudoersSearchQuery=this.value;renderSudoersMain(null)">
-    </div>
-
-    <div class="sudoers-section-hdr" style="display:flex;justify-content:space-between;align-items:center">
-      <span>Who can do what</span>
-      <button class="btn-primary" style="font-size:12px;padding:4px 12px" onclick="addRule()">+ Grant Access</button>
-    </div>
-
-    <div style="margin-top:12px">
-      ${cardsHtml || '<div style="text-align:center;padding:40px;color:var(--text-dim)">No permissions defined. Click "Grant Access" to start.</div>'}
-    </div>
-
-    <div class="sudoers-section-hdr" style="margin-top:24px">Inheritance & Technical Rules</div>
-    <details id="${aliasDetailsId}" ${isAliasOpen} ontoggle="toggleSudoersDetails('${aliasDetailsId}', this.open)">
-      <summary style="cursor:pointer;font-size:12px;color:var(--text-dim)">Aliases & Raw Advanced Rules</summary>
-
-      <div style="margin-top:12px">
-        <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Aliases</div>
-        <div id="sudoers-alias-list">${aliasRows}</div>
-        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-          <button class="sudoers-chip-add" onclick="addAlias('User_Alias')">+ User_Alias</button>
-          <button class="sudoers-chip-add" onclick="addAlias('Cmnd_Alias')">+ Cmnd_Alias</button>
-          <button class="sudoers-chip-add" onclick="addAlias('Host_Alias')">+ Host_Alias</button>
-        </div>
-      </div>
-
-      <div style="margin-top:18px">
-        <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Raw Advanced Rules</div>
-        <textarea id="sudoers-advanced-text" class="sudoers-raw-area" style="height:120px;margin-top:6px" oninput="sudoersAdvanced=this.value">${esc(sudoersAdvanced)}</textarea>
-      </div>
-    </details>
-  `;
-}
-
-function refreshVisual() {
-  const f = saveSudoersFocus();
-  const el = document.getElementById('sudoers-visual-editor');
-  if (el) el.innerHTML = renderVisualEditor();
-  restoreSudoersFocus(f);
 }
 
 function switchSudoersMode(mode) {
@@ -5356,42 +5170,242 @@ function switchSudoersMode(mode) {
   renderSudoersMain(null);
 }
 
-// ── Rule / alias mutations ────────────────────────────────────────────────────
+function renderSudoersRulesList() {
+  const list = document.getElementById('sudoers-rule-list');
+  if (!list) return;
+
+  if (!sudoersRules.length) {
+    list.innerHTML = `<p style="padding:20px; color:var(--text-dim); text-align:center; font-size:12px">No rules defined.</p>`;
+    return;
+  }
+
+  const filtered = sudoersRules
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => !sudoersSearchQuery || r.principalName.toLowerCase().includes(sudoersSearchQuery.toLowerCase()));
+
+  list.innerHTML = filtered.map(({ r, i }) => {
+    const activeClass = i === sudoersCurrentRuleIdx ? 'active' : '';
+    let icon = '👤';
+    if (r.principalType === 'group') icon = '👥';
+    if (r.principalType === 'ad-group') icon = '🌐';
+
+    const nopasswdBadge = r.nopasswd ? `<span style="font-size:9px; color:var(--green); background:rgba(0,232,122,0.1); padding:1px 4px; border-radius:3px; font-weight:bold;">NOPASSWD</span>` : '';
+    const cwdBadge = r.cwd ? `<span style="font-size:9px; color:var(--amber); background:rgba(232,164,77,0.1); padding:1px 4px; border-radius:3px; font-weight:bold;">CWD</span>` : '';
+
+    return `
+      <div class="sudoers-rule-item ${activeClass}" onclick="selectSudoersRule(${i})">
+        <div>
+          <div class="sudoers-rule-item-title">
+            <span>${icon}</span>
+            <span>${esc(r.principalName || 'unnamed')}</span>
+          </div>
+          <div class="sudoers-rule-item-desc">${esc(r.cmds.join(', ') || 'ALL')}</div>
+        </div>
+        <div class="sudoers-rule-item-badges">
+          ${nopasswdBadge}
+          ${cwdBadge}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function selectSudoersRule(idx) {
+  sudoersCurrentRuleIdx = idx;
+  renderSudoersRulesList();
+  renderSudoersInspector();
+}
+
+function renderSudoersInspector() {
+  const inspector = document.getElementById('sudoers-inspector-panel');
+  if (!inspector) return;
+
+  if (sudoersCurrentRuleIdx < 0 || sudoersCurrentRuleIdx >= sudoersRules.length) {
+    inspector.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:center; flex:1; color:var(--text-dim); font-size:13px; font-family:var(--font-ui);">
+        Select a rule from the list to edit or click "+ New"
+      </div>
+    `;
+    return;
+  }
+
+  const r = sudoersRules[sudoersCurrentRuleIdx];
+  const adHint = r.principalType === 'ad-group'
+    ? `<div style="font-size: 11px; color: var(--text-dim); margin-top: 4px; background: rgba(0, 140, 255, 0.05); border: 1px solid rgba(0, 140, 255, 0.15); padding: 8px 12px; border-radius: 6px; display: flex; align-items: start; gap: 8px; line-height: 1.4;">
+        <span style="color: var(--blue);">ℹ️</span>
+        <span>Active Directory groups are escaped as <code>%"${esc(r.principalName || '')}"</code> to correctly query SSSD.</span>
+       </div>`
+    : '';
+
+  const cmdsHtml = r.cmds.map((c, ci) => `
+    <div class="sudoers-chip">
+      <span>${esc(c)}</span>
+      <button class="sudoers-chip-rm" onclick="removeCmd(${sudoersCurrentRuleIdx},${ci})">×</button>
+    </div>
+  `).join('');
+
+  inspector.innerHTML = `
+    <div class="sudoers-inspector-header">
+      <div>
+        <span class="sudoers-inspector-title">Access Rule Editor</span>
+        <span class="sudoers-inspector-subtitle">${esc(r.principalName || '')}</span>
+      </div>
+      <button style="background:none; border:1px solid rgba(255,80,80,0.4); color:#ff8080; padding:4px 12px; font-size:12px; border-radius:4px; cursor:pointer;" onclick="removeRule(${sudoersCurrentRuleIdx})">Delete Rule</button>
+    </div>
+
+    <div class="sudoers-inspector-body">
+      <!-- Principal Definition -->
+      <div style="display:flex; gap:16px;">
+        <div style="flex:1.5;">
+          <label style="display:block; font-size:10.5px; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px; font-weight:600;">Principal Type</label>
+          <div class="tab-group">
+            <button class="tab-item ${r.principalType==='user'?'active':''}" onclick="setPrincipalType('user')">👤 User</button>
+            <button class="tab-item ${r.principalType==='group'?'active':''}" onclick="setPrincipalType('group')">👥 Local</button>
+            <button class="tab-item ${r.principalType==='ad-group'?'active':''}" onclick="setPrincipalType('ad-group')">🌐 AD Group</button>
+          </div>
+        </div>
+        <div style="flex:2;">
+          <label style="display:block; font-size:10.5px; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px; font-weight:600;">Name</label>
+          <input type="text" id="inspector-name-input" value="${esc(r.principalName)}" oninput="updateRuleField('principalName', this.value)" style="width:100%; box-sizing:border-box; padding:8px 12px; font-size:13px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:6px; outline:none;">
+        </div>
+      </div>
+
+      ${adHint}
+
+      <!-- Allowed Commands Tag Editor -->
+      <div>
+        <label style="display:block; font-size:10.5px; color:var(--text-dim); text-transform:uppercase; margin-bottom:6px; font-weight:600;">Allowed Commands</label>
+        <div style="border:1px solid var(--border-mid); padding:8px; border-radius:6px; display:flex; flex-wrap:wrap; gap:6px; background:var(--card); min-height:38px; align-items:center;">
+          ${cmdsHtml}
+          <input type="text" id="inspector-cmd-input" placeholder="+ Type command..." onkeydown="handleCommandKeydown(event, ${sudoersCurrentRuleIdx})" style="border:none; background:none; color:var(--text); font-size:11.5px; font-family:monospace; outline:none; flex:1; min-width:150px;">
+        </div>
+        <p style="font-size:10.5px; color:var(--text-dim); margin:6px 0 0;">Press <code>Enter</code> or <code>,</code> to add a command tag. Auto-completes paths.</p>
+      </div>
+
+      <!-- Security Flags -->
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; background:rgba(255,255,255,0.02); padding:12px 16px; border-radius:6px; border:1px solid var(--border);">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px;">
+          <input type="checkbox" ${r.nopasswd?'checked':''} onchange="updateRuleField('nopasswd', this.checked)" style="accent-color:var(--green); transform:scale(1.1);">
+          <span>No password</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px;">
+          <input type="checkbox" ${r.noexec?'checked':''} onchange="updateRuleField('noexec', this.checked)" style="accent-color:var(--amber); transform:scale(1.1);">
+          <span>No shell escape</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px;">
+          <input type="checkbox" ${r.setenv?'checked':''} onchange="updateRuleField('setenv', this.checked)" style="accent-color:var(--blue); transform:scale(1.1);">
+          <span>Keep environment</span>
+        </label>
+      </div>
+
+      <!-- Advanced Limits & Sandboxing -->
+      <div>
+        <div style="font-size:10.5px; color:var(--text-dim); text-transform:uppercase; margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:6px; font-weight:bold;">Advanced Limits & Sandboxing</div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px;">
+          <div>
+            <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Run As User</label>
+            <input type="text" value="${esc(r.runasUser)}" oninput="updateRuleField('runasUser', this.value)" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:4px; font-family:monospace;">
+          </div>
+          <div>
+            <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Run As Group</label>
+            <input type="text" value="${esc(r.runasGroup)}" oninput="updateRuleField('runasGroup', this.value)" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:4px; font-family:monospace;">
+          </div>
+          <div>
+            <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Hosts</label>
+            <input type="text" value="${esc(r.hosts)}" oninput="updateRuleField('hosts', this.value)" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:4px; font-family:monospace;">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
+          <div>
+            <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Working Dir (CWD)</label>
+            <input type="text" value="${esc(r.cwd || '')}" oninput="updateRuleField('cwd', this.value)" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:4px; font-family:monospace;">
+          </div>
+          <div>
+            <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Chroot Jail</label>
+            <input type="text" value="${esc(r.chroot || '')}" oninput="updateRuleField('chroot', this.value)" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:4px; font-family:monospace;">
+          </div>
+          <div>
+            <label style="display:block; font-size:11px; color:var(--text-dim); margin-bottom:4px;">Timeout (Seconds)</label>
+            <input type="number" value="${esc(r.timeout || '')}" oninput="updateRuleField('timeout', this.value ? parseInt(this.value, 10) : '')" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; background:var(--card); border:1px solid var(--border-mid); color:var(--text); border-radius:4px; font-family:monospace;">
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function updateRuleField(field, val) {
+  if (sudoersCurrentRuleIdx >= 0 && sudoersCurrentRuleIdx < sudoersRules.length) {
+    sudoersRules[sudoersCurrentRuleIdx][field] = val;
+
+    // Update UI preview & list
+    renderSudoersRulesList();
+
+    // Compute raw config updates in memory to sync live diff
+    sudoersCurrentConfig = serializeSudoers(sudoersRules, sudoersAliases, sudoersAdvanced, sudoersCurrentHost, '');
+
+    const diffContainer = document.querySelector('.sudoers-diff');
+    if (diffContainer) {
+      const managedSnap = extractManagedSudoers(sudoersCurrentSnap);
+      diffContainer.innerHTML = renderDiff(managedSnap, stripSudoersHeader(sudoersCurrentConfig));
+    }
+  }
+}
+
+function setPrincipalType(type) {
+  updateRuleField('principalType', type);
+  renderSudoersInspector();
+
+  const input = document.getElementById('inspector-name-input');
+  if (input) input.focus();
+}
+
+function handleCommandKeydown(event, ruleIdx) {
+  if (event.key === 'Enter' || event.key === ',') {
+    event.preventDefault();
+    const val = event.target.value.trim();
+    if (val) {
+      sudoersRules[ruleIdx].cmds.push(val);
+      event.target.value = '';
+      sudoersCurrentConfig = serializeSudoers(sudoersRules, sudoersAliases, sudoersAdvanced, sudoersCurrentHost, '');
+      renderSudoersRulesList();
+      renderSudoersInspector();
+
+      const cmdInput = document.getElementById('inspector-cmd-input');
+      if (cmdInput) cmdInput.focus();
+    }
+  }
+}
 
 function addRule() {
-  const name = prompt('Enter User or %Group name:');
-  if (!name) return;
-  let principalType = 'user';
-  let principalName = name;
-  if (name.startsWith('%"')) {
-    principalType = 'ad-group';
-    principalName = name.slice(2, -1);
-  } else if (name.startsWith('"')) {
-    principalType = 'user';
-    principalName = name.slice(1, -1);
-  } else if (name.startsWith('%')) {
-    principalType = 'group';
-    principalName = name.slice(1);
-  }
   sudoersRules.unshift({
-    principalType,
-    principalName,
-    hosts:'ALL', runasUser:'ALL', runasGroup:'',
-    nopasswd:false, noexec:false, setenv:false, cmds:['ALL']
+    principalType: 'user',
+    principalName: 'new_rule',
+    hosts: 'ALL', runasUser: 'ALL', runasGroup: '',
+    nopasswd: false, noexec: false, setenv: false,
+    cwd: '', chroot: '', timeout: '',
+    cmds: ['ALL']
   });
-  refreshVisual();
+  sudoersIsEditing = true;
+  sudoersCurrentConfig = serializeSudoers(sudoersRules, sudoersAliases, sudoersAdvanced, sudoersCurrentHost, '');
+  selectSudoersRule(0);
 }
-function removeRule(i) { sudoersRules.splice(i, 1); refreshVisual(); }
-function addCmd(ruleIdx) {
-  const cmd = prompt('Command path (e.g. /usr/bin/apt):');
-  if (cmd) { sudoersRules[ruleIdx].cmds.push(cmd.trim()); refreshVisual(); }
+
+function removeRule(i) {
+  sudoersRules.splice(i, 1);
+  sudoersCurrentRuleIdx = sudoersRules.length ? 0 : -1;
+  sudoersCurrentConfig = serializeSudoers(sudoersRules, sudoersAliases, sudoersAdvanced, sudoersCurrentHost, '');
+  renderSudoersMain(null);
 }
-function removeCmd(ruleIdx, cmdIdx) { sudoersRules[ruleIdx].cmds.splice(cmdIdx, 1); refreshVisual(); }
-function addAlias(type) {
-  sudoersAliases.push({ type, name:'', members:'' });
-  refreshVisual();
+
+function removeCmd(ruleIdx, cmdIdx) {
+  sudoersRules[ruleIdx].cmds.splice(cmdIdx, 1);
+  sudoersCurrentConfig = serializeSudoers(sudoersRules, sudoersAliases, sudoersAdvanced, sudoersCurrentHost, '');
+  renderSudoersRulesList();
+  renderSudoersInspector();
 }
-function removeAlias(i) { sudoersAliases.splice(i, 1); refreshVisual(); }
 
 // ── Save / reset ──────────────────────────────────────────────────────────────
 
