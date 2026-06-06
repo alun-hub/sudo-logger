@@ -628,7 +628,7 @@ The JIT approval system allows security teams to enforce a "four-eyes" principle
 - **Approval Windows**: Admins grant access for a specific duration (e.g., 30m). During this window, the user can run `sudo` on that host without further prompts.
 - **Session TTL Enforcement**: Active sessions are automatically terminated by the agent when the approval window expires. A warning is shown in the terminal 60 seconds before termination.
 - **Mattermost/Slack Integration**: New requests are posted to a channel. Admins can click **Approve** or **Deny** buttons directly in the chat.
-- **Secure Callbacks**: Interactive buttons use HMAC-SHA256 signatures to verify that the request originated from the log server. No shared secrets or proxy authentication are required for the callback endpoint.
+- **Secure Callbacks**: Interactive buttons use HMAC-SHA256 signatures to verify that the request originated from the log server. A `webhook_secret` must be configured — without it, interactive buttons are disabled and the callback endpoint rejects all requests.
 - **Exempt Rules**: Whitelist specific users or hosts that do not require approval (e.g., `root` or automated service accounts).
 
 #### Configuration (Local mode)
@@ -644,7 +644,7 @@ notifications:
   # URL where the callback should land. Must be reachable by the Mattermost server.
   # For internal/containerized deployments, use an internal IP (e.g., 10.42.0.1).
   replay_web_app_url: "http://replay.internal:8080"
-  webhook_secret: "optional-signing-secret"  # pragma: allowlist secret
+  webhook_secret: "your-secret-here"  # Required for Approve/Deny buttons  # pragma: allowlist secret
   mention_user: true
 ```
 

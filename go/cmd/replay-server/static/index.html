@@ -1033,7 +1033,7 @@
           <input type="text" id="appr-replay-web-url" placeholder="http://gnarg.alun.se:30080">
 
           <label>Webhook secret</label>
-          <input type="password" id="appr-webhook-secret" placeholder="(optional)">
+          <input type="password" id="appr-webhook-secret" placeholder="Required when Webhook URL is set">
 
           <label>Mention user</label>
           <input type="checkbox" id="appr-mention-user">
@@ -1673,6 +1673,50 @@
           <div class="help-tip"><span><strong>Best Practice:</strong> Always use full paths for commands (<code>/usr/bin/id</code> instead of just <code>id</code>) to prevent path-injection attacks.</span></div>
           <div class="help-tip"><span><strong>Aliases:</strong> If you need to reuse lists of users or commands, define them in the <strong>Aliases</strong> section at the bottom and then use the Alias name in your rules.</span></div>
           <div class="help-tip"><span><strong>Global vs Local:</strong> Write common rules in the <strong>Main</strong> template. Use host overrides only for rules that are truly unique to a single machine.</span></div>
+        </div>
+      </div>
+
+      <div class="help-section">
+        <h3>JIT Approval — Mattermost/Slack integration</h3>
+        <p class="help-intro" style="margin-bottom:12px">
+          Configure in <strong>Settings → JIT Approval</strong>. When a user's sudo request is pending,
+          a notification is posted to the configured channel with <strong>Approve</strong> and <strong>Deny</strong> buttons.
+          Clicking a button calls back to this server and instantly resolves the request.
+        </p>
+        <table class="help-table">
+          <thead><tr><th style="width:180px">Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Webhook URL</td>
+              <td>Incoming webhook URL for your Mattermost or Slack workspace. Notifications are posted here.</td>
+            </tr>
+            <tr>
+              <td>Request channel</td>
+              <td>Channel where new approval requests are posted (e.g. <code>sudo-logger</code>). Outcome notifications are sent as DMs to the user's handle.</td>
+            </tr>
+            <tr>
+              <td>Replay Web App URL</td>
+              <td>Public base URL of this server, reachable by the Mattermost/Slack server (e.g. <code>http://10.42.0.1</code>). Used to construct the callback URL for interactive buttons.</td>
+            </tr>
+            <tr>
+              <td><strong>Webhook secret</strong></td>
+              <td>
+                <strong>Required when Webhook URL is set.</strong> A secret shared between this server and your webhook integration.
+                Used to sign and verify the Approve/Deny button callbacks with HMAC-SHA256, preventing anyone from forging an approval.
+                If left empty, interactive buttons are disabled and no callbacks are accepted.
+              </td>
+            </tr>
+            <tr>
+              <td>Mention user</td>
+              <td>When enabled, outcome notifications mention the user's handle (<code>@alice</code>) so they are notified in Mattermost/Slack.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="help-tips" style="margin-top:16px">
+          <div class="help-tip"><span><strong>Webhook secret is mandatory</strong> for interactive buttons to work. Without it, the callback endpoint rejects all requests and no Approve/Deny buttons appear in notifications.</span></div>
+          <div class="help-tip"><span><strong>Network access:</strong> The Mattermost/Slack server must be able to reach <code>Replay Web App URL/api/approvals/callback</code>. If using an internal IP, enable <em>Allow Untrusted Internal Connections</em> in the Mattermost System Console.</span></div>
+          <div class="help-tip"><span><strong>Reverse proxy:</strong> If this server sits behind an authenticating proxy (e.g. oauth2-proxy), exempt <code>/api/approvals/callback</code> — it is protected by its own HMAC verification and does not need proxy-level auth.</span></div>
+          <div class="help-tip"><span><strong>UI vs file:</strong> In distributed mode all settings are stored in the database. In local mode they are read from <code>/etc/sudo-logger/approval-policy.yaml</code>. Changes saved here take effect within 30 seconds without a server restart.</span></div>
         </div>
       </div>
 
@@ -3556,6 +3600,11 @@ async function saveApprovalConfig() {
     exempt: [], // preserved server-side if we only send what we have, but policy is the full struct.
     // To be safe, we should probably fetch the existing policy and only update the fields we have in the UI.
   };
+
+  if (cfg.notifications.webhook_url && !cfg.notifications.webhook_secret) {
+    showApprovalStatus('Webhook secret is required when Webhook URL is set.', true);
+    return;
+  }
 
   // Re-fetch to preserve exempt rules which are not in the UI yet
   try {

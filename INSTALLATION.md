@@ -126,7 +126,8 @@ I distribuerat läge lagras inställningarna i databasen så att alla noder ser 
 1.  Logga in i **Replay UI**.
 2.  Gå till **Settings -> JIT Approval**.
 3.  Aktivera (Enabled) och fyll i Webhook-URL till Mattermost/Slack.
-4.  Klicka **Save**.
+4.  Fyll i **Webhook secret** — obligatoriskt om Webhook URL är satt. Utan det visas inga Approve/Deny-knappar i notiser och alla callback-anrop avvisas.
+5.  Klicka **Save**.
 
 ---
 
@@ -142,6 +143,8 @@ exempt:
   - user: root       # Root behöver inte godkännande
 notifications:
   webhook_url: "http://mattermost:8065/hooks/xxxx"
+  replay_web_app_url: "http://10.42.0.1"
+  webhook_secret: "byt-ut-detta-mot-ett-riktigt-hemligt-värde"  # Obligatoriskt för Approve/Deny-knappar  # pragma: allowlist secret
   mention_user: true
 ```
 
