@@ -280,7 +280,7 @@ func (m *ApprovalManager) RetryMessage(user, host string) string {
 	for _, r := range reqs {
 		if r.User == user && r.Host == host && r.ExpiresAt.After(now) {
 			age := now.Sub(r.SubmittedAt).Round(time.Second)
-			return fmt.Sprintf("sudo-logger: approval request %s still pending (submitted %s ago). Retry when notified.", r.ID, age)
+			return fmt.Sprintf("sudo-logger: approval request still pending (submitted %s ago). Retry when notified.", age)
 		}
 	}
 	return ""
@@ -411,7 +411,7 @@ func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, 
 		}
 		channel = cfg.RequestChannel
 
-		if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" {
+		if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" && cfg.WebhookSecret != "" {
 			callbackURL := strings.TrimSuffix(cfg.ReplayWebAppURL, "/") + "/api/approvals/callback"
 			log.Printf("approval: generated callback URL: %s", callbackURL)
 			actions = []slackAction{
@@ -733,6 +733,12 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	secret := m.policy.Notifications.WebhookSecret // pragma: allowlist secret
 	m.mu.RUnlock()
 
+	if secret == "" {
+		log.Printf("approval: callback rejected: webhook_secret not configured")
+		http.Error(w, "approval callback not configured", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Verify HMAC
 	expected := m.generateActionToken(reqID, action, secret)
 	if token == "" || !hmac.Equal([]byte(token), []byte(expected)) {
@@ -773,10 +779,8 @@ func newRequestID() string {
 }
 
 func (m *ApprovalManager) generateActionToken(requestID, action, secret string) string {
-	// If no secret configured, use a static salt so we still get a stable token
-	// for the buttons, but it's obviously less secure than a real secret.
 	if secret == "" {
-		secret = "sudo-logger-default-salt" // pragma: allowlist secret
+		return ""
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(requestID + ":" + action))
