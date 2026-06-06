@@ -28,6 +28,8 @@
       --green-glow:  rgba(0, 232, 122, 0.12);
       --blue:        #4da8ff;
       --red:         #ff5f6d;
+      --amber:       #e8a44d;
+      --amber-dim:   rgba(232, 164, 77, 0.15);
       --font:        'JetBrains Mono', 'Fira Code', monospace;
       --font-ui:     'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --radius:      5px;
@@ -36,22 +38,25 @@
     }
 
     [data-theme="light"] {
-      --bg:          #e8eaf4;
-      --surface:     #dfe2ef;
-      --card:        #d4d8e8;
-      --card-hover:  #c8cde0;
-      --card-active: #bccaf5;
-      --border:      #c8ccdb;
-      --border-mid:  #b4b9cc;
-      --text:        #1e2030;
-      --text-sub:    #5a5f72;
-      --text-dim:    #9298aa;
-      --green:       #0d9f58;
-      --green-dim:   #d8f0e6;
-      --green-glow:  rgba(13, 159, 88, 0.12);
-      --blue:        #3874d8;
-      --red:         #d93f50;
-      --card-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      --bg:          #ffffff;
+      --surface:     #f6f8fa;
+      --card:        #f6f8fa;
+      --card-hover:  #eef1f4;
+      --card-active: #dff0ff;
+      --border:      #d0d7de;
+      --border-mid:  #afb8c1;
+      --text:        #1f2328;
+      --text-sub:    #59636e;
+      --text-dim:    #818b98;
+      --green:       #1a7f37;
+      --green-dim:   #dafbe1;
+      --green-glow:  rgba(26, 127, 55, 0.12);
+      --blue:        #0969da;
+      --red:         #d1242f;
+      --amber:       #9a6700;
+      --amber-dim:   rgba(154, 103, 0, 0.10);
+      --card-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
+      --input-bg:    #ffffff;
     }
 
     html, body { height: 100%; background: var(--bg); color: var(--text);
@@ -237,46 +242,53 @@
       border-radius: 2px; padding: 0 1px; font-style: normal; }
     [data-theme="light"] mark { background: rgba(0, 122, 64, 0.14); }
 
-    /* Light mode: explicit card background so cards stand out from sidebar */
-    [data-theme="light"] .session-card { background: var(--card); }
+    /* Light mode: white cards stand out from light-gray sidebar */
+    [data-theme="light"] .session-card { background: #ffffff; }
+    [data-theme="light"] .session-card:hover { background: var(--card-hover); }
+    [data-theme="light"] .session-card.active { background: var(--card-active); border-left-color: var(--blue); }
+    [data-theme="light"] .session-card.active .sc-user { color: var(--blue); }
+    [data-theme="light"] .session-card.active .sc-dur { color: var(--blue); border-color: rgba(9,105,218,0.3); }
 
-    /* Light mode: navy chrome for topbar and controls */
+    /* Light mode: GitHub-style dark header */
     [data-theme="light"] .topbar {
-      background: #1a2a50; border-bottom-color: #253763;
+      background: #24292f; border-bottom-color: #30363d;
     }
-    [data-theme="light"] .topbar .logo { color: #2ecc71; }
+    [data-theme="light"] .topbar .logo { color: #3fb950; }
     [data-theme="light"] .topbar .badge {
-      background: rgba(0,0,0,0.22); border-color: rgba(255,255,255,0.12); color: #8898c0;
+      background: rgba(0,0,0,0.25); border-color: rgba(255,255,255,0.10); color: #8b949e;
     }
-    [data-theme="light"] .topbar .tab-btn { color: #8898c0; }
-    [data-theme="light"] .topbar .tab-btn:hover { color: #b0bcd8; border-color: rgba(255,255,255,0.2); }
+    [data-theme="light"] .topbar .tab-btn { color: #8b949e; }
+    [data-theme="light"] .topbar .tab-btn:hover { color: #c9d1d9; border-color: rgba(255,255,255,0.18); }
     [data-theme="light"] .topbar .tab-btn.active {
-      color: #2ecc71; border-color: #2ecc71; background: rgba(46,204,113,0.15);
+      color: #ffffff; border-color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.12);
     }
     [data-theme="light"] .topbar .theme-btn {
-      border-color: rgba(255,255,255,0.18); color: #8898c0;
+      border-color: rgba(255,255,255,0.15); color: #8b949e;
     }
-    [data-theme="light"] .topbar .theme-btn:hover { color: #b0bcd8; border-color: rgba(255,255,255,0.3); }
-    [data-theme="light"] .topbar .autoplay-label { color: #8898c0; }
-    [data-theme="light"] .topbar .user-chip { color: #8898c0; }
-    [data-theme="light"] .topbar .user-chip .user-name { color: #c8d4e8; }
+    [data-theme="light"] .topbar .theme-btn:hover { color: #c9d1d9; border-color: rgba(255,255,255,0.28); }
+    [data-theme="light"] .topbar .autoplay-label { color: #8b949e; }
+    [data-theme="light"] .topbar .user-chip { color: #8b949e; }
+    [data-theme="light"] .topbar .user-chip .user-name { color: #c9d1d9; }
     [data-theme="light"] .topbar .logout-btn {
-      border-color: rgba(255,255,255,0.18); color: #8898c0;
+      border-color: rgba(255,255,255,0.15); color: #8b949e;
     }
-    [data-theme="light"] .topbar .logout-btn:hover { color: var(--red); border-color: var(--red); }
+    [data-theme="light"] .topbar .logout-btn:hover { color: #ff7b72; border-color: #ff7b72; }
+
+    /* Light mode: controls bar — light surface, matches content */
     [data-theme="light"] .controls {
-      background: #1a2a50; border-top-color: #253763;
+      background: var(--surface); border-top-color: var(--border);
     }
     [data-theme="light"] .controls .btn-play {
-      background: rgba(46,204,113,0.18); border-color: #2ecc71; color: #2ecc71;
+      background: var(--green-dim); border-color: var(--green); color: var(--green);
     }
     [data-theme="light"] .controls .btn-icon {
-      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: #94a8cc;
+      background: #ffffff; border-color: var(--border); color: var(--text-sub);
     }
-    [data-theme="light"] .controls .time-cur { color: #2ecc71; }
-    [data-theme="light"] .controls .time-tot { color: #8898c0; }
+    [data-theme="light"] .controls .btn-icon:hover:not(:disabled) { background: var(--card-hover); color: var(--text); }
+    [data-theme="light"] .controls .time-cur { color: var(--green); }
+    [data-theme="light"] .controls .time-tot { color: var(--text-sub); }
     [data-theme="light"] .controls .speed-select {
-      background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: #94a8cc;
+      background: #ffffff; border-color: var(--border); color: var(--text-sub);
     }
 
     .load-more { flex-shrink: 0; display: none; width: 100%; background: none;
@@ -791,20 +803,20 @@
     .sudoers-banner-btn-danger:hover { background: rgba(255,80,80,0.2); }
 
     .sudoers-main-split { display: flex; flex: 1; overflow: hidden; height: 100%; }
-    .sudoers-rules-column { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: #0e1017; }
+    .sudoers-rules-column { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--surface); }
     .sudoers-column-header { padding: 12px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
-    .sudoers-column-header input { flex: 1; padding: 6px 10px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; outline: none; }
+    .sudoers-column-header input { flex: 1; padding: 6px 10px; font-size: 12px; background: var(--input-bg); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; outline: none; }
     .sudoers-rule-list { flex: 1; overflow-y: auto; }
 
-    .sudoers-rule-item { padding: 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); display: flex; justify-content: space-between; align-items: start; transition: background 0.15s ease; }
+    .sudoers-rule-item { padding: 12px; cursor: pointer; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: start; transition: background 0.15s ease; }
     .sudoers-rule-item:hover { background: var(--card-hover); }
-    .sudoers-rule-item.active { background: rgba(77, 168, 255, 0.06); border-left: 4px solid var(--blue); }
+    .sudoers-rule-item.active { background: var(--card-active); border-left: 4px solid var(--blue); }
     .sudoers-rule-item-title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--text); }
     .sudoers-rule-item.active .sudoers-rule-item-title { color: var(--blue); }
     .sudoers-rule-item-desc { font-size: 11px; color: var(--text-dim); margin-top: 4px; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
     .sudoers-rule-item-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 
-    .sudoers-inspector-column { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: #0c0d14; }
+    .sudoers-inspector-column { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: var(--bg); }
     .sudoers-inspector-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
     .sudoers-inspector-title { font-weight: bold; font-size: 14px; color: var(--text); }
     .sudoers-inspector-subtitle { color: var(--text-dim); font-size: 11px; margin-left: 8px; font-family: monospace; }
@@ -818,6 +830,47 @@
     :focus { outline: none; }
     :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 3px; }
     input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+
+    /* ── Light mode miscellaneous fixes ─────────────────────────────────────── */
+    [data-theme="light"] mark { background: rgba(26, 127, 55, 0.12); color: var(--green); }
+
+    /* Sudoers tab-group pill needs a visible background in light mode */
+    [data-theme="light"] .tab-group { background: var(--border); }
+    [data-theme="light"] .tab-item.active { background: #ffffff; border-color: var(--border-mid); color: var(--blue); }
+
+    /* Default host badge: near-invisible white overlay → use border approach */
+    [data-theme="light"] .sudoers-badge-default { background: transparent; color: var(--text-dim); border-color: var(--border-mid); }
+
+    /* Banner action buttons: white overlay buttons → solid bordered buttons */
+    [data-theme="light"] .sudoers-banner-btn {
+      background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.15); color: var(--text);
+    }
+    [data-theme="light"] .sudoers-banner-btn:hover { background: rgba(0,0,0,0.12); }
+
+    /* Sort/mode active state uses --green which is now dark-on-light — keep readable */
+    [data-theme="light"] .sort-btn.active { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+    [data-theme="light"] .stab-btn.active { background: #ffffff; color: var(--green); border: 1px solid var(--border); }
+    [data-theme="light"] .stab-btn:hover   { background: var(--card-hover); }
+    [data-theme="light"] .sudoers-mode-btn.active { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+
+    /* Sudoers syntax highlight — dark-themed colours need contrast on light bg */
+    [data-theme="light"] .sh-kw    { color: #8a5a00; }
+    [data-theme="light"] .sh-group { color: #1a7f37; }
+
+    /* Help-level risk cards — hardcoded neon colours invisible on white */
+    [data-theme="light"] .help-level.hl-medium   { border-color: #9a6700; color: #9a6700; }
+    [data-theme="light"] .help-level.hl-high     { border-color: #b84c00; color: #b84c00; }
+    [data-theme="light"] .help-level.hl-critical { border-color: #c0001a; color: #c0001a; }
+
+    /* Search focus ring */
+    [data-theme="light"] .search-input:focus,
+    [data-theme="light"] .form-input:focus,
+    [data-theme="light"] .summary-search:focus,
+    [data-theme="light"] .date-input:focus { border-color: var(--blue); }
+
+    /* Sidebar + info bar use surface */
+    [data-theme="light"] .sidebar { background: var(--surface); }
+    [data-theme="light"] .info-bar { background: var(--surface); }
 
     /* ── Reduced motion ─────────────────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
@@ -2838,6 +2891,7 @@ elAutoplayToggle.addEventListener('change', () => {
     btn.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
     btn.setAttribute('aria-label', btn.title);
     term.options.theme = termThemes[theme];
+    if (typeof renderRulesTable === 'function') renderRulesTable();
   };
   apply(localStorage.getItem('sudo-replay-theme') === 'light' ? 'light' : 'dark');
   btn.addEventListener('click', () => {
@@ -3219,9 +3273,10 @@ function initTagInputs() {
 initTagInputs();
 
 function scoreColor(score) {
-  if (score >= 75) return '#ff5f6d';
-  if (score >= 50) return '#ff9f40';
-  if (score >= 25) return '#ffd666';
+  const light = document.documentElement.dataset.theme === 'light';
+  if (score >= 75) return light ? '#c0001a' : '#ff5f6d';
+  if (score >= 50) return light ? '#b84c00' : '#ff9f40';
+  if (score >= 25) return light ? '#8a6500' : '#ffd666';
   return 'var(--text-sub)';
 }
 
