@@ -27,6 +27,9 @@ type agentConfig struct {
 	// SandboxConfig is the path to the sandbox YAML deny-list.
 	// Empty (default) disables the sandbox subsystem.
 	SandboxConfig string
+	// Hostname overrides the auto-detected hostname. When empty the agent
+	// resolves the FQDN via os.Hostname + reverse DNS lookup.
+	Hostname string
 }
 
 func defaultConfig() agentConfig {
@@ -111,6 +114,8 @@ func loadConfig(path string) (agentConfig, error) {
 			cfg.Ebpf = v != "false" && v != "0" && v != "no"
 		case "sandbox_config":
 			cfg.SandboxConfig = v
+		case "hostname":
+			cfg.Hostname = v
 		default:
 			// Silently ignore unknown keys for backward compatibility.
 		}

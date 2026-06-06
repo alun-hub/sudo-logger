@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -81,10 +82,7 @@ func main() {
 		log.Fatalf("build TLS config: %v", err)
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
-	}
+	hostname := resolveHostname(cfg.Hostname)
 
 	div = newDivergenceTracker(hostname, func(user, host, comm string, ts time.Time) {
 		log.Printf("ALERT: divergence detected — %s ran %q on %s without plugin logging", user, comm, host)
@@ -209,6 +207,31 @@ func checkBTFSupport() error {
 		return fmt.Errorf("kernel %d.%d is too old — requires 5.8+ for ring buffer and stable cgroup IDs", major, minor)
 	}
 	return nil
+}
+
+// resolveHostname returns the hostname to use for this agent.
+// Priority: config override > FQDN via reverse DNS > short kernel hostname.
+func resolveHostname(override string) string {
+	if override != "" {
+		return override
+	}
+	short, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	// Attempt FQDN via reverse DNS: resolve the short name to an IP, then
+	// look up the canonical name for that IP.
+	addrs, err := net.LookupHost(short)
+	if err == nil && len(addrs) > 0 {
+		names, err := net.LookupAddr(addrs[0])
+		if err == nil && len(names) > 0 {
+			fqdn := strings.TrimSuffix(names[0], ".")
+			if strings.Contains(fqdn, ".") {
+				return fqdn
+			}
+		}
+	}
+	return short
 }
 
 // utsnameToString converts a fixed-size int8 array (from Utsname) to a string.
