@@ -13,18 +13,18 @@ func TestEngine_BasicDecisions(t *testing.T) {
 		DefaultAction: "challenge",
 		Rules: []policy.Rule{
 			{
-				ID:      "allow-sre",
-				Comment: "SRE team always allowed",
-				Users:   []string{"alice", "bob"},
-				Hosts:   []string{"*"},
-				Action:  "allow",
+				ID:       "allow-sre",
+				Comment:  "SRE team always allowed",
+				Users:    []string{"alice", "bob"},
+				Hosts:    []string{"*"},
+				Action:   "allow",
 				HourFrom: -1, HourTo: -1,
 			},
 			{
-				ID:      "deny-contractors",
-				Comment: "Contractors always blocked",
-				Users:   []string{"contractor-*"},
-				Action:  "deny",
+				ID:       "deny-contractors",
+				Comment:  "Contractors always blocked",
+				Users:    []string{"contractor-*"},
+				Action:   "deny",
 				HourFrom: -1, HourTo: -1,
 			},
 		},
@@ -60,10 +60,10 @@ func TestEngine_GlobPatterns(t *testing.T) {
 		DefaultAction: "challenge",
 		Rules: []policy.Rule{
 			{
-				ID:     "allow-dev",
-				Users:  []string{"*"},
-				Hosts:  []string{"dev-*"},
-				Action: "allow",
+				ID:       "allow-dev",
+				Users:    []string{"*"},
+				Hosts:    []string{"dev-*"},
+				Action:   "allow",
 				HourFrom: -1, HourTo: -1,
 			},
 		},
@@ -182,5 +182,42 @@ func TestCompileToRego_Valid(t *testing.T) {
 	// Should contain the package declaration
 	if !strings.Contains(src, "package sudo_logger.jit") {
 		t.Error("missing package declaration")
+	}
+}
+
+func TestEngine_CommentInjection(t *testing.T) {
+	p := &policy.Policy{
+		DefaultAction: "challenge",
+		Rules: []policy.Rule{
+			{
+				ID:       "r1",
+				Comment:  "legit comment\n_any_allow if true",
+				Users:    []string{"alice"},
+				Action:   "allow",
+				HourFrom: -1, HourTo: -1,
+			},
+		},
+	}
+
+	// 1. Validate() should reject it.
+	if err := p.Validate(); err == nil {
+		t.Error("Validate did not reject rule with newline in comment")
+	}
+
+	// 2. CompileToRego should sanitize the newline.
+	src := policy.CompileToRego(p)
+	if strings.Contains(src, "\n_any_allow if true") {
+		t.Error("CompileToRego failed to sanitize newline in comment, allowing injection")
+	}
+
+	// 3. The engine should evaluate with sanitized Rego.
+	eng, err := policy.NewEngine(p)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	ctx := context.Background()
+	got := eng.Eval(ctx, policy.Input{User: "charlie"})
+	if got == policy.DecisionAllow {
+		t.Errorf("got %s, want challenge (injection bypass succeeded)", got)
 	}
 }

@@ -716,6 +716,10 @@ const T = {
     'jit-sent':'Skickad: 2026-06-07 00:00 | Timeout: 10 minuter',
     'jit-approved':'[GODKÄND] Administratör (sec-admin-01) har godkänt sessionen!',
     'jit-unfrozen':'Sessionen tinas upp (Session TTL: 60 minuter återstår)','sim2-restart':'Starta ny JIT-begäran',
+    'feat-opa-title': 'OPA JIT-policymotor <span class="badge badge-ee">Enterprise</span>',
+    'feat-opa-desc': 'Ersätt hårdkodade undantagslistor med ett fullständigt regelspråk baserat på Open Policy Agent och Rego. Regler kan matcha användare, host, kommando, OS-grupp (lokal/SSSD/LDAP/AD), veckodag och klockslag. Prioritet: deny &gt; allow &gt; challenge. Ändringar hot-reloadas utan omstart.',
+    'td-desc-opa': 'Regelbaserad åtkomstkontroll med Open Policy Agent — matcha på användare, host, OS-grupp, veckodag och klockslag. Deny &gt; allow &gt; challenge, hot-reload.',
+    'chk-opa': '★ JA',
   },
   en: {
     'page-title': 'sudo-logger — Audit logs that cannot be tampered with',
@@ -840,6 +844,10 @@ const T = {
     'jit-sent':'Sent: 2026-06-07 00:00 | Timeout: 10 minutes',
     'jit-approved':'[APPROVED] Administrator (sec-admin-01) has approved the session!',
     'jit-unfrozen':'Session unfrozen (Session TTL: 60 minutes remaining)','sim2-restart':'Start new JIT request',
+    'feat-opa-title': 'OPA JIT Policy Engine <span class="badge badge-ee">Enterprise</span>',
+    'feat-opa-desc': 'Replace hardcoded exception lists with a full policy language powered by Open Policy Agent and Rego. Rules can match on user, host, command, OS group (local/SSSD/LDAP/AD), weekday, and time of day. Priority: deny &gt; allow &gt; challenge. Changes hot-reload without restart.',
+    'td-desc-opa': 'Rule-based access control with Open Policy Agent — match on user, host, OS group, weekday, and time of day. Deny &gt; allow &gt; challenge, hot-reload.',
+    'chk-opa': '★ YES',
   }
 };
 

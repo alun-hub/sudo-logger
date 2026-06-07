@@ -12,20 +12,20 @@ import (
 type Rule struct {
 	ID        string   `json:"id"`
 	Comment   string   `json:"comment,omitempty"`
-	Users     []string `json:"users"`     // glob patterns or @groupname; [] or ["*"] = all
-	Hosts     []string `json:"hosts"`     // glob patterns or @groupname
-	Commands  []string `json:"commands"`  // glob patterns
-	Runas     []string `json:"runas"`     // glob patterns or @groupname
+	Users     []string `json:"users"`                // glob patterns or @groupname; [] or ["*"] = all
+	Hosts     []string `json:"hosts"`                // glob patterns or @groupname
+	Commands  []string `json:"commands"`             // glob patterns
+	Runas     []string `json:"runas"`                // glob patterns or @groupname
 	SysGroups []string `json:"sys_groups,omitempty"` // user must be member of ALL these groups (LDAP/AD via input.groups)
 	Weekdays  []int    `json:"weekdays,omitempty"`   // 0=Sun..6=Sat; empty = all days
-	HourFrom  int      `json:"hour_from"` // 0-23; -1 = no time constraint
-	HourTo    int      `json:"hour_to"`   // exclusive; -1 = no constraint
-	Action    string   `json:"action"`    // "allow" | "challenge" | "deny"
+	HourFrom  int      `json:"hour_from"`            // 0-23; -1 = no time constraint
+	HourTo    int      `json:"hour_to"`              // exclusive; -1 = no constraint
+	Action    string   `json:"action"`               // "allow" | "challenge" | "deny"
 }
 
 // Policy is the full JIT authorization configuration.
 type Policy struct {
-	Groups        map[string][]string `json:"groups,omitempty"`       // local group definitions: name → member patterns
+	Groups        map[string][]string `json:"groups,omitempty"` // local group definitions: name → member patterns
 	Rules         []Rule              `json:"rules"`
 	DefaultAction string              `json:"default_action"` // "allow" | "challenge"
 	RawRego       string              `json:"raw_rego,omitempty"`
@@ -39,6 +39,12 @@ func DefaultPolicy() Policy {
 // Validate returns an error if the policy is structurally invalid.
 func (p *Policy) Validate() error {
 	for i, r := range p.Rules {
+		if strings.ContainsAny(r.ID, "\r\n") {
+			return fmt.Errorf("rule %d: ID cannot contain newline characters", i)
+		}
+		if strings.ContainsAny(r.Comment, "\r\n") {
+			return fmt.Errorf("rule %d (%s): comment cannot contain newline characters", i, r.ID)
+		}
 		switch r.Action {
 		case "allow", "challenge", "deny":
 		default:
@@ -219,6 +225,8 @@ func emitClause(b *strings.Builder, name string, idx int, action string, r Rule,
 	if cmt == "" {
 		cmt = r.ID
 	}
+	cmt = strings.ReplaceAll(cmt, "\n", " ")
+	cmt = strings.ReplaceAll(cmt, "\r", " ")
 	if cmt != "" {
 		fmt.Fprintf(b, "# %s\n", cmt)
 	}
