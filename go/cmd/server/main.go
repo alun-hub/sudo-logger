@@ -548,6 +548,14 @@ func (srv *server) handleConn(conn *tls.Conn) {
 					netWriteMu.Unlock()
 					log.Printf("[%s] approval: user=%s host=%s — pending request %s created", start.SessionID, start.User, start.Host, result.RequestID)
 					return
+				case ApprovalResultDeny:
+					log.Printf("SECURITY: [%s] user=%s host=%s denied by OPA policy",
+						start.SessionID, start.User, start.Host)
+					netWriteMu.Lock()
+					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
+						"sudo-logger: access denied by policy."))
+					netWriteMu.Unlock()
+					return
 				case ApprovalResultAllow:
 					// Approved or exempt — continue normally.
 				}
@@ -607,6 +615,13 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
 				netWriteMu.Unlock()
 				log.Printf("[%s] approval: user=%s host=%s — pending request %s created (via challenge)", start.SessionID, start.User, start.Host, result.RequestID)
+				return
+			case ApprovalResultDeny:
+				log.Printf("SECURITY: [%s] user=%s host=%s denied by OPA policy (post-challenge)",
+					start.SessionID, start.User, start.Host)
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte("sudo-logger: access denied by policy."))
+				netWriteMu.Unlock()
 				return
 			case ApprovalResultAllow:
 				// Approved or exempt — continue normally.

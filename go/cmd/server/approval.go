@@ -34,6 +34,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"sudo-logger/internal/policy"
 	"sudo-logger/internal/store"
 )
 
@@ -97,6 +98,7 @@ const (
 	ApprovalResultPending                          // request created; SESSION_DENIED with request ID
 	ApprovalResultNeedReason                       // SESSION_DENIED asking for justification
 	ApprovalResultChallenge                        // MSG_SESSION_CHALLENGE asking for justification
+	ApprovalResultDeny                             // OPA policy hard-deny; no challenge offered
 )
 
 // CheckResult carries the outcome of ApprovalManager.Check.
@@ -116,8 +118,10 @@ type ApprovalManager struct {
 	policyPath string
 	backend    store.ApprovalStore
 
-	mu     sync.RWMutex
-	policy approvalPolicy
+	mu         sync.RWMutex
+	policy     approvalPolicy
+	opaEngine  *policy.Engine // nil if OPA policy not configured
+	opaPolicy  policy.Policy  // last successfully loaded OPA policy
 }
 
 func newApprovalManager(policyPath string, backend store.ApprovalStore) *ApprovalManager {
@@ -177,7 +181,45 @@ func (m *ApprovalManager) loadPolicy() error {
 	m.mu.Unlock()
 	log.Printf("approval: loaded policy from %s (enabled=%v, exempt=%d)",
 		source, p.Enabled, len(p.Exempt))
+
+	m.loadOPAPolicy(ctx)
 	return nil
+}
+
+// loadOPAPolicy loads the OPA JIT policy from the store and (re)compiles it.
+func (m *ApprovalManager) loadOPAPolicy(ctx context.Context) {
+	cfgStr, err := m.backend.GetConfig(ctx, "jit-policy")
+	if err != nil || cfgStr == "" {
+		return
+	}
+	var p policy.Policy
+	if err := json.Unmarshal([]byte(cfgStr), &p); err != nil {
+		log.Printf("approval: parse OPA policy: %v", err)
+		return
+	}
+	if err := p.Validate(); err != nil {
+		log.Printf("approval: invalid OPA policy: %v", err)
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.opaEngine == nil {
+		eng, err := policy.NewEngine(&p)
+		if err != nil {
+			log.Printf("approval: compile OPA policy: %v", err)
+			return
+		}
+		m.opaEngine = eng
+	} else {
+		if err := m.opaEngine.Update(&p); err != nil {
+			log.Printf("approval: reload OPA policy: %v", err)
+			return
+		}
+	}
+	m.opaPolicy = p
+	log.Printf("approval: OPA policy loaded (%d rules, default=%s)", len(p.Rules), p.DefaultAction)
 }
 
 // HasWebhook reports whether the policy has a webhook configured.
@@ -194,37 +236,67 @@ func (m *ApprovalManager) HasWebhook() bool {
 
 // Check evaluates whether the SESSION_START should be allowed, pending, or denied.
 // Returns ApprovalResultAllow immediately if the manager is nil (feature not configured).
+//
+// Decision order:
+//  1. Feature disabled → allow.
+//  2. Active approval window → allow (previously granted windows are always honored).
+//  3. OPA engine (when configured) → allow / deny / challenge.
+//  4. Legacy exempt list (when OPA not configured) → allow.
+//  5. Justification flow → challenge → pending.
 func (m *ApprovalManager) Check(user, host, command, justification string) CheckResult {
 	if m == nil {
 		return CheckResult{Result: ApprovalResultAllow}
 	}
 	m.mu.RLock()
-	policy := m.policy
+	pol := m.policy
+	eng := m.opaEngine
 	m.mu.RUnlock()
 
-	if !policy.Enabled {
+	if !pol.Enabled {
 		return CheckResult{Result: ApprovalResultAllow}
-	}
-	if policy.isExempt(user, host) {
-		ttl := sessionTTL(time.Time{}, policy.MaxSessionDuration)
-		return CheckResult{Result: ApprovalResultAllow, SessionTTL: ttl}
 	}
 
 	ctx := context.Background()
+
+	// Existing approval windows are always honored.
 	windowExp, hasWindow, err := m.backend.HasApprovalWindow(ctx, user, host)
 	if err != nil {
 		log.Printf("approval: HasApprovalWindow: %v", err)
 	}
 	if hasWindow {
-		ttl := sessionTTL(windowExp, policy.MaxSessionDuration)
+		ttl := sessionTTL(windowExp, pol.MaxSessionDuration)
 		return CheckResult{Result: ApprovalResultAllow, SessionTTL: ttl}
 	}
 
+	// OPA policy evaluation (when engine is configured).
+	if eng != nil {
+		decision := eng.Eval(ctx, policy.Input{
+			User:    user,
+			Host:    host,
+			Runas:   "", // populated by caller if needed
+			Command: command,
+		})
+		switch decision {
+		case policy.DecisionAllow:
+			ttl := sessionTTL(time.Time{}, pol.MaxSessionDuration)
+			return CheckResult{Result: ApprovalResultAllow, SessionTTL: ttl}
+		case policy.DecisionDeny:
+			log.Printf("approval: OPA denied user=%s host=%s command=%s", user, host, command)
+			return CheckResult{Result: ApprovalResultDeny}
+		// DecisionChallenge: fall through to justification flow below.
+		}
+	} else if pol.isExempt(user, host) {
+		// Legacy exempt list: only used when OPA engine is not configured.
+		ttl := sessionTTL(time.Time{}, pol.MaxSessionDuration)
+		return CheckResult{Result: ApprovalResultAllow, SessionTTL: ttl}
+	}
+
+	// Justification / challenge flow.
 	if strings.TrimSpace(justification) == "" {
 		if m.RetryMessage(user, host) != "" {
-			return CheckResult{Result: ApprovalResultNeedReason, HasWebhook: policy.Notifications.WebhookURL != ""}
+			return CheckResult{Result: ApprovalResultNeedReason, HasWebhook: pol.Notifications.WebhookURL != ""}
 		}
-		return CheckResult{Result: ApprovalResultChallenge, HasWebhook: policy.Notifications.WebhookURL != ""}
+		return CheckResult{Result: ApprovalResultChallenge, HasWebhook: pol.Notifications.WebhookURL != ""}
 	}
 
 	id := newRequestID()
@@ -236,14 +308,52 @@ func (m *ApprovalManager) Check(user, host, command, justification string) Check
 		Command:       command,
 		Justification: justification,
 		SubmittedAt:   now,
-		ExpiresAt:     now.Add(policy.PendingTTL),
+		ExpiresAt:     now.Add(pol.PendingTTL),
 	}
 	if err := m.backend.CreateApprovalRequest(ctx, req); err != nil {
 		log.Printf("approval: CreateApprovalRequest: %v", err)
 	}
 
-	go m.sendWebhook("requested", &req, "", policy.Notifications)
-	return CheckResult{Result: ApprovalResultPending, RequestID: id, HasWebhook: policy.Notifications.WebhookURL != ""}
+	go m.sendWebhook("requested", &req, "", pol.Notifications)
+	return CheckResult{Result: ApprovalResultPending, RequestID: id, HasWebhook: pol.Notifications.WebhookURL != ""}
+}
+
+// GetOPAPolicy returns the current OPA policy and its compiled Rego source.
+func (m *ApprovalManager) GetOPAPolicy() (policy.Policy, string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	src := ""
+	if m.opaEngine != nil {
+		src = m.opaEngine.Source()
+	}
+	return m.opaPolicy, src
+}
+
+// SetOPAPolicy saves and hot-reloads the OPA policy. Returns an error if
+// the Rego is invalid (the old policy remains active on error).
+func (m *ApprovalManager) SetOPAPolicy(ctx context.Context, p policy.Policy) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.opaEngine == nil {
+		eng, err := policy.NewEngine(&p)
+		if err != nil {
+			return err
+		}
+		m.opaEngine = eng
+	} else {
+		if err := m.opaEngine.Update(&p); err != nil {
+			return err
+		}
+	}
+	m.opaPolicy = p
+
+	data, _ := json.Marshal(p)
+	return m.backend.SetConfig(ctx, "jit-policy", string(data))
 }
 
 // sessionTTL returns the session lifetime in seconds given the window expiry and
@@ -556,6 +666,7 @@ func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) 
 	mux.HandleFunc("/api/approvals", auth(m.handleList))
 	mux.HandleFunc("/api/approvals/", auth(m.handleDecision))
 	mux.HandleFunc("/api/approval-config", auth(m.handleConfig))
+	mux.HandleFunc("/api/jit-policy", auth(m.handleJITPolicy))
 }
 
 func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -768,6 +879,46 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 			"message": fmt.Sprintf("Request %s %s by @%s.", reqID, verb, payload.UserName),
 		},
 	})
+}
+
+// ── OPA JIT Policy API ───────────────────────────────────────────────────────
+
+// handleJITPolicy serves GET/PUT /api/jit-policy.
+//
+//   GET  → returns {policy: {...}, rego: "<compiled Rego source>"}
+//   PUT  → saves new policy; validates Rego before accepting
+func (m *ApprovalManager) handleJITPolicy(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		p, src := m.GetOPAPolicy()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"policy": p,
+			"rego":   src,
+		})
+
+	case http.MethodPut:
+		var p policy.Policy
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := m.SetOPAPolicy(r.Context(), p); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Return the compiled Rego so the UI can show it immediately.
+		newP, src := m.GetOPAPolicy()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"policy": newP,
+			"rego":   src,
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

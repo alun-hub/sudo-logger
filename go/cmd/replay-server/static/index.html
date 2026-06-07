@@ -609,6 +609,11 @@
       color: var(--text-sub); padding: 5px 14px; border-radius: var(--radius); transition: background .15s, color .15s; }
     .stab-btn:hover  { background: var(--surface); color: var(--text); }
     .stab-btn.active { background: var(--surface); color: var(--green); font-weight: 600; }
+    .opa-subbtn { background: none; border: none; cursor: pointer; font-size: 12px; font-family: var(--font-ui);
+      color: var(--text-sub); padding: 5px 14px; border-radius: var(--radius); transition: background .15s, color .15s; }
+    .opa-subbtn:hover  { background: var(--surface); color: var(--text); }
+    .opa-subbtn.active { background: var(--surface); color: var(--green); font-weight: 600; }
+    .siem-label { font-size: 11px; color: var(--text-dim); font-weight: 600; letter-spacing: .05em; display: block; margin-bottom: 4px; text-transform: uppercase; }
     .stab-panel { display: none; }
     .stab-panel.active { display: block; }
     .rules-score { display: inline-block; font-size: 12px; font-weight: 700;
@@ -1009,6 +1014,7 @@
       <button class="stab-btn" data-stab="sandbox">Sandbox</button>
       <button class="stab-btn" data-stab="approval">JIT Approval</button>
       <button class="stab-btn" data-stab="retention">Retention</button>
+      <button class="stab-btn" data-stab="opa-policy">OPA Policy</button>
       </nav>
       ...
       <!-- ── JIT Approval ────────────────────────────────────────────────────── -->
@@ -1305,6 +1311,129 @@
         </div>
         <div class="siem-footer">
           <button class="btn-primary" id="btn-save-retention">Save retention policy</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── OPA JIT Policy ─────────────────────────────────────────────────────── -->
+    <div class="stab-panel" id="stab-opa-policy">
+      <div class="siem-section" style="margin-top:0">
+        <div class="siem-heading">
+          OPA JIT Policy
+          <span class="settings-status" id="opa-status" style="display:none"></span>
+        </div>
+        <p class="siem-note" style="margin:0 0 16px">
+          Define who can run sudo without a justification (<strong>allow</strong>), who must provide one (<strong>challenge</strong>), and who is blocked outright (<strong>deny</strong>).
+          Rules are evaluated in priority order: deny &gt; allow &gt; challenge (default).
+        </p>
+
+        <!-- Sub-nav: Rules / Rego -->
+        <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px">
+          <button class="opa-subbtn active" data-opa-sub="rules" onclick="opaShowSub('rules')">Rules</button>
+          <button class="opa-subbtn" data-opa-sub="rego" onclick="opaShowSub('rego')">Compiled Rego</button>
+        </div>
+
+        <!-- ── Rules panel ───────────────────────────────────────────── -->
+        <div id="opa-sub-rules">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+            <label style="font-size:12px;color:var(--text-dim)">Default action</label>
+            <select id="opa-default-action" class="speed-select" style="width:140px">
+              <option value="challenge">Challenge (ask why)</option>
+              <option value="allow">Allow (no prompt)</option>
+            </select>
+            <button class="btn-primary" id="btn-opa-add-rule" onclick="opaAddRule()">+ Add rule</button>
+          </div>
+
+          <!-- Rule table -->
+          <table class="report-table" id="opa-rule-table">
+            <thead><tr>
+              <th>Comment</th>
+              <th>Users</th>
+              <th>Hosts</th>
+              <th>Commands</th>
+              <th>Runas</th>
+              <th>Time (hour)</th>
+              <th>Action</th>
+              <th style="width:70px"></th>
+            </tr></thead>
+            <tbody id="opa-rules-tbody"></tbody>
+          </table>
+          <p id="opa-rules-empty" style="font-size:13px;color:var(--text-dim);margin-top:12px;display:none">
+            No rules defined — all sessions follow the default action above.
+          </p>
+
+          <!-- Inline add/edit form -->
+          <div id="opa-rule-form" style="display:none;margin-top:16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.07em;color:var(--text-dim);margin-bottom:12px;text-transform:uppercase">
+              <span id="opa-form-title">Add rule</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px">
+              <div>
+                <label class="siem-label">Comment (optional)</label>
+                <input type="text" id="opa-f-comment" class="form-input" style="width:100%" placeholder="e.g. SRE team always allowed">
+              </div>
+              <div>
+                <label class="siem-label">Action</label>
+                <select id="opa-f-action" class="speed-select" style="width:100%">
+                  <option value="allow">allow</option>
+                  <option value="challenge">challenge</option>
+                  <option value="deny">deny</option>
+                </select>
+              </div>
+              <div>
+                <label class="siem-label">Users <span style="color:var(--text-dim);font-weight:400">(glob, comma-sep; * = all)</span></label>
+                <input type="text" id="opa-f-users" class="form-input" style="width:100%" placeholder="alice, bob, contractor-*">
+              </div>
+              <div>
+                <label class="siem-label">Hosts <span style="color:var(--text-dim);font-weight:400">(glob; * = all)</span></label>
+                <input type="text" id="opa-f-hosts" class="form-input" style="width:100%" placeholder="prod-*, staging-01">
+              </div>
+              <div>
+                <label class="siem-label">Commands <span style="color:var(--text-dim);font-weight:400">(glob; * = all)</span></label>
+                <input type="text" id="opa-f-commands" class="form-input" style="width:100%" placeholder="/bin/bash, /bin/sh">
+              </div>
+              <div>
+                <label class="siem-label">Runas <span style="color:var(--text-dim);font-weight:400">(glob; * = all)</span></label>
+                <input type="text" id="opa-f-runas" class="form-input" style="width:100%" placeholder="root">
+              </div>
+              <div>
+                <label class="siem-label">Hour from <span style="color:var(--text-dim);font-weight:400">(0-23; -1 = any)</span></label>
+                <input type="number" id="opa-f-hour-from" class="form-input" style="width:80px" min="-1" max="23" value="-1">
+              </div>
+              <div>
+                <label class="siem-label">Hour to <span style="color:var(--text-dim);font-weight:400">(exclusive; -1 = any)</span></label>
+                <input type="number" id="opa-f-hour-to" class="form-input" style="width:80px" min="-1" max="23" value="-1">
+              </div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px">
+              <button class="btn-primary" onclick="opaFormSave()">Save rule</button>
+              <button class="btn-secondary" onclick="opaFormCancel()">Cancel</button>
+            </div>
+          </div>
+
+          <div style="margin-top:16px">
+            <button class="btn-primary" id="btn-opa-save" onclick="opaSavePolicy()">Save policy</button>
+          </div>
+        </div>
+
+        <!-- ── Compiled Rego panel ───────────────────────────────────── -->
+        <div id="opa-sub-rego" style="display:none">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;height:480px">
+            <div style="display:flex;flex-direction:column">
+              <div class="form-section" style="margin-bottom:6px">Custom Rego additions</div>
+              <p class="siem-note" style="margin-bottom:8px">Appended after the generated rules. Can add extra <code>_any_deny</code> / <code>_any_allow</code> clauses or override <code>decision</code> entirely.</p>
+              <textarea id="opa-raw-rego" style="flex:1;font-family:var(--font-mono);font-size:12px;resize:none;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:4px" placeholder="# optional hand-written Rego&#10;# _any_allow if { input.user == &quot;admin&quot; }"></textarea>
+            </div>
+            <div style="display:flex;flex-direction:column">
+              <div class="form-section" style="margin-bottom:6px">Compiled module (read-only)</div>
+              <p class="siem-note" style="margin-bottom:8px">This is the full Rego module that OPA evaluates for every session.</p>
+              <pre id="opa-rego-preview" style="flex:1;font-size:11px;overflow:auto;background:var(--surface);border:1px solid var(--border);color:var(--text-sub);padding:10px;border-radius:4px;margin:0;white-space:pre-wrap;word-break:break-all"></pre>
+            </div>
+          </div>
+          <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+            <button class="btn-primary" onclick="opaSavePolicy()">Save policy</button>
+            <span class="settings-status" id="opa-rego-status" style="display:none"></span>
+          </div>
         </div>
       </div>
     </div>
@@ -3242,11 +3371,13 @@ document.querySelectorAll('.tab-btn').forEach(btn =>
 // ── Settings sub-tabs ──────────────────────────────────────────────────────────
 
 function switchSettingsTab(stab) {
-  document.querySelectorAll('.stab-btn').forEach(b => b.classList.toggle('active', b.dataset.stab === stab));
+  if (!stab) return;
+  document.querySelectorAll('.stab-btn[data-stab]').forEach(b => b.classList.toggle('active', b.dataset.stab === stab));
   document.querySelectorAll('.stab-panel').forEach(p => p.classList.toggle('active', p.id === 'stab-' + stab));
+  if (stab === 'opa-policy') loadOPAPolicy();
 }
 
-document.querySelectorAll('.stab-btn').forEach(btn =>
+document.querySelectorAll('.stab-btn[data-stab]').forEach(btn =>
   btn.addEventListener('click', () => switchSettingsTab(btn.dataset.stab)));
 
 elReportFrom.addEventListener('change', () => { reportFromVal = elReportFrom.value; reportDirty = true; fetchReport(); });
@@ -3696,6 +3827,169 @@ function showRetentionStatus(msg, isErr) {
 }
 
 document.getElementById('btn-save-retention').addEventListener('click', saveRetentionConfig);
+
+// ── OPA JIT Policy ─────────────────────────────────────────────────────────────
+
+let opaPolicy  = { rules: [], default_action: 'challenge', raw_rego: '' };
+let opaEditIdx = -1;   // -1 = new rule, ≥0 = editing existing
+
+function opaShowSub(sub) {
+  document.querySelectorAll('.opa-subbtn').forEach(b =>
+    b.classList.toggle('active', b.dataset.opaSub === sub));
+  document.getElementById('opa-sub-rules').style.display = sub === 'rules' ? '' : 'none';
+  document.getElementById('opa-sub-rego').style.display  = sub === 'rego'  ? '' : 'none';
+}
+
+async function loadOPAPolicy() {
+  try {
+    const r = await fetch('/api/jit-policy');
+    if (!r.ok) { showOpaStatus('Failed to load policy', false); return; }
+    const data = await r.json();
+    opaPolicy = data.policy || { rules: [], default_action: 'challenge', raw_rego: '' };
+    if (!Array.isArray(opaPolicy.rules)) opaPolicy.rules = [];
+    opaPolicy.raw_rego = opaPolicy.raw_rego || '';
+    renderOPARules();
+    document.getElementById('opa-default-action').value = opaPolicy.default_action || 'challenge';
+    document.getElementById('opa-raw-rego').value       = opaPolicy.raw_rego;
+    document.getElementById('opa-rego-preview').textContent = data.rego || '';
+  } catch (e) {
+    showOpaStatus('Error: ' + e.message, false);
+  }
+}
+
+function renderOPARules() {
+  const tbody = document.getElementById('opa-rules-tbody');
+  tbody.innerHTML = '';
+  const empty = document.getElementById('opa-rules-empty');
+  empty.style.display = opaPolicy.rules.length === 0 ? '' : 'none';
+
+  opaPolicy.rules.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    const actionColor = r.action === 'allow' ? 'var(--green)' : r.action === 'deny' ? 'var(--red)' : 'var(--amber)';
+    tr.innerHTML = `
+      <td style="color:var(--text-dim);font-size:12px">${escHtml(r.comment || '')}</td>
+      <td><code>${escHtml((r.users   || []).join(', ') || '*')}</code></td>
+      <td><code>${escHtml((r.hosts   || []).join(', ') || '*')}</code></td>
+      <td><code>${escHtml((r.commands|| []).join(', ') || '*')}</code></td>
+      <td><code>${escHtml((r.runas   || []).join(', ') || '*')}</code></td>
+      <td style="font-size:12px">${opaFmtTime(r)}</td>
+      <td><span style="color:${actionColor};font-weight:600;font-size:12px;text-transform:uppercase">${escHtml(r.action)}</span></td>
+      <td>
+        <button class="btn-icon" title="Edit"   onclick="opaEditRule(${i})">✎</button>
+        <button class="btn-icon" title="Delete" onclick="opaDeleteRule(${i})" style="color:var(--red)">✕</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function opaFmtTime(r) {
+  if ((r.hour_from ?? -1) < 0 || (r.hour_to ?? -1) < 0) return '—';
+  return `${String(r.hour_from).padStart(2,'0')}:00 – ${String(r.hour_to).padStart(2,'0')}:00`;
+}
+
+function opaAddRule() {
+  opaEditIdx = -1;
+  document.getElementById('opa-form-title').textContent = 'Add rule';
+  document.getElementById('opa-f-comment').value  = '';
+  document.getElementById('opa-f-users').value    = '*';
+  document.getElementById('opa-f-hosts').value    = '*';
+  document.getElementById('opa-f-commands').value = '*';
+  document.getElementById('opa-f-runas').value    = '*';
+  document.getElementById('opa-f-action').value   = 'challenge';
+  document.getElementById('opa-f-hour-from').value = '-1';
+  document.getElementById('opa-f-hour-to').value   = '-1';
+  document.getElementById('opa-rule-form').style.display = '';
+  document.getElementById('opa-f-comment').focus();
+}
+
+function opaEditRule(idx) {
+  opaEditIdx = idx;
+  const r = opaPolicy.rules[idx];
+  document.getElementById('opa-form-title').textContent = 'Edit rule';
+  document.getElementById('opa-f-comment').value  = r.comment  || '';
+  document.getElementById('opa-f-users').value    = (r.users    || ['*']).join(', ');
+  document.getElementById('opa-f-hosts').value    = (r.hosts    || ['*']).join(', ');
+  document.getElementById('opa-f-commands').value = (r.commands || ['*']).join(', ');
+  document.getElementById('opa-f-runas').value    = (r.runas    || ['*']).join(', ');
+  document.getElementById('opa-f-action').value   = r.action   || 'challenge';
+  document.getElementById('opa-f-hour-from').value = r.hour_from ?? -1;
+  document.getElementById('opa-f-hour-to').value   = r.hour_to   ?? -1;
+  document.getElementById('opa-rule-form').style.display = '';
+  document.getElementById('opa-f-comment').focus();
+}
+
+function opaDeleteRule(idx) {
+  opaPolicy.rules.splice(idx, 1);
+  renderOPARules();
+}
+
+function opaFormSave() {
+  const splitField = v => v.split(',').map(s => s.trim()).filter(Boolean);
+  const rule = {
+    id:       opaEditIdx >= 0 ? (opaPolicy.rules[opaEditIdx].id || opaGenID()) : opaGenID(),
+    comment:  document.getElementById('opa-f-comment').value.trim(),
+    users:    splitField(document.getElementById('opa-f-users').value)    || ['*'],
+    hosts:    splitField(document.getElementById('opa-f-hosts').value)    || ['*'],
+    commands: splitField(document.getElementById('opa-f-commands').value) || ['*'],
+    runas:    splitField(document.getElementById('opa-f-runas').value)    || ['*'],
+    action:   document.getElementById('opa-f-action').value,
+    hour_from: parseInt(document.getElementById('opa-f-hour-from').value, 10),
+    hour_to:   parseInt(document.getElementById('opa-f-hour-to').value,   10),
+  };
+  if (opaEditIdx >= 0) {
+    opaPolicy.rules[opaEditIdx] = rule;
+  } else {
+    opaPolicy.rules.push(rule);
+  }
+  opaFormCancel();
+  renderOPARules();
+}
+
+function opaFormCancel() {
+  document.getElementById('opa-rule-form').style.display = 'none';
+  opaEditIdx = -1;
+}
+
+function opaGenID() {
+  return 'r' + Math.random().toString(36).slice(2, 8);
+}
+
+async function opaSavePolicy() {
+  opaPolicy.default_action = document.getElementById('opa-default-action').value;
+  opaPolicy.raw_rego        = document.getElementById('opa-raw-rego').value;
+
+  const btn = document.getElementById('btn-opa-save');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/jit-policy', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opaPolicy),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      showOpaStatus('Error: ' + txt, false);
+      return;
+    }
+    const data = await r.json();
+    opaPolicy = data.policy;
+    document.getElementById('opa-rego-preview').textContent = data.rego || '';
+    showOpaStatus('Saved', true);
+  } catch (e) {
+    showOpaStatus('Error: ' + e.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showOpaStatus(msg, ok) {
+  const s = document.getElementById('opa-status');
+  s.textContent = msg;
+  s.style.color   = ok ? 'var(--green)' : 'var(--red)';
+  s.style.display = '';
+  clearTimeout(s._t);
+  if (ok) s._t = setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
 
 // ── Sandbox config ─────────────────────────────────────────────────────────────
 

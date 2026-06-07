@@ -847,6 +847,9 @@ func main() {
 		mux.HandleFunc("/api/approval-config", func(w http.ResponseWriter, r *http.Request) {
 			proxyToLogServer(w, r, adminBase+"/api/approval-config", adminToken, viewerFromContext(r))
 		})
+		mux.HandleFunc("/api/jit-policy", func(w http.ResponseWriter, r *http.Request) {
+			proxyToLogServer(w, r, adminBase+"/api/jit-policy", adminToken, viewerFromContext(r))
+		})
 	}
 
 	mux.HandleFunc("/api/blocked-users", func(w http.ResponseWriter, r *http.Request) {
