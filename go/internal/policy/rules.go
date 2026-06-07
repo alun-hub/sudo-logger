@@ -152,6 +152,7 @@ func CompileToRego(p *Policy) string {
 
 // emitRuleHelpers emits per-rule field-matcher helpers when a field mixes
 // @groupname references with literal patterns (OR semantics need multiple clauses).
+// Also emits an overnight time-window helper when hour_from > hour_to.
 func emitRuleHelpers(b *strings.Builder, idx int, action string, r Rule, groups map[string][]string) {
 	for _, fd := range []struct {
 		name     string
@@ -164,6 +165,13 @@ func emitRuleHelpers(b *strings.Builder, idx int, action string, r Rule, groups 
 		if needsHelper(fd.patterns) {
 			emitFieldHelper(b, idx, action, fd.name, fd.patterns)
 		}
+	}
+	// Overnight time ranges need a helper because OPA v1 does not allow
+	// inline `or` inside a rule body.
+	if r.HourFrom >= 0 && r.HourTo >= 0 && r.HourFrom > r.HourTo {
+		name := fmt.Sprintf("_time_ok_%s_%d", action, idx)
+		fmt.Fprintf(b, "%s if { input.hour >= %d }\n", name, r.HourFrom)
+		fmt.Fprintf(b, "%s if { input.hour < %d }\n\n", name, r.HourTo)
 	}
 }
 
@@ -220,7 +228,7 @@ func emitClause(b *strings.Builder, name string, idx int, action string, r Rule,
 	writeFieldConstraint(&body, idx, action, "runas", "input.runas", r.Runas)
 	writeFieldMatch(&body, "input.command", r.Commands) // commands never use @groups
 	writeSysGroupsMatch(&body, r.SysGroups)
-	writeTimeMatch(&body, r)
+	writeTimeMatch(&body, idx, action, r)
 
 	if body.Len() == 0 {
 		fmt.Fprintf(b, "%s if { true } # %s_%d (all-wildcard)\n\n", name, name, idx)
@@ -291,15 +299,15 @@ func writeSysGroupsMatch(b *strings.Builder, sysGroups []string) {
 	}
 }
 
-func writeTimeMatch(b *strings.Builder, r Rule) {
+func writeTimeMatch(b *strings.Builder, idx int, action string, r Rule) {
 	if r.HourFrom < 0 || r.HourTo < 0 {
 		return
 	}
 	if r.HourFrom <= r.HourTo {
 		fmt.Fprintf(b, "\tinput.hour >= %d\n\tinput.hour < %d\n", r.HourFrom, r.HourTo)
 	} else {
-		fmt.Fprintf(b, "\t# overnight range %d..%d\n", r.HourFrom, r.HourTo)
-		fmt.Fprintf(b, "\t(input.hour >= %d or input.hour < %d)\n", r.HourFrom, r.HourTo)
+		// Overnight range: helper emitted by emitRuleHelpers.
+		fmt.Fprintf(b, "\t_time_ok_%s_%d\n", action, idx)
 	}
 }
 

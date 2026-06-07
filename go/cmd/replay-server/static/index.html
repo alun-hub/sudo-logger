@@ -3922,14 +3922,14 @@ function renderOPARules() {
     const tr = document.createElement('tr');
     const actionColor = r.action === 'allow' ? 'var(--green)' : r.action === 'deny' ? 'var(--red)' : 'var(--amber)';
     tr.innerHTML = `
-      <td style="color:var(--text-dim);font-size:12px">${escHtml(r.comment || '')}</td>
-      <td><code>${escHtml((r.users   || []).join(', ') || '*')}</code></td>
-      <td><code>${escHtml((r.hosts   || []).join(', ') || '*')}</code></td>
-      <td><code>${escHtml((r.commands|| []).join(', ') || '*')}</code></td>
-      <td><code>${escHtml((r.runas   || []).join(', ') || '*')}</code></td>
-      <td style="font-size:12px;color:var(--text-dim)">${escHtml((r.sys_groups || []).join(', ') || '—')}</td>
+      <td style="color:var(--text-dim);font-size:12px">${esc(r.comment || '')}</td>
+      <td><code>${esc((r.users   || []).join(', ') || '*')}</code></td>
+      <td><code>${esc((r.hosts   || []).join(', ') || '*')}</code></td>
+      <td><code>${esc((r.commands|| []).join(', ') || '*')}</code></td>
+      <td><code>${esc((r.runas   || []).join(', ') || '*')}</code></td>
+      <td style="font-size:12px;color:var(--text-dim)">${esc((r.sys_groups || []).join(', ') || '—')}</td>
       <td style="font-size:12px">${opaFmtTime(r)}</td>
-      <td><span style="color:${actionColor};font-weight:600;font-size:12px;text-transform:uppercase">${escHtml(r.action)}</span></td>
+      <td><span style="color:${actionColor};font-weight:600;font-size:12px;text-transform:uppercase">${esc(r.action)}</span></td>
       <td>
         <button class="btn-icon" title="Edit"   onclick="opaEditRule(${i})">✎</button>
         <button class="btn-icon" title="Delete" onclick="opaDeleteRule(${i})" style="color:var(--red)">✕</button>
@@ -4071,8 +4071,8 @@ function renderOPAGroups() {
     const members = (groups[name] || []).join(', ');
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><code>@${escHtml(name)}</code></td>
-      <td style="font-size:13px">${escHtml(members)}</td>
+      <td><code>@${esc(name)}</code></td>
+      <td style="font-size:13px">${esc(members)}</td>
       <td>
         <button class="btn-icon" title="Edit"   onclick="opaEditGroup(${JSON.stringify(name)})">✎</button>
         <button class="btn-icon" title="Delete" onclick="opaDeleteGroup(${JSON.stringify(name)})" style="color:var(--red)">✕</button>
