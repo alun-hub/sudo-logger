@@ -3232,7 +3232,7 @@ function switchTab(tab) {
   }
   if (tab === 'blocked') { fetchBlockedUsers(); fetchWhitelistedUsers(); }
   if (tab === 'approvals') fetchApprovals();
-  if (tab === 'sudoers') { loadSudoersHosts(true); startSudoersPolling(); }
+  if (tab === 'sudoers') { sudoersCurrentHost = ''; localStorage.removeItem('sudo_sudoers_host'); loadSudoersHosts(); startSudoersPolling(); }
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
@@ -5627,10 +5627,7 @@ function sudoersViewSnapshot(sha256) {
   if (w) { w.document.write('<pre style="font-family:monospace;font-size:12px;padding:16px">' + esc(sudoersCurrentSnap) + '</pre>'); }
 }
 
-// Load sudoers hosts when the tab is activated
-document.querySelectorAll('.tab-btn[data-tab="sudoers"]').forEach(btn => {
-  btn.addEventListener('click', () => { loadSudoersHosts(); });
-});
+// switchTab handles sudoers tab activation (resets host → overview shown)
 
 window.addEventListener('DOMContentLoaded', () => {
   const path = window.location.pathname.replace(/\/$/, '');
