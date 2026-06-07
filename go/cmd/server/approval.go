@@ -687,12 +687,18 @@ func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
 		p := m.policy
 		m.mu.RUnlock()
 
+		// Mask the webhook secret so it is never returned to the browser.
+		// The UI treats "***" as "secret is configured; leave unchanged on save".
+		notif := p.Notifications
+		if notif.WebhookSecret != "" {
+			notif.WebhookSecret = "***"
+		}
 		pj := policyJSON{
 			Enabled:       p.Enabled,
 			DefaultWindow: p.DefaultWindow.String(),
 			PendingTTL:    p.PendingTTL.String(),
 			Exempt:        p.Exempt,
-			Notifications: p.Notifications,
+			Notifications: notif,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -707,6 +713,15 @@ func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		// If the browser sent back the sentinel "***" it means the user did not
+		// change the webhook secret — restore the real value from the live policy.
+		m.mu.RLock()
+		currentSecret := m.policy.Notifications.WebhookSecret // pragma: allowlist secret
+		m.mu.RUnlock()
+		if req.Config.Notifications.WebhookSecret == "***" { // pragma: allowlist secret
+			req.Config.Notifications.WebhookSecret = currentSecret // pragma: allowlist secret
 		}
 
 		// Map back to real policy to validate durations
@@ -925,7 +940,7 @@ func (m *ApprovalManager) handleJITPolicy(w http.ResponseWriter, r *http.Request
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func newRequestID() string {
-	b := make([]byte, 4)
+	b := make([]byte, 16)
 	rand.Read(b)
 	return strings.ToUpper(hex.EncodeToString(b))
 }

@@ -1046,7 +1046,7 @@
           <input type="text" id="appr-replay-web-url" placeholder="http://gnarg.alun.se:30080">
 
           <label>Webhook secret</label>
-          <input type="password" id="appr-webhook-secret" placeholder="Required when Webhook URL is set">
+          <input type="password" id="appr-webhook-secret" placeholder="Required when Webhook URL is set" autocomplete="new-password">
 
           <label>Mention user</label>
           <input type="checkbox" id="appr-mention-user">
@@ -3844,6 +3844,12 @@ document.getElementById('btn-save-siem').addEventListener('click', saveSiemConfi
 
 // ── JIT Approval ──────────────────────────────────────────────────────────────
 
+// True when the server has a webhook_secret configured. The actual value is
+// never returned by the server (it sends "***" as a sentinel). We track this
+// so saveApprovalConfig() can send "***" back when the user leaves the field
+// blank, signalling "keep existing secret".
+let apprSecretConfigured = false;
+
 async function fetchApprovalConfig() {
   try {
     const res = await fetch('/api/approval-config');
@@ -3857,14 +3863,27 @@ async function fetchApprovalConfig() {
     document.getElementById('appr-webhook-url').value       = (c.notifications && c.notifications.webhook_url)    || '';
     document.getElementById('appr-request-channel').value   = (c.notifications && c.notifications.request_channel) || '';
     document.getElementById('appr-replay-web-url').value    = (c.notifications && c.notifications.replay_web_app_url) || '';
-    document.getElementById('appr-webhook-secret').value    = (c.notifications && c.notifications.webhook_secret) || '';
     document.getElementById('appr-mention-user').checked    = !!(c.notifications && c.notifications.mention_user);
+
+    // The server returns "***" when a secret is configured, never the real value.
+    const secretEl = document.getElementById('appr-webhook-secret');
+    const serverSecret = (c.notifications && c.notifications.webhook_secret) || '';
+    apprSecretConfigured = serverSecret === '***';
+    secretEl.value = '';
+    secretEl.placeholder = apprSecretConfigured
+      ? 'configured — leave blank to keep existing'
+      : 'Required when Webhook URL is set';
   } catch (err) {
     showApprovalStatus('Load failed: ' + err.message, true);
   }
 }
 
 async function saveApprovalConfig() {
+  const typedSecret = document.getElementById('appr-webhook-secret').value.trim();
+  // If the user left the field blank and a secret was already configured,
+  // send the sentinel "***" so the server preserves the existing secret.
+  const webhookSecret = typedSecret || (apprSecretConfigured ? '***' : '');
+
   const cfg = {
     enabled:        document.getElementById('appr-enabled').checked,
     default_window: document.getElementById('appr-default-window').value.trim(),
@@ -3873,13 +3892,13 @@ async function saveApprovalConfig() {
       webhook_url:         document.getElementById('appr-webhook-url').value.trim(),
       request_channel:     document.getElementById('appr-request-channel').value.trim(),
       replay_web_app_url:  document.getElementById('appr-replay-web-url').value.trim(),
-      webhook_secret:      document.getElementById('appr-webhook-secret').value.trim(),
+      webhook_secret:      webhookSecret,
       mention_user:        document.getElementById('appr-mention-user').checked,
     },
-    exempt: [], // preserved server-side if we only send what we have, but policy is the full struct.
-    // To be safe, we should probably fetch the existing policy and only update the fields we have in the UI.
+    exempt: [],
   };
 
+  // Only warn about missing secret when no secret is configured at all.
   if (cfg.notifications.webhook_url && !cfg.notifications.webhook_secret) {
     showApprovalStatus('Webhook secret is required when Webhook URL is set.', true);
     return;
@@ -3904,6 +3923,14 @@ async function saveApprovalConfig() {
     });
     if (!res.ok) { const t = await res.text(); throw new Error(t); }
     showApprovalStatus('Saved — reloads within 30 s', false);
+    // If a new secret was typed, update local state so the placeholder reflects
+    // "configured" without needing a full re-fetch.
+    if (typedSecret) {
+      apprSecretConfigured = true;
+      const secretEl = document.getElementById('appr-webhook-secret');
+      secretEl.value = '';
+      secretEl.placeholder = 'configured — leave blank to keep existing';
+    }
   } catch (err) {
     showApprovalStatus('Save failed: ' + err.message, true);
   } finally {
