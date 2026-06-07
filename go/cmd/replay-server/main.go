@@ -43,6 +43,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed IANA timezone data so TZ env var works in minimal containers
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"

@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed IANA timezone data so TZ env var works in minimal containers
 
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
