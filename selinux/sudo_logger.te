@@ -1,4 +1,4 @@
-policy_module(sudo_logger, 1.1.19)
+policy_module(sudo_logger, 1.1.20)
 
 ########################################
 #
@@ -134,8 +134,15 @@ allow init_t sudo_agent_t:dbus send_msg;
 # NSS and passwd
 auth_read_passwd(sudo_agent_t)
 systemd_userdbd_stream_connect(sudo_agent_t)
-# resolveUserGroups() triggers nss_systemd → io.systemd.Machine socket (systemd_machined_t)
-allow sudo_agent_t systemd_machined_t:unix_stream_socket connectto;
+# resolveUserGroups() triggers nss_systemd → io.systemd.Machine socket.
+# systemd_machined_t exists in the runtime policy but is not exported in the
+# policy headers, so optional_policy+gen_require is used for portability.
+optional_policy(`
+    gen_require(`
+        type systemd_machined_t;
+    ')
+    allow sudo_agent_t systemd_machined_t:unix_stream_socket connectto;
+')
 
 # Manage sudoers configuration (for sudoers management feature)
 # Explicit raw rules for etc_t (covers /etc/sudoers.d on Fedora).
