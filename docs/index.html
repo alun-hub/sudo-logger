@@ -2187,6 +2187,50 @@ body::after {
     </div>
   </div>
 
+  <!-- ░░ SLIDE 14b: OPA JIT POLICY ░░ -->
+  <div class="slide" id="s14b">
+    <div class="s-features" style="max-width:960px">
+      <h2>OPA<br>JIT POLICY</h2>
+      <div class="sub">▸ Open Policy Agent · Rego rules · deny &gt; allow &gt; challenge</div>
+
+      <div class="feat-grid" style="grid-template-columns:1.2fr 1fr;gap:20px 48px;margin-top:28px;font-size:13px">
+
+        <div style="border-left:2px solid var(--amber);padding-left:16px">
+          <div style="color:var(--amber);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">RULE CONDITIONS</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> User / host / command / runas — glob patterns</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> OS group membership — local, SSSD, LDAP, AD via NSS</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Time window — hour-of-day, overnight ranges supported</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Weekday restriction — Mon–Sun granularity</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">★</span> Local policy groups — <code style="font-size:11px">@groupname</code> aliases in any field</div>
+        </div>
+
+        <div style="border-left:2px solid var(--green);padding-left:16px">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">OUTCOMES</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--red)">✕</span> <strong>Deny</strong> — hard block, no prompt offered</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--green)">✓</span> <strong>Allow</strong> — session proceeds immediately</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--amber)">?</span> <strong>Challenge</strong> — justification + admin approval</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--green)">⚡</span> Hot-reload — changes apply on next sudo, no restart</div>
+          <div class="feat" style="font-size:12px"><span class="arr" style="color:var(--green)">⚡</span> Compiled Rego visible in UI for audit</div>
+        </div>
+
+      </div>
+
+      <div style="margin-top:28px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);border:1px solid var(--border);border-radius:4px;padding:12px 16px;text-align:left;max-width:820px">
+        <span style="color:var(--green-dim)"># generated Rego (excerpt)</span><br>
+        <span style="color:var(--text)">default decision := <span style="color:var(--amber)">"challenge"</span></span><br>
+        <span style="color:var(--text)">decision := <span style="color:var(--red)">"deny"</span>   if _any_deny</span><br>
+        <span style="color:var(--text)">decision := <span style="color:var(--green)">"allow"</span>  if { not _any_deny; _any_allow }</span><br>
+        <br>
+        <span style="color:var(--text-dim)"># rule: SRE on-call — Mon–Fri 20:00–06:00</span><br>
+        <span style="color:var(--text)">_any_allow if {</span><br>
+        <span style="color:var(--text)">&nbsp;&nbsp;_group_sre_team(input.user)</span><br>
+        <span style="color:var(--text)">&nbsp;&nbsp;input.weekday in {1,2,3,4,5}</span><br>
+        <span style="color:var(--text)">&nbsp;&nbsp;_time_ok_allow_0</span><br>
+        <span style="color:var(--text)">}</span>
+      </div>
+    </div>
+  </div>
+
   <!-- ░░ SLIDE 15: DISTRIBUTED STORAGE ░░ -->
   <div class="slide" id="s15">
     <div class="s-features" style="max-width:900px">

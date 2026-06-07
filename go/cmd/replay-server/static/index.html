@@ -1920,6 +1920,83 @@
         </div>
       </div>
 
+      <!-- ── OPA JIT Policy ──────────────────────────────────────────────── -->
+      <div class="help-section">
+        <h3>OPA JIT Policy</h3>
+        <p style="margin:0 0 14px">
+          The OPA (Open Policy Agent) policy engine replaces the simple exempt-list with a full rule table.
+          Every <code>SESSION_START</code> is evaluated by an embedded Rego module. The result determines
+          whether the session is <strong style="color:var(--green)">allowed</strong> immediately,
+          <strong style="color:var(--amber)">challenged</strong> (justification required),
+          or <strong style="color:var(--red)">hard-denied</strong>.
+        </p>
+
+        <p style="margin:0 0 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim)">Decision priority (deny always wins)</p>
+        <div class="help-logic" style="margin-bottom:20px">
+          <div class="help-logic-row">
+            <span class="help-logic-badge" style="background:var(--red);color:#fff">DENY</span>
+            <span>Any matching deny rule vetoes all allow rules. Order within the table does not matter.</span>
+          </div>
+          <div class="help-logic-row">
+            <span class="help-logic-badge" style="background:var(--green);color:#111">ALLOW</span>
+            <span>If no deny rule matches and at least one allow rule matches → session proceeds without a prompt.</span>
+          </div>
+          <div class="help-logic-row">
+            <span class="help-logic-badge" style="background:var(--amber);color:#111">CHALLENGE</span>
+            <span>No allow rule matches → justification is required and an approval request is created.</span>
+          </div>
+          <div class="help-logic-row">
+            <span class="help-logic-badge" style="background:var(--surface);border:1px solid var(--border)">DEFAULT</span>
+            <span>If no rule matches at all, the <em>Default action</em> dropdown applies (allow or challenge).</span>
+          </div>
+        </div>
+
+        <p style="margin:0 0 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim)">Rule fields</p>
+        <table class="help-table" style="margin-bottom:20px">
+          <thead><tr><th>Field</th><th>Format</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>Users</td><td>glob, <code>@group</code>, comma-sep; <code>*</code> = all</td><td>Matches the username that ran sudo.</td></tr>
+            <tr><td>Hosts</td><td>glob, <code>@group</code>, comma-sep; <code>*</code> = all</td><td>Matches the hostname of the monitored machine.</td></tr>
+            <tr><td>Commands</td><td>glob, comma-sep; <code>*</code> = all</td><td>Matches the full command path (e.g. <code>/bin/bash</code>, <code>/usr/bin/apt*</code>).</td></tr>
+            <tr><td>Runas</td><td>glob, <code>@group</code>, comma-sep; <code>*</code> = all</td><td>Matches the target user sudo runs as (usually <code>root</code>).</td></tr>
+            <tr><td>Sys groups</td><td>group names, comma-sep (AND)</td><td>User must belong to <em>all</em> listed OS groups. Resolved by the agent via NSS — covers local, SSSD, LDAP, and Active Directory groups transparently.</td></tr>
+            <tr><td>Weekdays</td><td>Mon–Sun checkboxes; unchecked = any day</td><td>Restricts the rule to specific days of the week (server clock, CET).</td></tr>
+            <tr><td>Hour from / Hour to</td><td>0–23; -1 = no constraint</td><td>Time window (hour-of-day, exclusive upper bound). Overnight ranges (e.g. 22–06) are supported.</td></tr>
+          </tbody>
+        </table>
+
+        <p style="margin:0 0 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim)">Local policy groups</p>
+        <p style="margin:0 0 14px">
+          Under the <strong>Groups</strong> sub-tab you can define named lists of users, hosts, or runas targets.
+          Reference them in rule fields as <code>@groupname</code>.
+          This avoids repeating the same member list across multiple rules — update the group once and all rules pick up the change automatically.
+        </p>
+        <div class="help-example" style="margin-bottom:20px">
+          <div class="ex-title">Example: SRE on-call window</div>
+          <div class="ex-body">
+            Define group <strong>sre-team</strong> → members: <code>alice, bob, sre-*</code><br>
+            Add rule: Users = <code>@sre-team</code> · Weekdays = Mon–Fri · Hour = 20:00–06:00 · Action = <strong>allow</strong><br>
+            Default action = <strong>challenge</strong><br><br>
+            Result: SRE members can sudo without a prompt on weeknight on-call shifts.
+            All other users and times require a justification.
+          </div>
+        </div>
+
+        <p style="margin:0 0 10px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-dim)">Compiled Rego</p>
+        <p style="margin:0 0 14px">
+          The <strong>Compiled Rego</strong> sub-tab shows the exact Rego module that the server passes to OPA.
+          Use it to verify that your rules translate as expected, especially for complex group references or overnight time windows.
+          The raw Rego field at the bottom lets advanced operators append arbitrary Rego to the generated module.
+        </p>
+
+        <div class="help-tips">
+          <div class="help-tip"><span><strong>Sys groups vs local groups:</strong> Use <em>Sys groups</em> (rule field) for OS-level group membership (LDAP, AD, local <code>/etc/group</code>). Use <em>Groups</em> (sub-tab) for policy-level aliases like <code>@sre-team</code> that group users by name pattern.</span></div>
+          <div class="help-tip"><span><strong>Clock:</strong> Time and weekday rules use the log server's clock (Europe/Stockholm). The agent's clock is irrelevant.</span></div>
+          <div class="help-tip"><span><strong>Deny is absolute:</strong> A deny rule blocks the session even if an allow rule also matches. There is no way to "override" a deny with a lower-priority allow.</span></div>
+          <div class="help-tip"><span><strong>Save policy:</strong> Changes take effect immediately on the next sudo invocation — no server restart needed.</span></div>
+        </div>
+      </div>
+
     </div>
   </div>
 
