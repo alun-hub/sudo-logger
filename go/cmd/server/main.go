@@ -504,8 +504,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			if whitelisted, _ := srv.sessionStore.IsWhitelisted(context.Background(), start.User, start.Host); whitelisted {
 				log.Printf("[%s] whitelist: user=%s host=%s — bypassing JIT approval", start.SessionID, start.User, start.Host)
 			} else {
-				result = srv.approvalMgr.Check(start.User, start.Host, start.Command,
-					start.Justification)
+				result = srv.approvalMgr.Check(start.User, start.Host, start.RunasUser, start.Command,
+					start.Groups, start.Justification)
 				switch result.Result {
 				case ApprovalResultNeedReason:
 					// Check if there's already a pending request for this user@host
@@ -599,8 +599,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			start.Justification = resp.Justification
 
 			// Re-run the check with the newly provided justification.
-			result := srv.approvalMgr.Check(start.User, start.Host, start.Command,
-				start.Justification)
+			result := srv.approvalMgr.Check(start.User, start.Host, start.RunasUser, start.Command,
+				start.Groups, start.Justification)
 			switch result.Result {
 			case ApprovalResultNeedReason, ApprovalResultChallenge:
 				// They already had their chance.

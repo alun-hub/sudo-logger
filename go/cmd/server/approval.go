@@ -243,7 +243,7 @@ func (m *ApprovalManager) HasWebhook() bool {
 //  3. OPA engine (when configured) → allow / deny / challenge.
 //  4. Legacy exempt list (when OPA not configured) → allow.
 //  5. Justification flow → challenge → pending.
-func (m *ApprovalManager) Check(user, host, command, justification string) CheckResult {
+func (m *ApprovalManager) Check(user, host, runas, command string, groups []string, justification string) CheckResult {
 	if m == nil {
 		return CheckResult{Result: ApprovalResultAllow}
 	}
@@ -273,8 +273,9 @@ func (m *ApprovalManager) Check(user, host, command, justification string) Check
 		decision := eng.Eval(ctx, policy.Input{
 			User:    user,
 			Host:    host,
-			Runas:   "", // populated by caller if needed
+			Runas:   runas,
 			Command: command,
+			Groups:  groups,
 		})
 		switch decision {
 		case policy.DecisionAllow:

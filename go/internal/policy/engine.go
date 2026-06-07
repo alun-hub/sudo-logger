@@ -21,11 +21,12 @@ const (
 
 // Input is the session context sent to OPA for each SESSION_START.
 type Input struct {
-	User    string `json:"user"`
-	Host    string `json:"host"`
-	Runas   string `json:"runas"`
-	Command string `json:"command"`
-	Cwd     string `json:"cwd"`
+	User    string   `json:"user"`
+	Host    string   `json:"host"`
+	Runas   string   `json:"runas"`
+	Command string   `json:"command"`
+	Cwd     string   `json:"cwd"`
+	Groups  []string `json:"groups"` // resolved by agent via NSS (SSSD/AD/local)
 }
 
 // Engine evaluates JIT authorization using an embedded OPA instance.
@@ -83,6 +84,10 @@ func (e *Engine) Eval(ctx context.Context, in Input) Decision {
 		return DecisionChallenge
 	}
 
+	groups := in.Groups
+	if groups == nil {
+		groups = []string{}
+	}
 	now := time.Now()
 	inputDoc := map[string]any{
 		"user":    in.User,
@@ -90,6 +95,7 @@ func (e *Engine) Eval(ctx context.Context, in Input) Decision {
 		"runas":   in.Runas,
 		"command": in.Command,
 		"cwd":     in.Cwd,
+		"groups":  groups, // NSS-resolved: local, SSSD, LDAP, AD, winbind
 		"hour":    now.Hour(),
 		"weekday": int(now.Weekday()), // 0 = Sunday
 	}

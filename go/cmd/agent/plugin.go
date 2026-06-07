@@ -435,6 +435,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	start.Command = redactor.RedactString(start.Command)
 	start.ResolvedCommand = redactor.RedactString(start.ResolvedCommand)
 	start.Source = "plugin"
+	start.Groups = resolveUserGroups(start.User)
 	startPayload, _ = json.Marshal(start)
 
 	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v tty=%s",

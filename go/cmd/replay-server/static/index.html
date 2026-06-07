@@ -1330,6 +1330,7 @@
         <!-- Sub-nav: Rules / Rego -->
         <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px">
           <button class="opa-subbtn active" data-opa-sub="rules" onclick="opaShowSub('rules')">Rules</button>
+          <button class="opa-subbtn" data-opa-sub="groups" onclick="opaShowSub('groups')">Groups</button>
           <button class="opa-subbtn" data-opa-sub="rego" onclick="opaShowSub('rego')">Compiled Rego</button>
         </div>
 
@@ -1352,6 +1353,7 @@
               <th>Hosts</th>
               <th>Commands</th>
               <th>Runas</th>
+              <th>Sys groups</th>
               <th>Time (hour)</th>
               <th>Action</th>
               <th style="width:70px"></th>
@@ -1393,7 +1395,7 @@
                 <input type="text" id="opa-f-commands" class="form-input" style="width:100%" placeholder="/bin/bash, /bin/sh">
               </div>
               <div>
-                <label class="siem-label">Runas <span style="color:var(--text-dim);font-weight:400">(glob; * = all)</span></label>
+                <label class="siem-label">Runas <span style="color:var(--text-dim);font-weight:400">(glob or @group; * = all)</span></label>
                 <input type="text" id="opa-f-runas" class="form-input" style="width:100%" placeholder="root">
               </div>
               <div>
@@ -1403,6 +1405,10 @@
               <div>
                 <label class="siem-label">Hour to <span style="color:var(--text-dim);font-weight:400">(exclusive; -1 = any)</span></label>
                 <input type="number" id="opa-f-hour-to" class="form-input" style="width:80px" min="-1" max="23" value="-1">
+              </div>
+              <div style="grid-column:1/-1">
+                <label class="siem-label">System groups <span style="color:var(--text-dim);font-weight:400">(comma-sep; user must be member of ALL — checked via LDAP/AD/local at login time)</span></label>
+                <input type="text" id="opa-f-sys-groups" class="form-input" style="width:100%" placeholder="sre-team, wheel">
               </div>
             </div>
             <div style="margin-top:14px;display:flex;gap:8px">
@@ -1433,6 +1439,52 @@
           <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
             <button class="btn-primary" onclick="opaSavePolicy()">Save policy</button>
             <span class="settings-status" id="opa-rego-status" style="display:none"></span>
+          </div>
+        </div>
+
+        <!-- ── Groups panel ──────────────────────────────────── -->
+        <div id="opa-sub-groups" style="display:none">
+          <p class="siem-note" style="margin:0 0 12px">
+            Named groups of users, hosts or roles. Reference with <code>@groupname</code> in Users / Hosts / Runas fields.
+            <br>System groups (LDAP/AD/local) are resolved live by the agent — add them directly in the <em>System groups</em> rule field without defining them here.
+          </p>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <button class="btn-primary" onclick="opaAddGroup()">+ Add group</button>
+          </div>
+
+          <table class="report-table" id="opa-groups-table">
+            <thead><tr>
+              <th style="width:180px">Name (use as @name)</th>
+              <th>Members <span style="font-weight:400;color:var(--text-dim)">(usernames, globs — comma-sep)</span></th>
+              <th style="width:70px"></th>
+            </tr></thead>
+            <tbody id="opa-groups-tbody"></tbody>
+          </table>
+          <p id="opa-groups-empty" style="font-size:13px;color:var(--text-dim);margin-top:12px;display:none">No groups defined.</p>
+
+          <!-- Inline group add/edit form -->
+          <div id="opa-group-form" style="display:none;margin-top:14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.07em;color:var(--text-dim);margin-bottom:10px;text-transform:uppercase">
+              <span id="opa-group-form-title">Add group</span>
+            </div>
+            <div style="display:grid;grid-template-columns:200px 1fr;gap:10px 14px;align-items:start">
+              <div>
+                <label class="siem-label">Group name</label>
+                <input type="text" id="opa-gf-name" class="form-input" style="width:100%" placeholder="sre-team">
+              </div>
+              <div>
+                <label class="siem-label">Members</label>
+                <input type="text" id="opa-gf-members" class="form-input" style="width:100%" placeholder="alice, bob, sre-*">
+              </div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px">
+              <button class="btn-primary" onclick="opaGroupFormSave()">Save group</button>
+              <button class="btn-secondary" onclick="opaGroupFormCancel()">Cancel</button>
+            </div>
+          </div>
+
+          <div style="margin-top:16px">
+            <button class="btn-primary" onclick="opaSavePolicy()">Save policy</button>
           </div>
         </div>
       </div>
@@ -3836,8 +3888,9 @@ let opaEditIdx = -1;   // -1 = new rule, ≥0 = editing existing
 function opaShowSub(sub) {
   document.querySelectorAll('.opa-subbtn').forEach(b =>
     b.classList.toggle('active', b.dataset.opaSub === sub));
-  document.getElementById('opa-sub-rules').style.display = sub === 'rules' ? '' : 'none';
-  document.getElementById('opa-sub-rego').style.display  = sub === 'rego'  ? '' : 'none';
+  document.getElementById('opa-sub-rules').style.display  = sub === 'rules'  ? '' : 'none';
+  document.getElementById('opa-sub-groups').style.display = sub === 'groups' ? '' : 'none';
+  document.getElementById('opa-sub-rego').style.display   = sub === 'rego'   ? '' : 'none';
 }
 
 async function loadOPAPolicy() {
@@ -3845,10 +3898,12 @@ async function loadOPAPolicy() {
     const r = await fetch('/api/jit-policy');
     if (!r.ok) { showOpaStatus('Failed to load policy', false); return; }
     const data = await r.json();
-    opaPolicy = data.policy || { rules: [], default_action: 'challenge', raw_rego: '' };
+    opaPolicy = data.policy || { rules: [], groups: {}, default_action: 'challenge', raw_rego: '' };
     if (!Array.isArray(opaPolicy.rules)) opaPolicy.rules = [];
+    opaPolicy.groups   = opaPolicy.groups || {};
     opaPolicy.raw_rego = opaPolicy.raw_rego || '';
     renderOPARules();
+    renderOPAGroups();
     document.getElementById('opa-default-action').value = opaPolicy.default_action || 'challenge';
     document.getElementById('opa-raw-rego').value       = opaPolicy.raw_rego;
     document.getElementById('opa-rego-preview').textContent = data.rego || '';
@@ -3872,6 +3927,7 @@ function renderOPARules() {
       <td><code>${escHtml((r.hosts   || []).join(', ') || '*')}</code></td>
       <td><code>${escHtml((r.commands|| []).join(', ') || '*')}</code></td>
       <td><code>${escHtml((r.runas   || []).join(', ') || '*')}</code></td>
+      <td style="font-size:12px;color:var(--text-dim)">${escHtml((r.sys_groups || []).join(', ') || '—')}</td>
       <td style="font-size:12px">${opaFmtTime(r)}</td>
       <td><span style="color:${actionColor};font-weight:600;font-size:12px;text-transform:uppercase">${escHtml(r.action)}</span></td>
       <td>
@@ -3895,9 +3951,10 @@ function opaAddRule() {
   document.getElementById('opa-f-hosts').value    = '*';
   document.getElementById('opa-f-commands').value = '*';
   document.getElementById('opa-f-runas').value    = '*';
-  document.getElementById('opa-f-action').value   = 'challenge';
-  document.getElementById('opa-f-hour-from').value = '-1';
-  document.getElementById('opa-f-hour-to').value   = '-1';
+  document.getElementById('opa-f-action').value     = 'challenge';
+  document.getElementById('opa-f-hour-from').value  = '-1';
+  document.getElementById('opa-f-hour-to').value    = '-1';
+  document.getElementById('opa-f-sys-groups').value = '';
   document.getElementById('opa-rule-form').style.display = '';
   document.getElementById('opa-f-comment').focus();
 }
@@ -3911,9 +3968,10 @@ function opaEditRule(idx) {
   document.getElementById('opa-f-hosts').value    = (r.hosts    || ['*']).join(', ');
   document.getElementById('opa-f-commands').value = (r.commands || ['*']).join(', ');
   document.getElementById('opa-f-runas').value    = (r.runas    || ['*']).join(', ');
-  document.getElementById('opa-f-action').value   = r.action   || 'challenge';
-  document.getElementById('opa-f-hour-from').value = r.hour_from ?? -1;
-  document.getElementById('opa-f-hour-to').value   = r.hour_to   ?? -1;
+  document.getElementById('opa-f-action').value     = r.action     || 'challenge';
+  document.getElementById('opa-f-hour-from').value  = r.hour_from  ?? -1;
+  document.getElementById('opa-f-hour-to').value    = r.hour_to    ?? -1;
+  document.getElementById('opa-f-sys-groups').value = (r.sys_groups || []).join(', ');
   document.getElementById('opa-rule-form').style.display = '';
   document.getElementById('opa-f-comment').focus();
 }
@@ -3931,8 +3989,9 @@ function opaFormSave() {
     users:    splitField(document.getElementById('opa-f-users').value)    || ['*'],
     hosts:    splitField(document.getElementById('opa-f-hosts').value)    || ['*'],
     commands: splitField(document.getElementById('opa-f-commands').value) || ['*'],
-    runas:    splitField(document.getElementById('opa-f-runas').value)    || ['*'],
-    action:   document.getElementById('opa-f-action').value,
+    runas:      splitField(document.getElementById('opa-f-runas').value)      || ['*'],
+    sys_groups: splitField(document.getElementById('opa-f-sys-groups').value),
+    action:    document.getElementById('opa-f-action').value,
     hour_from: parseInt(document.getElementById('opa-f-hour-from').value, 10),
     hour_to:   parseInt(document.getElementById('opa-f-hour-to').value,   10),
   };
@@ -3972,8 +4031,14 @@ async function opaSavePolicy() {
       return;
     }
     const data = await r.json();
-    opaPolicy = data.policy;
+    opaPolicy = data.policy || opaPolicy;
+    if (!Array.isArray(opaPolicy.rules)) opaPolicy.rules = [];
+    opaPolicy.groups = opaPolicy.groups || {};
+    document.getElementById('opa-default-action').value = opaPolicy.default_action || 'challenge';
+    document.getElementById('opa-raw-rego').value       = opaPolicy.raw_rego || '';
     document.getElementById('opa-rego-preview').textContent = data.rego || '';
+    renderOPARules();
+    renderOPAGroups();
     showOpaStatus('Saved', true);
   } catch (e) {
     showOpaStatus('Error: ' + e.message, false);
@@ -3989,6 +4054,79 @@ function showOpaStatus(msg, ok) {
   s.style.display = '';
   clearTimeout(s._t);
   if (ok) s._t = setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
+
+// ── OPA group helpers ───────────────────────────────────────────────────────────
+
+let opaGroupEditName = null; // null = add mode, string = edit mode (original name)
+
+function renderOPAGroups() {
+  const groups = opaPolicy.groups || {};
+  const names  = Object.keys(groups).sort();
+  const tbody  = document.getElementById('opa-groups-tbody');
+  const empty  = document.getElementById('opa-groups-empty');
+  tbody.innerHTML = '';
+  empty.style.display = names.length === 0 ? '' : 'none';
+  names.forEach(name => {
+    const members = (groups[name] || []).join(', ');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code>@${escHtml(name)}</code></td>
+      <td style="font-size:13px">${escHtml(members)}</td>
+      <td>
+        <button class="btn-icon" title="Edit"   onclick="opaEditGroup(${JSON.stringify(name)})">✎</button>
+        <button class="btn-icon" title="Delete" onclick="opaDeleteGroup(${JSON.stringify(name)})" style="color:var(--red)">✕</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function opaAddGroup() {
+  opaGroupEditName = null;
+  document.getElementById('opa-group-form-title').textContent = 'Add group';
+  document.getElementById('opa-gf-name').value    = '';
+  document.getElementById('opa-gf-members').value = '';
+  document.getElementById('opa-gf-name').disabled = false;
+  document.getElementById('opa-group-form').style.display = '';
+  document.getElementById('opa-gf-name').focus();
+}
+
+function opaEditGroup(name) {
+  opaGroupEditName = name;
+  const members = (opaPolicy.groups[name] || []).join(', ');
+  document.getElementById('opa-group-form-title').textContent = 'Edit group';
+  document.getElementById('opa-gf-name').value    = name;
+  document.getElementById('opa-gf-members').value = members;
+  document.getElementById('opa-gf-name').disabled = true; // rename not supported; delete & re-add
+  document.getElementById('opa-group-form').style.display = '';
+  document.getElementById('opa-gf-members').focus();
+}
+
+function opaDeleteGroup(name) {
+  if (!opaPolicy.groups) return;
+  delete opaPolicy.groups[name];
+  renderOPAGroups();
+}
+
+function opaGroupFormSave() {
+  const name    = document.getElementById('opa-gf-name').value.trim();
+  const members = document.getElementById('opa-gf-members').value
+    .split(',').map(s => s.trim()).filter(Boolean);
+  if (!name) { alert('Group name is required'); return; }
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) { alert('Group name may only contain letters, digits, _ and -'); return; }
+  if (!opaPolicy.groups) opaPolicy.groups = {};
+  if (opaGroupEditName === null && opaPolicy.groups[name] !== undefined) {
+    alert('A group named "' + name + '" already exists');
+    return;
+  }
+  opaPolicy.groups[name] = members;
+  opaGroupFormCancel();
+  renderOPAGroups();
+}
+
+function opaGroupFormCancel() {
+  document.getElementById('opa-group-form').style.display = 'none';
+  opaGroupEditName = null;
 }
 
 // ── Sandbox config ─────────────────────────────────────────────────────────────
