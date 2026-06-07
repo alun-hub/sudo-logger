@@ -1354,7 +1354,7 @@
               <th>Commands</th>
               <th>Runas</th>
               <th>Sys groups</th>
-              <th>Time (hour)</th>
+              <th>When</th>
               <th>Action</th>
               <th style="width:70px"></th>
             </tr></thead>
@@ -1409,6 +1409,18 @@
               <div style="grid-column:1/-1">
                 <label class="siem-label">System groups <span style="color:var(--text-dim);font-weight:400">(comma-sep; user must be member of ALL — checked via LDAP/AD/local at login time)</span></label>
                 <input type="text" id="opa-f-sys-groups" class="form-input" style="width:100%" placeholder="sre-team, wheel">
+              </div>
+              <div style="grid-column:1/-1">
+                <label class="siem-label">Weekdays <span style="color:var(--text-dim);font-weight:400">(unchecked = no restriction)</span></label>
+                <div id="opa-f-weekdays" style="display:flex;gap:14px;margin-top:5px;flex-wrap:wrap">
+                  <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" value="1"> Mon</label>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" value="2"> Tue</label>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" value="3"> Wed</label>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" value="4"> Thu</label>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" value="5"> Fri</label>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" value="6"> Sat</label>
+                  <label style="display:flex;align-items:center;gap:4px;font-size:13px"><input type="checkbox" value="0"> Sun</label>
+                </div>
               </div>
             </div>
             <div style="margin-top:14px;display:flex;gap:8px">
@@ -3938,9 +3950,18 @@ function renderOPARules() {
   });
 }
 
+const _WDAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
 function opaFmtTime(r) {
-  if ((r.hour_from ?? -1) < 0 || (r.hour_to ?? -1) < 0) return '—';
-  return `${String(r.hour_from).padStart(2,'0')}:00 – ${String(r.hour_to).padStart(2,'0')}:00`;
+  const parts = [];
+  const days = r.weekdays || [];
+  if (days.length > 0 && days.length < 7) {
+    parts.push(days.map(d => _WDAY_NAMES[d] ?? d).join('/'));
+  }
+  if ((r.hour_from ?? -1) >= 0 && (r.hour_to ?? -1) >= 0) {
+    parts.push(`${String(r.hour_from).padStart(2,'0')}:00–${String(r.hour_to).padStart(2,'0')}:00`);
+  }
+  return parts.length ? parts.join(' ') : '—';
 }
 
 function opaAddRule() {
@@ -3955,6 +3976,7 @@ function opaAddRule() {
   document.getElementById('opa-f-hour-from').value  = '-1';
   document.getElementById('opa-f-hour-to').value    = '-1';
   document.getElementById('opa-f-sys-groups').value = '';
+  document.querySelectorAll('#opa-f-weekdays input').forEach(cb => { cb.checked = false; });
   document.getElementById('opa-rule-form').style.display = '';
   document.getElementById('opa-f-comment').focus();
 }
@@ -3972,6 +3994,9 @@ function opaEditRule(idx) {
   document.getElementById('opa-f-hour-from').value  = r.hour_from  ?? -1;
   document.getElementById('opa-f-hour-to').value    = r.hour_to    ?? -1;
   document.getElementById('opa-f-sys-groups').value = (r.sys_groups || []).join(', ');
+  document.querySelectorAll('#opa-f-weekdays input').forEach(cb => {
+    cb.checked = (r.weekdays || []).includes(parseInt(cb.value, 10));
+  });
   document.getElementById('opa-rule-form').style.display = '';
   document.getElementById('opa-f-comment').focus();
 }
@@ -3991,6 +4016,8 @@ function opaFormSave() {
     commands: splitField(document.getElementById('opa-f-commands').value) || ['*'],
     runas:      splitField(document.getElementById('opa-f-runas').value)      || ['*'],
     sys_groups: splitField(document.getElementById('opa-f-sys-groups').value),
+    weekdays:  Array.from(document.querySelectorAll('#opa-f-weekdays input:checked'))
+                 .map(cb => parseInt(cb.value, 10)).sort((a, b) => a - b),
     action:    document.getElementById('opa-f-action').value,
     hour_from: parseInt(document.getElementById('opa-f-hour-from').value, 10),
     hour_to:   parseInt(document.getElementById('opa-f-hour-to').value,   10),

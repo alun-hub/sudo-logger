@@ -131,6 +131,22 @@ func TestEngine_Update(t *testing.T) {
 	}
 }
 
+func TestEngine_WeekdayConstraint(t *testing.T) {
+	p := &policy.Policy{
+		DefaultAction: "challenge",
+		Rules: []policy.Rule{
+			{ID: "weekday-allow", Users: []string{"*"}, Action: "allow",
+				Weekdays: []int{1, 2, 3, 4, 5}, // Mon–Fri
+				HourFrom: -1, HourTo: -1},
+		},
+	}
+	eng, err := policy.NewEngine(p)
+	if err != nil {
+		t.Fatalf("NewEngine weekday: %v", err)
+	}
+	_ = eng // Rego compiled successfully; runtime hour check not injectable in unit tests
+}
+
 func TestEngine_OvernightTimeRange(t *testing.T) {
 	// hour_from=22, hour_to=6 is an overnight window [22:00, 06:00).
 	// OPA v1 cannot use `or` inline; a helper rule must be emitted.

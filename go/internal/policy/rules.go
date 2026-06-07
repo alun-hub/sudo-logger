@@ -17,6 +17,7 @@ type Rule struct {
 	Commands  []string `json:"commands"`  // glob patterns
 	Runas     []string `json:"runas"`     // glob patterns or @groupname
 	SysGroups []string `json:"sys_groups,omitempty"` // user must be member of ALL these groups (LDAP/AD via input.groups)
+	Weekdays  []int    `json:"weekdays,omitempty"`   // 0=Sun..6=Sat; empty = all days
 	HourFrom  int      `json:"hour_from"` // 0-23; -1 = no time constraint
 	HourTo    int      `json:"hour_to"`   // exclusive; -1 = no constraint
 	Action    string   `json:"action"`    // "allow" | "challenge" | "deny"
@@ -228,6 +229,7 @@ func emitClause(b *strings.Builder, name string, idx int, action string, r Rule,
 	writeFieldConstraint(&body, idx, action, "runas", "input.runas", r.Runas)
 	writeFieldMatch(&body, "input.command", r.Commands) // commands never use @groups
 	writeSysGroupsMatch(&body, r.SysGroups)
+	writeWeekdayMatch(&body, r.Weekdays)
 	writeTimeMatch(&body, idx, action, r)
 
 	if body.Len() == 0 {
@@ -297,6 +299,19 @@ func writeSysGroupsMatch(b *strings.Builder, sysGroups []string) {
 		}
 		fmt.Fprintf(b, "\t%q in input.groups\n", g)
 	}
+}
+
+// writeWeekdayMatch emits a weekday constraint using an OPA set literal.
+// Empty or all-7 slice = no constraint. 0=Sun, 1=Mon, …, 6=Sat.
+func writeWeekdayMatch(b *strings.Builder, weekdays []int) {
+	if len(weekdays) == 0 || len(weekdays) >= 7 {
+		return
+	}
+	parts := make([]string, len(weekdays))
+	for i, d := range weekdays {
+		parts[i] = fmt.Sprintf("%d", d)
+	}
+	fmt.Fprintf(b, "\tinput.weekday in {%s}\n", strings.Join(parts, ", "))
 }
 
 func writeTimeMatch(b *strings.Builder, idx int, action string, r Rule) {
