@@ -715,6 +715,7 @@
     .sudoers-overview-card-name { font-size: 15px; font-weight: 700; color: var(--text); }
     .sudoers-overview-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
     .sudoers-overview-heading { padding: 20px 24px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-dim); letter-spacing: 0.08em; }
+    .sudoers-overview-card-sync { font-size: 11px; color: var(--text-dim); margin-top: auto; padding-top: 6px; border-top: 1px solid var(--border); }
     .sudoers-main { flex: 1; overflow-y: auto; padding: 20px 24px; }
     .sudoers-mode-bar { display: flex; gap: 6px; margin-bottom: 16px; align-items: center; }
     .sudoers-mode-btn { background: var(--card); border: 1px solid var(--border-mid);
@@ -5000,11 +5001,26 @@ async function loadSudoersHosts(skipSelect = false) {
   }
 }
 
-function renderSudoersOverview() {
+async function renderSudoersOverview() {
   const main = document.getElementById('sudoers-main');
   if (!main) return;
 
   const hosts = sudoersHostsInfo;
+
+  // Fetch latest snapshot timestamp for each non-default host in parallel
+  const snapTimes = {};
+  await Promise.all(
+    hosts.filter(info => info.name !== '_default').map(async info => {
+      try {
+        const res = await fetch(`/api/sudoers/snapshots?host=${encodeURIComponent(info.name)}`);
+        const data = await res.json();
+        const snaps = data.snapshots || [];
+        snapTimes[info.name] = snaps.length > 0 ? snaps[0].uploaded_at : null;
+      } catch(e) {
+        snapTimes[info.name] = null;
+      }
+    })
+  );
 
   const cards = hosts.map(info => {
     const h = info.name;
@@ -5025,12 +5041,19 @@ function renderSudoersOverview() {
       }
     }
 
+    let syncHtml = '';
+    if (!isDefault) {
+      const ts = snapTimes[h];
+      syncHtml = `<div class="sudoers-overview-card-sync">${ts ? 'Last sync: ' + esc(formatTS(ts)) : 'No snapshot yet'}</div>`;
+    }
+
     return `<div class="sudoers-overview-card" data-host="${esc(h)}">
       <div class="sudoers-overview-card-name">${esc(h)}</div>
       <div class="sudoers-overview-card-meta">
         <span class="sudoers-host-badge ${typeClass}">${typeLabel}</span>
         ${statusHtml}
       </div>
+      ${syncHtml}
     </div>`;
   }).join('');
 
