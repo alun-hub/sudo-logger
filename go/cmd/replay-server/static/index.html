@@ -709,6 +709,12 @@
     .sudoers-badge-warn { color: var(--amber); margin-left: 4px; }
     .sudoers-badge-err  { color: var(--red); margin-left: 4px; }
     .sudoers-badge-none { color: var(--text-dim); margin-left: 4px; }
+    .sudoers-overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; padding: 0 24px 24px; }
+    .sudoers-overview-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; cursor: pointer; transition: border-color 0.15s, background 0.15s; display: flex; flex-direction: column; gap: 10px; }
+    .sudoers-overview-card:hover { border-color: var(--green); background: var(--card-hover); }
+    .sudoers-overview-card-name { font-size: 15px; font-weight: 700; color: var(--text); }
+    .sudoers-overview-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .sudoers-overview-heading { padding: 20px 24px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-dim); letter-spacing: 0.08em; }
     .sudoers-main { flex: 1; overflow-y: auto; padding: 20px 24px; }
     .sudoers-mode-bar { display: flex; gap: 6px; margin-bottom: 16px; align-items: center; }
     .sudoers-mode-btn { background: var(--card); border: 1px solid var(--border-mid);
@@ -4984,10 +4990,56 @@ async function loadSudoersHosts(skipSelect = false) {
       </div>`;
     }).join('');
 
-    if (sudoersCurrentHost && !skipSelect) selectSudoersHost(sudoersCurrentHost);
+    if (sudoersCurrentHost && !skipSelect) {
+      selectSudoersHost(sudoersCurrentHost);
+    } else if (!sudoersCurrentHost) {
+      renderSudoersOverview();
+    }
   } catch(e) {
     list.innerHTML = '<p style="padding:10px;color:var(--red);font-size:12px">Failed to load hosts</p>';
   }
+}
+
+function renderSudoersOverview() {
+  const main = document.getElementById('sudoers-main');
+  if (!main) return;
+
+  const hosts = sudoersHostsInfo;
+
+  const cards = hosts.map(info => {
+    const h = info.name;
+    const isDefault = h === '_default';
+    const typeLabel = isDefault ? 'Main' : (info.isOverride ? 'Modified' : 'Default');
+    const typeClass = isDefault ? 'sudoers-badge-default' : (info.isOverride ? 'sudoers-badge-modified' : 'sudoers-badge-default');
+
+    let statusHtml = '';
+    if (!isDefault) {
+      if (info.error) {
+        statusHtml = `<span class="sudoers-badge-err" title="${esc(info.error)}">✖ Error</span>`;
+      } else if (info.isOffline) {
+        statusHtml = `<span class="sudoers-badge-warn">⚠ Offline</span>`;
+      } else if (info.inSync) {
+        statusHtml = `<span class="sudoers-badge-ok">✓ In sync</span>`;
+      } else {
+        statusHtml = `<span class="sudoers-badge-warn">⏳ Pending</span>`;
+      }
+    }
+
+    return `<div class="sudoers-overview-card" data-host="${esc(h)}">
+      <div class="sudoers-overview-card-name">${esc(h)}</div>
+      <div class="sudoers-overview-card-meta">
+        <span class="sudoers-host-badge ${typeClass}">${typeLabel}</span>
+        ${statusHtml}
+      </div>
+    </div>`;
+  }).join('');
+
+  main.innerHTML = `
+    <div class="sudoers-overview-heading">${hosts.length} host${hosts.length !== 1 ? 's' : ''} configured</div>
+    <div class="sudoers-overview-grid">${cards || '<p style="color:var(--text-dim);font-size:13px">No hosts found.</p>'}</div>`;
+
+  main.querySelectorAll('.sudoers-overview-card').forEach(el =>
+    el.addEventListener('click', () => selectSudoersHost(el.dataset.host)));
 }
 
 let sudoersPollTimer = null;
