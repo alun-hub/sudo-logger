@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os/user"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,10 +38,21 @@ type pendingSudoExec struct {
 
 func newDivergenceTracker(hostname string, alertFn func(user, host, comm string, ts time.Time)) *divergenceTracker {
 	return &divergenceTracker{
-		hostname: hostname,
+		hostname: shortHost(hostname), // normalize to short name for key matching
 		pending:  make(map[string][]*pendingSudoExec),
 		alertFn:  alertFn,
 	}
+}
+
+// shortHost returns the first label of a hostname, stripping any domain suffix.
+// This normalizes between FQDNs (fedora.local) and short kernel hostnames (fedora)
+// so that eBPF events and plugin SESSION_START messages match regardless of
+// which form resolveHostname() returned.
+func shortHost(host string) string {
+	if i := strings.IndexByte(host, '.'); i > 0 {
+		return host[:i]
+	}
+	return host
 }
 
 // registerEBPF is called when the eBPF execve hook sees a sudo or pkexec invocation.
@@ -110,7 +122,7 @@ const maxExecvePerUser = 100
 // Returns true if a matching eBPF execve was found (confirmed), false if the
 // plugin session has no eBPF witness (unwitnessed — eBPF may be down).
 func (d *divergenceTracker) confirmPlugin(username, host string) bool {
-	key := username + "|" + host
+	key := username + "|" + shortHost(host)
 	now := time.Now()
 
 	d.mu.Lock()
