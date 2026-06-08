@@ -3022,6 +3022,21 @@ function restoreFromURL() {
   selectSession(tsid, t);
 }
 
+window.addEventListener('popstate', () => {
+  const p = new URLSearchParams(location.search);
+  if (p.has('tsid')) {
+    switchTab('sessions', { pushURL: false });
+    const t = parseFloat(p.get('t') || '0');
+    const card = elSessionList.querySelector(`[data-tsid="${CSS.escape(p.get('tsid'))}"]`);
+    if (card) card.scrollIntoView({ block: 'nearest' });
+    selectSession(p.get('tsid'), t);
+  } else if (p.has('tab')) {
+    switchTab(p.get('tab'), { pushURL: false });
+  } else {
+    switchTab('sessions', { pushURL: false });
+  }
+});
+
 // ── Player ────────────────────────────────────────────────────────────────────
 
 function resetPlayer() {
@@ -3491,7 +3506,7 @@ document.querySelector('#tab-anomalies thead').addEventListener('click', e => {
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
-function switchTab(tab) {
+function switchTab(tab, { pushURL = true } = {}) {
   localStorage.setItem('sudo_replay_tab', tab);
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
@@ -3504,6 +3519,13 @@ function switchTab(tab) {
   if (tab === 'blocked') { fetchBlockedUsers(); fetchWhitelistedUsers(); }
   if (tab === 'approvals') fetchApprovals();
   if (tab === 'sudoers') { sudoersCurrentHost = ''; localStorage.removeItem('sudo_sudoers_host'); loadSudoersHosts(); startSudoersPolling(); }
+  if (pushURL) {
+    if (tab === 'sessions') {
+      history.pushState({ tab }, '', currentTSID ? '?tsid=' + encodeURIComponent(currentTSID) : location.pathname);
+    } else {
+      history.pushState({ tab }, '', '?tab=' + encodeURIComponent(tab));
+    }
+  }
 }
 
 document.querySelectorAll('.tab-btn').forEach(btn =>
@@ -6217,14 +6239,41 @@ function sudoersViewSnapshot(sha256) {
 
 window.addEventListener('DOMContentLoaded', () => {
   const path = window.location.pathname.replace(/\/$/, '');
-  let activeTab = localStorage.getItem('sudo_replay_tab');
+  const p = new URLSearchParams(location.search);
 
+  // /approvals path always wins
   if (path === '/approvals') {
-    activeTab = 'approvals';
+    switchTab('approvals', { pushURL: false });
+    return;
   }
 
+  // URL params take priority over localStorage
+  if (p.has('tab')) {
+    const tab = p.get('tab');
+    switchTab(tab, { pushURL: false });
+    if (tab === 'sudoers') {
+      startSudoersPolling();
+      const lastHost = localStorage.getItem('sudo_sudoers_host');
+      if (lastHost) {
+        const checkHosts = setInterval(() => {
+          if (sudoersHostsInfo.length > 0 || document.querySelector('.sudoers-host-item')) {
+            clearInterval(checkHosts);
+            selectSudoersHost(lastHost);
+          }
+        }, 100);
+        setTimeout(() => clearInterval(checkHosts), 5000);
+      }
+    }
+    return;
+  }
+
+  // ?tsid= means sessions tab — restoreFromURL() handles session selection after fetchSessions
+  if (p.has('tsid')) return;
+
+  // Fall back to last known tab from localStorage
+  const activeTab = localStorage.getItem('sudo_replay_tab');
   if (activeTab) {
-    switchTab(activeTab);
+    switchTab(activeTab, { pushURL: false });
     if (activeTab === 'sudoers') {
       startSudoersPolling();
       const lastHost = localStorage.getItem('sudo_sudoers_host');
