@@ -616,6 +616,18 @@
     .siem-label { font-size: 11px; color: var(--text-dim); font-weight: 600; letter-spacing: .05em; display: block; margin-bottom: 4px; text-transform: uppercase; }
     .stab-panel { display: none; }
     .stab-panel.active { display: block; }
+    .rsub-btn { background: none; border: none; cursor: pointer; font-size: 12px; font-family: var(--font-ui);
+      color: var(--text-sub); padding: 5px 14px; border-radius: var(--radius); transition: background .15s, color .15s; }
+    .rsub-btn:hover  { background: var(--surface); color: var(--text); }
+    .rsub-btn.active { background: var(--surface); color: var(--green); font-weight: 600; }
+    .rsub-panel { display: none; }
+    .rsub-panel.active { display: block; }
+    .psub-btn { background: none; border: none; cursor: pointer; font-size: 12px; font-family: var(--font-ui);
+      color: var(--text-sub); padding: 5px 14px; border-radius: var(--radius); transition: background .15s, color .15s; }
+    .psub-btn:hover  { background: var(--surface); color: var(--text); }
+    .psub-btn.active { background: var(--surface); color: var(--green); font-weight: 600; }
+    .psub-panel { display: none; }
+    .psub-panel.active { display: block; }
     .rules-score { display: inline-block; font-size: 12px; font-weight: 700;
       width: 32px; text-align: center; padding: 1px 0; border-radius: 3px; }
     .rules-conds { font-size: 12px; color: var(--text-dim);
@@ -903,13 +915,9 @@
     <span class="badge" id="session-count">loading…</span>
     <nav class="tab-nav">
       <button class="tab-btn active" data-tab="sessions">Sessions</button>
-      <button class="tab-btn" data-tab="summary">Summary</button>
-      <button class="tab-btn" data-tab="anomalies">Anomalies</button>
-      <button class="tab-btn" data-tab="settings">Settings</button>
-      <button class="tab-btn" data-tab="blocked">Access Control</button>
-      <button class="tab-btn" data-tab="approvals" id="approvals-tab-btn" style="display:none">Approvals <span id="approvals-badge" class="badge" style="display:none"></span></button>
-      <button class="tab-btn" data-tab="sudoers">Sudoers</button>
-      <button class="tab-btn" data-tab="help">Help</button>
+      <button class="tab-btn" data-tab="reports">Reports</button>
+      <button class="tab-btn" data-tab="policy">Policy</button>
+      <button class="tab-btn" data-tab="config">Config</button>
     </nav>
     <label class="autoplay-label"><input type="checkbox" id="autoplay-toggle" checked> autoplay</label>
     <div class="user-chip" id="user-chip" hidden>
@@ -920,6 +928,8 @@
       <svg id="theme-icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
       <svg id="theme-icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
+    <button class="theme-btn" id="approvals-topbar-btn" title="Pending approvals" aria-label="Pending approvals" style="display:none">Approvals <span id="approvals-topbar-badge" class="badge" style="display:none"></span></button>
+    <button class="theme-btn" id="help-btn" title="Help" aria-label="Help" style="font-size:14px;font-weight:700;width:28px;height:28px;padding:0;border-radius:50%">?</button>
   </header>
 
   <aside class="sidebar">
@@ -974,51 +984,74 @@
   </main>
 
   <!-- ── Summary tab ───────────────────────────────────────────────────────── -->
-  <div class="report-panel" id="tab-summary">
-    <div class="report-filter">
-      <label>From</label>
-      <input type="date" id="report-from" class="date-input" title="From date">
-      <label>To</label>
-      <input type="date" id="report-to" class="date-input" title="To date">
-      <button class="date-clear" id="report-clear" title="Clear date filter" aria-label="Clear date filter"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg></button>
-    </div>
-    <div class="rc-period" id="report-period"></div>
-    <div class="report-cards" id="report-cards"></div>
-    <div class="report-section">
-      <div class="summary-toolbar">
-        <h2 style="margin:0">Per User</h2>
-        <input type="text" id="summary-search" class="summary-search" placeholder="Search user…">
+  <!-- ── Reports tab ──────────────────────────────────────────────────────── -->
+  <div class="report-panel" id="tab-reports">
+    <nav class="stab-nav">
+      <button class="rsub-btn active" data-rsub="summary">Summary</button>
+      <button class="rsub-btn" data-rsub="anomalies">Anomalies</button>
+    </nav>
+    <div class="rsub-panel active" id="rsub-summary">
+      <div class="report-filter">
+        <label>From</label>
+        <input type="date" id="report-from" class="date-input" title="From date">
+        <label>To</label>
+        <input type="date" id="report-to" class="date-input" title="To date">
+        <button class="date-clear" id="report-clear" title="Clear date filter" aria-label="Clear date filter"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M1 1l8 8M9 1L1 9"/></svg></button>
       </div>
-      <table class="report-table" id="summary-user-table">
-        <thead><tr>
-          <th class="sortable" data-col="user">User</th>
-          <th class="sortable" data-col="sessions">Sessions</th>
-          <th class="sortable" data-col="avg_duration">Avg Duration</th>
-          <th>Top Commands</th>
-          <th class="sortable" data-col="hosts">Hosts</th>
-          <th class="sortable" data-col="incomplete">Incomplete</th>
-          <th class="sortable" data-col="long_sessions">Long (&gt;2h)</th>
-          <th class="sortable" data-col="high_risk">High Risk</th>
-          <th class="sortable" data-col="critical">Critical</th>
-        </tr></thead>
-        <tbody id="report-user-tbody"></tbody>
-      </table>
+      <div class="rc-period" id="report-period"></div>
+      <div class="report-cards" id="report-cards"></div>
+      <div class="report-section">
+        <div class="summary-toolbar">
+          <h2 style="margin:0">Per User</h2>
+          <input type="text" id="summary-search" class="summary-search" placeholder="Search user…">
+        </div>
+        <table class="report-table" id="summary-user-table">
+          <thead><tr>
+            <th class="sortable" data-col="user">User</th>
+            <th class="sortable" data-col="sessions">Sessions</th>
+            <th class="sortable" data-col="avg_duration">Avg Duration</th>
+            <th>Top Commands</th>
+            <th class="sortable" data-col="hosts">Hosts</th>
+            <th class="sortable" data-col="incomplete">Incomplete</th>
+            <th class="sortable" data-col="long_sessions">Long (&gt;2h)</th>
+            <th class="sortable" data-col="high_risk">High Risk</th>
+            <th class="sortable" data-col="critical">Critical</th>
+          </tr></thead>
+          <tbody id="report-user-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="rsub-panel" id="rsub-anomalies">
+      <div class="report-section">
+        <h2>Anomalies</h2>
+        <table class="report-table">
+          <thead><tr>
+            <th class="sortable" data-col="kind">Type</th>
+            <th class="sortable" data-col="risk_score">Risk</th>
+            <th class="sortable" data-col="user">User</th>
+            <th class="sortable" data-col="host">Host</th>
+            <th>Command</th>
+            <th class="sortable" data-col="start_time">Time</th>
+            <th class="sortable" data-col="duration">Duration</th>
+            <th>Detail</th><th></th>
+          </tr></thead>
+          <tbody id="report-anomaly-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <!-- ── Settings tab ──────────────────────────────────────────────────────── -->
-  <div class="report-panel" id="tab-settings">
+  <!-- ── Config tab (was Settings) ────────────────────────────────────────── -->
+  <div class="report-panel" id="tab-config">
     <nav class="stab-nav">
-      <button class="stab-btn active" data-stab="rules">Risk Rules</button>
+      <button class="stab-btn active" data-stab="approval">JIT Approval</button>
       <button class="stab-btn" data-stab="siem">SIEM</button>
       <button class="stab-btn" data-stab="sandbox">Sandbox</button>
-      <button class="stab-btn" data-stab="approval">JIT Approval</button>
       <button class="stab-btn" data-stab="retention">Retention</button>
-      <button class="stab-btn" data-stab="opa-policy">OPA Policy</button>
       </nav>
       ...
       <!-- ── JIT Approval ────────────────────────────────────────────────────── -->
-      <div class="stab-panel" id="stab-approval">
+      <div class="stab-panel active" id="stab-approval">
       <div class="siem-section" style="margin-top:0">
         <div class="siem-heading">
           JIT Approval Policy
@@ -1065,22 +1098,6 @@
 
       <!-- ── Data Retention ────────────────────────────────────────────────────── -->
 
-    <div class="stab-panel active" id="stab-rules">
-      <div class="settings-toolbar">
-        <button class="btn-primary" id="btn-add-rule">+ Add rule</button>
-        <span class="settings-path" id="settings-path"></span>
-        <span class="settings-status" id="settings-status" style="display:none"></span>
-      </div>
-      <table class="report-table">
-        <thead><tr>
-          <th style="width:52px">Score</th>
-          <th>Reason / ID</th>
-          <th>Conditions</th>
-          <th style="width:70px"></th>
-        </tr></thead>
-        <tbody id="rules-tbody"></tbody>
-      </table>
-    </div>
 
     <!-- ── SIEM forwarding ──────────────────────────────────────────────────── -->
     <div class="stab-panel" id="stab-siem">
@@ -1315,8 +1332,33 @@
       </div>
     </div>
 
-    <!-- ── OPA JIT Policy ─────────────────────────────────────────────────────── -->
-    <div class="stab-panel" id="stab-opa-policy">
+  </div>
+
+  <!-- ── Policy tab ────────────────────────────────────────────────────────── -->
+  <div class="report-panel" id="tab-policy">
+    <nav class="stab-nav">
+      <button class="psub-btn active" data-psub="rules">Risk Rules</button>
+      <button class="psub-btn" data-psub="opa-policy">OPA Policy</button>
+      <button class="psub-btn" data-psub="blocked">Access Control</button>
+      <button class="psub-btn" data-psub="sudoers">Sudoers</button>
+    </nav>
+    <div class="psub-panel active" id="psub-rules">
+      <div class="settings-toolbar">
+        <button class="btn-primary" id="btn-add-rule">+ Add rule</button>
+        <span class="settings-path" id="settings-path"></span>
+        <span class="settings-status" id="settings-status" style="display:none"></span>
+      </div>
+      <table class="report-table">
+        <thead><tr>
+          <th style="width:52px">Score</th>
+          <th>Reason / ID</th>
+          <th>Conditions</th>
+          <th style="width:70px"></th>
+        </tr></thead>
+        <tbody id="rules-tbody"></tbody>
+      </table>
+    </div>
+    <div class="psub-panel" id="psub-opa-policy">
       <div class="siem-section" style="margin-top:0">
         <div class="siem-heading">
           OPA JIT Policy
@@ -1501,10 +1543,108 @@
         </div>
       </div>
     </div>
+    <div class="psub-panel" id="psub-blocked">
+      <div class="siem-section">
+        <div class="siem-heading">
+          Block Message
+          <span class="settings-status" id="blocked-status" style="display:none"></span>
+        </div>
+        <p class="siem-note" style="margin-bottom:10px">
+          This message is shown to blocked users when they attempt to run sudo.
+        </p>
+        <textarea id="blocked-message" class="form-input" rows="3"
+          style="resize:vertical;font-family:var(--font);width:100%;max-width:640px;box-sizing:border-box"
+          placeholder="Your sudo access has been temporarily suspended. Contact security@example.com."></textarea>
+        <div class="siem-footer">
+          <button class="btn-primary" id="btn-save-blocked-msg">Save message</button>
+        </div>
+      </div>
+
+      <div class="siem-section">
+        <div class="siem-heading">
+          Blocked Users
+          <button class="btn-primary" id="btn-add-blocked" style="margin-left:auto">+ Block user</button>
+        </div>
+        <p class="siem-note">
+          Config file: <span class="settings-path" id="blocked-path"></span>
+          &nbsp;— log server picks up changes within 30 s.
+        </p>
+        <table class="report-table" style="margin-top:12px">
+          <thead><tr>
+            <th>Username</th>
+            <th>Hosts</th>
+            <th>Reason</th>
+            <th>Blocked at</th>
+            <th style="width:60px"></th>
+          </tr></thead>
+          <tbody id="blocked-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="siem-section">
+        <div class="siem-heading">
+          Whitelisted Users
+          <span class="siem-note" style="font-weight:normal;font-size:13px;margin-left:8px">— bypass JIT approval</span>
+          <button class="btn-primary" id="btn-add-whitelisted" style="margin-left:auto">+ Add user</button>
+        </div>
+        <p class="siem-note">
+          Config file: <span class="settings-path" id="whitelisted-path"></span>
+          &nbsp;— log server picks up changes within 30 s.
+          <span class="settings-status" id="whitelisted-status" style="display:none;margin-left:8px"></span>
+        </p>
+        <table class="report-table" style="margin-top:12px">
+          <thead><tr>
+            <th>Username</th>
+            <th>Hosts</th>
+            <th>Reason</th>
+            <th style="width:60px"></th>
+          </tr></thead>
+          <tbody id="whitelisted-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="psub-panel" id="psub-sudoers">
+      <div class="sudoers-layout">
+        <!-- Host list -->
+        <div class="sudoers-host-list" id="sudoers-host-list"></div>
+        <!-- Main content area — fully populated by renderSudoersMain() -->
+        <div id="sudoers-main" class="sudoers-main" style="flex:1;overflow:hidden;display:flex;flex-direction:column;"></div>
+      </div>
+    </div>
   </div>
 
-  <!-- ── Help tab ──────────────────────────────────────────────────────────── -->
-  <div class="report-panel" id="tab-help">
+  <div class="report-panel" id="tab-approvals">
+    <div class="siem-section">
+      <div class="siem-heading">
+        Pending Approval Requests
+        <button class="btn-primary" id="btn-refresh-approvals" style="margin-left:auto">↺ Refresh</button>
+      </div>
+      <p class="siem-note">
+        Users waiting for sudo approval. Approve grants a time window; Deny cancels the request.
+        The user is notified via webhook when a decision is made.
+      </p>
+      <table class="report-table" style="margin-top:12px" id="approvals-table">
+        <thead><tr>
+          <th style="width:80px">ID</th>
+          <th>User</th>
+          <th>Host</th>
+          <th>Command</th>
+          <th>Reason</th>
+          <th>Submitted</th>
+          <th>Expires</th>
+          <th style="width:160px"></th>
+        </tr></thead>
+        <tbody id="approvals-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Help modal ────────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="help-modal" hidden>
+  <div class="modal-box" style="max-width:860px;max-height:85vh;overflow-y:auto">
+    <button class="modal-close" id="help-modal-close" aria-label="Close help">&times;</button>
     <div class="help-body">
 
       <div class="help-section">
@@ -1999,126 +2139,6 @@
 
     </div>
   </div>
-
-  <!-- ── Anomalies tab ─────────────────────────────────────────────────────── -->
-  <div class="report-panel" id="tab-anomalies">
-    <div class="report-section">
-      <h2>Anomalies</h2>
-      <table class="report-table">
-        <thead><tr>
-          <th class="sortable" data-col="kind">Type</th>
-          <th class="sortable" data-col="risk_score">Risk</th>
-          <th class="sortable" data-col="user">User</th>
-          <th class="sortable" data-col="host">Host</th>
-          <th>Command</th>
-          <th class="sortable" data-col="start_time">Time</th>
-          <th class="sortable" data-col="duration">Duration</th>
-          <th>Detail</th><th></th>
-        </tr></thead>
-        <tbody id="report-anomaly-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ── Access Control tab (Blocked + Whitelisted users) ─────────────────── -->
-  <div class="report-panel" id="tab-blocked">
-    <div class="siem-section">
-      <div class="siem-heading">
-        Block Message
-        <span class="settings-status" id="blocked-status" style="display:none"></span>
-      </div>
-      <p class="siem-note" style="margin-bottom:10px">
-        This message is shown to blocked users when they attempt to run sudo.
-      </p>
-      <textarea id="blocked-message" class="form-input" rows="3"
-        style="resize:vertical;font-family:var(--font);width:100%;max-width:640px;box-sizing:border-box"
-        placeholder="Your sudo access has been temporarily suspended. Contact security@example.com."></textarea>
-      <div class="siem-footer">
-        <button class="btn-primary" id="btn-save-blocked-msg">Save message</button>
-      </div>
-    </div>
-
-    <div class="siem-section">
-      <div class="siem-heading">
-        Blocked Users
-        <button class="btn-primary" id="btn-add-blocked" style="margin-left:auto">+ Block user</button>
-      </div>
-      <p class="siem-note">
-        Config file: <span class="settings-path" id="blocked-path"></span>
-        &nbsp;— log server picks up changes within 30 s.
-      </p>
-      <table class="report-table" style="margin-top:12px">
-        <thead><tr>
-          <th>Username</th>
-          <th>Hosts</th>
-          <th>Reason</th>
-          <th>Blocked at</th>
-          <th style="width:60px"></th>
-        </tr></thead>
-        <tbody id="blocked-tbody"></tbody>
-      </table>
-    </div>
-
-    <div class="siem-section">
-      <div class="siem-heading">
-        Whitelisted Users
-        <span class="siem-note" style="font-weight:normal;font-size:13px;margin-left:8px">— bypass JIT approval</span>
-        <button class="btn-primary" id="btn-add-whitelisted" style="margin-left:auto">+ Add user</button>
-      </div>
-      <p class="siem-note">
-        Config file: <span class="settings-path" id="whitelisted-path"></span>
-        &nbsp;— log server picks up changes within 30 s.
-        <span class="settings-status" id="whitelisted-status" style="display:none;margin-left:8px"></span>
-      </p>
-      <table class="report-table" style="margin-top:12px">
-        <thead><tr>
-          <th>Username</th>
-          <th>Hosts</th>
-          <th>Reason</th>
-          <th style="width:60px"></th>
-        </tr></thead>
-        <tbody id="whitelisted-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="report-panel" id="tab-approvals">
-    <div class="siem-section">
-      <div class="siem-heading">
-        Pending Approval Requests
-        <button class="btn-primary" id="btn-refresh-approvals" style="margin-left:auto">↺ Refresh</button>
-      </div>
-      <p class="siem-note">
-        Users waiting for sudo approval. Approve grants a time window; Deny cancels the request.
-        The user is notified via webhook when a decision is made.
-      </p>
-      <table class="report-table" style="margin-top:12px" id="approvals-table">
-        <thead><tr>
-          <th style="width:80px">ID</th>
-          <th>User</th>
-          <th>Host</th>
-          <th>Command</th>
-          <th>Reason</th>
-          <th>Submitted</th>
-          <th>Expires</th>
-          <th style="width:160px"></th>
-        </tr></thead>
-        <tbody id="approvals-tbody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- ── Sudoers tab ──────────────────────────────────────────────────────────── -->
-  <div class="report-panel" id="tab-sudoers">
-    <div class="sudoers-layout">
-      <!-- Host list -->
-      <div class="sudoers-host-list" id="sudoers-host-list"></div>
-
-      <!-- Main content area — fully populated by renderSudoersMain() -->
-      <div id="sudoers-main" class="sudoers-main" style="flex:1;overflow:hidden;display:flex;flex-direction:column;"></div>
-    </div>
-  </div>
-
 </div>
 
 <!-- ── Blocked user modal ────────────────────────────────────────────────────── -->
@@ -3031,7 +3051,7 @@ window.addEventListener('popstate', () => {
     if (card) card.scrollIntoView({ block: 'nearest' });
     selectSession(p.get('tsid'), t);
   } else if (p.has('tab')) {
-    switchTab(p.get('tab'), { pushURL: false });
+    switchTab(normalizeTab(p.get('tab')) || 'sessions', { pushURL: false });
   } else {
     switchTab('sessions', { pushURL: false });
   }
@@ -3511,14 +3531,16 @@ function switchTab(tab, { pushURL = true } = {}) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelector('.layout').classList.toggle('report-view', tab !== 'sessions');
   document.querySelectorAll('.report-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
-  if (tab === 'summary' || tab === 'anomalies') fetchReport();
-  if (tab === 'settings') {
-    switchSettingsTab('rules');
-    fetchRules(); fetchSiemConfig(); fetchApprovalConfig(); fetchRetentionConfig(); fetchSandboxConfig(); fetchSandboxTemplates();
+  if (tab === 'reports') { switchReportsTab('summary'); fetchReport(); }
+  if (tab === 'policy') {
+    switchPolicyTab('rules');
+    fetchRules(); fetchBlockedUsers(); fetchWhitelistedUsers();
   }
-  if (tab === 'blocked') { fetchBlockedUsers(); fetchWhitelistedUsers(); }
+  if (tab === 'config') {
+    switchSettingsTab('approval');
+    fetchSiemConfig(); fetchApprovalConfig(); fetchRetentionConfig(); fetchSandboxConfig(); fetchSandboxTemplates();
+  }
   if (tab === 'approvals') fetchApprovals();
-  if (tab === 'sudoers') { sudoersCurrentHost = ''; localStorage.removeItem('sudo_sudoers_host'); loadSudoersHosts(); startSudoersPolling(); }
   if (pushURL) {
     if (tab === 'sessions') {
       history.pushState({ tab }, '', currentTSID ? '?tsid=' + encodeURIComponent(currentTSID) : location.pathname);
@@ -3531,17 +3553,60 @@ function switchTab(tab, { pushURL = true } = {}) {
 document.querySelectorAll('.tab-btn').forEach(btn =>
   btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
 
+document.getElementById('approvals-topbar-btn').addEventListener('click', () => switchTab('approvals'));
+
+document.getElementById('help-btn').addEventListener('click', () => {
+  document.getElementById('help-modal').hidden = false;
+});
+document.getElementById('help-modal-close').addEventListener('click', () => {
+  document.getElementById('help-modal').hidden = true;
+});
+document.getElementById('help-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.hidden = true;
+});
+
 // ── Settings sub-tabs ──────────────────────────────────────────────────────────
 
 function switchSettingsTab(stab) {
   if (!stab) return;
-  document.querySelectorAll('.stab-btn[data-stab]').forEach(b => b.classList.toggle('active', b.dataset.stab === stab));
-  document.querySelectorAll('.stab-panel').forEach(p => p.classList.toggle('active', p.id === 'stab-' + stab));
-  if (stab === 'opa-policy') loadOPAPolicy();
+  const panel = document.getElementById('tab-config');
+  panel.querySelectorAll('.stab-btn[data-stab]').forEach(b => b.classList.toggle('active', b.dataset.stab === stab));
+  panel.querySelectorAll('.stab-panel').forEach(p => p.classList.toggle('active', p.id === 'stab-' + stab));
 }
 
-document.querySelectorAll('.stab-btn[data-stab]').forEach(btn =>
+document.getElementById('tab-config').querySelectorAll('.stab-btn[data-stab]').forEach(btn =>
   btn.addEventListener('click', () => switchSettingsTab(btn.dataset.stab)));
+
+// ── Reports sub-tabs ───────────────────────────────────────────────────────────
+
+function switchReportsTab(rsub) {
+  const panel = document.getElementById('tab-reports');
+  panel.querySelectorAll('.rsub-btn').forEach(b => b.classList.toggle('active', b.dataset.rsub === rsub));
+  panel.querySelectorAll('.rsub-panel').forEach(p => p.classList.toggle('active', p.id === 'rsub-' + rsub));
+}
+
+document.getElementById('tab-reports').querySelectorAll('.rsub-btn').forEach(btn =>
+  btn.addEventListener('click', () => switchReportsTab(btn.dataset.rsub)));
+
+// ── Policy sub-tabs ────────────────────────────────────────────────────────────
+
+function switchPolicyTab(psub) {
+  const panel = document.getElementById('tab-policy');
+  panel.querySelectorAll('.psub-btn').forEach(b => b.classList.toggle('active', b.dataset.psub === psub));
+  panel.querySelectorAll('.psub-panel').forEach(p => p.classList.toggle('active', p.id === 'psub-' + psub));
+  if (psub === 'sudoers') {
+    sudoersCurrentHost = '';
+    localStorage.removeItem('sudo_sudoers_host');
+    loadSudoersHosts();
+    startSudoersPolling();
+  }
+  if (psub === 'blocked') { fetchBlockedUsers(); fetchWhitelistedUsers(); }
+  if (psub === 'rules') { fetchRules(); }
+  if (psub === 'opa-policy') { loadOPAPolicy(); }
+}
+
+document.getElementById('tab-policy').querySelectorAll('.psub-btn').forEach(btn =>
+  btn.addEventListener('click', () => switchPolicyTab(btn.dataset.psub)));
 
 elReportFrom.addEventListener('change', () => { reportFromVal = elReportFrom.value; reportDirty = true; fetchReport(); });
 elReportTo.addEventListener('change',   () => { reportToVal   = elReportTo.value;   reportDirty = true; fetchReport(); });
@@ -5156,7 +5221,7 @@ async function checkApprovalsAvailable() {
     const r = await fetch('/api/approvals');
     if (r.status !== 404) {
       approvalsAvailable = true;
-      document.getElementById('approvals-tab-btn').style.display = '';
+      document.getElementById('approvals-topbar-btn').style.display = '';
       fetchApprovals();
       setInterval(fetchApprovals, 10000);
     }
@@ -5171,7 +5236,7 @@ async function fetchApprovals() {
     if (!r.ok) return;
     const items = await r.json();
     renderApprovals(items || []);
-    const badge = document.getElementById('approvals-badge');
+    const badge = document.getElementById('approvals-topbar-badge');
     if (items && items.length > 0) {
       badge.textContent = items.length;
       badge.style.display = '';
@@ -5655,8 +5720,9 @@ let sudoersPollTimer = null;
 function startSudoersPolling() {
   if (sudoersPollTimer) return;
   sudoersPollTimer = setInterval(async () => {
-    const tab = document.querySelector('.tab-btn[data-tab="sudoers"]');
-    if (!tab || !tab.classList.contains('active')) return;
+    const tab = document.querySelector('.tab-btn[data-tab="policy"]');
+    const subPanel = document.getElementById('psub-sudoers');
+    if (!tab || !tab.classList.contains('active') || !subPanel || !subPanel.classList.contains('active')) return;
 
     // Refresh host list badges
     await loadSudoersHosts(true);
@@ -6237,6 +6303,16 @@ function sudoersViewSnapshot(sha256) {
 
 // switchTab handles sudoers tab activation (resets host → overview shown)
 
+// Map old tab names to new ones for backwards compatibility
+function normalizeTab(tab) {
+  if (!tab) return null;
+  if (tab === 'settings') return 'config';
+  if (tab === 'summary' || tab === 'anomalies') return 'reports';
+  if (tab === 'blocked' || tab === 'sudoers') return 'policy';
+  if (tab === 'help') return null; // no tab to restore; help is now a modal
+  return tab;
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   const path = window.location.pathname.replace(/\/$/, '');
   const p = new URLSearchParams(location.search);
@@ -6249,21 +6325,8 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // URL params take priority over localStorage
   if (p.has('tab')) {
-    const tab = p.get('tab');
+    const tab = normalizeTab(p.get('tab')) || 'sessions';
     switchTab(tab, { pushURL: false });
-    if (tab === 'sudoers') {
-      startSudoersPolling();
-      const lastHost = localStorage.getItem('sudo_sudoers_host');
-      if (lastHost) {
-        const checkHosts = setInterval(() => {
-          if (sudoersHostsInfo.length > 0 || document.querySelector('.sudoers-host-item')) {
-            clearInterval(checkHosts);
-            selectSudoersHost(lastHost);
-          }
-        }, 100);
-        setTimeout(() => clearInterval(checkHosts), 5000);
-      }
-    }
     return;
   }
 
@@ -6271,22 +6334,9 @@ window.addEventListener('DOMContentLoaded', () => {
   if (p.has('tsid')) return;
 
   // Fall back to last known tab from localStorage
-  const activeTab = localStorage.getItem('sudo_replay_tab');
+  const activeTab = normalizeTab(localStorage.getItem('sudo_replay_tab'));
   if (activeTab) {
     switchTab(activeTab, { pushURL: false });
-    if (activeTab === 'sudoers') {
-      startSudoersPolling();
-      const lastHost = localStorage.getItem('sudo_sudoers_host');
-      if (lastHost) {
-        const checkHosts = setInterval(() => {
-          if (sudoersHostsInfo.length > 0 || document.querySelector('.sudoers-host-item')) {
-            clearInterval(checkHosts);
-            selectSudoersHost(lastHost);
-          }
-        }, 100);
-        setTimeout(() => clearInterval(checkHosts), 5000);
-      }
-    }
   }
 });
 
