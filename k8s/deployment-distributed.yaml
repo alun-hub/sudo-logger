@@ -51,6 +51,8 @@ spec:
             - -approval-token=$(APPROVAL_TOKEN)
 
           env:
+            - name: TZ
+              value: Europe/Stockholm
             - name: S3_ACCESS_KEY
               valueFrom:
                 secretKeyRef:

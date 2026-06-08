@@ -126,6 +126,10 @@ type SessionStart struct {
 	// NotifyVia is an optional contact handle the user supplied at prompt time
 	// (e.g. a Slack username) so the notification system can route approvals.
 	NotifyVia string `json:"notify_via,omitempty"`
+	// Groups holds the invoking user's resolved group memberships at session time.
+	// Populated by the agent via NSS (id -Gn equivalent), so SSSD/winbind/AD
+	// groups are included automatically. Empty for older agents.
+	Groups []string `json:"groups,omitempty"`
 }
 
 // DivergenceAlert is the JSON payload for MsgDivergenceAlert.

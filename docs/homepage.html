@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sudo-logger — Privilegierad Sökning, Session Replay &amp; eBPF LSM Härdning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:ital,wght@0,300;0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#07090a; --card:#0c1012; --border:#18232a;
+  --green:#00e87a; --green-dim:#00884a; --green-glow:rgba(0,232,122,0.12);
+  --red:#ff3535; --red-dim:#3d0e0e; --red-glow:rgba(255,53,53,0.15);
+  --amber:#ffb800; --amber-dim:#8a6500; --amber-glow:rgba(255,184,0,0.12);
+  --text:#c4cfd4; --text-dim:#5b6f7a; --white:#ffffff;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{width:100%;min-height:100vh;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;overflow-x:hidden;position:relative;}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 4px);pointer-events:none;z-index:900;}
+body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at 50% 50%,transparent 60%,rgba(0,0,0,0.8) 100%);pointer-events:none;z-index:901;}
+.grain{position:fixed;inset:0;opacity:0.015;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:180px 180px;pointer-events:none;z-index:902;}
+.corner{position:fixed;width:24px;height:24px;z-index:800;pointer-events:none;}
+.c-tl{top:12px;left:12px;border-top:2px solid var(--green-dim);border-left:2px solid var(--green-dim);}
+.c-tr{top:12px;right:12px;border-top:2px solid var(--green-dim);border-right:2px solid var(--green-dim);}
+.c-bl{bottom:12px;left:12px;border-bottom:2px solid var(--green-dim);border-left:2px solid var(--green-dim);}
+.c-br{bottom:12px;right:12px;border-bottom:2px solid var(--green-dim);border-right:2px solid var(--green-dim);}
+::-webkit-scrollbar{width:8px;}
+::-webkit-scrollbar-track{background:var(--bg);border-left:1px solid var(--border);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:var(--green-dim);}
+h1,h2,h3,h4{font-family:'Bebas Neue',sans-serif;letter-spacing:0.04em;color:var(--white);}
+code,pre,.mono{font-family:'JetBrains Mono',monospace;}
+.badge{display:inline-block;padding:4px 8px;border-radius:3px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;}
+.badge-oss{background:rgba(0,232,122,0.1);color:var(--green);border:1px solid var(--green-dim);}
+.badge-ee{background:rgba(255,184,0,0.1);color:var(--amber);border:1px solid var(--amber-dim);}
+/* Nav */
+header{position:sticky;top:0;z-index:100;background:rgba(7,9,10,0.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:16px 40px;}
+.nav-container{max-width:1200px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;}
+.logo-link{display:flex;align-items:center;gap:12px;text-decoration:none;}
+.logo-text{font-size:24px;font-weight:700;color:var(--white);}
+.logo-text span{color:var(--green);}
+nav{display:flex;gap:28px;align-items:center;}
+nav a{color:var(--text);text-decoration:none;font-size:14px;font-weight:500;transition:color 0.3s;}
+nav a:hover{color:var(--green);}
+.btn-cta-nav{background:transparent;color:var(--green);border:1px solid var(--green);padding:8px 16px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px;text-decoration:none;transition:all 0.3s;}
+.btn-cta-nav:hover{background:var(--green);color:var(--bg);}
+.lang-switcher{display:flex;align-items:center;gap:2px;font-family:'JetBrains Mono',monospace;font-size:11px;border:1px solid var(--border);border-radius:4px;overflow:hidden;}
+.lang-btn{background:transparent;border:none;color:var(--text-dim);cursor:pointer;padding:5px 9px;transition:all 0.2s;font-family:inherit;font-size:inherit;}
+.lang-btn:hover{color:var(--green);background:rgba(0,232,122,0.05);}
+.lang-btn-active{color:var(--green);background:rgba(0,232,122,0.08);}
+/* Hero */
+.hero{padding:100px 40px 80px;max-width:1200px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center;}
+.hero-content{display:flex;flex-direction:column;}
+.hero-eyebrow{font-family:'JetBrains Mono',monospace;color:var(--green);font-size:11px;letter-spacing:0.3em;text-transform:uppercase;margin-bottom:20px;}
+.hero-title{font-size:clamp(60px,6vw,96px);line-height:0.9;margin-bottom:24px;}
+.hero-title span{color:var(--green);}
+.hero-description{font-size:16px;line-height:1.6;color:var(--text);margin-bottom:36px;max-width:500px;}
+.hero-actions{display:flex;gap:16px;}
+.btn{display:inline-block;padding:14px 28px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;text-decoration:none;border-radius:4px;transition:all 0.3s;cursor:pointer;text-align:center;}
+.btn-primary{background:var(--green);color:var(--bg);border:1px solid var(--green);}
+.btn-primary:hover{box-shadow:0 0 25px var(--green-glow);transform:translateY(-2px);}
+.btn-secondary{background:transparent;color:var(--amber);border:1px solid var(--amber);}
+.btn-secondary:hover{background:rgba(255,184,0,0.05);box-shadow:0 0 25px var(--amber-glow);transform:translateY(-2px);}
+/* Terminal */
+.hero-visual{position:relative;}
+.terminal{background:var(--card);border:1px solid var(--border);border-radius:6px;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.6);}
+.terminal-header{background:#090c0e;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+.terminal-buttons{display:flex;gap:8px;}
+.t-btn{width:10px;height:10px;border-radius:50%;}
+.t-btn-red{background:#ff5f56;}.t-btn-yellow{background:#ffbd2e;}.t-btn-green{background:#27c93f;}
+.terminal-title{font-size:11px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;margin-right:36px;}
+.terminal-body{padding:20px;font-size:13px;line-height:1.7;color:var(--text);min-height:280px;}
+.t-prompt-line{display:flex;gap:8px;}
+.t-prompt{color:var(--green);}.t-cmd{color:var(--white);font-weight:bold;}.t-output{color:var(--text-dim);}
+.t-cursor-blink{display:inline-block;width:8px;height:15px;background:var(--green);animation:blink 1s step-end infinite;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:0;}}
+/* Sections */
+section{padding:100px 40px;max-width:1200px;margin:0 auto;}
+.section-header{text-align:center;margin-bottom:60px;}
+.section-eyebrow{font-family:'JetBrains Mono',monospace;color:var(--green);font-size:11px;letter-spacing:0.25em;text-transform:uppercase;margin-bottom:12px;}
+.section-title{font-size:clamp(38px,4vw,56px);line-height:1.0;margin-bottom:16px;}
+.section-subtitle{font-size:16px;color:var(--text-dim);max-width:640px;margin:0 auto;}
+/* Problem cards */
+.problem-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:40px;}
+.problem-card{background:#0a0a0c;border:1px solid rgba(255,53,53,0.2);border-radius:6px;padding:28px;position:relative;transition:all 0.3s;}
+.problem-card:hover{border-color:rgba(255,53,53,0.45);transform:translateY(-3px);}
+.problem-card .p-icon{font-size:24px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:6px;background:rgba(255,53,53,0.08);border:1px solid rgba(255,53,53,0.2);}
+.problem-card h3{font-size:20px;margin-bottom:10px;color:var(--white);}
+.problem-card p{font-size:13px;line-height:1.65;color:var(--text-dim);}
+.problem-card .p-impact{margin-top:14px;padding:10px 14px;border-radius:4px;background:rgba(255,53,53,0.07);border-left:3px solid var(--red);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--red);}
+/* Guarantee cards */
+.guarantee-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:24px;margin-top:40px;}
+.guarantee-card{background:var(--card);border:1px solid var(--green-dim);border-radius:6px;padding:32px;position:relative;transition:all 0.3s;}
+.guarantee-card:hover{border-color:var(--green);box-shadow:0 8px 30px rgba(0,232,122,0.06);transform:translateY(-3px);}
+.guarantee-card .g-number{font-family:'Bebas Neue',sans-serif;font-size:56px;line-height:1;color:rgba(0,232,122,0.12);position:absolute;top:16px;right:20px;}
+.guarantee-card h3{font-size:22px;margin-bottom:12px;color:var(--white);}
+.guarantee-card p{font-size:14px;line-height:1.65;color:var(--text-dim);}
+.guarantee-card .g-stat{margin-top:16px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);display:flex;align-items:center;gap:8px;}
+.guarantee-card .g-stat::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);}
+/* Features */
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:24px;}
+.feature-card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:32px;position:relative;transition:all 0.3s;}
+.feature-card:hover{border-color:var(--green-dim);transform:translateY(-4px);box-shadow:0 10px 30px rgba(0,232,122,0.03);}
+.feature-card.enterprise-card:hover{border-color:var(--amber-dim);box-shadow:0 10px 30px rgba(255,184,0,0.03);}
+.feat-icon{font-size:22px;margin-bottom:18px;width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid var(--border);background:rgba(24,35,42,0.5);}
+.feature-card.enterprise-card .feat-icon{border-color:rgba(255,184,0,0.2);}
+.feat-title{font-size:22px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.feat-description{font-size:13px;line-height:1.65;color:var(--text-dim);}
+/* Table */
+.table-container{overflow-x:auto;border:1px solid var(--border);border-radius:6px;background:var(--card);margin-top:40px;}
+table{width:100%;border-collapse:collapse;text-align:left;font-size:14px;}
+th,td{padding:18px 24px;border-bottom:1px solid var(--border);}
+th{background:#090c0e;font-family:'JetBrains Mono',monospace;color:var(--white);font-weight:600;font-size:12px;letter-spacing:0.1em;text-transform:uppercase;}
+tr:last-child td{border-bottom:none;}
+.check-oss{color:var(--green);font-weight:bold;}.check-ee{color:var(--amber);font-weight:bold;}.dash-none{color:var(--text-dim);opacity:0.4;}
+/* Simulators */
+.simulator-layout{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:40px;align-items:start;}
+.sim-pane{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:30px;}
+.sim-pane h3{font-size:26px;margin-bottom:14px;color:var(--white);}
+.sim-pane p{font-size:13px;line-height:1.65;margin-bottom:22px;color:var(--text-dim);}
+.sim-interactive{display:flex;flex-direction:column;gap:14px;}
+.sim-action-btn{background:#111820;border:1px solid var(--border);color:var(--text);padding:12px 20px;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:12px;cursor:pointer;text-align:left;transition:all 0.3s;display:flex;justify-content:space-between;align-items:center;}
+.sim-action-btn:hover{border-color:var(--green);background:rgba(0,232,122,0.03);}
+.sim-action-btn.danger-action:hover{border-color:var(--red);background:rgba(255,53,53,0.03);}
+.sim-terminal-screen{background:#050708;border:1px solid var(--border);border-radius:6px;padding:18px;min-height:230px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.65;color:var(--text);}
+/* Footer */
+footer{border-top:1px solid var(--border);padding:60px 40px;background:#050708;text-align:center;font-size:12px;color:var(--text-dim);}
+.footer-content{max-width:1200px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;}
+.footer-links{display:flex;gap:20px;}
+.footer-links a{color:var(--text-dim);text-decoration:none;transition:color 0.3s;}
+.footer-links a:hover{color:var(--green);}
+.footer-timestamp{font-family:'JetBrains Mono',monospace;margin-top:16px;color:var(--text-dim);}
+/* Demo */
+.demo-browser{background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,0.7),0 0 0 1px rgba(0,232,122,0.08);}
+.demo-browser-bar{background:#090c0e;padding:12px 20px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--border);}
+.demo-browser-dots{display:flex;gap:7px;}
+.demo-browser-url{flex:1;background:#111820;border:1px solid var(--border);border-radius:4px;padding:5px 14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-dim);display:flex;align-items:center;gap:8px;}
+.demo-browser-url .lock-icon{color:var(--green);font-size:11px;}
+.demo-iframe-wrap{position:relative;width:100%;height:680px;}
+.demo-iframe-wrap iframe{width:100%;height:100%;border:none;display:block;}
+.demo-badges{display:flex;justify-content:center;gap:24px;margin-top:32px;flex-wrap:wrap;}
+.demo-badge-item{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;}
+.demo-badge-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse-dot 2s ease-in-out infinite;}
+@keyframes pulse-dot{0%,100%{opacity:1;}50%{opacity:0.4;}}
+/* Responsive */
+@media(max-width:768px){
+  .hero,.problem-grid,.guarantee-grid,.simulator-layout{grid-template-columns:1fr;gap:24px;}
+  .hero{padding:60px 20px;}
+  header{padding:16px 20px;}
+  nav{display:none;}
+  .footer-content{flex-direction:column;gap:20px;}
+}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="corner c-tl"></div><div class="corner c-tr"></div>
+<div class="corner c-bl"></div><div class="corner c-br"></div>
+
+<!-- HEADER -->
+<header>
+  <div class="nav-container">
+    <a href="#" class="logo-link">
+      <svg width="32" height="32" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+        <path d="M22 2 L40 10 L40 28 Q40 40 22 46 Q4 40 4 28 L4 10 Z" fill="#0c1012" stroke="#00e87a" stroke-width="2"/>
+        <rect x="13" y="22" width="18" height="14" rx="2.5" fill="#00e87a"/>
+        <path d="M16 22 L16 17 Q16 12 22 12 Q28 12 28 17 L28 22" fill="none" stroke="#00e87a" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="22" cy="27" r="2.5" fill="#0c1012"/>
+      </svg>
+      <div class="logo-text">sudo-<span>logger</span></div>
+    </a>
+    <nav>
+      <a href="#problem" data-i18n="nav-problem">Problemet</a>
+      <a href="#features" data-i18n="nav-features">Funktioner</a>
+      <a href="#comparison">OSS vs Enterprise</a>
+      <a href="#demo" style="color:var(--green);font-weight:700;">&#9654; Live Demo</a>
+      <a href="#pricing" data-i18n="nav-pricing">Prissättning</a>
+      <a href="https://github.com/alun-hub/sudo-logger" target="_blank" class="btn-cta-nav">GitHub</a>
+      <div class="lang-switcher">
+        <button class="lang-btn lang-btn-active" data-lang="sv" onclick="setLanguage('sv')">SV</button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">EN</button>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-content">
+    <div class="hero-eyebrow" data-i18n="hero-eyebrow">Privilegierad åtkomsthantering för Linux-infrastruktur</div>
+    <h1 class="hero-title" data-i18n="hero-title">Audit-loggar som <span>inte kan manipuleras</span></h1>
+    <p class="hero-description" data-i18n="hero-desc">
+      Standard sudo loggar på samma host som root — det är meningslöst. sudo-logger streamar varje knapptryckning i realtid till en isolerad server med mTLS, och om nätverket försvinner fryser kärnan sessionen inom 800&nbsp;ms. Inga gap. Inga undantag.
+    </p>
+    <div class="hero-actions">
+      <a href="#demo" class="btn btn-primary" data-i18n="hero-cta-primary">Prova Live Demo</a>
+      <a href="#pricing" class="btn btn-secondary" data-i18n="hero-cta-secondary">Enterprise &amp; Priser</a>
+    </div>
+  </div>
+  <div class="hero-visual">
+    <div class="terminal">
+      <div class="terminal-header">
+        <div class="terminal-buttons">
+          <div class="t-btn t-btn-red"></div><div class="t-btn t-btn-yellow"></div><div class="t-btn t-btn-green"></div>
+        </div>
+        <div class="terminal-title">alice@prod-node-01: sudo-logger session</div>
+      </div>
+      <div class="terminal-body" id="hero-terminal">
+        <div class="t-prompt-line">
+          <span class="t-prompt">alice@prod-node-01:~$</span>
+          <span class="t-cmd">sudo -i</span>
+        </div>
+        <div class="t-output" data-i18n="terminal-line1">[sudo-logger] Session verifierad. Upprättar krypterad mTLS-kanal...</div>
+        <div class="t-output" data-i18n="terminal-line2">[sudo-logger] Strömmar till: logserver.corp.local:443 (Session ID: s_8a2d1f)</div>
+        <div class="t-prompt-line">
+          <span class="t-prompt">root@prod-node-01:~#</span>
+          <span id="hero-typing-text"></span><span class="t-cursor-blink"></span>
+        </div>
+        <div id="hero-output-text"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROBLEM SECTION -->
+<div style="background:rgba(255,53,53,0.02);border-top:1px solid rgba(255,53,53,0.12);border-bottom:1px solid rgba(255,53,53,0.12);padding:100px 40px;">
+<section id="problem" style="max-width:1200px;margin:0 auto;padding:0;">
+  <div class="section-header">
+    <div class="section-eyebrow" style="color:var(--red);" data-i18n="prob-eyebrow">Det dolda problemet med standard sudo</div>
+    <h2 class="section-title" data-i18n="prob-title">Root kan radera sina egna spår</h2>
+    <p class="section-subtitle" data-i18n="prob-subtitle">
+      De flesta sudo-verktyg loggar till samma host som användaren som kör sudo. Det innebär att en administratör med tillräckliga privilegier kan radera, stoppa eller kringgå loggningen. Det är inte ett audit — det är en illusion av kontroll.
+    </p>
+  </div>
+  <div class="problem-grid">
+    <div class="problem-card">
+      <div class="p-icon">🗑️</div>
+      <h3 data-i18n="prob1-title">Loggarna ligger på samma disk</h3>
+      <p data-i18n="prob1-desc">Standard sudo skriver till <code>/var/log/auth.log</code> eller auditd på samma host. Root kan ta bort dem, stoppa syslog, eller skriva över dem — innan din SIEM ens hunnit samla in dem.</p>
+      <div class="p-impact" data-i18n="prob1-impact">rm -rf /var/log/auth* &amp;&amp; systemctl stop rsyslog</div>
+    </div>
+    <div class="problem-card">
+      <div class="p-icon">📡</div>
+      <h3 data-i18n="prob2-title">Nätverksavbrott = loggningsgap</h3>
+      <p data-i18n="prob2-desc">Om SSH-anslutningen tappas mitt i en session — nätverksfel, timeout, omstart — fortsätter processen köra utan loggning. Du vet aldrig vad som hände under avbrottet.</p>
+      <div class="p-impact" data-i18n="prob2-impact">Session fortsatte 14 min utan loggning efter nätverksfel</div>
+    </div>
+    <div class="problem-card">
+      <div class="p-icon">👻</div>
+      <h3 data-i18n="prob3-title">Fail-open av design</h3>
+      <p data-i18n="prob3-desc">Standardverktyg är designade för att låta sudo köra även om loggservern är nere. Loggning ses som "nice to have" — inte som ett krav. Det öppnar ett fönster som angripare kan utnyttja.</p>
+      <div class="p-impact" data-i18n="prob3-impact">Loggserver nere i 3 min = 47 ologgade sudo-kommandon</div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- GUARANTEES SECTION -->
+<section id="guarantees" style="max-width:1200px;margin:0 auto;">
+  <div class="section-header">
+    <div class="section-eyebrow" data-i18n="guar-eyebrow">Fyra garantier ingen annan ger</div>
+    <h2 class="section-title" data-i18n="guar-title">Designad för att vara omöjlig att kringgå</h2>
+    <p class="section-subtitle" data-i18n="guar-subtitle">
+      Varje säkerhetsegenskap är enforced i Linux-kärnan eller via mTLS-protokollet — inte av policyer i userspace som root kan stänga av.
+    </p>
+  </div>
+  <div class="guarantee-grid">
+    <div class="guarantee-card">
+      <div class="g-number">01</div>
+      <h3 data-i18n="guar1-title">Fail-closed — alltid</h3>
+      <p data-i18n="guar1-desc">Om loggservern är otillgänglig när sudo startar avvisas sessionen <em>innan</em> kommandot exekveras. Inget undantag. Loggningen är ett krav, inte ett bästa-fall-scenario. En angripare kan inte vänta ut loggservern.</p>
+      <div class="g-stat" data-i18n="guar1-stat">Ingen loggserver = ingen session. Period.</div>
+    </div>
+    <div class="guarantee-card">
+      <div class="g-number">02</div>
+      <h3 data-i18n="guar2-title">Kernel-freeze vid nätverksavbrott</h3>
+      <p data-i18n="guar2-desc">Om ACK-heartbeat från servern uteblir i 800&nbsp;ms fryser agenten <em>alla processer</em> i sessionen via <code>cgroup.freeze</code> — utan jobcontrol-signaler, så <code>fg</code> inte kan bryta ut. <code>CLONE_NEWCGROUP</code>-isolering hindrar även <code>CAP_SYS_ADMIN</code> från att migrera till ett annat cgroup och undkomma frysningen.</p>
+      <div class="g-stat" data-i18n="guar2-stat">Freeze inom ~800 ms · automatisk återhämtning · timeout efter 3 min</div>
+    </div>
+    <div class="guarantee-card">
+      <div class="g-number">03</div>
+      <h3 data-i18n="guar3-title">20 kernel-hooks — root kan inte gömma sig</h3>
+      <p data-i18n="guar3-desc">eBPF LSM Sandbox attachar 20 hooks i Linux-kärnan (16 LSM + 2 tracepoints). De blockerar skrivningar till skyddade filer, borttagning av sockets, <code>bpf()</code>-syscall, <code>AF_NETLINK</code> (brandväggsmanipulation), <code>ptrace()</code>, <code>mount()</code> och CAP_AUDIT_CONTROL — allt scoped per session-cgroup. Root kan inte byta ut agenten, döda auditd eller radera loggar.</p>
+      <div class="g-stat" data-i18n="guar3-stat">Kernel-enforced · inte bypassbart ens av root</div>
+    </div>
+    <div class="guarantee-card">
+      <div class="g-number">04</div>
+      <h3 data-i18n="guar4-title">eBPF ring buffer — varje knapptryckning</h3>
+      <p data-i18n="guar4-desc">Tre eBPF-tracepoints fångar TTY-I/O från <em>alla processer</em> i trackade cgroups — inte bara direkt under sudo. <code>su</code>, <code>screen</code>, <code>tmux</code> och <code>pkexec</code> fångas transparant inuti den omkringliggande sessionen. Om sudo kör utan plugin skapar divergence-detectorn ett synligt <code>⚠ no plugin</code>-larm i replay-gränssnittet.</p>
+      <div class="g-stat" data-i18n="guar4-stat">Ring buffer · sys_enter_write hook · divergence detection</div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="section-header">
+    <div class="section-eyebrow" data-i18n="feat-eyebrow">Modulär uppbyggnad &amp; Open-Core</div>
+    <h2 class="section-title" data-i18n="feat-section-title">Komplett plattform för privilegierad åtkomst</h2>
+    <p class="section-subtitle" data-i18n="feat-subtitle">
+      Från kernel-nivå härdning till centraliserad sudoers-hantering och SIEM-integration — allt i ett paket.
+    </p>
+  </div>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feat-icon">🔌</div>
+      <div class="feat-title" data-i18n="feat1-title">Sudo I/O Plugin <span class="badge badge-oss">OSS</span></div>
+      <p class="feat-description" data-i18n="feat1-desc">Laddas direkt av sudo som en native I/O-plugin. Fångar stdin, stdout, stderr, tty-input, tty-output, miljövariabler och körda kommandon. Streamas i realtid — ingen lokal buffring på klienten. Plugin detekterar socket-drop inom 150&nbsp;ms och skickar SIGTERM.</p>
+    </div>
+    <div class="feature-card enterprise-card">
+      <div class="feat-icon">🛡️</div>
+      <div class="feat-title" data-i18n="feat2-title">eBPF LSM Sandbox <span class="badge badge-ee">Enterprise</span></div>
+      <p class="feat-description" data-i18n="feat2-desc">20 kernel-hooks (16 LSM + 2 tracepoints) enforcar ett deny-list i Linux-kärnan. Blockerar skrivningar till skyddade filer och devices, kill-signaler till skyddade processer, <code>bpf()</code>-syscall, <code>AF_NETLINK</code>, ptrace, mount och farliga capabilities. Scoped per session via cgroup-ID och PID-tracking propagerat atomärt vid fork.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon">📡</div>
+      <div class="feat-title" data-i18n="feat3-title">mTLS + Ed25519 ACK-signering <span class="badge badge-oss">OSS</span></div>
+      <p class="feat-description" data-i18n="feat3-desc">Klient och server autentiserar varandra med certifikat. Varje mottaget chunk bekräftas med en Ed25519-signerad ACK — agenten vägrar spara data som inte ACK:ats. Heartbeat skickas var 400&nbsp;ms; sessionen fryses om ACK uteblir i 800&nbsp;ms.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon">🔍</div>
+      <div class="feat-title" data-i18n="feat4-title">Automatisk hemlighetsredigering <span class="badge badge-oss">OSS</span></div>
+      <p class="feat-description" data-i18n="feat4-desc">Agenten maskerar AWS-nycklar, API-tokens, Bearer-headers, JWT-tokens, URL-lösenord och andra hemligheter i terminalströmmen <em>innan</em> de når loggservern. Anpassade regex-mönster kan läggas till via <code>mask_pattern</code> i agent.conf.</p>
+    </div>
+    <div class="feature-card enterprise-card">
+      <div class="feat-icon">⏳</div>
+      <div class="feat-title" data-i18n="feat5-title">Just-In-Time Godkännanden <span class="badge badge-ee">Enterprise</span></div>
+      <p class="feat-description" data-i18n="feat5-desc">Kräv motivering och godkännande i realtid innan sudo-sessionen startar. Sessionen fryses i kärnan medan begäran väntar. Stödjer Mattermost/Slack med interaktiva Approve/Deny-knappar, tidsbegränsade godkännandefönster och automatisk TTL-stängning.</p>
+    </div>
+    <div class="feature-card enterprise-card">
+      <div class="feat-icon">🧠</div>
+      <div class="feat-title" data-i18n="feat-opa-title">OPA JIT-policymotor <span class="badge badge-ee">Enterprise</span></div>
+      <p class="feat-description" data-i18n="feat-opa-desc">Ersätt hårdkodade undantagslistor med ett fullständigt regelspråk baserat på Open Policy Agent och Rego. Regler kan matcha användare, host, kommando, OS-grupp (lokal/SSSD/LDAP/AD), veckodag och klockslag. Prioritet: deny &gt; allow &gt; challenge. Ändringar hot-reloadas utan omstart.</p>
+    </div>
+    <div class="feature-card enterprise-card">
+      <div class="feat-icon">📋</div>
+      <div class="feat-title" data-i18n="feat6-title">Centraliserad Sudoers-hantering <span class="badge badge-ee">Enterprise</span></div>
+      <p class="feat-description" data-i18n="feat6-desc">Push sudoers-regler till alla hanterade hostar från replay-gränssnittet. Agenten validerar och applicerar atomärt via <code>visudo -c</code> och rapporterar sync-status i realtid. Globalt default-template med per-host-override, visuell korteditor och raw-editor med syntaxmarkering.</p>
+    </div>
+    <div class="feature-card enterprise-card">
+      <div class="feat-icon">☁️</div>
+      <div class="feat-title" data-i18n="feat7-title">S3 &amp; PostgreSQL — skalbar HA <span class="badge badge-ee">Enterprise</span></div>
+      <p class="feat-description" data-i18n="feat7-desc">Skala loggservrar horisontellt i Kubernetes. Sessioner lagras i S3-kompatibel objektlagring, metadata i PostgreSQL, med inbyggd leader election för SIEM-vidarebefordran. Designad för 500+ simultana sessioner med asynkron batch-disk-I/O och nolldeadlock-arkitektur.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon">📤</div>
+      <div class="feat-title" data-i18n="feat8-title">SIEM-integration <span class="badge badge-oss">OSS</span></div>
+      <p class="feat-description" data-i18n="feat8-desc">Vidarebefordra risklarm i realtid till valfritt SIEM i JSON, CEF (ArcSight/QRadar) eller OCSF-format via HTTPS eller syslog. Konfigurationen hot-reloadas var 30:e sekund utan omstart. Prometheus-endpoint för Grafana-dashboards ingår.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon">🕵️</div>
+      <div class="feat-title" data-i18n="feat9-title">eBPF Divergence Detection <span class="badge badge-oss">OSS</span></div>
+      <p class="feat-description" data-i18n="feat9-desc">Tre eBPF-tracepoints (TTY-I/O, execve, process-exit) jämför kernel-aktivitet med vad plugin rapporterat. Om sudo kör <em>utan</em> plugin visas ett <code>⚠ no plugin</code>-larm i UI:t. Fångar även pkexec-körningar inuti sessioner och flaggar dem som separata händelser.</p>
+    </div>
+    <div class="feature-card enterprise-card">
+      <div class="feat-icon">🚫</div>
+      <div class="feat-title" data-i18n="feat10-title">Central Block-policy <span class="badge badge-ee">Enterprise</span></div>
+      <p class="feat-description" data-i18n="feat10-desc">Blockera specifika användare eller hostar omedelbart från centralt håll — ingen distribution av sudoers-ändringar till varje maskin. Agenten pollar blockeringslistan och avvisar nya sessioner för blockerade identiteter inom sekunder.</p>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON TABLE -->
+<section id="comparison">
+  <div class="section-header">
+    <div class="section-eyebrow">Open Source vs Enterprise</div>
+    <h2 class="section-title" data-i18n="comp-title">Funktionsjämförelse</h2>
+    <p class="section-subtitle" data-i18n="comp-subtitle">
+      Välj rätt version för din infrastruktur. Den öppna kärnan ger robust skydd medan Enterprise erbjuder avancerad centraliserad hantering och regelefterlevnad.
+    </p>
+  </div>
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th data-i18n="th-feature">Funktion</th>
+          <th data-i18n="th-description">Beskrivning</th>
+          <th style="width:140px;">Open Source</th>
+          <th style="width:140px;">Enterprise</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Fail-closed session start</strong></td><td data-i18n="td-desc-1">Sessionen avvisas om loggservern är otillgänglig — aldrig fail-open.</td><td><span class="check-oss" data-i18n="chk-yes">✔ JA</span></td><td><span class="check-ee" data-i18n="chk-yes2">✔ JA</span></td></tr>
+        <tr><td><strong>Real-time mTLS streaming</strong></td><td data-i18n="td-desc-2">Varje knapptryckning streamad direkt, ingen lokal buffring. Ed25519 ACK-signering.</td><td><span class="check-oss" data-i18n="chk-yes3">✔ JA</span></td><td><span class="check-ee" data-i18n="chk-yes4">✔ JA</span></td></tr>
+        <tr><td><strong>Kernel freeze vid nätverkstapp</strong></td><td data-i18n="td-desc-3">cgroup.freeze + CLONE_NEWCGROUP inom 800 ms. Ingen kan undkomma via fg eller CAP_SYS_ADMIN.</td><td><span class="check-oss" data-i18n="chk-yes5">✔ JA</span></td><td><span class="check-ee" data-i18n="chk-yes6">✔ JA</span></td></tr>
+        <tr><td><strong>eBPF Divergence Detection</strong></td><td data-i18n="td-desc-4">Ring buffer fångar TTY-I/O, execve, pkexec — varnar om sudo kör utan plugin.</td><td><span class="check-oss" data-i18n="chk-yes7">✔ JA</span></td><td><span class="check-ee" data-i18n="chk-yes8">✔ JA</span></td></tr>
+        <tr><td><strong>Automatisk hemlighetsredigering</strong></td><td data-i18n="td-desc-5">AWS-nycklar, JWT, Bearer-tokens maskeras i strömmen innan de når servern.</td><td><span class="check-oss" data-i18n="chk-yes9">✔ JA</span></td><td><span class="check-ee" data-i18n="chk-yes10">✔ JA</span></td></tr>
+        <tr><td><strong>SIEM (JSON/CEF/OCSF)</strong></td><td data-i18n="td-desc-6">Risklarm vidarebefordrade i realtid. Prometheus-metrics ingår.</td><td><span class="check-oss" data-i18n="chk-yes11">✔ JA</span></td><td><span class="check-ee" data-i18n="chk-yes12">✔ JA</span></td></tr>
+        <tr><td><strong>eBPF LSM Process Sandbox</strong></td><td data-i18n="td-desc-7">20 kernel-hooks blockerar filskrivning, kill, bpf(), netlink, ptrace, mount — ej bypassbart av root.</td><td><span class="dash-none">—</span></td><td><span class="check-ee" data-i18n="chk-kernel">★ JA (Kernel-tvingat)</span></td></tr>
+        <tr><td><strong>JIT Approval &amp; Session TTL</strong></td><td data-i18n="td-desc-8">Manuellt godkännande med Slack/Mattermost-knappar och tidsbegränsade sessionsfönster.</td><td><span class="dash-none">—</span></td><td><span class="check-ee" data-i18n="chk-jit">★ JA</span></td></tr>
+        <tr><td><strong>OPA JIT-policymotor</strong></td><td data-i18n="td-desc-opa">Regelbaserad åtkomstkontroll med Open Policy Agent — matcha på användare, host, OS-grupp, veckodag och klockslag. Deny &gt; allow &gt; challenge, hot-reload.</td><td><span class="dash-none">—</span></td><td><span class="check-ee" data-i18n="chk-opa">★ JA</span></td></tr>
+        <tr><td><strong>Centralized Sudoers Push</strong></td><td data-i18n="td-desc-9">Atomär push och validering av sudoers-regler till hela flottan från webb-UI.</td><td><span class="dash-none">—</span></td><td><span class="check-ee" data-i18n="chk-realtime">★ JA (Realtid)</span></td></tr>
+        <tr><td><strong>S3 + PostgreSQL HA</strong></td><td data-i18n="td-desc-10">Horisontellt skalbar lagring med leader election. 500+ simultana sessioner.</td><td><span class="dash-none">—</span></td><td><span class="check-ee" data-i18n="chk-s3">★ JA</span></td></tr>
+        <tr><td><strong>MFA / SSO &amp; RBAC</strong></td><td data-i18n="td-desc-11">OIDC/SAML och rollbaserad åtkomstkontroll till replay-UI och audit-loggar.</td><td><span class="dash-none">—</span></td><td><span class="check-ee" data-i18n="chk-yes13">★ JA</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="section-header">
+    <div class="section-eyebrow" data-i18n="arch-eyebrow">Hur det fungerar</div>
+    <h2 class="section-title" data-i18n="arch-title">Enkel driftsättning, stark säkerhet</h2>
+    <p class="section-subtitle" data-i18n="arch-subtitle">
+      En lättvikts plugin på varje host skickar krypterad sessionsdata till en central loggserver via mTLS. Inget behöver installeras på klienterna — sudo-integrationen sker transparent via <code>/etc/sudo.conf</code>.
+    </p>
+  </div>
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:40px;display:flex;justify-content:center;">
+    <svg width="100%" height="auto" viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg" style="max-width:850px;">
+      <rect x="10" y="20" width="360" height="280" rx="8" fill="none" stroke="#5b6f7a" stroke-width="1.5" stroke-dasharray="6 4"/>
+      <text x="30" y="45" font-family="'JetBrains Mono',monospace" font-size="12" fill="#5b6f7a" data-i18n="svg-client-host">SERVERKLIENT (HOST)</text>
+      <rect x="30" y="70" width="130" height="70" rx="4" fill="#111820" stroke="#00e87a" stroke-width="1"/>
+      <text x="95" y="103" font-family="'JetBrains Mono',monospace" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle" data-i18n="svg-sudo-process">Sudo-process</text>
+      <text x="95" y="122" font-family="'JetBrains Mono',monospace" font-size="10" fill="#00e87a" text-anchor="middle">plugin.so</text>
+      <rect x="210" y="70" width="130" height="150" rx="4" fill="#111820" stroke="#00e87a" stroke-width="1.5"/>
+      <text x="275" y="103" font-family="'JetBrains Mono',monospace" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle" data-i18n="svg-local-agent">Lokal Agent</text>
+      <text x="275" y="122" font-family="'JetBrains Mono',monospace" font-size="10" fill="#00e87a" text-anchor="middle">go/cmd/agent</text>
+      <rect x="220" y="145" width="110" height="60" rx="3" fill="#1a2035" stroke="#ffb800" stroke-width="1"/>
+      <text x="275" y="170" font-family="'JetBrains Mono',monospace" font-size="11" font-weight="700" fill="#ffb800" text-anchor="middle">eBPF LSM</text>
+      <text x="275" y="185" font-family="'JetBrains Mono',monospace" font-size="9" fill="#ffb800" text-anchor="middle" data-i18n="svg-sandbox-ee">Sandlåda (EE)</text>
+      <path d="M 160 105 L 210 105" stroke="#00e87a" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+      <text x="185" y="95" font-family="'JetBrains Mono',monospace" font-size="9" fill="#5b6f7a" text-anchor="middle">Unix Sock</text>
+      <rect x="490" y="70" width="140" height="150" rx="4" fill="#111820" stroke="#00e87a" stroke-width="1.5"/>
+      <text x="560" y="103" font-family="'JetBrains Mono',monospace" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle" data-i18n="svg-log-server">Loggserver</text>
+      <text x="560" y="122" font-family="'JetBrains Mono',monospace" font-size="10" fill="#00e87a" text-anchor="middle">go/cmd/server</text>
+      <rect x="500" y="148" width="120" height="50" rx="3" fill="#0c1012" stroke="#18232a" stroke-width="1"/>
+      <text x="560" y="178" font-family="'JetBrains Mono',monospace" font-size="11" fill="#c4cfd4" text-anchor="middle">mTLS + Ed25519</text>
+      <path d="M 340 105 L 490 105" stroke="#00e87a" stroke-width="2" stroke-dasharray="4 2" fill="none"/>
+      <text x="415" y="95" font-family="'JetBrains Mono',monospace" font-size="10" fill="#00e87a" text-anchor="middle">mTLS ACKs</text>
+      <rect x="740" y="40" width="140" height="70" rx="4" fill="#0c1012" stroke="#18232a" stroke-width="1"/>
+      <text x="810" y="73" font-family="'JetBrains Mono',monospace" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle" data-i18n="svg-local-storage">Lokal Lagring (OSS)</text>
+      <text x="810" y="93" font-family="'JetBrains Mono',monospace" font-size="9" fill="#5b6f7a" text-anchor="middle">/var/log/sudoreplay</text>
+      <rect x="740" y="140" width="140" height="80" rx="4" fill="#1c1f24" stroke="#ffb800" stroke-width="1"/>
+      <text x="810" y="173" font-family="'JetBrains Mono',monospace" font-size="11" font-weight="700" fill="#ffb800" text-anchor="middle">S3 &amp; Postgres (EE)</text>
+      <text x="810" y="193" font-family="'JetBrains Mono',monospace" font-size="9" fill="#ffb800" text-anchor="middle" data-i18n="svg-dist-ha">Distribuerat &amp; HA</text>
+      <path d="M 630 105 L 680 105 L 680 75 L 740 75" stroke="#00e87a" stroke-width="1.5" fill="none"/>
+      <path d="M 630 180 L 680 180 L 740 180" stroke="#ffb800" stroke-width="1.5" fill="none"/>
+      <rect x="490" y="250" width="140" height="50" rx="4" fill="#111820" stroke="#00e87a" stroke-width="1"/>
+      <text x="560" y="280" font-family="'JetBrains Mono',monospace" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle" data-i18n="svg-replay">Replay-server (UI)</text>
+      <path d="M 810 110 L 810 275 L 630 275" stroke="#5b6f7a" stroke-width="1" stroke-dasharray="3 3" fill="none"/>
+      <defs><marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#00e87a"/></marker></defs>
+    </svg>
+  </div>
+</section>
+
+<!-- SIMULATORS -->
+<section id="simulators" style="background:rgba(12,16,18,0.3);border-top:1px solid var(--border);border-bottom:1px solid var(--border);max-width:100%;">
+  <div style="max-width:1200px;margin:0 auto;">
+    <div class="section-header">
+      <div class="section-eyebrow" data-i18n="sim-eyebrow">Se det i aktion</div>
+      <h2 class="section-title" data-i18n="sim-title">Stoppa attacker — innan de lyckas</h2>
+      <p class="section-subtitle" data-i18n="sim-subtitle">Klicka nedan för att simulera vanliga attackscenarier. Kernel-hooksen körs i ring 0 — root kan inte byta ut dem, stänga av dem eller kringgå dem.</p>
+    </div>
+    <div class="simulator-layout">
+      <div class="sim-pane">
+        <h3 data-i18n="sim1-heading">1. eBPF LSM Process Sandbox</h3>
+        <p data-i18n="sim1-desc">Även root inuti en sudo-session kan inte manipulera systemet. LSM-krokar i kärnan avvisar systemanropet med <code>EPERM</code> baserat på session-cgroup och PID-tracking — propagerat atomärt vid varje fork.</p>
+        <div class="sim-interactive">
+          <button class="sim-action-btn danger-action" onclick="runSandboxSim('rm -rf /etc/sudoers','FILE_UNLINK','/etc/sudoers')">
+            <span data-i18n="sim1-btn1">Radera sudoers: <code>rm /etc/sudoers</code></span>
+            <span data-i18n="sim-execute">☠ Exekvera</span>
+          </button>
+          <button class="sim-action-btn danger-action" onclick="runSandboxSim('echo evil > /etc/shadow','FILE_OPEN','/etc/shadow')">
+            <span data-i18n="sim1-btn2">Skriva till shadow: <code>echo x &gt; /etc/shadow</code></span>
+            <span data-i18n="sim-execute2">☠ Exekvera</span>
+          </button>
+          <button class="sim-action-btn danger-action" onclick="runSandboxSim('kill -9 auditd','PROCESS_KILL','auditd')">
+            <span data-i18n="sim1-btn3">Döda auditd: <code>kill -SIGKILL auditd</code></span>
+            <span data-i18n="sim-execute3">☠ Exekvera</span>
+          </button>
+          <div class="sim-terminal-screen" id="sandbox-terminal">
+            <span style="color:var(--text-dim);" data-i18n="sim1-placeholder">// Klicka på en attack ovan...</span>
+          </div>
+        </div>
+      </div>
+      <div class="sim-pane">
+        <h3 data-i18n="sim2-heading">2. Just-In-Time Godkännande</h3>
+        <p data-i18n="sim2-desc">Administratörer kräver motivering i terminalen. Sessionen fryses i kärnan via <code>cgroup.freeze</code> och väntar tills en admin godkänner i webbgränssnittet — Slack/Mattermost-knappar stödjs.</p>
+        <div class="sim-interactive">
+          <button class="sim-action-btn" id="jit-request-btn" onclick="startJitSim()">
+            <span data-i18n="sim2-btn1">Steg 1: Starta privilegierad session</span>
+            <span data-i18n="sim2-start">⚡ Starta</span>
+          </button>
+          <button class="sim-action-btn" id="jit-approve-btn" onclick="approveJit()" style="border-color:var(--amber);color:var(--amber);display:none;">
+            <span data-i18n="sim2-btn2">Steg 2: [Admin UI] Godkänn Begäran</span>
+            <span data-i18n="sim2-approve">✔ Godkänn</span>
+          </button>
+          <div class="sim-terminal-screen" id="jit-terminal">
+            <span style="color:var(--text-dim);" data-i18n="sim2-placeholder">// Klicka på "Starta" för att påbörja JIT-flödet...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="pricing">
+  <div class="section-header">
+    <div class="section-eyebrow" data-i18n="pricing-eyebrow">Licenser &amp; prissättning</div>
+    <h2 class="section-title" data-i18n="pricing-title">Välj rätt version</h2>
+    <p class="section-subtitle" data-i18n="pricing-subtitle">Open source-kärnan är fri att använda för alla. Enterprise-tilläggen licensieras per antal övervakade värdar med full support och SLA.</p>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;max-width:860px;margin:0 auto;">
+    <div class="feature-card" style="padding:40px;display:flex;flex-direction:column;">
+      <div class="badge badge-oss" style="margin-bottom:24px;align-self:flex-start;">Open Source · AGPLv3</div>
+      <div style="font-size:56px;font-family:'Bebas Neue';color:var(--white);line-height:1;margin-bottom:6px;" data-i18n="oss-price">Gratis</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:32px;" data-i18n="oss-sub">Ingen tidsbegränsning · Självhostad</p>
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:10px;font-size:13px;margin-bottom:36px;flex:1;">
+        <li><span style="color:var(--green)">✔</span> <span data-i18n="oss-item1">Terminal-inspelning &amp; session replay</span></li>
+        <li><span style="color:var(--green)">✔</span> <span data-i18n="oss-item2">Fail-closed · mTLS · Ed25519 ACKs</span></li>
+        <li><span style="color:var(--green)">✔</span> <span data-i18n="oss-item3">Kernel freeze vid nätverkstapp</span></li>
+        <li><span style="color:var(--green)">✔</span> <span data-i18n="oss-item4">Automatisk hemlighetsredigering</span></li>
+        <li><span style="color:var(--green)">✔</span> <span data-i18n="oss-item5">SIEM (JSON/CEF/OCSF) + Prometheus</span></li>
+        <li><span style="color:var(--green)">✔</span> <span data-i18n="oss-item6">eBPF divergence detection</span></li>
+        <li style="color:var(--text-dim);opacity:0.5" data-i18n="oss-item7">— JIT Godkännanden</li>
+        <li style="color:var(--text-dim);opacity:0.5" data-i18n="oss-item8">— eBPF LSM Process Sandbox</li>
+        <li style="color:var(--text-dim);opacity:0.5" data-i18n="oss-item9">— Skalbar HA-lagring</li>
+      </ul>
+      <a href="https://github.com/alun-hub/sudo-logger" target="_blank" class="btn btn-primary" style="text-align:center;" data-i18n="oss-cta">Kom igång på GitHub →</a>
+    </div>
+    <div class="feature-card enterprise-card" style="padding:40px;display:flex;flex-direction:column;border-color:rgba(255,184,0,0.3);background:linear-gradient(135deg,#0c1012 0%,#12100a 100%);">
+      <div class="badge badge-ee" style="margin-bottom:24px;align-self:flex-start;">Enterprise</div>
+      <div style="font-size:56px;font-family:'Bebas Neue';color:var(--white);line-height:1;margin-bottom:6px;" data-i18n="ee-price">Kontakta oss</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:32px;" data-i18n="ee-sub">Prisas per övervakad host · SLA ingår</p>
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:10px;font-size:13px;margin-bottom:36px;flex:1;">
+        <li><span style="color:var(--green)">✔</span> <span data-i18n="ee-item1">Allt i Open Source</span></li>
+        <li><span style="color:var(--amber)">★</span> <span data-i18n="ee-item2">eBPF LSM Process Sandbox (20 kernel-hooks)</span></li>
+        <li><span style="color:var(--amber)">★</span> <span data-i18n="ee-item3">JIT Godkännanden med Session TTL</span></li>
+        <li><span style="color:var(--amber)">★</span> <span data-i18n="ee-item4">Centraliserad Sudoers-hantering</span></li>
+        <li><span style="color:var(--amber)">★</span> <span data-i18n="ee-item5">S3 &amp; PostgreSQL — skalbar HA (500+ sessioner)</span></li>
+        <li><span style="color:var(--amber)">★</span> <span data-i18n="ee-item6">Central blockering av användare &amp; hostar</span></li>
+        <li><span style="color:var(--amber)">★</span> <span data-i18n="ee-item7">MFA / SSO &amp; RBAC</span></li>
+        <li><span style="color:var(--amber)">★</span> <span data-i18n="ee-item8">Prioriterad support &amp; SLA</span></li>
+      </ul>
+      <a href="mailto:info@unixkonsult.se?subject=sudo-logger%20Enterprise" class="btn btn-secondary" style="text-align:center;border-color:var(--amber);color:var(--amber);" data-i18n="ee-cta">Kontakta oss →</a>
+    </div>
+  </div>
+  <p style="text-align:center;margin-top:32px;font-size:13px;color:var(--text-dim);" data-i18n="pricing-help">
+    Behöver du hjälp att välja? <a href="mailto:info@unixkonsult.se" style="color:var(--green);text-decoration:none;">Hör av dig</a> så berättar vi mer.
+  </p>
+</section>
+
+<!-- LIVE DEMO -->
+<div style="background:rgba(0,232,122,0.02);border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:100px 40px;">
+<section id="demo" style="max-width:1200px;margin:0 auto;padding:0;">
+  <div class="section-header">
+    <div class="section-eyebrow" data-i18n="demo-eyebrow">Prova det live just nu</div>
+    <h2 class="section-title" data-i18n="demo-title">Session Replay — <span style="color:var(--green);">Live Demo</span></h2>
+    <p class="section-subtitle" data-i18n="demo-subtitle">Riktiga inspelningar mot en isolerad demo-server med autentiska risk-rules. Klicka på en session för att spela upp terminalinspelningen och se riskbedömningen i aktion.</p>
+  </div>
+  <div class="demo-browser">
+    <div class="demo-browser-bar">
+      <div class="demo-browser-dots"><div class="t-btn t-btn-red"></div><div class="t-btn t-btn-yellow"></div><div class="t-btn t-btn-green"></div></div>
+      <div class="demo-browser-url"><span class="lock-icon">🔒</span><span>sudo-logger.unixkonsult.se/demo/</span></div>
+      <a href="/demo/" target="_blank" data-i18n="demo-fullscreen" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);text-decoration:none;white-space:nowrap;border:1px solid var(--green-dim);padding:4px 10px;border-radius:3px;" onmouseover="this.style.background='rgba(0,232,122,0.08)'" onmouseout="this.style.background='transparent'">Helskärm ↗</a>
+    </div>
+    <div class="demo-iframe-wrap">
+      <iframe src="/demo/" title="sudo-logger live demo" loading="lazy" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+    </div>
+  </div>
+  <div class="demo-badges">
+    <div class="demo-badge-item"><div class="demo-badge-dot"></div><span data-i18n="demo-badge1">Live — genereras var 15:e minut</span></div>
+    <div class="demo-badge-item" style="color:var(--text-dim);"><span style="color:var(--amber);">⚠</span><span data-i18n="demo-badge2">Isolerad demo-server — inga riktiga sessioner</span></div>
+    <div class="demo-badge-item" style="color:var(--text-dim);"><span>🔍</span><span data-i18n="demo-badge3">Klicka på en röd/orange session för att se risklarm</span></div>
+  </div>
+</section>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-content">
+    <div>
+      <p style="font-weight:bold;font-size:14px;margin-bottom:8px;color:var(--white);">sudo-logger</p>
+      <p data-i18n="footer-copy">Öppen källkod under AGPLv3. Kommersiella licenser under egen EULA.</p>
+    </div>
+    <div class="footer-links">
+      <a href="#problem" data-i18n="footer-problem">Problemet</a>
+      <a href="#features" data-i18n="footer-features">Funktioner</a>
+      <a href="#comparison" data-i18n="footer-comparison">Jämförelse</a>
+      <a href="#demo">Live Demo</a>
+      <a href="#pricing" data-i18n="footer-pricing">Prissättning</a>
+      <a href="mailto:info@unixkonsult.se" data-i18n="footer-contact">Kontakt</a>
+      <a href="https://github.com/alun-hub/sudo-logger" target="_blank">GitHub</a>
+    </div>
+  </div>
+  <div class="footer-timestamp" data-i18n="footer-status">
+    Systemstatus: Licensverifierare online · Live demo: <span style="color:var(--green)">●</span> Online · Senast uppdaterad: 2026-06-07
+  </div>
+</footer>
+
+<script>
+const T = {
+  sv: {
+    'page-title': 'sudo-logger — Audit-loggar som inte kan manipuleras',
+    'nav-problem': 'Problemet', 'nav-features': 'Funktioner', 'nav-pricing': 'Prissättning',
+    'hero-eyebrow': 'Privilegierad åtkomsthantering för Linux-infrastruktur',
+    'hero-title': 'Audit-loggar som <span>inte kan manipuleras</span>',
+    'hero-desc': 'Standard sudo loggar på samma host som root — det är meningslöst. sudo-logger streamar varje knapptryckning i realtid till en isolerad server med mTLS, och om nätverket försvinner fryser kärnan sessionen inom 800&nbsp;ms. Inga gap. Inga undantag.',
+    'hero-cta-primary': 'Prova Live Demo', 'hero-cta-secondary': 'Enterprise &amp; Priser',
+    'terminal-line1': '[sudo-logger] Session verifierad. Upprättar krypterad mTLS-kanal...',
+    'terminal-line2': '[sudo-logger] Strömmar till: logserver.corp.local:443 (Session ID: s_8a2d1f)',
+    'prob-eyebrow': 'Det dolda problemet med standard sudo',
+    'prob-title': 'Root kan radera sina egna spår',
+    'prob-subtitle': 'De flesta sudo-verktyg loggar till samma host som användaren som kör sudo. Det innebär att en administratör med tillräckliga privilegier kan radera, stoppa eller kringgå loggningen. Det är inte ett audit — det är en illusion av kontroll.',
+    'prob1-title': 'Loggarna ligger på samma disk',
+    'prob1-desc': 'Standard sudo skriver till <code>/var/log/auth.log</code> eller auditd på samma host. Root kan ta bort dem, stoppa syslog, eller skriva över dem — innan din SIEM ens hunnit samla in dem.',
+    'prob1-impact': 'rm -rf /var/log/auth* &amp;&amp; systemctl stop rsyslog',
+    'prob2-title': 'Nätverksavbrott = loggningsgap',
+    'prob2-desc': 'Om SSH-anslutningen tappas mitt i en session fortsätter processen köra utan loggning. Du vet aldrig vad som hände under avbrottet.',
+    'prob2-impact': 'Session fortsatte 14 min utan loggning efter nätverksfel',
+    'prob3-title': 'Fail-open av design',
+    'prob3-desc': 'Standardverktyg låter sudo köra även om loggservern är nere. Loggning ses som "nice to have" — inte som ett krav. Det öppnar ett fönster som angripare kan utnyttja.',
+    'prob3-impact': 'Loggserver nere i 3 min = 47 ologgade sudo-kommandon',
+    'guar-eyebrow': 'Fyra garantier ingen annan ger',
+    'guar-title': 'Designad för att vara omöjlig att kringgå',
+    'guar-subtitle': 'Varje säkerhetsegenskap är enforced i Linux-kärnan eller via mTLS-protokollet — inte av policyer i userspace som root kan stänga av.',
+    'guar1-title': 'Fail-closed — alltid',
+    'guar1-desc': 'Om loggservern är otillgänglig när sudo startar avvisas sessionen <em>innan</em> kommandot exekveras. Inget undantag. En angripare kan inte vänta ut loggservern.',
+    'guar1-stat': 'Ingen loggserver = ingen session. Period.',
+    'guar2-title': 'Kernel-freeze vid nätverksavbrott',
+    'guar2-desc': 'Om ACK-heartbeat uteblir i 800&nbsp;ms fryser agenten <em>alla processer</em> i sessionen via <code>cgroup.freeze</code>. <code>CLONE_NEWCGROUP</code>-isolering hindrar även <code>CAP_SYS_ADMIN</code> från att migrera till ett annat cgroup.',
+    'guar2-stat': 'Freeze inom ~800 ms · automatisk återhämtning · timeout efter 3 min',
+    'guar3-title': '20 kernel-hooks — root kan inte gömma sig',
+    'guar3-desc': 'eBPF LSM Sandbox attachar 20 hooks i kärnan. De blockerar skrivningar till skyddade filer, kill-signaler, <code>bpf()</code>-syscall, <code>AF_NETLINK</code>, <code>ptrace()</code>, <code>mount()</code> och CAP_AUDIT_CONTROL — scoped per session-cgroup.',
+    'guar3-stat': 'Kernel-enforced · inte bypassbart ens av root',
+    'guar4-title': 'eBPF ring buffer — varje knapptryckning',
+    'guar4-desc': 'Tre eBPF-tracepoints fångar TTY-I/O från <em>alla processer</em> i trackade cgroups. <code>su</code>, <code>screen</code>, <code>tmux</code> och <code>pkexec</code> fångas transparant. Om sudo kör utan plugin skapar divergence-detectorn ett <code>⚠ no plugin</code>-larm.',
+    'guar4-stat': 'Ring buffer · sys_enter_write hook · divergence detection',
+    'feat-eyebrow': 'Modulär uppbyggnad &amp; Open-Core',
+    'feat-section-title': 'Komplett plattform för privilegierad åtkomst',
+    'feat-subtitle': 'Från kernel-nivå härdning till centraliserad sudoers-hantering och SIEM-integration — allt i ett paket.',
+    'feat1-title': 'Sudo I/O Plugin <span class="badge badge-oss">OSS</span>',
+    'feat1-desc': 'Laddas direkt av sudo som en native I/O-plugin. Fångar stdin, stdout, stderr, tty-input, tty-output, miljövariabler och körda kommandon. Streamas i realtid — ingen lokal buffring. Plugin detekterar socket-drop inom 150&nbsp;ms och skickar SIGTERM.',
+    'feat2-title': 'eBPF LSM Sandbox <span class="badge badge-ee">Enterprise</span>',
+    'feat2-desc': '20 kernel-hooks (16 LSM + 2 tracepoints) enforcar ett deny-list i kärnan. Blockerar skrivningar till skyddade filer, kill-signaler, <code>bpf()</code>, <code>AF_NETLINK</code>, ptrace, mount och farliga capabilities. Scoped per session via cgroup-ID och PID-tracking propagerat atomärt vid fork.',
+    'feat3-title': 'mTLS + Ed25519 ACK-signering <span class="badge badge-oss">OSS</span>',
+    'feat3-desc': 'Klient och server autentiserar varandra med certifikat. Varje chunk bekräftas med en Ed25519-signerad ACK — agenten vägrar spara obekräftad data. Heartbeat var 400&nbsp;ms; sessionen fryses om ACK uteblir i 800&nbsp;ms.',
+    'feat4-title': 'Automatisk hemlighetsredigering <span class="badge badge-oss">OSS</span>',
+    'feat4-desc': 'Agenten maskerar AWS-nycklar, API-tokens, Bearer-headers, JWT-tokens, URL-lösenord och hemligheter i strömmen <em>innan</em> de når loggservern. Anpassade regex-mönster via <code>mask_pattern</code> i agent.conf.',
+    'feat5-title': 'Just-In-Time Godkännanden <span class="badge badge-ee">Enterprise</span>',
+    'feat5-desc': 'Kräv motivering och godkännande innan sudo-sessionen startar. Sessionen fryses i kärnan under väntetiden. Stödjer Mattermost/Slack med interaktiva Approve/Deny-knappar, tidsbegränsade godkännandefönster och automatisk TTL-stängning.',
+    'feat6-title': 'Centraliserad Sudoers-hantering <span class="badge badge-ee">Enterprise</span>',
+    'feat6-desc': 'Push sudoers-regler till alla hanterade hostar från replay-UI. Agenten validerar och applicerar atomärt via <code>visudo -c</code> och rapporterar sync-status i realtid. Globalt template med per-host-override och syntaxmarkering.',
+    'feat7-title': 'S3 &amp; PostgreSQL — skalbar HA <span class="badge badge-ee">Enterprise</span>',
+    'feat7-desc': 'Skala loggservrar horisontellt i Kubernetes. Sessioner i S3-kompatibel objektlagring, metadata i PostgreSQL med inbyggd leader election. Designad för 500+ simultana sessioner med asynkron batch-disk-I/O och nolldeadlock-arkitektur.',
+    'feat8-title': 'SIEM-integration <span class="badge badge-oss">OSS</span>',
+    'feat8-desc': 'Vidarebefordra risklarm i realtid i JSON, CEF (ArcSight/QRadar) eller OCSF-format via HTTPS eller syslog. Konfigurationen hot-reloadas var 30:e sekund utan omstart. Prometheus-endpoint för Grafana-dashboards ingår.',
+    'feat9-title': 'eBPF Divergence Detection <span class="badge badge-oss">OSS</span>',
+    'feat9-desc': 'Tre eBPF-tracepoints (TTY-I/O, execve, process-exit) jämför kernel-aktivitet med plugin-rapporter. Om sudo kör utan plugin visas <code>⚠ no plugin</code>-larm i UI:t. Fångar även pkexec-körningar inuti sessioner.',
+    'feat10-title': 'Central Block-policy <span class="badge badge-ee">Enterprise</span>',
+    'feat10-desc': 'Blockera användare eller hostar omedelbart från centralt håll — ingen sudoers-distribution krävs. Agenten pollar blockeringslistan och avvisar nya sessioner för blockerade identiteter inom sekunder.',
+    'comp-title': 'Funktionsjämförelse', 'comp-subtitle': 'Välj rätt version för din infrastruktur. Den öppna kärnan ger robust skydd medan Enterprise erbjuder avancerad centraliserad hantering och regelefterlevnad.',
+    'th-feature': 'Funktion', 'th-description': 'Beskrivning',
+    'td-desc-1': 'Sessionen avvisas om loggservern är otillgänglig — aldrig fail-open.',
+    'td-desc-2': 'Varje knapptryckning streamad direkt, ingen lokal buffring. Ed25519 ACK-signering.',
+    'td-desc-3': 'cgroup.freeze + CLONE_NEWCGROUP inom 800 ms. Ingen kan undkomma via fg eller CAP_SYS_ADMIN.',
+    'td-desc-4': 'Ring buffer fångar TTY-I/O, execve, pkexec — varnar om sudo kör utan plugin.',
+    'td-desc-5': 'AWS-nycklar, JWT, Bearer-tokens maskeras i strömmen innan de når servern.',
+    'td-desc-6': 'Risklarm vidarebefordrade i realtid. Prometheus-metrics ingår.',
+    'td-desc-7': '20 kernel-hooks blockerar filskrivning, kill, bpf(), netlink, ptrace, mount — ej bypassbart av root.',
+    'td-desc-8': 'Manuellt godkännande med Slack/Mattermost-knappar och tidsbegränsade sessionsfönster.',
+    'td-desc-9': 'Atomär push och validering av sudoers-regler till hela flottan från webb-UI.',
+    'td-desc-10': 'Horisontellt skalbar lagring med leader election. 500+ simultana sessioner.',
+    'td-desc-11': 'OIDC/SAML och rollbaserad åtkomstkontroll till replay-UI och audit-loggar.',
+    'chk-yes':'✔ JA','chk-yes2':'✔ JA','chk-yes3':'✔ JA','chk-yes4':'✔ JA','chk-yes5':'✔ JA','chk-yes6':'✔ JA','chk-yes7':'✔ JA','chk-yes8':'✔ JA','chk-yes9':'✔ JA','chk-yes10':'✔ JA','chk-yes11':'✔ JA','chk-yes12':'✔ JA','chk-yes13':'★ JA',
+    'chk-kernel':'★ JA (Kernel-tvingat)','chk-jit':'★ JA','chk-realtime':'★ JA (Realtid)','chk-s3':'★ JA',
+    'arch-eyebrow': 'Hur det fungerar', 'arch-title': 'Enkel driftsättning, stark säkerhet',
+    'arch-subtitle': 'En lättvikts plugin på varje host skickar krypterad sessionsdata till en central loggserver via mTLS. Inget behöver installeras på klienterna — sudo-integrationen sker transparent via <code>/etc/sudo.conf</code>.',
+    'svg-client-host':'SERVERKLIENT (HOST)','svg-sudo-process':'Sudo-process','svg-local-agent':'Lokal Agent','svg-sandbox-ee':'Sandlåda (EE)','svg-log-server':'Loggserver','svg-local-storage':'Lokal Lagring (OSS)','svg-dist-ha':'Distribuerat &amp; HA','svg-replay':'Replay-server (UI)',
+    'sim-eyebrow':'Se det i aktion','sim-title':'Stoppa attacker — innan de lyckas',
+    'sim-subtitle':'Klicka nedan för att simulera vanliga attackscenarier. Kernel-hooksen körs i ring 0 — root kan inte byta ut dem, stänga av dem eller kringgå dem.',
+    'sim1-heading':'1. eBPF LSM Process Sandbox',
+    'sim1-desc':'Även root inuti en sudo-session kan inte manipulera systemet. LSM-krokar i kärnan avvisar systemanropet med <code>EPERM</code> baserat på session-cgroup och PID-tracking — propagerat atomärt vid varje fork.',
+    'sim1-btn1':'Radera sudoers: <code>rm /etc/sudoers</code>',
+    'sim1-btn2':'Skriva till shadow: <code>echo x &gt; /etc/shadow</code>',
+    'sim1-btn3':'Döda auditd: <code>kill -SIGKILL auditd</code>',
+    'sim-execute':'☠ Exekvera','sim-execute2':'☠ Exekvera','sim-execute3':'☠ Exekvera',
+    'sim1-placeholder':'// Klicka på en attack ovan...',
+    'sim2-heading':'2. Just-In-Time Godkännande',
+    'sim2-desc':'Administratörer kräver motivering i terminalen. Sessionen fryses i kärnan via <code>cgroup.freeze</code> och väntar tills en admin godkänner i webbgränssnittet — Slack/Mattermost-knappar stödjs.',
+    'sim2-btn1':'Steg 1: Starta privilegierad session','sim2-btn2':'Steg 2: [Admin UI] Godkänn Begäran',
+    'sim2-start':'⚡ Starta','sim2-approve':'✔ Godkänn',
+    'sim2-placeholder':'// Klicka på "Starta" för att påbörja JIT-flödet...',
+    'pricing-eyebrow':'Licenser &amp; prissättning','pricing-title':'Välj rätt version',
+    'pricing-subtitle':'Open source-kärnan är fri att använda för alla. Enterprise-tilläggen licensieras per antal övervakade värdar med full support och SLA.',
+    'oss-price':'Gratis','oss-sub':'Ingen tidsbegränsning · Självhostad',
+    'oss-item1':'Terminal-inspelning &amp; session replay','oss-item2':'Fail-closed · mTLS · Ed25519 ACKs',
+    'oss-item3':'Kernel freeze vid nätverkstapp','oss-item4':'Automatisk hemlighetsredigering',
+    'oss-item5':'SIEM (JSON/CEF/OCSF) + Prometheus','oss-item6':'eBPF divergence detection',
+    'oss-item7':'— JIT Godkännanden','oss-item8':'— eBPF LSM Process Sandbox','oss-item9':'— Skalbar HA-lagring',
+    'oss-cta':'Kom igång på GitHub →',
+    'ee-price':'Kontakta oss','ee-sub':'Prisas per övervakad host · SLA ingår',
+    'ee-item1':'Allt i Open Source','ee-item2':'eBPF LSM Process Sandbox (20 kernel-hooks)',
+    'ee-item3':'JIT Godkännanden med Session TTL','ee-item4':'Centraliserad Sudoers-hantering',
+    'ee-item5':'S3 &amp; PostgreSQL — skalbar HA (500+ sessioner)',
+    'ee-item6':'Central blockering av användare &amp; hostar','ee-item7':'MFA / SSO &amp; RBAC','ee-item8':'Prioriterad support &amp; SLA',
+    'ee-cta':'Kontakta oss →',
+    'pricing-help':'Behöver du hjälp att välja? <a href="mailto:info@unixkonsult.se" style="color:var(--green);text-decoration:none;">Hör av dig</a> så berättar vi mer.',
+    'demo-eyebrow':'Prova det live just nu',
+    'demo-title':'Session Replay — <span style="color:var(--green);">Live Demo</span>',
+    'demo-subtitle':'Riktiga inspelningar mot en isolerad demo-server med autentiska risk-rules. Klicka på en session för att spela upp terminalinspelningen och se riskbedömningen i aktion.',
+    'demo-badge1':'Live — genereras var 15:e minut','demo-badge2':'Isolerad demo-server — inga riktiga sessioner',
+    'demo-badge3':'Klicka på en röd/orange session för att se risklarm','demo-fullscreen':'Helskärm ↗',
+    'footer-copy':'Öppen källkod under AGPLv3. Kommersiella licenser under egen EULA.',
+    'footer-problem':'Problemet','footer-features':'Funktioner','footer-comparison':'Jämförelse',
+    'footer-pricing':'Prissättning','footer-contact':'Kontakt',
+    'footer-status':'Systemstatus: Live demo: <span style="color:var(--green)">●</span> Online · Senast uppdaterad: 2026-06-07',
+    'sim-denied':'Operationen tillåts ej (Permission denied)','sim-blocked-label':'Åtgärd blockerad!',
+    'sim-rule':'Rule Triggered:','sim-target':'Target Object:','sim-timestamp':'Timestamp:','sim-siem':'(Strukturerat SIEM-larm skickat)',
+    'jit-required':'[JIT APPROVAL REQUIRED] Privilegierad åtkomst kräver godkännande.',
+    'jit-reason':'Ange motivering (t.ex. ärendenummer):','jit-example':'alice: Felsökning av databasanslutning (Ärende #9921)',
+    'jit-waiting':'[VÄNTAR] Sessionen fryst via cgroup.freeze. Begäran skickad till Säkerhetsgruppen...',
+    'jit-sent':'Skickad: 2026-06-07 00:00 | Timeout: 10 minuter',
+    'jit-approved':'[GODKÄND] Administratör (sec-admin-01) har godkänt sessionen!',
+    'jit-unfrozen':'Sessionen tinas upp (Session TTL: 60 minuter återstår)','sim2-restart':'Starta ny JIT-begäran',
+    'feat-opa-title': 'OPA JIT-policymotor <span class="badge badge-ee">Enterprise</span>',
+    'feat-opa-desc': 'Ersätt hårdkodade undantagslistor med ett fullständigt regelspråk baserat på Open Policy Agent och Rego. Regler kan matcha användare, host, kommando, OS-grupp (lokal/SSSD/LDAP/AD), veckodag och klockslag. Prioritet: deny &gt; allow &gt; challenge. Ändringar hot-reloadas utan omstart.',
+    'td-desc-opa': 'Regelbaserad åtkomstkontroll med Open Policy Agent — matcha på användare, host, OS-grupp, veckodag och klockslag. Deny &gt; allow &gt; challenge, hot-reload.',
+    'chk-opa': '★ JA',
+  },
+  en: {
+    'page-title': 'sudo-logger — Audit logs that cannot be tampered with',
+    'nav-problem': 'The Problem', 'nav-features': 'Features', 'nav-pricing': 'Pricing',
+    'hero-eyebrow': 'Privileged Access Management for Linux Infrastructure',
+    'hero-title': 'Audit logs that <span>cannot be tampered with</span>',
+    'hero-desc': 'Standard sudo logs on the same host as root — making it meaningless. sudo-logger streams every keystroke in real time to an isolated server over mTLS, and if the network drops, the kernel freezes the session within 800&nbsp;ms. No gaps. No exceptions.',
+    'hero-cta-primary': 'Try Live Demo', 'hero-cta-secondary': 'Enterprise &amp; Pricing',
+    'terminal-line1': '[sudo-logger] Session verified. Establishing encrypted mTLS channel...',
+    'terminal-line2': '[sudo-logger] Streaming to: logserver.corp.local:443 (Session ID: s_8a2d1f)',
+    'prob-eyebrow': 'The hidden problem with standard sudo',
+    'prob-title': 'Root can erase its own tracks',
+    'prob-subtitle': 'Most sudo tools log to the same host as the user running sudo. That means an admin with sufficient privileges can delete, stop, or bypass logging entirely. That\'s not an audit — it\'s an illusion of control.',
+    'prob1-title': 'Logs live on the same disk',
+    'prob1-desc': 'Standard sudo writes to <code>/var/log/auth.log</code> or auditd on the same host. Root can delete them, stop syslog, or overwrite them — before your SIEM has even had a chance to collect them.',
+    'prob1-impact': 'rm -rf /var/log/auth* &amp;&amp; systemctl stop rsyslog',
+    'prob2-title': 'Network drop = audit gap',
+    'prob2-desc': 'If the SSH connection drops mid-session — network fault, timeout, reboot — the process keeps running without logging. You will never know what happened during the outage.',
+    'prob2-impact': 'Session continued 14 min without logging after network failure',
+    'prob3-title': 'Fail-open by design',
+    'prob3-desc': 'Standard tools let sudo run even if the log server is down. Logging is treated as "nice to have" — not a requirement. This opens a window attackers can exploit.',
+    'prob3-impact': 'Log server down 3 min = 47 unlogged sudo commands',
+    'guar-eyebrow': 'Four guarantees no other tool provides',
+    'guar-title': 'Designed to be impossible to bypass',
+    'guar-subtitle': 'Every security property is enforced in the Linux kernel or via the mTLS protocol — not by userspace policies that root can disable.',
+    'guar1-title': 'Fail-closed — always',
+    'guar1-desc': 'If the log server is unreachable when sudo starts, the session is rejected <em>before</em> the command executes. No exception. An attacker cannot wait out the log server.',
+    'guar1-stat': 'No log server = no session. Period.',
+    'guar2-title': 'Kernel freeze on network loss',
+    'guar2-desc': 'If the ACK heartbeat is missing for 800&nbsp;ms, the agent freezes <em>all processes</em> in the session via <code>cgroup.freeze</code>. <code>CLONE_NEWCGROUP</code> isolation prevents even <code>CAP_SYS_ADMIN</code> from migrating to a different cgroup to escape.',
+    'guar2-stat': 'Freeze within ~800 ms · auto-recovery · timeout after 3 min',
+    'guar3-title': '20 kernel hooks — root cannot hide',
+    'guar3-desc': 'The eBPF LSM Sandbox attaches 20 hooks in the kernel (16 LSM + 2 tracepoints). They block writes to protected files, kill signals, the <code>bpf()</code> syscall, <code>AF_NETLINK</code> (firewall tampering), <code>ptrace()</code>, <code>mount()</code>, and CAP_AUDIT_CONTROL — all scoped per session cgroup.',
+    'guar3-stat': 'Kernel-enforced · not bypassable even by root',
+    'guar4-title': 'eBPF ring buffer — every keystroke',
+    'guar4-desc': 'Three eBPF tracepoints capture TTY I/O from <em>all processes</em> in tracked cgroups. <code>su</code>, <code>screen</code>, <code>tmux</code>, and <code>pkexec</code> are captured transparently. If sudo runs without the plugin, the divergence detector creates a visible <code>⚠ no plugin</code> alert.',
+    'guar4-stat': 'Ring buffer · sys_enter_write hook · divergence detection',
+    'feat-eyebrow': 'Modular Architecture &amp; Open-Core',
+    'feat-section-title': 'Complete platform for privileged access',
+    'feat-subtitle': 'From kernel-level hardening to centralized sudoers management and SIEM integration — all in one package.',
+    'feat1-title': 'Sudo I/O Plugin <span class="badge badge-oss">OSS</span>',
+    'feat1-desc': 'Loaded directly by sudo as a native I/O plugin. Captures stdin, stdout, stderr, tty-input, tty-output, environment variables, and executed commands. Streamed in real time — no local buffering. Plugin detects socket drop within 150&nbsp;ms and sends SIGTERM.',
+    'feat2-title': 'eBPF LSM Sandbox <span class="badge badge-ee">Enterprise</span>',
+    'feat2-desc': '20 kernel hooks (16 LSM + 2 tracepoints) enforce a deny-list in the kernel. Blocks writes to protected files, kill signals, <code>bpf()</code> syscall, <code>AF_NETLINK</code>, ptrace, mount, and dangerous capabilities. Scoped per session via cgroup ID and PID tracking propagated atomically at fork.',
+    'feat3-title': 'mTLS + Ed25519 ACK Signing <span class="badge badge-oss">OSS</span>',
+    'feat3-desc': 'Client and server authenticate each other with certificates. Every chunk is confirmed with an Ed25519-signed ACK — the agent refuses to save unacknowledged data. Heartbeat every 400&nbsp;ms; session freezes if ACK is missing for 800&nbsp;ms.',
+    'feat4-title': 'Automatic Secret Redaction <span class="badge badge-oss">OSS</span>',
+    'feat4-desc': 'The agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in the stream <em>before</em> they reach the log server. Custom regex patterns via <code>mask_pattern</code> in agent.conf.',
+    'feat5-title': 'Just-In-Time Approvals <span class="badge badge-ee">Enterprise</span>',
+    'feat5-desc': 'Require justification and approval before the sudo session starts. The session is frozen in the kernel while waiting. Supports Mattermost/Slack with interactive Approve/Deny buttons, time-limited approval windows, and automatic TTL expiry.',
+    'feat6-title': 'Centralized Sudoers Management <span class="badge badge-ee">Enterprise</span>',
+    'feat6-desc': 'Push sudoers rules to all managed hosts from the replay UI. The agent validates and applies atomically via <code>visudo -c</code> and reports sync status in real time. Global template with per-host overrides and syntax highlighting.',
+    'feat7-title': 'S3 &amp; PostgreSQL — Scalable HA <span class="badge badge-ee">Enterprise</span>',
+    'feat7-desc': 'Scale log servers horizontally in Kubernetes. Sessions stored in S3-compatible object storage, metadata in PostgreSQL with built-in leader election. Designed for 500+ concurrent sessions with async batch disk I/O and zero-deadlock architecture.',
+    'feat8-title': 'SIEM Integration <span class="badge badge-oss">OSS</span>',
+    'feat8-desc': 'Forward risk alerts in real time in JSON, CEF (ArcSight/QRadar), or OCSF format via HTTPS or syslog. Configuration hot-reloads every 30 seconds without restart. Prometheus endpoint for Grafana dashboards included.',
+    'feat9-title': 'eBPF Divergence Detection <span class="badge badge-oss">OSS</span>',
+    'feat9-desc': 'Three eBPF tracepoints (TTY I/O, execve, process-exit) compare kernel activity with plugin reports. If sudo runs without the plugin, a <code>⚠ no plugin</code> alert appears in the UI. Also captures pkexec invocations inside sessions.',
+    'feat10-title': 'Central Block Policy <span class="badge badge-ee">Enterprise</span>',
+    'feat10-desc': 'Block specific users or hosts immediately from a central location — no sudoers distribution required. The agent polls the blocklist and rejects new sessions for blocked identities within seconds.',
+    'comp-title': 'Feature Comparison', 'comp-subtitle': 'Choose the right version for your infrastructure. The open core provides robust protection while Enterprise offers advanced centralized management and compliance.',
+    'th-feature': 'Feature', 'th-description': 'Description',
+    'td-desc-1': 'Session rejected if the log server is unreachable — never fail-open.',
+    'td-desc-2': 'Every keystroke streamed immediately, no local buffering. Ed25519 ACK signing.',
+    'td-desc-3': 'cgroup.freeze + CLONE_NEWCGROUP within 800 ms. Cannot escape via fg or CAP_SYS_ADMIN.',
+    'td-desc-4': 'Ring buffer captures TTY I/O, execve, pkexec — alerts if sudo runs without plugin.',
+    'td-desc-5': 'AWS keys, JWT, Bearer tokens masked in stream before reaching server.',
+    'td-desc-6': 'Risk alerts forwarded in real time. Prometheus metrics included.',
+    'td-desc-7': '20 kernel hooks block file writes, kill, bpf(), netlink, ptrace, mount — not bypassable by root.',
+    'td-desc-8': 'Manual approval via Slack/Mattermost buttons with time-limited session windows.',
+    'td-desc-9': 'Atomic push and validation of sudoers rules to the entire fleet from the web UI.',
+    'td-desc-10': 'Horizontally scalable storage with leader election. 500+ concurrent sessions.',
+    'td-desc-11': 'OIDC/SAML and role-based access control to the replay UI and audit logs.',
+    'chk-yes':'✔ YES','chk-yes2':'✔ YES','chk-yes3':'✔ YES','chk-yes4':'✔ YES','chk-yes5':'✔ YES','chk-yes6':'✔ YES','chk-yes7':'✔ YES','chk-yes8':'✔ YES','chk-yes9':'✔ YES','chk-yes10':'✔ YES','chk-yes11':'✔ YES','chk-yes12':'✔ YES','chk-yes13':'★ YES',
+    'chk-kernel':'★ YES (Kernel-enforced)','chk-jit':'★ YES','chk-realtime':'★ YES (Real-time)','chk-s3':'★ YES',
+    'arch-eyebrow': 'How it works', 'arch-title': 'Simple Deployment, Strong Security',
+    'arch-subtitle': 'A lightweight plugin on each host sends encrypted session data to a central log server via mTLS. Nothing needs to be installed on clients — sudo integration is transparent via <code>/etc/sudo.conf</code>.',
+    'svg-client-host':'CLIENT HOST','svg-sudo-process':'Sudo Process','svg-local-agent':'Local Agent','svg-sandbox-ee':'Sandbox (EE)','svg-log-server':'Log Server','svg-local-storage':'Local Storage (OSS)','svg-dist-ha':'Distributed &amp; HA','svg-replay':'Replay Server (UI)',
+    'sim-eyebrow':'See it in action','sim-title':'Stop attacks — before they succeed',
+    'sim-subtitle':'Click below to simulate common attack scenarios. The kernel hooks run in ring 0 — root cannot replace, disable, or bypass them.',
+    'sim1-heading':'1. eBPF LSM Process Sandbox',
+    'sim1-desc':'Even root inside a sudo session cannot tamper with the system. LSM hooks in the kernel reject the syscall with <code>EPERM</code> based on session cgroup and PID tracking — propagated atomically at every fork.',
+    'sim1-btn1':'Delete sudoers: <code>rm /etc/sudoers</code>',
+    'sim1-btn2':'Write to shadow: <code>echo x &gt; /etc/shadow</code>',
+    'sim1-btn3':'Kill auditd: <code>kill -SIGKILL auditd</code>',
+    'sim-execute':'☠ Execute','sim-execute2':'☠ Execute','sim-execute3':'☠ Execute',
+    'sim1-placeholder':'// Click an attack above...',
+    'sim2-heading':'2. Just-In-Time Approval',
+    'sim2-desc':'Administrators require justification in the terminal. The session is frozen in the kernel via <code>cgroup.freeze</code> and waits until an admin approves in the web UI — Slack/Mattermost buttons supported.',
+    'sim2-btn1':'Step 1: Start privileged session','sim2-btn2':'Step 2: [Admin UI] Approve Request',
+    'sim2-start':'⚡ Start','sim2-approve':'✔ Approve',
+    'sim2-placeholder':'// Click "Start" to begin the JIT flow...',
+    'pricing-eyebrow':'Licenses &amp; Pricing','pricing-title':'Choose the right version',
+    'pricing-subtitle':'The open source core is free to use for everyone. Enterprise add-ons are licensed per monitored host with full support and SLA.',
+    'oss-price':'Free','oss-sub':'No time limit · Self-hosted',
+    'oss-item1':'Terminal recording &amp; session replay','oss-item2':'Fail-closed · mTLS · Ed25519 ACKs',
+    'oss-item3':'Kernel freeze on network loss','oss-item4':'Automatic secret redaction',
+    'oss-item5':'SIEM (JSON/CEF/OCSF) + Prometheus','oss-item6':'eBPF divergence detection',
+    'oss-item7':'— JIT Approvals','oss-item8':'— eBPF LSM Process Sandbox','oss-item9':'— Scalable HA storage',
+    'oss-cta':'Get started on GitHub →',
+    'ee-price':'Contact us','ee-sub':'Priced per monitored host · SLA included',
+    'ee-item1':'Everything in Open Source','ee-item2':'eBPF LSM Process Sandbox (20 kernel hooks)',
+    'ee-item3':'JIT Approvals with Session TTL','ee-item4':'Centralized Sudoers Management',
+    'ee-item5':'S3 &amp; PostgreSQL — scalable HA (500+ sessions)',
+    'ee-item6':'Central user &amp; host blocking','ee-item7':'MFA / SSO &amp; RBAC','ee-item8':'Priority support &amp; SLA',
+    'ee-cta':'Contact us →',
+    'pricing-help':'Need help choosing? <a href="mailto:info@unixkonsult.se" style="color:var(--green);text-decoration:none;">Get in touch</a> and we\'ll tell you more.',
+    'demo-eyebrow':'Try it live right now',
+    'demo-title':'Session Replay — <span style="color:var(--green);">Live Demo</span>',
+    'demo-subtitle':'Real recordings against an isolated demo server with authentic risk rules. Click a session to replay the terminal recording and see risk scoring in action.',
+    'demo-badge1':'Live — generated every 15 minutes','demo-badge2':'Isolated demo server — no real sessions',
+    'demo-badge3':'Click a red/orange session to see risk alerts','demo-fullscreen':'Full screen ↗',
+    'footer-copy':'Open source under AGPLv3. Commercial licenses under a proprietary EULA.',
+    'footer-problem':'The Problem','footer-features':'Features','footer-comparison':'Comparison',
+    'footer-pricing':'Pricing','footer-contact':'Contact',
+    'footer-status':'System status: Live demo: <span style="color:var(--green)">●</span> Online · Last updated: 2026-06-07',
+    'sim-denied':'Operation not permitted (Permission denied)','sim-blocked-label':'Action blocked!',
+    'sim-rule':'Rule Triggered:','sim-target':'Target Object:','sim-timestamp':'Timestamp:','sim-siem':'(Structured SIEM alert sent)',
+    'jit-required':'[JIT APPROVAL REQUIRED] Privileged access requires approval.',
+    'jit-reason':'Enter justification (e.g. ticket number):','jit-example':'alice: Debugging database connection (Ticket #9921)',
+    'jit-waiting':'[WAITING] Session frozen via cgroup.freeze. Request sent to Security team...',
+    'jit-sent':'Sent: 2026-06-07 00:00 | Timeout: 10 minutes',
+    'jit-approved':'[APPROVED] Administrator (sec-admin-01) has approved the session!',
+    'jit-unfrozen':'Session unfrozen (Session TTL: 60 minutes remaining)','sim2-restart':'Start new JIT request',
+    'feat-opa-title': 'OPA JIT Policy Engine <span class="badge badge-ee">Enterprise</span>',
+    'feat-opa-desc': 'Replace hardcoded exception lists with a full policy language powered by Open Policy Agent and Rego. Rules can match on user, host, command, OS group (local/SSSD/LDAP/AD), weekday, and time of day. Priority: deny &gt; allow &gt; challenge. Changes hot-reload without restart.',
+    'td-desc-opa': 'Rule-based access control with Open Policy Agent — match on user, host, OS group, weekday, and time of day. Deny &gt; allow &gt; challenge, hot-reload.',
+    'chk-opa': '★ YES',
+  }
+};
+
+let currentLang = localStorage.getItem('sudo-logger-lang') || 'sv';
+
+function setLanguage(lang) {
+  if (!T[lang]) return;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (T[lang][key] !== undefined) el.innerHTML = T[lang][key];
+  });
+  document.title = T[lang]['page-title'];
+  document.documentElement.lang = lang;
+  localStorage.setItem('sudo-logger-lang', lang);
+  document.querySelectorAll('.lang-btn').forEach(btn => btn.classList.toggle('lang-btn-active', btn.dataset.lang === lang));
+  currentLang = lang;
+}
+setLanguage(currentLang);
+
+/* Hero animation */
+const typingLinesSv = [
+  {text:"cat /etc/shadow", wait:1000, output:"cat: /etc/shadow: Åtkomst nekas\n[eBPF LSM] FILE_OPEN blockerad — skyddad inode"},
+  {text:"systemctl stop auditd", wait:900, output:"[eBPF LSM] PROCESS_KILL blockerad — auditd är skyddad process"},
+  {text:"rm /var/log/sudoreplay/alice/*", wait:1100, output:"rm: /var/log/sudoreplay/alice/: Operationen tillåts ej\n[eBPF LSM] INODE_UNLINK blockerad — skyddad loggkatalog"},
+];
+const typingLinesEn = [
+  {text:"cat /etc/shadow", wait:1000, output:"cat: /etc/shadow: Permission denied\n[eBPF LSM] FILE_OPEN blocked — protected inode"},
+  {text:"systemctl stop auditd", wait:900, output:"[eBPF LSM] PROCESS_KILL blocked — auditd is a protected process"},
+  {text:"rm /var/log/sudoreplay/alice/*", wait:1100, output:"rm: /var/log/sudoreplay/alice/: Operation not permitted\n[eBPF LSM] INODE_UNLINK blocked — protected log directory"},
+];
+
+let currentLineIndex=0, charIndex=0;
+const typingSpeed=55;
+const typingElem=document.getElementById("hero-typing-text");
+const outputElem=document.getElementById("hero-output-text");
+
+function typeHeroTerminal() {
+  const lines = currentLang==='en' ? typingLinesEn : typingLinesSv;
+  if (currentLineIndex >= lines.length) {
+    setTimeout(()=>{ typingElem.textContent=""; outputElem.textContent=""; currentLineIndex=0; charIndex=0; typeHeroTerminal(); }, 4000);
+    return;
+  }
+  const cur = lines[currentLineIndex];
+  if (charIndex < cur.text.length) {
+    typingElem.textContent += cur.text.charAt(charIndex++);
+    setTimeout(typeHeroTerminal, typingSpeed);
+  } else {
+    setTimeout(()=>{
+      const d=document.createElement("div"); d.className="t-output"; d.style.whiteSpace="pre-line"; d.textContent=cur.output; outputElem.appendChild(d);
+      setTimeout(()=>{
+        const pc=document.createElement("div"); pc.className="t-prompt-line";
+        const ps=document.createElement("span"); ps.className="t-prompt"; ps.textContent="root@prod-node-01:~# "; pc.appendChild(ps);
+        const cs=document.createElement("span"); cs.id="hero-typing-text-"+currentLineIndex; cs.className="t-cmd"; pc.appendChild(cs);
+        outputElem.appendChild(pc);
+        currentLineIndex++; charIndex=0;
+        setTimeout(()=>{
+          const nt=document.getElementById("hero-typing-text-"+(currentLineIndex-1));
+          if(nt){const bc=document.querySelector(".t-cursor-blink"); nt.parentNode.appendChild(bc); window.typingElemRef=nt;}
+          typeHeroTerminal();
+        }, 700);
+      }, 400);
+    }, cur.wait);
+  }
+}
+window.typingElemRef=typingElem;
+Object.defineProperty(window,"typingElem",{get:()=>window.typingElemRef,set:v=>{window.typingElemRef=v;}});
+setTimeout(typeHeroTerminal, 1000);
+
+/* Sandbox simulator */
+function runSandboxSim(command, eventType, path) {
+  const term=document.getElementById("sandbox-terminal"), L=T[currentLang];
+  term.innerHTML=`<div><span style="color:var(--green)">root@corp-prod-db:~#</span> <span style="color:var(--white);font-weight:bold;">${command}</span></div>`;
+  setTimeout(()=>{
+    term.innerHTML+=`<div style="color:var(--red);margin-top:8px;font-weight:bold;">bash: ${command.split(' ')[0]}: ${L['sim-denied']}</div>`;
+    term.innerHTML+=`<div style="color:var(--text-dim);margin-top:12px;border-left:2px solid var(--red);padding-left:10px;">[eBPF LSM ALERT] <span style="color:var(--white)">${L['sim-blocked-label']}</span><br><span>${L['sim-rule']}</span> <span style="color:var(--amber)">sandbox.yaml — block_${eventType.toLowerCase()}</span><br><span>${L['sim-target']}</span> <span style="color:var(--white)">${path}</span><br>Host: corp-prod-db · Process: bash (PID 28911)<br><span>${L['sim-timestamp']}</span> 2026-06-07 00:00 ${L['sim-siem']}</div>`;
+  }, 400);
+}
+
+/* JIT simulator */
+function startJitSim() {
+  const term=document.getElementById("jit-terminal"), L=T[currentLang];
+  const rb=document.getElementById("jit-request-btn"), ab=document.getElementById("jit-approve-btn");
+  term.innerHTML=`<div><span style="color:var(--green)">alice@gateway-node:~$</span> <span style="color:var(--white);font-weight:bold;">sudo -i</span></div>`;
+  setTimeout(()=>{
+    term.innerHTML+=`<div style="color:var(--amber);margin-top:6px;">${L['jit-required']}</div>`;
+    term.innerHTML+=`<div style="color:var(--white);">${L['jit-reason']}</div>`;
+    term.innerHTML+=`<div><span style="color:var(--text-dim);font-style:italic;">${L['jit-example']}</span></div>`;
+    term.innerHTML+=`<div style="color:var(--amber);margin-top:8px;">${L['jit-waiting']}</div>`;
+    term.innerHTML+=`<div style="color:var(--text-dim);font-size:11px;">${L['jit-sent']}</div>`;
+    rb.style.display="none"; ab.style.display="flex";
+  }, 600);
+}
+
+function approveJit() {
+  const term=document.getElementById("jit-terminal"), L=T[currentLang];
+  const rb=document.getElementById("jit-request-btn"), ab=document.getElementById("jit-approve-btn");
+  term.innerHTML+=`<div style="color:var(--green);margin-top:10px;font-weight:bold;">${L['jit-approved']}</div>`;
+  term.innerHTML+=`<div style="color:var(--green);">${L['jit-unfrozen']}</div>`;
+  setTimeout(()=>{
+    term.innerHTML+=`<div style="margin-top:8px;"><span style="color:var(--green)">root@gateway-node:~#</span> <span class="t-cursor-blink"></span></div>`;
+    ab.style.display="none"; rb.style.display="flex";
+    rb.innerHTML=`<span>${L['sim2-restart']}</span><span>${L['sim2-start']}</span>`;
+  }, 500);
+}
+</script>
+</body>
+</html>

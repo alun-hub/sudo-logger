@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed IANA timezone data so TZ env var works in minimal containers
 
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
@@ -504,8 +505,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			if whitelisted, _ := srv.sessionStore.IsWhitelisted(context.Background(), start.User, start.Host); whitelisted {
 				log.Printf("[%s] whitelist: user=%s host=%s — bypassing JIT approval", start.SessionID, start.User, start.Host)
 			} else {
-				result = srv.approvalMgr.Check(start.User, start.Host, start.Command,
-					start.Justification)
+				result = srv.approvalMgr.Check(start.User, start.Host, start.RunasUser, start.Command,
+					start.Groups, start.Justification)
 				switch result.Result {
 				case ApprovalResultNeedReason:
 					// Check if there's already a pending request for this user@host
@@ -547,6 +548,14 @@ func (srv *server) handleConn(conn *tls.Conn) {
 					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
 					netWriteMu.Unlock()
 					log.Printf("[%s] approval: user=%s host=%s — pending request %s created", start.SessionID, start.User, start.Host, result.RequestID)
+					return
+				case ApprovalResultDeny:
+					log.Printf("SECURITY: [%s] user=%s host=%s denied by OPA policy",
+						start.SessionID, start.User, start.Host)
+					netWriteMu.Lock()
+					_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(
+						"sudo-logger: access denied by policy."))
+					netWriteMu.Unlock()
 					return
 				case ApprovalResultAllow:
 					// Approved or exempt — continue normally.
@@ -591,8 +600,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			start.Justification = resp.Justification
 
 			// Re-run the check with the newly provided justification.
-			result := srv.approvalMgr.Check(start.User, start.Host, start.Command,
-				start.Justification)
+			result := srv.approvalMgr.Check(start.User, start.Host, start.RunasUser, start.Command,
+				start.Groups, start.Justification)
 			switch result.Result {
 			case ApprovalResultNeedReason, ApprovalResultChallenge:
 				// They already had their chance.
@@ -607,6 +616,13 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte(msg))
 				netWriteMu.Unlock()
 				log.Printf("[%s] approval: user=%s host=%s — pending request %s created (via challenge)", start.SessionID, start.User, start.Host, result.RequestID)
+				return
+			case ApprovalResultDeny:
+				log.Printf("SECURITY: [%s] user=%s host=%s denied by OPA policy (post-challenge)",
+					start.SessionID, start.User, start.Host)
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionDenied, []byte("sudo-logger: access denied by policy."))
+				netWriteMu.Unlock()
 				return
 			case ApprovalResultAllow:
 				// Approved or exempt — continue normally.

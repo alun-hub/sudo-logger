@@ -660,6 +660,68 @@ In distributed mode, settings are managed via the **Settings -> JIT Approval** t
 
 ---
 
+### OPA JIT Policy
+
+The OPA (Open Policy Agent) policy engine replaces the simple exempt-list in `approval-policy.yaml` with a structured rule table evaluated by an embedded Rego module. Configure it via **Settings → OPA Policy** in the Replay UI.
+
+#### Decision priority
+
+Rules are not evaluated in order — priority is fixed:
+
+```
+deny  >  allow  >  default action (challenge or allow)
+```
+
+A single deny rule vetoes all allow rules. If no rule matches, the configured default action applies.
+
+#### Rule fields
+
+| Field | Format | Description |
+|-------|--------|-------------|
+| Users | glob / `@group` | Username that ran sudo (`*` = all) |
+| Hosts | glob / `@group` | Hostname of the monitored machine |
+| Commands | glob | Full command path (e.g. `/bin/bash`, `/usr/bin/apt*`) |
+| Runas | glob / `@group` | Target user sudo runs as (usually `root`) |
+| Sys groups | comma-sep group names (AND) | User must belong to **all** listed OS groups — resolved via NSS (local, SSSD, LDAP, Active Directory) |
+| Weekdays | subset of Mon–Sun | Restrict to specific days of the week (server clock) |
+| Hour from / to | 0–23 (-1 = any) | Time window; overnight ranges (e.g. 22–06) are supported |
+| Action | allow / challenge / deny | Outcome when all conditions match |
+
+#### Local policy groups
+
+Define named sets of users, hosts, or runas targets under the **Groups** sub-tab and reference them with `@groupname` in rule fields. This avoids repeating long member lists across multiple rules.
+
+```
+Group:   sre-team
+Members: alice, bob, sre-*
+```
+
+Use in rules as: `Users = @sre-team`
+
+> **Sys groups vs local groups:** Sys groups are OS-level groups resolved at session time by the agent (LDAP, AD, `/etc/group`). Local policy groups are Rego-level aliases defined in the policy itself.
+
+#### Example policy
+
+| Comment | Users | Hosts | Commands | Runas | Sys groups | Weekdays | Time | Action |
+|---------|-------|-------|----------|-------|------------|----------|------|--------|
+| SRE on-call | `@sre-team` | `*` | `*` | `root` | | Mon–Fri | 20:00–06:00 | allow |
+| All others | `*` | `*` | `*` | `*` | | | | challenge |
+
+Default action: **challenge**
+
+#### API
+
+The policy is stored under the key `jit-policy` in the server store and exposed at:
+
+```
+GET  /api/jit-policy   → { policy, rego }
+PUT  /api/jit-policy   ← policy JSON; validates and hot-reloads OPA
+```
+
+Changes take effect immediately on the next sudo invocation without a server restart.
+
+---
+
 ### Distributed storage (S3 + PostgreSQL)
 
 Pass `--storage=distributed` plus the flags below to both `sudo-logserver` and

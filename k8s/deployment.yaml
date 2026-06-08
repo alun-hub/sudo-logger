@@ -52,6 +52,10 @@ spec:
             # - -db-url=$(DB_URL)
             # - -buffer-dir=/var/lib/sudo-logger/buffer
 
+          env:
+            - name: TZ
+              value: Europe/Stockholm
+
           ports:
             - name: tls
               containerPort: 9876

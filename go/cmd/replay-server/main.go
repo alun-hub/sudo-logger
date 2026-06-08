@@ -43,6 +43,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embed IANA timezone data so TZ env var works in minimal containers
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -846,6 +847,9 @@ func main() {
 		})
 		mux.HandleFunc("/api/approval-config", func(w http.ResponseWriter, r *http.Request) {
 			proxyToLogServer(w, r, adminBase+"/api/approval-config", adminToken, viewerFromContext(r))
+		})
+		mux.HandleFunc("/api/jit-policy", func(w http.ResponseWriter, r *http.Request) {
+			proxyToLogServer(w, r, adminBase+"/api/jit-policy", adminToken, viewerFromContext(r))
 		})
 	}
 
