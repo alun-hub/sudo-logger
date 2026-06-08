@@ -3465,7 +3465,7 @@ function renderAnomalyTable(anomalies) {
   });
 
   // Update header arrows
-  document.querySelectorAll('#tab-anomalies th.sortable').forEach(th => {
+  document.querySelectorAll('#rsub-anomalies th.sortable').forEach(th => {
     th.classList.remove('sort-asc', 'sort-desc');
     if (th.dataset.col === anomalySort.col) th.classList.add('sort-' + anomalySort.order);
   });
@@ -3515,7 +3515,7 @@ function renderAnomalyTable(anomalies) {
 }
 
 // Anomaly column sort
-document.querySelector('#tab-anomalies thead').addEventListener('click', e => {
+document.querySelector('#rsub-anomalies thead').addEventListener('click', e => {
   const th = e.target.closest('th.sortable');
   if (!th) return;
   const col = th.dataset.col;
