@@ -5194,11 +5194,13 @@ fetchSessions();
 
 // ── Current user ──────────────────────────────────────────────────────────────
 
+let currentUserIsAdmin = false;
+
 async function fetchCurrentUser() {
   try {
     const res = await fetch('/api/me');
     if (!res.ok) return;
-    const { user, logoutUrl } = await res.json();
+    const { user, logoutUrl, role } = await res.json();
     if (!user) return;
     document.getElementById('user-name').textContent = user;
     const logoutBtn = document.getElementById('logout-btn');
@@ -5208,18 +5210,23 @@ async function fetchCurrentUser() {
       logoutBtn.remove();
     }
     document.getElementById('user-chip').removeAttribute('hidden');
+    currentUserIsAdmin = (role === 'admin');
+    if (!currentUserIsAdmin) {
+      // Hide admin-only settings tab from viewer-role users.
+      document.querySelector('.stab-btn[data-stab="approval"]')?.remove();
+    }
   } catch (_) { /* not fatal */ }
 }
-fetchCurrentUser();
 
 // ── Approvals ──────────────────────────────────────────────────────────────────
 
 let approvalsAvailable = false;
 
 async function checkApprovalsAvailable() {
+  if (!currentUserIsAdmin) return;
   try {
     const r = await fetch('/api/approvals');
-    if (r.status !== 404) {
+    if (r.ok) {
       approvalsAvailable = true;
       document.getElementById('approvals-topbar-btn').style.display = '';
       fetchApprovals();
@@ -5227,7 +5234,8 @@ async function checkApprovalsAvailable() {
     }
   } catch (_) {}
 }
-checkApprovalsAvailable();
+// Defer until fetchCurrentUser() has resolved the role.
+fetchCurrentUser().then(checkApprovalsAvailable);
 
 async function fetchApprovals() {
   if (!approvalsAvailable) return;

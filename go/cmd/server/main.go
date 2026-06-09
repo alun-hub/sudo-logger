@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -29,6 +30,7 @@ import (
 	"time"
 	_ "time/tzdata" // embed IANA timezone data so TZ env var works in minimal containers
 
+	"sudo-logger/internal/config"
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
 	"sudo-logger/internal/store"
@@ -77,6 +79,8 @@ var (
 		"JIT approval policy file (reloaded every 30 s; feature disabled when file absent)")
 	flagApprovalToken = flag.String("approval-token", "",
 		"Shared secret for the approval REST API (Bearer token); required to enable /api/approvals endpoints")
+	flagApprovalTokenFile = flag.String("approval-token-file", "",
+		"File containing the approval REST API bearer token (alternative to -approval-token; env SUDO_LOGGER_APPROVAL_TOKEN also accepted)")
 	flagSandbox = flag.String("sandbox", "/etc/sudo-logger/sandbox.yaml",
 		"Process sandbox config file (served to agents)")
 	flagSandboxTemplates = flag.String("sandbox-templates", "/etc/sudo-logger/sandbox-templates.json",
@@ -196,7 +200,49 @@ func main() {
 		healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintln(w, "ok")
 		})
-		srv.approvalMgr.RegisterApprovalAPI(healthMux, *flagApprovalToken)
+		approvalToken, err := config.ResolveSecret(*flagApprovalToken, *flagApprovalTokenFile, "SUDO_LOGGER_APPROVAL_TOKEN")
+		if err != nil {
+			log.Fatalf("approval token: %v", err)
+		}
+		srv.approvalMgr.RegisterApprovalAPI(healthMux, approvalToken)
+
+		// DELETE /api/sessions/<tsid> — permanent GDPR/audit deletion.
+		// Only registered when an approval token is configured; no token = endpoint disabled.
+		if approvalToken == "" {
+			log.Printf("approval token not configured; DELETE /api/sessions/ endpoint disabled")
+		} else {
+			wantAuth := []byte("Bearer " + approvalToken)
+			healthMux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+					return
+				}
+				if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), wantAuth) != 1 {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				tsid := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+				if tsid == "" {
+					http.Error(w, "missing tsid", http.StatusBadRequest)
+					return
+				}
+				var body struct {
+					Reason string `json:"reason"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Reason) == "" {
+					http.Error(w, "body must be JSON with non-empty \"reason\"", http.StatusBadRequest)
+					return
+				}
+				if err := srv.sessionStore.DeleteSession(r.Context(), tsid, body.Reason, "api"); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				log.Printf(`{"time":%q,"event":"session_deleted","tsid":%q,"reason":%q,"deleted_by":"api"}`,
+					time.Now().UTC().Format(time.RFC3339), tsid, body.Reason)
+				w.WriteHeader(http.StatusNoContent)
+			})
+		}
+
 		healthMux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 			srv.mu.Lock()
 			active := len(srv.sessions)

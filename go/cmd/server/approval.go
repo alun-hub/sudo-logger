@@ -22,6 +22,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -118,10 +119,11 @@ type ApprovalManager struct {
 	policyPath string
 	backend    store.ApprovalStore
 
-	mu         sync.RWMutex
-	policy     approvalPolicy
-	opaEngine  *policy.Engine // nil if OPA policy not configured
-	opaPolicy  policy.Policy  // last successfully loaded OPA policy
+	mu             sync.RWMutex
+	policy         approvalPolicy
+	lastPolicyHash string // SHA256 hex of last successfully loaded policy bytes
+	opaEngine      *policy.Engine // nil if OPA policy not configured
+	opaPolicy      policy.Policy  // last successfully loaded OPA policy
 }
 
 func newApprovalManager(policyPath string, backend store.ApprovalStore) *ApprovalManager {
@@ -171,16 +173,24 @@ func (m *ApprovalManager) loadPolicy() error {
 		source = m.policyPath
 	}
 
+	newHash := fmt.Sprintf("%x", sha256.Sum256(data))
+
 	var p approvalPolicy
 	if err := yaml.Unmarshal(data, &p); err != nil {
 		return fmt.Errorf("parse approval policy: %w", err)
 	}
 	p.setDefaults()
 	m.mu.Lock()
+	changed := newHash != m.lastPolicyHash
 	m.policy = p
+	if changed {
+		m.lastPolicyHash = newHash
+	}
 	m.mu.Unlock()
-	log.Printf("approval: loaded policy from %s (enabled=%v, exempt=%d)",
-		source, p.Enabled, len(p.Exempt))
+	if changed {
+		log.Printf(`{"time":%q,"event":"config_reload","config":"approval-policy.yaml","sha256":%q,"source":%q}`,
+			time.Now().UTC().Format(time.RFC3339), newHash, source)
+	}
 
 	m.loadOPAPolicy(ctx)
 	return nil
@@ -655,9 +665,10 @@ func (m *ApprovalManager) RegisterApprovalAPI(mux *http.ServeMux, token string) 
 			"Set -approval-token to enable the UI approval panel.")
 		return
 	}
+	wantAuth := []byte("Bearer " + token)
 	auth := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("Authorization") != "Bearer "+token {
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), wantAuth) != 1 {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

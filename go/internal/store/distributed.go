@@ -140,7 +140,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	9 — added sudo_approval_requests and sudo_approval_windows for JIT approval
 //	10 — added sudo_whitelisted_users for JIT approval bypass
 //	11 — added sudo_sudoers_snapshots for sudoers state tracking
-const currentSchemaVersion = 11
+//	12 — added sudo_deletion_log for GDPR/audit deletion records
+const currentSchemaVersion = 12
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -298,6 +299,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS sudo_sudoers_snapshots_host_sha256
     ON sudo_sudoers_snapshots (host, sha256);
 CREATE INDEX IF NOT EXISTS sudo_sudoers_snapshots_host_ts
     ON sudo_sudoers_snapshots (host, uploaded_at DESC);
+
+-- migration v12: deletion audit log for GDPR/right-to-erasure requests
+CREATE TABLE IF NOT EXISTS sudo_deletion_log (
+    id         BIGSERIAL PRIMARY KEY,
+    tsid       TEXT NOT NULL,
+    reason     TEXT NOT NULL,
+    deleted_by TEXT NOT NULL,
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS sudo_deletion_log_deleted_at
+    ON sudo_deletion_log (deleted_at DESC);
 `); err != nil {
 		return err
 	}
@@ -681,6 +693,34 @@ func (d *DistributedStore) deleteS3Session(ctx context.Context, tsid string) {
 			log.Printf("store/distributed: cleanup: delete objects for %s: %v", tsid, err)
 		}
 	}
+}
+
+// DeleteSession implements SessionStore.
+// Removes the S3 objects and database row for tsid, then records an audit
+// entry in sudo_deletion_log. Returns an error if the session is still in
+// progress or does not exist.
+func (d *DistributedStore) DeleteSession(ctx context.Context, tsid, reason, deletedBy string) error {
+	var inProgress bool
+	err := d.db.QueryRow(ctx, `SELECT in_progress FROM sudo_sessions WHERE tsid = $1`, tsid).Scan(&inProgress)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	if inProgress {
+		return fmt.Errorf("session %q is still in progress", tsid)
+	}
+
+	d.deleteS3Session(ctx, tsid)
+
+	if _, err := d.db.Exec(ctx, `DELETE FROM sudo_sessions WHERE tsid = $1`, tsid); err != nil {
+		return fmt.Errorf("delete session row: %w", err)
+	}
+	if _, err := d.db.Exec(ctx,
+		`INSERT INTO sudo_deletion_log (tsid, reason, deleted_by) VALUES ($1, $2, $3)`,
+		tsid, reason, deletedBy,
+	); err != nil {
+		log.Printf("store/distributed: deletion audit write for %s: %v", tsid, err)
+	}
+	return nil
 }
 
 // WatchSessions implements SessionStore.

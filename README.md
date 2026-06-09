@@ -27,6 +27,8 @@ the user's terminal is frozen — preventing any unlogged sudo activity.
   - [Distributed storage (S3 + PostgreSQL)](#distributed-storage-s3--postgresql)
 - [Web replay interface](#web-replay-interface)
   - [Authentication](#authentication)
+  - [Role-based access control (RBAC)](#role-based-access-control-rbac)
+- [GDPR session deletion](#gdpr-session-deletion)
 - [Sudoers management](#sudoers-management)
 - [Viewing and replaying sessions](#viewing-and-replaying-sessions)
 - [Developer guide](#developer-guide)
@@ -247,6 +249,9 @@ migrate-sessions \
 | **Process sandbox (optional)** | 18 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Also blocks `AF_NETLINK` (firewall tampering), `mount()` (masking audit dirs), and `ptrace()` (code injection into external processes). Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Active by default on Fedora 38+; older or non-Fedora kernels may need `lsm=bpf`. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
+| **Approval token not exposed in process list** | The approval token can be loaded from a file (`-approval-token-file`) or environment variable (`SUDO_LOGGER_APPROVAL_TOKEN`) rather than passed as a CLI flag, preventing it from appearing in `ps aux` or shell history. |
+| **Constant-time token comparison** | The approval API and GDPR deletion endpoint compare Bearer tokens using `crypto/subtle.ConstantTimeCompare` to prevent timing-based token enumeration attacks. |
+| **RBAC enforced server-side** | Viewer vs admin role enforcement happens in HTTP middleware on every request, not only in the browser UI — direct API calls without the admin role are rejected with `403 Forbidden`. |
 
 ---
 
@@ -255,6 +260,8 @@ migrate-sessions \
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
 - **Centralised sudoers management**: push sudoers rules to all managed hosts from the replay UI; agents validate and apply atomically via `visudo -c` and report sync status in real time. Global default template with per-host overrides; visual card editor and raw editor with syntax highlighting.
 - **Just-In-Time (JIT) sudo approval**: require human justification and admin approval before sudo proceeds. Supports asynchronous requests with Mattermost/Slack notifications, interactive Approve/Deny buttons, and time-limited approval windows.
+- **Role-based access control (RBAC)**: `viewer` role sees only their own sessions; `admin` role sees all sessions, access logs, and can perform approval and deletion actions. Roles are assigned via `--admin-users` at startup.
+- **GDPR session deletion API**: permanently removes a session recording on request. Deletion requires a `reason`, is logged with a timestamp and deleted-by field (local: `.deletion-log.jsonl`; distributed: `sudo_deletion_log` table), and is forwarded to the configured SIEM as a `session_deleted` event.
 - **Automatic secret redaction**: the agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `agent.conf`.
 - Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
 - Incomplete session detection — replay UI flags sessions where the agent was killed mid-recording
@@ -582,7 +589,17 @@ ExecStart=/usr/bin/sudo-logserver \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-strict-cert-host` | off | Reject sessions where the `host` field in SESSION_START does not match the CN or DNS SANs of the client's TLS certificate. Recommended when each machine has its own certificate; leave off for shared-certificate setups. |
-| `-health-listen addr` | *(disabled)* | Start a plain HTTP listener on `addr` (e.g. `:9877`) that serves `/healthz` (always 200) and `/metrics` (Prometheus text format). Disabled by default; enable in Kubernetes to replace the TCP socket liveness probe. |
+| `-health-listen addr` | *(disabled)* | Start a plain HTTP listener on `addr` (e.g. `:9877`) that serves `/healthz` (always 200), `/metrics` (Prometheus text format), and `DELETE /api/sessions/<tsid>` (GDPR deletion). Disabled by default; enable in Kubernetes to replace the TCP socket liveness probe. |
+| `-approval-token secret` | — | Bearer token for the JIT approval API and GDPR deletion endpoint. Prefer `-approval-token-file` or the env var to avoid the value appearing in `ps aux`. |
+| `-approval-token-file file` | — | Path to a file containing the approval token (newline stripped). Evaluated at startup. |
+
+**Secret resolution priority** (same applies to both the server approval token and the replay-server admin token):
+
+1. CLI flag value (`-approval-token`)
+2. Environment variable `SUDO_LOGGER_APPROVAL_TOKEN`
+3. File path (`-approval-token-file`)
+
+Using a file or environment variable keeps the secret out of `ps aux` and shell history.
 
 ### Secret redaction
 
@@ -1105,6 +1122,7 @@ xdg-open http://localhost:8080
   with syntax highlighting is also available. A real-time diff compares the staged
   config against the latest snapshot from the agent and shows a sync badge:
   ✓ in sync · ⏳ pending · ⚠ agent offline · ✖ apply error.
+- **Role-based access control (RBAC)** — `viewer` users see only their own sessions and can replay them; `admin` users see all sessions and have access to the access log, approval actions, and GDPR deletion. Assign admins via `--admin-users` at startup. The current user's role is reflected in the `/api/me` response and used to show or hide admin-only UI tabs.
 - **Auto-refresh** — session list polls for new sessions every 15 seconds and
   immediately on tab focus; no manual browser refresh needed.
 - **Prometheus metrics** — `/metrics` endpoint with session counts, risk level
@@ -1258,10 +1276,42 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 | `-tls-key file` | — | PEM TLS private key |
 | `-htpasswd file` | — | htpasswd file for Basic Auth (bcrypt only; reload with `SIGHUP`) |
 | `-trusted-user-header hdr` | — | Log username from this request header (e.g. `X-Forwarded-User`) |
+| `-admin-users list` | — | Comma-separated list of usernames that receive the `admin` role (e.g. `alice,bob`). All other authenticated users receive the `viewer` role. |
 | `-listen addr` | `:8080` | Listen address |
 | `-logdir dir` | `/var/log/sudoreplay` | Session log directory |
 | `-rules file` | `/etc/sudo-logger/risk-rules.yaml` | Risk scoring rules |
 | `-siem-config file` | `/etc/sudo-logger/siem.yaml` | SIEM forwarding config |
+| `-logserver-admin-token secret` | — | Bearer token used when the replay server proxies admin requests (GDPR deletion) to the log server. Prefer `-logserver-admin-token-file` or `SUDO_LOGGER_ADMIN_TOKEN` env var. |
+| `-logserver-admin-token-file file` | — | Path to a file containing the log server admin token (newline stripped). |
+
+---
+
+### Role-based access control (RBAC)
+
+The replay server enforces two roles on every authenticated request:
+
+| Role | Session list | Session replay | Access log | Approvals | GDPR deletion |
+|------|-------------|---------------|-----------|-----------|---------------|
+| `viewer` | Own sessions only | Own sessions | — | — | — |
+| `admin` | All sessions | All sessions | Yes | Yes | Yes |
+
+Roles are assigned at startup via `--admin-users`. All authenticated users not in the list are viewers. Unauthenticated requests (no auth configured) are treated as admin to preserve backwards compatibility with open deployments.
+
+**Configuration example** (`/etc/sudo-logger/replay.conf`):
+
+```bash
+REPLAY_ARGS=-trusted-user-header X-Forwarded-User -admin-users alice,bob
+```
+
+The authenticated username is resolved from the request (Basic Auth, trusted header, or unauthenticated) and compared against the admin list at each request — no restart needed after editing the list via a config reload.
+
+The current user's role is exposed at `GET /api/me`:
+
+```json
+{"user": "alice", "logoutUrl": "", "role": "admin"}
+```
+
+The browser UI uses this to show or hide admin-only tabs (Access Log, Approvals, Settings). Viewer-role users see only their own sessions in the session list; attempts to load another user's session cast return `403 Forbidden`.
 
 ---
 
@@ -1383,6 +1433,42 @@ Key extension fields: `rt` (start ms), `shost`, `suser`, `duser`, `duid`,
 OCSF v1.3.0 Class 3003 (Process Activity).  Risk score and reasons appear in
 the `unmapped` object.
 
+### Audit events
+
+In addition to per-session events, the replay server emits **audit events** for administrative actions. Audit events are always JSON, regardless of the `format` setting, because they do not map to CEF/OCSF session schemas.
+
+#### `session_deleted`
+
+Emitted when a session is deleted via the GDPR deletion API. Sent through the configured SIEM transport (https / syslog / stdout).
+
+```json
+{
+  "event": "session_deleted",
+  "time": "2026-06-09T14:22:01Z",
+  "tsid": "alice/gnarg_20260609-142200",
+  "reason": "GDPR request #1234",
+  "deleted_by": "bob"
+}
+```
+
+#### `config_reload` (log server stdout)
+
+Emitted by the log server to stdout whenever a watched config file changes content (detected by SHA256 comparison on each 30-second reload). Suitable for capture by Fluentd, Promtail, or Vector.
+
+```json
+{
+  "time": "2026-06-09T14:22:01Z",
+  "event": "config_reload",
+  "config": "approval-policy.yaml",
+  "sha256": "abc123...",
+  "source": "/etc/sudo-logger/approval-policy.yaml"
+}
+```
+
+Config files that generate `config_reload` events: `approval-policy.yaml`, `blocked-users.yaml`, `whitelisted-users.yaml`.
+
+> **Note:** `config_reload` events are written to the log server's stdout, not forwarded through the SIEM transport. The log server does not have a SIEM configuration. Capture these events with your log collector and route them to the SIEM there.
+
 ### Testing with netcat
 
 ```bash
@@ -1459,6 +1545,46 @@ users:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-blocked-users file` | `/etc/sudo-logger/blocked-users.yaml` | Blocked users config (shared with log server) |
+
+---
+
+## GDPR session deletion
+
+The log server exposes a `DELETE /api/sessions/<tsid>` endpoint on the `-health-listen` port to permanently remove a session recording on request (e.g. a GDPR right-to-erasure request).
+
+### Requirements
+
+- `-health-listen` must be enabled on the log server (e.g. `-health-listen :9877`).
+- An approval token must be configured on the log server (`-approval-token`, `-approval-token-file`, or `SUDO_LOGGER_APPROVAL_TOKEN` env var).
+- The replay server must have `-logserver-admin-token` (or equivalent) set to the same token and must know the log server's health-listen address via `-logserver-url`.
+
+### How it works
+
+1. An admin user clicks **Delete session** in the replay UI (admin-only button) or calls the API directly.
+2. The replay server proxies the request to the log server's `DELETE /api/sessions/<tsid>` with a `Bearer` token and the provided reason.
+3. The log server authenticates the request, verifies the session is not currently active, removes all files under the session directory (local) or deletes the S3 object and PostgreSQL row (distributed).
+4. A deletion log entry is written:
+   - **Local mode:** appended to `/var/log/sudoreplay/.deletion-log.jsonl`
+   - **Distributed mode:** inserted into the `sudo_deletion_log` PostgreSQL table (added in schema v12)
+5. A `session_deleted` SIEM event is sent from the replay server if SIEM is configured.
+
+### API
+
+```
+DELETE /api/sessions/<tsid>
+Authorization: Bearer <approval-token>
+Content-Type: application/json
+
+{"reason": "GDPR request #1234"}
+```
+
+Responses: `204 No Content` on success, `401 Unauthorized` if the token is wrong, `400 Bad Request` if the reason is missing, `404 Not Found` if the session does not exist, `409 Conflict` if the session is currently active.
+
+### Deletion log format
+
+```json
+{"tsid": "alice/gnarg_20260609-142200", "reason": "GDPR request #1234", "deleted_by": "bob", "deleted_at": "2026-06-09T14:22:01Z"}
+```
 
 ---
 
@@ -1672,9 +1798,11 @@ sudo-logger/
 │   │   │       ├── recorder.c   # eBPF tracepoint hooks (compiled via bpf2go)
 │   │   │       └── sandbox.bpf.c # eBPF LSM: 11 file/inode/kill hooks + sched_process_fork/exit
 │   │   ├── server/
-│   │   │   └── main.go          # Remote log server
+│   │   │   ├── main.go          # Remote log server
+│   │   │   └── approval.go      # JIT approval manager (policy reload, audit log)
 │   │   ├── replay-server/
 │   │   │   ├── main.go          # Web replay interface (HTTP + embedded SPA)
+│   │   │   ├── rbac.go          # Role type, context helpers, requireAdmin middleware
 │   │   │   ├── risk-rules.yaml  # Default risk scoring rules
 │   │   │   └── static/
 │   │   │       └── index.html   # Single-page terminal player (xterm.js)
@@ -1690,10 +1818,12 @@ sudo-logger/
 │       │   ├── local.go    # Local filesystem backend (default)
 │       │   ├── local_test.go
 │       │   └── distributed.go  # S3 + PostgreSQL backend
+│       ├── config/
+│       │   └── secret.go   # ResolveSecret: flag → env var → file priority
 │       └── siem/
 │           ├── config.go   # YAML config loader (30 s polling)
 │           ├── event.go    # Event struct + JSON/CEF/OCSF formatters
-│           └── sender.go   # HTTPS and syslog transports
+│           └── sender.go   # HTTPS, syslog, stdout transports; SendAudit for non-session events
 ├── rpm/
 │   ├── sudo-logger-client.spec  # RPM spec for client package
 │   ├── sudo-logger-server.spec  # RPM spec for server package

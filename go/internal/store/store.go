@@ -192,6 +192,13 @@ type SessionStore interface {
 	// GetLastSeen returns the unix timestamp (seconds) of the host's last activity.
 	GetLastSeen(ctx context.Context, host string) (int64, error)
 
+	// DeleteSession permanently removes a session and all associated data
+	// (cast file, risk cache, access log). reason must be non-empty and is
+	// persisted in the deletion audit log. deletedBy identifies the caller
+	// (e.g. "api", username). Returns an error if the session is still in
+	// progress or cannot be found.
+	DeleteSession(ctx context.Context, tsid, reason, deletedBy string) error
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }

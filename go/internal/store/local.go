@@ -36,12 +36,14 @@ type LocalStore struct {
 	cfg Config
 
 	// blocked-users state — reloaded every 30 s in background goroutine.
-	blockedMu  sync.RWMutex
-	blockedCfg blockedUsersConfig
+	blockedMu       sync.RWMutex
+	blockedCfg      blockedUsersConfig
+	lastBlockedHash string // SHA256 hex of last successfully loaded content
 
 	// whitelisted-users state — reloaded every 30 s in background goroutine.
-	whitelistMu  sync.RWMutex
-	whitelistCfg whitelistedUsersConfig
+	whitelistMu       sync.RWMutex
+	whitelistCfg      whitelistedUsersConfig
+	lastWhitelistHash string // SHA256 hex of last successfully loaded content
 
 	// access log — bounded in-memory ring buffer (same behaviour as before
 	// the store abstraction was introduced).
@@ -177,15 +179,24 @@ func (ls *LocalStore) loadBlockedUsers() error {
 		}
 		return err
 	}
+	h := sha256.Sum256(data)
+	newHash := hex.EncodeToString(h[:])
+
 	var cfg blockedUsersConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse blocked-users: %w", err)
 	}
 	ls.blockedMu.Lock()
+	changed := newHash != ls.lastBlockedHash
 	ls.blockedCfg = cfg
+	if changed {
+		ls.lastBlockedHash = newHash
+	}
 	ls.blockedMu.Unlock()
-	log.Printf("store/local: blocked-users: loaded %d entry/entries from %s",
-		len(cfg.Users), ls.cfg.BlockedUsersPath)
+	if changed {
+		log.Printf(`{"time":%q,"event":"config_reload","config":"blocked-users.yaml","sha256":%q,"entries":%d}`,
+			time.Now().UTC().Format(time.RFC3339), newHash, len(cfg.Users))
+	}
 	return nil
 }
 
@@ -372,6 +383,35 @@ func (ls *LocalStore) ListAccessLog(_ context.Context, viewer string, limit int)
 	return result, nil
 }
 
+// DeleteSession implements SessionStore.
+// It removes the session directory and appends an audit entry to
+// <logdir>/.deletion-log.jsonl. Returns an error if the session is still
+// active or cannot be found.
+func (ls *LocalStore) DeleteSession(_ context.Context, tsid, reason, deletedBy string) error {
+	sessDir, err := ls.resolveSessionDir(tsid)
+	if err != nil {
+		return fmt.Errorf("session not found: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
+		return fmt.Errorf("session %q is still in progress", tsid)
+	}
+	if err := os.RemoveAll(sessDir); err != nil {
+		return fmt.Errorf("remove session: %w", err)
+	}
+	// Append JSON audit entry.
+	entry := fmt.Sprintf(`{"time":%q,"event":"session_deleted","tsid":%q,"reason":%q,"deleted_by":%q}`+"\n",
+		time.Now().UTC().Format(time.RFC3339), tsid, reason, deletedBy)
+	logPath := filepath.Join(ls.cfg.LogDir, ".deletion-log.jsonl")
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err == nil {
+		_, _ = f.WriteString(entry)
+		f.Close()
+	} else {
+		log.Printf("store/local: deletion audit write: %v", err)
+	}
+	return nil
+}
+
 // Close implements SessionStore.
 func (ls *LocalStore) Close() error {
 	ls.stopOnce.Do(func() { close(ls.stopCh) })
@@ -527,15 +567,24 @@ func (ls *LocalStore) loadWhitelistedUsers() error {
 		}
 		return err
 	}
+	wh := sha256.Sum256(data)
+	newHash := hex.EncodeToString(wh[:])
+
 	var cfg whitelistedUsersConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return fmt.Errorf("parse whitelisted-users: %w", err)
 	}
 	ls.whitelistMu.Lock()
+	changed := newHash != ls.lastWhitelistHash
 	ls.whitelistCfg = cfg
+	if changed {
+		ls.lastWhitelistHash = newHash
+	}
 	ls.whitelistMu.Unlock()
-	log.Printf("store/local: whitelisted-users: loaded %d entry/entries from %s",
-		len(cfg.Users), ls.cfg.WhitelistedUsersPath)
+	if changed {
+		log.Printf(`{"time":%q,"event":"config_reload","config":"whitelisted-users.yaml","sha256":%q,"entries":%d}`,
+			time.Now().UTC().Format(time.RFC3339), newHash, len(cfg.Users))
+	}
 	return nil
 }
 

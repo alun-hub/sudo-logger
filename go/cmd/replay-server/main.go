@@ -48,6 +48,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 
+	"sudo-logger/internal/config"
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 )
@@ -65,11 +66,13 @@ var (
 	flagBlockedUsers        = flag.String("blocked-users", "/etc/sudo-logger/blocked-users.yaml", "Blocked users config file (shared with log server)")
 	flagWhitelistedUsers    = flag.String("whitelisted-users", "/etc/sudo-logger/whitelisted-users.yaml", "Whitelisted users config file — these users bypass JIT approval (shared with log server)")
 	flagLogServerAdmin    = flag.String("logserver-admin", "", "Log server admin address for approval API (e.g. http://localhost:9877); empty disables approvals tab")
-	flagLogServerAdminToken = flag.String("logserver-admin-token", "", "Shared bearer token for the log server approval API (must match -approval-token on the log server)")
+	flagLogServerAdminToken     = flag.String("logserver-admin-token", "", "Shared bearer token for the log server approval API (must match -approval-token on the log server)")
+	flagLogServerAdminTokenFile = flag.String("logserver-admin-token-file", "", "File containing the log server admin bearer token (alternative to -logserver-admin-token; env SUDO_LOGGER_ADMIN_TOKEN also accepted)")
 	flagTLSCert           = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	flagTLSKey            = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
 	flagHTPasswd          = flag.String("htpasswd", "", "Path to htpasswd file for HTTP Basic Auth (bcrypt hashes only; reload with SIGHUP)")
 	flagTrustedUserHeader = flag.String("trusted-user-header", "", "Header containing pre-authenticated username (e.g. X-Forwarded-User)")
+	flagAdminUsers        = flag.String("admin-users", "", "Comma-separated list of usernames granted admin role (can view all sessions, approve, delete)")
 
 	// Storage backend flags.
 	// NOTE: these flags are intentionally duplicated in cmd/server/main.go.
@@ -149,7 +152,8 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 
 // accessLogMiddleware logs every request with the authenticated username,
 // resolved from the trusted header (proxy mode) or Basic Auth credentials.
-func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
+// adminSet maps usernames to admin role; pass nil to disable RBAC enforcement.
+func accessLogMiddleware(next http.Handler, trustedHeader string, adminSet map[string]bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := "-"
 		if trustedHeader != "" {
@@ -159,11 +163,16 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		} else if u, _, ok := r.BasicAuth(); ok {
 			user = u
 		}
+		role := RoleViewer
+		if len(adminSet) > 0 && adminSet[user] {
+			role = RoleAdmin
+		}
 		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		ctx := context.WithValue(r.Context(), ctxViewer, user)
+		ctx = context.WithValue(ctx, ctxRole, role)
 		next.ServeHTTP(lrw, r.WithContext(ctx))
-		log.Printf("access identity=%s addr=%s method=%s path=%s status=%d",
-			sanitizeForLog(user), r.RemoteAddr, r.Method, sanitizeForLog(r.URL.Path), lrw.status)
+		log.Printf("access identity=%s role=%s addr=%s method=%s path=%s status=%d",
+			sanitizeForLog(user), role, r.RemoteAddr, r.Method, sanitizeForLog(r.URL.Path), lrw.status)
 	})
 }
 
@@ -833,11 +842,20 @@ func main() {
 	})
 	if *flagLogServerAdmin != "" {
 		adminBase := strings.TrimRight(*flagLogServerAdmin, "/")
-		adminToken := *flagLogServerAdminToken
+		adminToken, err := config.ResolveSecret(*flagLogServerAdminToken, *flagLogServerAdminTokenFile, "SUDO_LOGGER_ADMIN_TOKEN")
+		if err != nil {
+			log.Fatalf("admin token: %v", err)
+		}
 		mux.HandleFunc("/api/approvals", func(w http.ResponseWriter, r *http.Request) {
+			if !requireAdmin(w, r) {
+				return
+			}
 			proxyToLogServer(w, r, adminBase+"/api/approvals", adminToken, viewerFromContext(r))
 		})
 		mux.HandleFunc("/api/approvals/", func(w http.ResponseWriter, r *http.Request) {
+			if !requireAdmin(w, r) {
+				return
+			}
 			tail := strings.TrimPrefix(r.URL.Path, "/api/approvals/")
 			proxyToLogServer(w, r, adminBase+"/api/approvals/"+tail, adminToken, viewerFromContext(r))
 		})
@@ -846,10 +864,35 @@ func main() {
 			proxyToLogServer(w, r, adminBase+"/api/approvals/callback", adminToken, "")
 		})
 		mux.HandleFunc("/api/approval-config", func(w http.ResponseWriter, r *http.Request) {
+			if !requireAdmin(w, r) {
+				return
+			}
 			proxyToLogServer(w, r, adminBase+"/api/approval-config", adminToken, viewerFromContext(r))
 		})
 		mux.HandleFunc("/api/jit-policy", func(w http.ResponseWriter, r *http.Request) {
+			if !requireAdmin(w, r) {
+				return
+			}
 			proxyToLogServer(w, r, adminBase+"/api/jit-policy", adminToken, viewerFromContext(r))
+		})
+		mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodDelete {
+				http.NotFound(w, r)
+				return
+			}
+			if !requireAdmin(w, r) {
+				return
+			}
+			tsid := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+			viewer := viewerFromContext(r)
+			lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			proxyToLogServer(lrw, r, adminBase+r.URL.Path, adminToken, viewer)
+			if lrw.status == http.StatusNoContent {
+				go siem.SendAudit("session_deleted", map[string]any{
+					"tsid":       tsid,
+					"deleted_by": viewer,
+				})
+			}
 		})
 	}
 
@@ -926,8 +969,7 @@ func main() {
 			logoutURL = "/oauth2/sign_out"
 		}
 		w.Header().Set("Content-Type", "application/json")
-		// user is used in JSON output which is already quoted and escaped by fmt.Fprintf %q
-		fmt.Fprintf(w, `{"user":%q,"logoutUrl":%q}`, user, logoutURL)
+		fmt.Fprintf(w, `{"user":%q,"logoutUrl":%q,"role":%q}`, user, logoutURL, roleFromContext(r))
 	})
 
 	mux.HandleFunc("/api/sudoers/hosts", func(w http.ResponseWriter, r *http.Request) {
@@ -991,7 +1033,13 @@ func main() {
 		}
 		handler = basicAuthMiddleware(handler, htStore)
 	}
-	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
+	adminSet := map[string]bool{}
+	for _, u := range strings.Split(*flagAdminUsers, ",") {
+		if u = strings.TrimSpace(u); u != "" {
+			adminSet[u] = true
+		}
+	}
+	handler = accessLogMiddleware(handler, *flagTrustedUserHeader, adminSet)
 
 	// Build the HTTP server so we can call Shutdown() on SIGTERM.
 	var httpSrv *http.Server
@@ -1073,7 +1121,14 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 		to = v
 	}
 
-	result, err := listSessions(r.Context(), q, sortBy, order, from, to, limit, offset)
+	var ownerFilter string
+	if !isAdmin(r) {
+		ownerFilter = viewerFromContext(r)
+		if ownerFilter == "-" {
+			ownerFilter = "" // unauthenticated open deployment — show all
+		}
+	}
+	result, err := listSessions(r.Context(), q, sortBy, order, from, to, limit, offset, ownerFilter)
 	if err != nil {
 		log.Printf("list sessions: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -1100,6 +1155,27 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce viewer-role ownership: non-admin users may only replay their own sessions.
+	viewer := viewerFromContext(r)
+	if !isAdmin(r) && viewer != "-" {
+		all := cachedListSessions(r.Context())
+		found := false
+		for _, s := range all {
+			if s.TSID == tsid {
+				found = true
+				if s.User != viewer {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+	}
+
 	// Record who viewed this session before streaming the response.
 	var replayURL string
 	if base := strings.TrimRight(siem.Get().ReplayURLBase, "/"); base != "" {
@@ -1111,7 +1187,6 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		replayURL = scheme + "://" + r.Host + "/?tsid=" + url.QueryEscape(tsid)
 	}
-	viewer := viewerFromContext(r)
 	recordView(r, tsid, replayURL)
 	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", sanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
 
@@ -1201,6 +1276,9 @@ func handleAccessLog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireAdmin(w, r) {
+		return
+	}
 
 	filterViewer := r.URL.Query().Get("viewer")
 	limit := 200
@@ -1288,7 +1366,7 @@ func validateTSID(tsid string) error {
 }
 
 // listSessions filters, sorts and paginates sessions from the in-memory cache.
-func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, limit, offset int) (*SessionList, error) {
+func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, limit, offset int, ownerFilter string) (*SessionList, error) {
 	all, err := cache.get(ctx)
 	if err != nil {
 		return nil, err
@@ -1300,6 +1378,9 @@ func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, 
 		// plugin session already appears in the list with full detail.
 		// Unmatched eBPF sessions (su, screen, SSH without sudo) are shown.
 		if s.Source == "ebpf-tty" && s.MatchedSessionID != "" {
+			continue
+		}
+		if ownerFilter != "" && s.User != ownerFilter {
 			continue
 		}
 		if from > 0 && s.StartTime < from {
@@ -2436,7 +2517,8 @@ func loadRules(path string) error {
 	globalRules = rs.Rules
 	globalRulesHash = hash
 	rulesMu.Unlock()
-	log.Printf("risk rules loaded: %d rules (hash %s)", len(rs.Rules), hash)
+	log.Printf(`{"time":%q,"event":"config_reload","config":"risk-rules.yaml","sha256":%q,"rules":%d}`,
+		time.Now().UTC().Format(time.RFC3339), hash, len(rs.Rules))
 	return nil
 }
 
@@ -2462,7 +2544,8 @@ func loadRulesFromText(text string) error {
 	globalRules = rs.Rules
 	globalRulesHash = hash
 	rulesMu.Unlock()
-	log.Printf("risk rules loaded: %d rules (hash %s)", len(rs.Rules), hash)
+	log.Printf(`{"time":%q,"event":"config_reload","config":"risk-rules.yaml","sha256":%q,"rules":%d}`,
+		time.Now().UTC().Format(time.RFC3339), hash, len(rs.Rules))
 	return nil
 }
 

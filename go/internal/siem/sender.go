@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -61,6 +62,45 @@ func Send(e Event) {
 			e.SessionID, e.User, e.Host, truncate(e.Command, 60), cfg.Format, e.ReplayURL)
 	default:
 		log.Printf("siem: unknown transport %q — use https, syslog, or stdout", cfg.Transport)
+	}
+}
+
+// SendAudit forwards a non-session audit event (config change, deletion, etc.)
+// to the configured SIEM endpoint. Always uses JSON encoding regardless of the
+// session format setting, since audit events don't fit CEF/OCSF session schemas.
+// Safe to call as a goroutine; errors are logged and discarded.
+func SendAudit(action string, fields map[string]any) {
+	cfg := Get()
+	if !cfg.Enabled {
+		return
+	}
+	payload := make(map[string]any, len(fields)+2)
+	for k, v := range fields {
+		payload[k] = v
+	}
+	payload["event"] = action
+	payload["time"] = time.Now().UTC().Format(time.RFC3339)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("siem: audit encode: %v", err)
+		return
+	}
+	body = append(body, '\n')
+
+	switch cfg.Transport {
+	case "https":
+		if err := sendHTTPS(cfg, Event{}, body, "application/json"); err != nil {
+			log.Printf("siem: audit HTTPS error (%s): %v", action, err)
+		}
+	case "syslog":
+		if err := sendSyslog(cfg, Event{}, body); err != nil {
+			log.Printf("siem: audit syslog error (%s): %v", action, err)
+		}
+	case "stdout":
+		fmt.Fprintf(os.Stdout, "%s", body)
+	default:
+		log.Printf("siem: audit: unknown transport %q", cfg.Transport)
 	}
 }
 
