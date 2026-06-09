@@ -3716,7 +3716,10 @@ function switchSettingsTab(stab) {
   const panel = document.getElementById('tab-config');
   panel.querySelectorAll('.stab-btn[data-stab]').forEach(b => b.classList.toggle('active', b.dataset.stab === stab));
   panel.querySelectorAll('.stab-panel').forEach(p => p.classList.toggle('active', p.id === 'stab-' + stab));
-  if (stab === 'users') { fetchUsers(); }
+  if (stab === 'users') {
+    fetchUsers();
+    fetchAuthConfig();
+  }
 }
 
 document.getElementById('tab-config').querySelectorAll('.stab-btn[data-stab]').forEach(btn =>
@@ -6475,6 +6478,29 @@ document.getElementById('auth-source').addEventListener('change', (e) => {
   document.getElementById('section-local-users').style.display = (src === 'local') ? 'block' : 'none';
   document.getElementById('section-role-mapping').style.display = (src !== 'local') ? 'block' : 'none';
 });
+
+async function fetchAuthConfig() {
+  try {
+    const res = await fetch('/api/auth-config');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const c = data.config || {};
+
+    document.getElementById('auth-source').value = c.source || 'local';
+    document.getElementById('auth-source').dispatchEvent(new Event('change'));
+
+    document.getElementById('oidc-issuer').value = c.oidc?.issuer || '';
+    document.getElementById('oidc-client-id').value = c.oidc?.client_id || '';
+    document.getElementById('oidc-client-secret').value = ''; // Always mask client-side
+
+    document.getElementById('proxy-user-header').value = c.proxy?.user_header || '';
+    document.getElementById('proxy-groups-header').value = c.proxy?.groups_header || '';
+
+    document.getElementById('auth-admin-groups').value = (c.admin_groups || []).join(', ');
+  } catch(e) {
+    showAuthStatus('Failed to load config: ' + e.message, true);
+  }
+}
 
 async function saveAuthStrategy() {
   const btn = document.getElementById('btn-save-auth');

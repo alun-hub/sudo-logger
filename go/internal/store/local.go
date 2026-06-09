@@ -50,6 +50,11 @@ type LocalStore struct {
 	usersCfg      usersConfig
 	lastUsersHash string // SHA256 hex of last successfully loaded content
 
+	// auth-config state — reloaded every 30 s in background goroutine.
+	authMu       sync.RWMutex
+	authCfg      AuthConfig
+	lastAuthHash string // SHA256 hex of last successfully loaded content
+
 	// access log — bounded in-memory ring buffer (same behaviour as before
 	// the store abstraction was introduced).
 	viewMu  sync.Mutex
@@ -118,6 +123,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.UsersPath == "" {
 		cfg.UsersPath = "/etc/sudo-logger/users.yaml"
 	}
+	if cfg.AuthConfigPath == "" {
+		cfg.AuthConfigPath = "/etc/sudo-logger/auth-config.yaml"
+	}
 	if cfg.SiemConfigPath == "" {
 		cfg.SiemConfigPath = "/etc/sudo-logger/siem.yaml"
 	}
@@ -156,6 +164,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if err := ls.loadUsers(); err != nil {
 		log.Printf("store/local: users initial load: %v", err)
 	}
+	if err := ls.loadAuthConfig(); err != nil {
+		log.Printf("store/local: auth-config initial load: %v", err)
+	}
 	if err := ls.loadApprovalStore(); err != nil {
 		log.Printf("store/local: approval-store initial load: %v", err)
 	}
@@ -175,6 +186,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 				}
 				if err := ls.loadUsers(); err != nil {
 					log.Printf("store/local: users reload: %v", err)
+				}
+				if err := ls.loadAuthConfig(); err != nil {
+					log.Printf("store/local: auth-config reload: %v", err)
 				}
 			case <-ls.stopCh:
 				return
@@ -364,6 +378,82 @@ func (ls *LocalStore) DeleteUser(_ context.Context, username string) error {
 	ls.usersCfg.Users = newUsers
 	ls.usersMu.Unlock()
 	return ls.saveUsers()
+}
+
+// ── Auth Configuration ───────────────────────────────────────────────────
+
+func (ls *LocalStore) loadAuthConfig() error {
+	data, err := os.ReadFile(ls.cfg.AuthConfigPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ls.authMu.Lock()
+			ls.authCfg = AuthConfig{Source: "local"}
+			ls.authMu.Unlock()
+			return nil
+		}
+		return err
+	}
+	h := sha256.Sum256(data)
+	newHash := hex.EncodeToString(h[:])
+
+	var cfg AuthConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse auth-config: %w", err)
+	}
+	if cfg.Source == "" {
+		cfg.Source = "local"
+	}
+	ls.authMu.Lock()
+	changed := newHash != ls.lastAuthHash
+	ls.authCfg = cfg
+	if changed {
+		ls.lastAuthHash = newHash
+	}
+	ls.authMu.Unlock()
+	if changed {
+		log.Printf(`{"time":%q,"event":"config_reload","config":"auth-config.yaml","sha256":%q,"source":%q}`,
+			time.Now().UTC().Format(time.RFC3339), newHash, cfg.Source)
+	}
+	return nil
+}
+
+func (ls *LocalStore) saveAuthConfig() error {
+	ls.authMu.RLock()
+	data, err := yaml.Marshal(ls.authCfg)
+	ls.authMu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("marshal auth-config: %w", err)
+	}
+
+	tmp := ls.cfg.AuthConfigPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write tmp auth-config: %w", err)
+	}
+	if err := os.Rename(tmp, ls.cfg.AuthConfigPath); err != nil {
+		return fmt.Errorf("rename tmp auth-config: %w", err)
+	}
+
+	h := sha256.Sum256(data)
+	ls.authMu.Lock()
+	ls.lastAuthHash = hex.EncodeToString(h[:])
+	ls.authMu.Unlock()
+
+	return nil
+}
+
+// GetAuthConfig implements SessionStore.
+func (ls *LocalStore) GetAuthConfig(_ context.Context) (AuthConfig, error) {
+	ls.authMu.RLock()
+	defer ls.authMu.RUnlock()
+	return ls.authCfg, nil
+}
+
+// SetAuthConfig implements SessionStore.
+func (ls *LocalStore) SetAuthConfig(_ context.Context, cfg AuthConfig) error {
+	ls.authMu.Lock()
+	ls.authCfg = cfg
+	ls.authMu.Unlock()
+	return ls.saveAuthConfig()
 }
 
 // CreateSession implements SessionStore.

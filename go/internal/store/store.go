@@ -213,8 +213,31 @@ type SessionStore interface {
 	// DeleteUser removes a user.
 	DeleteUser(ctx context.Context, username string) error
 
+	// ── Auth Configuration ───────────────────────────────────────────────────
+
+	// GetAuthConfig returns the current authentication strategy and OIDC/Proxy settings.
+	GetAuthConfig(ctx context.Context) (AuthConfig, error)
+
+	// SetAuthConfig saves the authentication strategy and settings.
+	SetAuthConfig(ctx context.Context, cfg AuthConfig) error
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
+}
+
+// AuthConfig defines the authentication strategy and related settings.
+type AuthConfig struct {
+	Source string `json:"source" yaml:"source"` // "local", "oidc", "proxy"
+	OIDC   struct {
+		Issuer       string `json:"issuer" yaml:"issuer"`
+		ClientID     string `json:"client_id" yaml:"client_id"`
+		ClientSecret string `json:"client_secret" yaml:"client_secret"`
+	} `json:"oidc" yaml:"oidc"`
+	Proxy struct {
+		UserHeader   string `json:"user_header" yaml:"user_header"`
+		GroupsHeader string `json:"groups_header" yaml:"groups_header"`
+	} `json:"proxy" yaml:"proxy"`
+	AdminGroups []string `json:"admin_groups" yaml:"admin_groups"`
 }
 
 // User represents a person with access to the replay-server.
@@ -391,6 +414,10 @@ type Config struct {
 	// UsersPath is the YAML file listing users and roles for the replay UI.
 	// Default: /etc/sudo-logger/users.yaml
 	UsersPath string
+
+	// AuthConfigPath is the YAML file containing auth settings (LocalStore only).
+	// Default: /etc/sudo-logger/auth-config.yaml
+	AuthConfigPath string
 
 	// SiemConfigPath is the path to siem.yaml (LocalStore only).
 	// Default: /etc/sudo-logger/siem.yaml

@@ -157,21 +157,64 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 }
 
 // accessLogMiddleware logs every request with the authenticated username,
-// resolved from the trusted header (proxy mode) or Basic Auth credentials.
-// It also resolves the user's role from the SessionStore.
+// resolved from the dynamic AuthConfig (proxy mode, OIDC, or Basic Auth).
 func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := "-"
-		if trustedHeader != "" {
+		role := RoleViewer
+
+		cfg, _ := sessionStore.GetAuthConfig(r.Context())
+
+		if cfg.Source == "proxy" {
+			header := cfg.Proxy.UserHeader
+			if header == "" {
+				header = trustedHeader
+			}
+			if header != "" && r.Header.Get(header) != "" {
+				user = r.Header.Get(header)
+
+				// Optional: map roles from Proxy Groups header
+				if cfg.Proxy.GroupsHeader != "" {
+					groupsRaw := r.Header.Get(cfg.Proxy.GroupsHeader)
+					for _, g := range strings.Split(groupsRaw, ",") {
+						g = strings.TrimSpace(g)
+						for _, adminGroup := range cfg.AdminGroups {
+							if g == adminGroup {
+								role = RoleAdmin
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if user == "-" && cfg.Source == "oidc" {
+			if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
+				if dec, err := base64.URLEncoding.DecodeString(c.Value); err == nil {
+					parts := strings.SplitN(string(dec), ":", 2)
+					if len(parts) == 2 {
+						user = parts[0]
+						role = Role(parts[1])
+					}
+				}
+			}
+		}
+
+		if user == "-" && (cfg.Source == "local" || cfg.Source == "") {
+			if u, _, ok := r.BasicAuth(); ok {
+				user = u
+			}
+		}
+
+		// Fallback for legacy trusted header if source is not explicitly set
+		if user == "-" && trustedHeader != "" {
 			if v := r.Header.Get(trustedHeader); v != "" {
 				user = v
 			}
-		} else if u, _, ok := r.BasicAuth(); ok {
-			user = u
 		}
 
-		role := RoleViewer
-		if user != "-" {
+		if user != "-" && role == RoleViewer {
 			if u, err := sessionStore.GetUser(r.Context(), user); err == nil && u != nil {
 				role = Role(u.Role)
 			}
@@ -179,7 +222,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 
 		// Backward compatibility for unauthenticated/open deployments:
 		// if no auth is configured and no user header is present, treat as admin.
-		if user == "-" && trustedHeader == "" && *flagHTPasswd == "" {
+		if user == "-" && trustedHeader == "" && *flagHTPasswd == "" && cfg.Source != "oidc" && cfg.Source != "proxy" {
 			role = RoleAdmin
 		}
 
@@ -225,6 +268,41 @@ func authenticate(ctx context.Context, username, password string) bool {
 func basicAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isBootstrapMode(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow OIDC endpoints to bypass Basic Auth
+		if strings.HasPrefix(r.URL.Path, "/api/oidc/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		cfg, _ := sessionStore.GetAuthConfig(r.Context())
+
+		if cfg.Source == "oidc" {
+			if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Redirect unauthenticated OIDC users to login instead of showing Basic Auth prompt
+			http.Redirect(w, r, "/api/oidc/login", http.StatusFound)
+			return
+		}
+
+		if cfg.Source == "proxy" {
+			header := cfg.Proxy.UserHeader
+			if header == "" {
+				header = *flagTrustedUserHeader
+			}
+			if header != "" && r.Header.Get(header) != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// Fallback for legacy trusted header
+		if *flagTrustedUserHeader != "" && r.Header.Get(*flagTrustedUserHeader) != "" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -1021,18 +1099,75 @@ func main() {
 		if !requireAdmin(w, r) {
 			return
 		}
-		// Placeholder for auth configuration save
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		if r.Method == http.MethodGet {
+			cfg, err := sessionStore.GetAuthConfig(r.Context())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// Mask the secret before sending to client
+			if cfg.OIDC.ClientSecret != "" {
+				cfg.OIDC.ClientSecret = "***"
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"config": cfg})
+			return
+		}
+
+		if r.Method == http.MethodPut {
+			var body struct {
+				Config store.AuthConfig `json:"config"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+
+			// If client sends "***" or empty, keep the existing secret
+			if body.Config.OIDC.ClientSecret == "***" || body.Config.OIDC.ClientSecret == "" { // pragma: allowlist secret
+				oldCfg, _ := sessionStore.GetAuthConfig(r.Context())
+				body.Config.OIDC.ClientSecret = oldCfg.OIDC.ClientSecret // pragma: allowlist secret
+			}
+
+			// Keep existing admin groups intact
+			oldCfg, _ := sessionStore.GetAuthConfig(r.Context())
+			body.Config.AdminGroups = oldCfg.AdminGroups
+
+			if err := sessionStore.SetAuthConfig(r.Context(), body.Config); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 	mux.HandleFunc("/api/auth-mapping", func(w http.ResponseWriter, r *http.Request) {
 		if !requireAdmin(w, r) {
 			return
 		}
-		// Placeholder for role mapping save
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		if r.Method == http.MethodPut {
+			var body struct {
+				AdminGroups []string `json:"admin_groups"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+
+			cfg, _ := sessionStore.GetAuthConfig(r.Context())
+			cfg.AdminGroups = body.AdminGroups
+			if err := sessionStore.SetAuthConfig(r.Context(), cfg); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
+	mux.HandleFunc("/api/oidc/login", handleOIDCLogin)
+	mux.HandleFunc("/api/oidc/callback", handleOIDCCallback)
 	mux.HandleFunc("/api/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

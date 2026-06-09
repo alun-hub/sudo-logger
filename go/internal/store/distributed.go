@@ -142,7 +142,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	11 — added sudo_sudoers_snapshots for sudoers state tracking
 //	12 — added sudo_deletion_log for GDPR/audit deletion records
 //	13 — added sudo_users for Enterprise RBAC and Auth management
-const currentSchemaVersion = 13
+//	14 — added sudo_auth_config for dynamic SSO configuration
+const currentSchemaVersion = 14
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -324,6 +325,13 @@ CREATE TABLE IF NOT EXISTS sudo_users (
     last_login    TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS sudo_users_role ON sudo_users(role);
+
+-- migration v14: Dynamic SSO/Auth configuration
+CREATE TABLE IF NOT EXISTS sudo_auth_config (
+    id          INT PRIMARY KEY,
+    config_json JSONB NOT NULL
+);
+INSERT INTO sudo_auth_config (id, config_json) VALUES (1, '{}') ON CONFLICT DO NOTHING;
 `); err != nil {
 		return err
 	}
@@ -820,6 +828,41 @@ ORDER BY username ASC`)
 func (d *DistributedStore) DeleteUser(ctx context.Context, username string) error {
 	if _, err := d.db.Exec(ctx, `DELETE FROM sudo_users WHERE username = $1`, username); err != nil {
 		return fmt.Errorf("delete user: %w", err)
+	}
+	return nil
+}
+
+// ── Auth Configuration ───────────────────────────────────────────────────
+
+// GetAuthConfig implements SessionStore.
+func (d *DistributedStore) GetAuthConfig(ctx context.Context) (AuthConfig, error) {
+	var cfg AuthConfig
+	var raw []byte
+	err := d.db.QueryRow(ctx, `SELECT config_json FROM sudo_auth_config WHERE id = 1`).Scan(&raw)
+	if err == pgx.ErrNoRows {
+		return cfg, nil
+	}
+	if err != nil {
+		return cfg, fmt.Errorf("get auth config: %w", err)
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return cfg, fmt.Errorf("parse auth config: %w", err)
+	}
+	return cfg, nil
+}
+
+// SetAuthConfig implements SessionStore.
+func (d *DistributedStore) SetAuthConfig(ctx context.Context, cfg AuthConfig) error {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal auth config: %w", err)
+	}
+	_, err = d.db.Exec(ctx, `
+		INSERT INTO sudo_auth_config (id, config_json) VALUES (1, $1)
+		ON CONFLICT (id) DO UPDATE SET config_json = EXCLUDED.config_json
+	`, raw)
+	if err != nil {
+		return fmt.Errorf("set auth config: %w", err)
 	}
 	return nil
 }
