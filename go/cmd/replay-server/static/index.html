@@ -6667,9 +6667,9 @@ async function checkBootstrap() {
     const res = await fetch('/api/me');
     if (!res.ok) return;
     const me = await res.json();
-    // If store is empty, API returns no role or empty user
-    if (me.role === 'admin' && !me.user) {
-       // Unauthenticated admin = potential bootstrap
+    // If store is empty, user is temporarily granted admin
+    if (me.role === 'admin') {
+       // Check if there are actually any users in the DB
        const usersRes = await fetch('/api/users');
        const users = await usersRes.json();
        if (users.length === 0) {
