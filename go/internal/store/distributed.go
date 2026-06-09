@@ -807,7 +807,7 @@ ORDER BY username ASC`)
 	}
 	defer rows.Close()
 
-	var users []User
+	var users = []User{}
 	for rows.Next() {
 		var u User
 		var lastLogin *time.Time

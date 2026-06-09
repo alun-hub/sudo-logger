@@ -6673,8 +6673,8 @@ async function checkBootstrap() {
        // Check if there are actually any users in the DB
        const usersRes = await fetch('/api/users');
        const users = await usersRes.json();
-       console.log('Bootstrap check: found %d users in DB', users.length);
-       if (users.length === 0) {
+       console.log('Bootstrap check: found users:', users);
+       if (users && (users.length === 0 || users === null)) {
          console.log('Triggering bootstrap modal');
          document.getElementById('bootstrap-modal').hidden = false;
          document.getElementById('bootstrap-modal').style.display = 'flex';
