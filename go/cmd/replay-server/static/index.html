@@ -6670,17 +6670,29 @@ async function checkBootstrap() {
     console.log('Bootstrap check: user=%s, role=%s', me.user, me.role);
     // If store is empty, user is temporarily granted admin
     if (me.role === 'admin') {
-       // Check if there are actually any users in the DB
        const usersRes = await fetch('/api/users');
        const users = await usersRes.json();
-       console.log('Bootstrap check: found users:', users);
        if (users && (users.length === 0 || users === null)) {
-         console.log('Triggering bootstrap modal');
+         const modal = document.getElementById('bootstrap-modal');
+         const title = modal.querySelector('h3');
+         const desc = modal.querySelector('p');
+         const userInput = document.getElementById('boot-user');
+
          if (me.user) {
-           document.getElementById('boot-user').value = me.user;
+           title.innerText = "Identity Detected";
+           desc.innerHTML = `We detected you are logged in as <b>${me.user}</b> via a proxy/SSO. We will initialize this account as the primary administrator. Please set a "break-glass" password below.`;
+           userInput.value = me.user;
+           userInput.readOnly = true;
+           userInput.style.backgroundColor = 'var(--bg-card)';
+         } else {
+           title.innerText = "Welcome to sudo-logger";
+           desc.innerText = "System initialization required. Create the first local administrator account to continue.";
+           userInput.value = 'admin';
+           userInput.readOnly = false;
          }
-         document.getElementById('bootstrap-modal').hidden = false;
-         document.getElementById('bootstrap-modal').style.display = 'flex';
+
+         modal.hidden = false;
+         modal.style.display = 'flex';
        }
     }
   } catch(e) { console.error('Bootstrap check failed', e); }
