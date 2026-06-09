@@ -141,7 +141,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	10 — added sudo_whitelisted_users for JIT approval bypass
 //	11 — added sudo_sudoers_snapshots for sudoers state tracking
 //	12 — added sudo_deletion_log for GDPR/audit deletion records
-const currentSchemaVersion = 12
+//	13 — added sudo_users for Enterprise RBAC and Auth management
+const currentSchemaVersion = 13
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -310,6 +311,19 @@ CREATE TABLE IF NOT EXISTS sudo_deletion_log (
 );
 CREATE INDEX IF NOT EXISTS sudo_deletion_log_deleted_at
     ON sudo_deletion_log (deleted_at DESC);
+
+-- migration v13: Enterprise RBAC and Auth management
+CREATE TABLE IF NOT EXISTS sudo_users (
+    username      TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL DEFAULT '',
+    role          TEXT NOT NULL DEFAULT 'viewer',
+    source        TEXT NOT NULL DEFAULT 'local',
+    full_name     TEXT NOT NULL DEFAULT '',
+    email         TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_login    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS sudo_users_role ON sudo_users(role);
 `); err != nil {
 		return err
 	}
@@ -719,6 +733,93 @@ func (d *DistributedStore) DeleteSession(ctx context.Context, tsid, reason, dele
 		tsid, reason, deletedBy,
 	); err != nil {
 		log.Printf("store/distributed: deletion audit write for %s: %v", tsid, err)
+	}
+	return nil
+}
+
+// ── User Management ──────────────────────────────────────────────────────
+
+// GetUser implements SessionStore.
+func (d *DistributedStore) GetUser(ctx context.Context, username string) (*User, error) {
+	var u User
+	var lastLogin *time.Time
+	err := d.db.QueryRow(ctx, `
+SELECT username, password_hash, role, source, full_name, email, created_at, last_login
+FROM sudo_users
+WHERE username = $1`, username).Scan(
+		&u.Username, &u.PasswordHash, &u.Role, &u.Source, &u.FullName, &u.Email, &u.CreatedAt, &lastLogin,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+	if lastLogin != nil {
+		u.LastLogin = *lastLogin
+	}
+	return &u, nil
+}
+
+// UpsertUser implements SessionStore.
+func (d *DistributedStore) UpsertUser(ctx context.Context, u User) error {
+	_, err := d.db.Exec(ctx, `
+INSERT INTO sudo_users
+  (username, password_hash, role, source, full_name, email, created_at, last_login)
+VALUES ($1, $2, $3, $4, $5, $6, COALESCE(NULLIF($7, '0001-01-01 00:00:00+00'::timestamptz), NOW()), $8)
+ON CONFLICT (username) DO UPDATE SET
+  password_hash = EXCLUDED.password_hash, -- pragma: allowlist secret
+  role          = EXCLUDED.role,
+  source        = EXCLUDED.source,
+  full_name     = EXCLUDED.full_name,
+  email         = EXCLUDED.email,
+  last_login    = COALESCE(EXCLUDED.last_login, sudo_users.last_login)`,
+		u.Username, u.PasswordHash, u.Role, u.Source, u.FullName, u.Email, u.CreatedAt,
+		func() *time.Time {
+			if u.LastLogin.IsZero() {
+				return nil
+			}
+			return &u.LastLogin
+		}(),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert user: %w", err)
+	}
+	return nil
+}
+
+// ListUsers implements SessionStore.
+func (d *DistributedStore) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := d.db.Query(ctx, `
+SELECT username, password_hash, role, source, full_name, email, created_at, last_login
+FROM sudo_users
+ORDER BY username ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		var lastLogin *time.Time
+		if err := rows.Scan(
+			&u.Username, &u.PasswordHash, &u.Role, &u.Source, &u.FullName, &u.Email, &u.CreatedAt, &lastLogin,
+		); err != nil {
+			return nil, fmt.Errorf("scan user row: %w", err)
+		}
+		if lastLogin != nil {
+			u.LastLogin = *lastLogin
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// DeleteUser implements SessionStore.
+func (d *DistributedStore) DeleteUser(ctx context.Context, username string) error {
+	if _, err := d.db.Exec(ctx, `DELETE FROM sudo_users WHERE username = $1`, username); err != nil {
+		return fmt.Errorf("delete user: %w", err)
 	}
 	return nil
 }

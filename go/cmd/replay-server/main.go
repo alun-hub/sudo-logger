@@ -74,6 +74,12 @@ var (
 	flagTrustedUserHeader = flag.String("trusted-user-header", "", "Header containing pre-authenticated username (e.g. X-Forwarded-User)")
 	flagAdminUsers        = flag.String("admin-users", "", "Comma-separated list of usernames granted admin role (can view all sessions, approve, delete)")
 
+	// ── OIDC (Enterprise) ───────────────────────────────────────────────────
+	flagOIDCIssuer   = flag.String("oidc-issuer", "", "OIDC provider issuer URL (e.g. https://accounts.google.com)")
+	flagOIDCClientID = flag.String("oidc-client-id", "", "OIDC client ID")
+	flagOIDCSecret   = flag.String("oidc-client-secret", "", "OIDC client secret")
+	flagOIDCRedirect = flag.String("oidc-redirect-url", "", "OIDC redirect URL (e.g. https://replay.example.com/api/oidc/callback)")
+
 	// Storage backend flags.
 	// NOTE: these flags are intentionally duplicated in cmd/server/main.go.
 	// If you change a default or description here, update that file too.
@@ -152,8 +158,8 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 
 // accessLogMiddleware logs every request with the authenticated username,
 // resolved from the trusted header (proxy mode) or Basic Auth credentials.
-// adminSet maps usernames to admin role; pass nil to disable RBAC enforcement.
-func accessLogMiddleware(next http.Handler, trustedHeader string, adminSet map[string]bool) http.Handler {
+// It also resolves the user's role from the SessionStore.
+func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := "-"
 		if trustedHeader != "" {
@@ -163,10 +169,20 @@ func accessLogMiddleware(next http.Handler, trustedHeader string, adminSet map[s
 		} else if u, _, ok := r.BasicAuth(); ok {
 			user = u
 		}
+
 		role := RoleViewer
-		if len(adminSet) > 0 && adminSet[user] {
+		if user != "-" {
+			if u, err := sessionStore.GetUser(r.Context(), user); err == nil && u != nil {
+				role = Role(u.Role)
+			}
+		}
+
+		// Backward compatibility for unauthenticated/open deployments:
+		// if no auth is configured and no user header is present, treat as admin.
+		if user == "-" && trustedHeader == "" && *flagHTPasswd == "" {
 			role = RoleAdmin
 		}
+
 		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		ctx := context.WithValue(r.Context(), ctxViewer, user)
 		ctx = context.WithValue(ctx, ctxRole, role)
@@ -186,88 +202,35 @@ func sanitizeForLog(s string) string {
 	}, s)
 }
 
-// htpasswdStore holds bcrypt-hashed credentials loaded from an htpasswd file.
-// The file format is one "username:bcrypt-hash" entry per line; lines starting
-// with '#' and blank lines are ignored.  Only bcrypt hashes are accepted.
-// Reload at runtime by sending SIGHUP to the process.
-type htpasswdStore struct {
-	mu    sync.RWMutex
-	users map[string][]byte // username → bcrypt hash
-	path  string
-}
-
-func newHTPasswd(path string) (*htpasswdStore, error) {
-	h := &htpasswdStore{path: path}
-	if err := h.reload(); err != nil {
-		return nil, err
-	}
-	return h, nil
-}
-
-// reload reads the htpasswd file and replaces the in-memory user map atomically.
-func (h *htpasswdStore) reload() error {
-	f, err := os.Open(h.path)
-	if err != nil {
-		return fmt.Errorf("open htpasswd %s: %w", h.path, err)
-	}
-	defer f.Close()
-
-	users := make(map[string][]byte)
-	lineNum := 0
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		idx := strings.IndexByte(line, ':')
-		if idx < 1 {
-			log.Printf("htpasswd %s:%d: missing colon, skipping", h.path, lineNum)
-			continue
-		}
-		username, hash := line[:idx], []byte(line[idx+1:])
-		if _, err := bcrypt.Cost(hash); err != nil {
-			log.Printf("htpasswd %s:%d: user %q: not a bcrypt hash, skipping", h.path, lineNum, username)
-			continue
-		}
-		users[username] = hash
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read htpasswd: %w", err)
-	}
-
-	h.mu.Lock()
-	h.users = users
-	h.mu.Unlock()
-	log.Printf("htpasswd: loaded %d user(s) from %s", len(users), h.path)
-	return nil
-}
-
-// authenticate returns true if username and password match a stored entry.
-// Always runs bcrypt even for unknown users to prevent timing-based
-// username enumeration.
 var dummyHash = func() []byte {
 	h, _ := bcrypt.GenerateFromPassword([]byte("dummy"), bcrypt.MinCost)
 	return h
 }()
 
-func (h *htpasswdStore) authenticate(username, password string) bool {
-	h.mu.RLock()
-	hash, ok := h.users[username]
-	h.mu.RUnlock()
-	if !ok {
+// authenticate returns true if username and password match a stored entry.
+// Always runs bcrypt even for unknown users to prevent timing-based
+// username enumeration.
+func authenticate(ctx context.Context, username, password string) bool {
+	u, err := sessionStore.GetUser(ctx, username)
+	if err != nil || u == nil || u.Source != "local" || u.PasswordHash == "" {
 		bcrypt.CompareHashAndPassword(dummyHash, []byte(password)) //nolint:errcheck
 		return false
 	}
-	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
+	return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil
 }
 
-// basicAuthMiddleware enforces HTTP Basic Auth using the htpasswdStore.
-func basicAuthMiddleware(next http.Handler, store *htpasswdStore) http.Handler {
+// basicAuthMiddleware enforces HTTP Basic Auth using the SessionStore.
+// In bootstrap mode (no users exist), it allows all requests to pass through
+// so that the first admin can be created.
+func basicAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isBootstrapMode(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		u, p, ok := r.BasicAuth()
-		if !ok || !store.authenticate(u, p) {
+		if !ok || !authenticate(r.Context(), u, p) {
 			w.Header().Set("WWW-Authenticate", `Basic realm="sudo-replay"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -694,6 +657,90 @@ func handlePutWhitelistedUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
+func handleGetUsers(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	users, err := sessionStore.ListUsers(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
+}
+
+func handlePutUser(w http.ResponseWriter, r *http.Request) {
+	// Bootstrap exception: allow creating the first user without admin role.
+	if !isBootstrapMode(r) && !requireAdmin(w, r) {
+		return
+	}
+
+	var u store.User
+	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if u.Username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	// Hash password if provided
+	var password string
+	if err := json.Unmarshal([]byte(`"`+u.PasswordHash+`"`), &password); err == nil && password != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "hash failed", http.StatusInternalServerError)
+			return
+		}
+		u.PasswordHash = string(hash) // pragma: allowlist secret
+	} else if u.Source == "local" {
+		// Keep existing hash if not changing password
+		if existing, _ := sessionStore.GetUser(r.Context(), u.Username); existing != nil {
+			u.PasswordHash = existing.PasswordHash // pragma: allowlist secret
+		}
+	}
+
+	if u.Role == "" {
+		u.Role = string(RoleViewer)
+	}
+	if u.Source == "" {
+		u.Source = "local"
+	}
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = time.Now()
+	}
+
+	if err := sessionStore.UpsertUser(r.Context(), u); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("user %q updated (source=%s, role=%s)", u.Username, u.Source, u.Role)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	username := strings.TrimPrefix(r.URL.Path, "/api/users/")
+	if username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	if err := sessionStore.DeleteUser(r.Context(), username); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("user %q deleted", username)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func handleGetHosts(w http.ResponseWriter, r *http.Request) {
 	all, err := cache.get(r.Context())
 	if err != nil {
@@ -953,6 +1000,39 @@ func main() {
 		}
 		handleGetHosts(w, r)
 	})
+	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetUsers(w, r)
+		case http.MethodPut, http.MethodPost:
+			handlePutUser(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/users/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.NotFound(w, r)
+			return
+		}
+		handleDeleteUser(w, r)
+	})
+	mux.HandleFunc("/api/auth-config", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		// Placeholder for auth configuration save
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("/api/auth-mapping", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		// Placeholder for role mapping save
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("/api/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1021,25 +1101,30 @@ func main() {
 		}
 	}()
 
+	// Seed admin users from --admin-users flag if the store is empty (bootstrap).
+	users, _ := sessionStore.ListUsers(context.Background())
+	if len(users) == 0 && *flagAdminUsers != "" {
+		for _, u := range strings.Split(*flagAdminUsers, ",") {
+			if u = strings.TrimSpace(u); u != "" {
+				err := sessionStore.UpsertUser(context.Background(), store.User{
+					Username: u,
+					Role:     string(RoleAdmin),
+					Source:   "local", // or "proxy" if they use trusted header
+				})
+				if err != nil {
+					log.Printf("seed admin %q: %v", u, err)
+				} else {
+					log.Printf("seeded admin user %q from --admin-users flag", u)
+				}
+			}
+		}
+	}
+
 	// Build middleware chain (innermost first):
-	//   basicAuth (optional) → accessLog → handler
+	//   basicAuth → accessLog → handler
 	var handler http.Handler = mux
-	var htStore *htpasswdStore
-	if *flagHTPasswd != "" {
-		var err error
-		htStore, err = newHTPasswd(*flagHTPasswd)
-		if err != nil {
-			log.Fatalf("htpasswd: %v", err)
-		}
-		handler = basicAuthMiddleware(handler, htStore)
-	}
-	adminSet := map[string]bool{}
-	for _, u := range strings.Split(*flagAdminUsers, ",") {
-		if u = strings.TrimSpace(u); u != "" {
-			adminSet[u] = true
-		}
-	}
-	handler = accessLogMiddleware(handler, *flagTrustedUserHeader, adminSet)
+	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
+	handler = basicAuthMiddleware(handler)
 
 	// Build the HTTP server so we can call Shutdown() on SIGTERM.
 	var httpSrv *http.Server
@@ -1056,26 +1141,17 @@ func main() {
 		httpSrv = &http.Server{Addr: *flagListen, Handler: handler}
 	}
 
-	// Signal handling: SIGHUP reloads htpasswd; SIGTERM/SIGINT triggers graceful shutdown.
+	// Signal handling: SIGTERM/SIGINT triggers graceful shutdown.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		for sig := range sigCh {
-			switch sig {
-			case syscall.SIGHUP:
-				if htStore != nil {
-					if err := htStore.reload(); err != nil {
-						log.Printf("htpasswd reload: %v", err)
-					}
-				}
-			default:
-				log.Printf("sudo-replay-server: received %v — shutting down", sig)
-				shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
-				if err := httpSrv.Shutdown(shutCtx); err != nil {
-					log.Printf("sudo-replay-server: shutdown: %v", err)
-				}
-				shutCancel()
+			log.Printf("sudo-replay-server: received %v — shutting down", sig)
+			shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := httpSrv.Shutdown(shutCtx); err != nil {
+				log.Printf("sudo-replay-server: shutdown: %v", err)
 			}
+			shutCancel()
 		}
 	}()
 

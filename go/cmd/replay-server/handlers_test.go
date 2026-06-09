@@ -96,68 +96,6 @@ func newOKHandler() http.Handler {
 	})
 }
 
-func TestBasicAuthMiddleware401NoCreds(t *testing.T) {
-	hash := makeBcrypt(t, "secret")
-	hs, _ := newHTPasswd(tempHTPasswd(t, "alice:"+hash))
-	handler := basicAuthMiddleware(newOKHandler(), hs)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("no creds: got %d, want 401", rr.Code)
-	}
-	if !strings.Contains(rr.Header().Get("WWW-Authenticate"), "Basic") {
-		t.Error("WWW-Authenticate header missing or wrong")
-	}
-}
-
-func TestBasicAuthMiddleware401WrongPassword(t *testing.T) {
-	hash := makeBcrypt(t, "correct")
-	hs, _ := newHTPasswd(tempHTPasswd(t, "alice:"+hash))
-	handler := basicAuthMiddleware(newOKHandler(), hs)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.SetBasicAuth("alice", "wrong")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("wrong password: got %d, want 401", rr.Code)
-	}
-}
-
-func TestBasicAuthMiddleware401UnknownUser(t *testing.T) {
-	hash := makeBcrypt(t, "pw")
-	hs, _ := newHTPasswd(tempHTPasswd(t, "alice:"+hash))
-	handler := basicAuthMiddleware(newOKHandler(), hs)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.SetBasicAuth("nobody", "pw")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("unknown user: got %d, want 401", rr.Code)
-	}
-}
-
-func TestBasicAuthMiddleware200ValidCreds(t *testing.T) {
-	hash := makeBcrypt(t, "secret")
-	hs, _ := newHTPasswd(tempHTPasswd(t, "alice:"+hash))
-	handler := basicAuthMiddleware(newOKHandler(), hs)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.SetBasicAuth("alice", "secret")
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("valid creds: got %d, want 200", rr.Code)
-	}
-}
-
 // ── handlePutRules ────────────────────────────────────────────────────────────
 
 func TestHandlePutRulesValid(t *testing.T) {

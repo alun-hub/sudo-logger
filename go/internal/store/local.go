@@ -45,6 +45,11 @@ type LocalStore struct {
 	whitelistCfg      whitelistedUsersConfig
 	lastWhitelistHash string // SHA256 hex of last successfully loaded content
 
+	// users state — reloaded every 30 s in background goroutine.
+	usersMu       sync.RWMutex
+	usersCfg      usersConfig
+	lastUsersHash string // SHA256 hex of last successfully loaded content
+
 	// access log — bounded in-memory ring buffer (same behaviour as before
 	// the store abstraction was introduced).
 	viewMu  sync.Mutex
@@ -93,6 +98,11 @@ type whitelistedUser struct {
 	Reason   string   `yaml:"reason"`
 }
 
+// usersConfig mirrors the YAML structure of users.yaml.
+type usersConfig struct {
+	Users []User `yaml:"users"`
+}
+
 // newLocalStore creates a LocalStore and starts the background reload goroutine
 // for blocked-users.yaml.
 func newLocalStore(cfg Config) (*LocalStore, error) {
@@ -104,6 +114,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	}
 	if cfg.WhitelistedUsersPath == "" {
 		cfg.WhitelistedUsersPath = "/etc/sudo-logger/whitelisted-users.yaml"
+	}
+	if cfg.UsersPath == "" {
+		cfg.UsersPath = "/etc/sudo-logger/users.yaml"
 	}
 	if cfg.SiemConfigPath == "" {
 		cfg.SiemConfigPath = "/etc/sudo-logger/siem.yaml"
@@ -140,6 +153,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if err := ls.loadWhitelistedUsers(); err != nil {
 		log.Printf("store/local: whitelisted-users initial load: %v", err)
 	}
+	if err := ls.loadUsers(); err != nil {
+		log.Printf("store/local: users initial load: %v", err)
+	}
 	if err := ls.loadApprovalStore(); err != nil {
 		log.Printf("store/local: approval-store initial load: %v", err)
 	}
@@ -156,6 +172,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 				}
 				if err := ls.loadWhitelistedUsers(); err != nil {
 					log.Printf("store/local: whitelisted-users reload: %v", err)
+				}
+				if err := ls.loadUsers(); err != nil {
+					log.Printf("store/local: users reload: %v", err)
 				}
 			case <-ls.stopCh:
 				return
@@ -220,6 +239,131 @@ func (ls *LocalStore) IsBlocked(_ context.Context, user, host string) (bool, str
 		}
 	}
 	return false, "", nil
+}
+
+// ── User Management ──────────────────────────────────────────────────────
+
+func (ls *LocalStore) loadUsers() error {
+	data, err := os.ReadFile(ls.cfg.UsersPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ls.usersMu.Lock()
+			ls.usersCfg = usersConfig{}
+			ls.usersMu.Unlock()
+			return nil
+		}
+		return err
+	}
+	h := sha256.Sum256(data)
+	newHash := hex.EncodeToString(h[:])
+
+	var cfg usersConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return fmt.Errorf("parse users: %w", err)
+	}
+	ls.usersMu.Lock()
+	changed := newHash != ls.lastUsersHash
+	ls.usersCfg = cfg
+	if changed {
+		ls.lastUsersHash = newHash
+	}
+	ls.usersMu.Unlock()
+	if changed {
+		log.Printf(`{"time":%q,"event":"config_reload","config":"users.yaml","sha256":%q,"entries":%d}`,
+			time.Now().UTC().Format(time.RFC3339), newHash, len(cfg.Users))
+	}
+	return nil
+}
+
+func (ls *LocalStore) saveUsers() error {
+	ls.usersMu.RLock()
+	data, err := yaml.Marshal(ls.usersCfg)
+	ls.usersMu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("marshal users: %w", err)
+	}
+
+	// Write to temporary file first to ensure atomic update.
+	tmp := ls.cfg.UsersPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write tmp users: %w", err)
+	}
+	if err := os.Rename(tmp, ls.cfg.UsersPath); err != nil {
+		return fmt.Errorf("rename tmp users: %w", err)
+	}
+
+	// Update local cache hash immediately so we don't log a config_reload
+	// for our own change in the background goroutine.
+	h := sha256.Sum256(data)
+	ls.usersMu.Lock()
+	ls.lastUsersHash = hex.EncodeToString(h[:])
+	ls.usersMu.Unlock()
+
+	return nil
+}
+
+// GetUser implements SessionStore.
+func (ls *LocalStore) GetUser(_ context.Context, username string) (*User, error) {
+	ls.usersMu.RLock()
+	defer ls.usersMu.RUnlock()
+	for _, u := range ls.usersCfg.Users {
+		if u.Username == username {
+			cp := u
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
+// UpsertUser implements SessionStore.
+func (ls *LocalStore) UpsertUser(_ context.Context, u User) error {
+	ls.usersMu.Lock()
+	found := false
+	for i, existing := range ls.usersCfg.Users {
+		if existing.Username == u.Username {
+			if u.CreatedAt.IsZero() {
+				u.CreatedAt = existing.CreatedAt
+			}
+			if u.LastLogin.IsZero() {
+				u.LastLogin = existing.LastLogin
+			}
+			ls.usersCfg.Users[i] = u
+			found = true
+			break
+		}
+	}
+	if !found {
+		if u.CreatedAt.IsZero() {
+			u.CreatedAt = time.Now()
+		}
+		ls.usersCfg.Users = append(ls.usersCfg.Users, u)
+	}
+	ls.usersMu.Unlock()
+	return ls.saveUsers()
+}
+
+// ListUsers implements SessionStore.
+func (ls *LocalStore) ListUsers(_ context.Context) ([]User, error) {
+	ls.usersMu.RLock()
+	defer ls.usersMu.RUnlock()
+	users := make([]User, len(ls.usersCfg.Users))
+	copy(users, ls.usersCfg.Users)
+	sort.Slice(users, func(i, j int) bool { return users[i].Username < users[j].Username })
+	return users, nil
+}
+
+// DeleteUser implements SessionStore.
+func (ls *LocalStore) DeleteUser(_ context.Context, username string) error {
+	ls.usersMu.Lock()
+	newUsers := make([]User, 0, len(ls.usersCfg.Users))
+	for _, u := range ls.usersCfg.Users {
+		if u.Username != username {
+			newUsers = append(newUsers, u)
+		}
+	}
+	ls.usersCfg.Users = newUsers
+	ls.usersMu.Unlock()
+	return ls.saveUsers()
 }
 
 // CreateSession implements SessionStore.

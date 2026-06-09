@@ -40,6 +40,7 @@ spec:
             - -trusted-user-header=X-Forwarded-User
             - -logserver-admin=http://sudo-logserver-admin:9877
             - -logserver-admin-token=$(APPROVAL_TOKEN)
+            - -admin-users=alun-hub
 
           env:
             - name: TZ

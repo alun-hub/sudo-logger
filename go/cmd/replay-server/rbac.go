@@ -28,11 +28,18 @@ func isAdmin(r *http.Request) bool {
 	return roleFromContext(r) == RoleAdmin
 }
 
+// isBootstrapMode returns true if no users exist in the store, allowing the
+// creation of the first admin account via the UI.
+func isBootstrapMode(r *http.Request) bool {
+	users, err := sessionStore.ListUsers(r.Context())
+	return err == nil && len(users) == 0
+}
+
 // requireAdmin writes 403 and returns false if the request is not admin.
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if !isAdmin(r) {
-		http.Error(w, "forbidden: admin role required", http.StatusForbidden)
-		return false
+	if isAdmin(r) || isBootstrapMode(r) {
+		return true
 	}
-	return true
+	http.Error(w, "forbidden: admin role required", http.StatusForbidden)
+	return false
 }

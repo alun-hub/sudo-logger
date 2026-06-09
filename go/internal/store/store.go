@@ -199,8 +199,34 @@ type SessionStore interface {
 	// progress or cannot be found.
 	DeleteSession(ctx context.Context, tsid, reason, deletedBy string) error
 
+	// ── User Management ──────────────────────────────────────────────────────
+
+	// GetUser retrieves a user by username. Returns nil if not found.
+	GetUser(ctx context.Context, username string) (*User, error)
+
+	// UpsertUser creates or updates a user.
+	UpsertUser(ctx context.Context, user User) error
+
+	// ListUsers returns all users.
+	ListUsers(ctx context.Context) ([]User, error)
+
+	// DeleteUser removes a user.
+	DeleteUser(ctx context.Context, username string) error
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
+}
+
+// User represents a person with access to the replay-server.
+type User struct {
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"` // bcrypt hash, only for Source="local"
+	Role         string    `json:"role"`     // "admin" | "viewer"
+	Source       string    `json:"source"`   // "local" | "oidc" | "proxy"
+	FullName     string    `json:"full_name"`
+	Email        string    `json:"email"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastLogin    time.Time `json:"last_login,omitempty"`
 }
 
 // ApprovalStore handles the state for the JIT sudo approval system.
@@ -361,6 +387,10 @@ type Config struct {
 	// WhitelistedUsersPath is the YAML file listing users who bypass JIT approval.
 	// Default: /etc/sudo-logger/whitelisted-users.yaml
 	WhitelistedUsersPath string
+
+	// UsersPath is the YAML file listing users and roles for the replay UI.
+	// Default: /etc/sudo-logger/users.yaml
+	UsersPath string
 
 	// SiemConfigPath is the path to siem.yaml (LocalStore only).
 	// Default: /etc/sudo-logger/siem.yaml

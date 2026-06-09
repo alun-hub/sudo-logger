@@ -1045,6 +1045,7 @@
   <div class="report-panel" id="tab-config">
     <nav class="stab-nav">
       <button class="stab-btn active" data-stab="approval">JIT Approval</button>
+      <button class="stab-btn" data-stab="users">Users & Auth</button>
       <button class="stab-btn" data-stab="siem">SIEM</button>
       <button class="stab-btn" data-stab="sandbox">Sandbox</button>
       <button class="stab-btn" data-stab="retention">Retention</button>
@@ -1094,6 +1095,81 @@
           <span id="approval-path" style="font-size:11px;color:var(--text-dim)"></span>
         </div>
       </div>
+      </div>
+
+      <!-- ── Users & Auth ────────────────────────────────────────────────────── -->
+      <div class="stab-panel" id="stab-users">
+        <div class="siem-section" style="margin-top:0">
+          <div class="siem-heading">
+            Authentication Strategy
+            <span class="settings-status" id="auth-status" style="display:none"></span>
+          </div>
+          <div class="siem-form">
+            <label>Identity Source</label>
+            <select id="auth-source">
+              <option value="local">Local Database (Standalone)</option>
+              <option value="oidc">OIDC (Enterprise SSO)</option>
+              <option value="proxy">External Proxy (Pomerium/Ingress)</option>
+            </select>
+
+            <!-- OIDC Settings -->
+            <div id="auth-oidc-fields" style="display:none">
+              <div class="siem-subsection">OIDC Configuration</div>
+              <label>Issuer URL</label>
+              <input type="text" id="oidc-issuer" placeholder="https://keycloak.example.com/realms/master">
+              <label>Client ID</label>
+              <input type="text" id="oidc-client-id" placeholder="sudo-logger">
+              <label>Client Secret</label>
+              <input type="password" id="oidc-client-secret" placeholder="••••••••" autocomplete="new-password">
+            </div>
+
+            <!-- Proxy Settings -->
+            <div id="auth-proxy-fields" style="display:none">
+              <div class="siem-subsection">Proxy Configuration</div>
+              <label>User Header</label>
+              <input type="text" id="proxy-user-header" placeholder="X-Forwarded-User">
+              <label>Groups Header</label>
+              <input type="text" id="proxy-groups-header" placeholder="X-Forwarded-Groups (optional)">
+            </div>
+          </div>
+          <div class="siem-footer">
+            <button class="btn-primary" id="btn-save-auth">Save authentication strategy</button>
+          </div>
+        </div>
+
+        <div class="siem-section" id="section-local-users">
+          <div class="siem-heading">
+            Local Users
+            <button class="btn-icon" style="width:auto;padding:0 10px;font-size:12px" onclick="showAddUserModal()">+ Add User</button>
+          </div>
+          <table class="report-table" id="users-table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Full Name</th>
+                <th>Role</th>
+                <th>Source</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-list-body">
+              <!-- populated by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="siem-section" id="section-role-mapping" style="display:none">
+          <div class="siem-heading">Role Mapping (Group → Admin)</div>
+          <p class="siem-note">Users in these groups will be granted the <strong>admin</strong> role. Others will be viewers.</p>
+          <div class="siem-form">
+            <label>Admin Groups</label>
+            <input type="text" id="auth-admin-groups" placeholder="sudo-admins, security-ops">
+          </div>
+          <div class="siem-footer">
+            <button class="btn-primary" id="btn-save-mapping">Save role mapping</button>
+          </div>
+        </div>
       </div>
 
       <!-- ── Data Retention ────────────────────────────────────────────────────── -->
@@ -1642,6 +1718,74 @@
 </div>
 
 <!-- ── Help modal ────────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="bootstrap-modal" hidden>
+  <div class="modal-box" style="width:500px">
+    <div class="modal-header">
+      <h3>Welcome to sudo-logger</h3>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text-sub)">System initialization required. Create the first administrator account to continue.</p>
+      <div class="form-group">
+        <label>Admin Username</label>
+        <input type="text" id="boot-user" class="form-input" placeholder="admin">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="boot-pass" class="form-input" placeholder="••••••••">
+        </div>
+        <div class="form-group">
+          <label>Confirm Password</label>
+          <input type="password" id="boot-pass2" class="form-input" placeholder="••••••••">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="btn-finish-bootstrap" style="width:100%">Create Admin & Start</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="user-modal" hidden>
+  <div class="modal-box" style="width:450px">
+    <div class="modal-header">
+      <h3 id="user-modal-title">Add Local User</h3>
+      <button class="modal-close" onclick="closeUserModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="user-username" class="form-input">
+      </div>
+      <div class="form-group">
+        <label>Full Name</label>
+        <input type="text" id="user-fullname" class="form-input">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="user-email" class="form-input">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="user-pass" class="form-input" placeholder="Leave blank to keep current">
+        </div>
+        <div class="form-group">
+          <label>Role</label>
+          <select id="user-role" class="form-input" style="height:32px;padding:4px 8px">
+            <option value="viewer">Viewer</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="btn-save-user">Save User</button>
+      <button class="theme-btn" onclick="closeUserModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="help-modal" hidden>
   <div class="modal-box" style="width:900px;max-width:95vw;max-height:85vh;overflow-y:auto">
     <button class="modal-close" id="help-modal-close" aria-label="Close help">&times;</button>
@@ -3572,6 +3716,7 @@ function switchSettingsTab(stab) {
   const panel = document.getElementById('tab-config');
   panel.querySelectorAll('.stab-btn[data-stab]').forEach(b => b.classList.toggle('active', b.dataset.stab === stab));
   panel.querySelectorAll('.stab-panel').forEach(p => p.classList.toggle('active', p.id === 'stab-' + stab));
+  if (stab === 'users') { fetchUsers(); }
 }
 
 document.getElementById('tab-config').querySelectorAll('.stab-btn[data-stab]').forEach(btn =>
@@ -6321,22 +6466,222 @@ function normalizeTab(tab) {
   return tab;
 }
 
+// ── Users & Auth ──────────────────────────────────────────────────────────────
+
+document.getElementById('auth-source').addEventListener('change', (e) => {
+  const src = e.target.value;
+  document.getElementById('auth-oidc-fields').style.display = (src === 'oidc') ? 'block' : 'none';
+  document.getElementById('auth-proxy-fields').style.display = (src === 'proxy') ? 'block' : 'none';
+  document.getElementById('section-local-users').style.display = (src === 'local') ? 'block' : 'none';
+  document.getElementById('section-role-mapping').style.display = (src !== 'local') ? 'block' : 'none';
+});
+
+async function saveAuthStrategy() {
+  const btn = document.getElementById('btn-save-auth');
+  btn.disabled = true;
+  const cfg = {
+    source: document.getElementById('auth-source').value,
+    oidc: {
+      issuer: document.getElementById('oidc-issuer').value.trim(),
+      client_id: document.getElementById('oidc-client-id').value.trim(),
+      client_secret: document.getElementById('oidc-client-secret').value.trim(),
+    },
+    proxy: {
+      user_header: document.getElementById('proxy-user-header').value.trim(),
+      groups_header: document.getElementById('proxy-groups-header').value.trim(),
+    }
+  };
+  try {
+    const res = await fetch('/api/auth-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: cfg })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showAuthStatus('Saved — reloads within 30 s', false);
+  } catch (e) {
+    showAuthStatus('Save failed: ' + e.message, true);
+  } finally { btn.disabled = false; }
+}
+
+async function saveRoleMapping() {
+  const btn = document.getElementById('btn-save-mapping');
+  btn.disabled = true;
+  const groups = document.getElementById('auth-admin-groups').value.split(',').map(s => s.trim()).filter(s => s);
+  try {
+    const res = await fetch('/api/auth-mapping', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_groups: groups })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    showAuthStatus('Mapping saved', false);
+  } catch (e) {
+    showAuthStatus('Save failed: ' + e.message, true);
+  } finally { btn.disabled = false; }
+}
+
+function showAuthStatus(msg, isErr) {
+  const s = document.getElementById('auth-status');
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
+
+document.getElementById('btn-save-auth').addEventListener('click', saveAuthStrategy);
+document.getElementById('btn-save-mapping').addEventListener('click', saveRoleMapping);
+
+// ── User Management ───────────────────────────────────────────────────────────
+
+async function fetchUsers() {
+  const body = document.getElementById('users-list-body');
+  body.innerHTML = '<tr><td colspan="6" class="td-dim">Loading users...</td></tr>';
+  try {
+    const res = await fetch('/api/users');
+    if (!res.ok) throw new Error(await res.text());
+    const users = await res.json();
+    renderUsers(users);
+  } catch(e) {
+    body.innerHTML = `<tr><td colspan="6" class="td-warn">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function renderUsers(users) {
+  const body = document.getElementById('users-list-body');
+  if (!users || users.length === 0) {
+    body.innerHTML = '<tr><td colspan="6" class="td-dim" style="text-align:center">No local users found.</td></tr>';
+    return;
+  }
+  body.innerHTML = users.map(u => `
+    <tr>
+      <td style="font-family:var(--font)">${esc(u.username)}</td>
+      <td>${esc(u.full_name || '-')}</td>
+      <td><span class="badge" style="color:${u.role==='admin'?'var(--green)':'var(--text-sub)'}">${u.role}</span></td>
+      <td><span class="badge">${u.source}</span></td>
+      <td class="td-dim">${u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}</td>
+      <td>
+        <button class="report-link" onclick="editUser('${u.username}')" style="margin-right:10px">Edit</button>
+        <button class="report-link td-warn" onclick="deleteUser('${u.username}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+let editingUsername = null;
+
+function showAddUserModal() {
+  editingUsername = null;
+  document.getElementById('user-modal-title').innerText = 'Add Local User';
+  document.getElementById('user-username').value = '';
+  document.getElementById('user-username').disabled = false;
+  document.getElementById('user-fullname').value = '';
+  document.getElementById('user-email').value = '';
+  document.getElementById('user-pass').value = '';
+  document.getElementById('user-role').value = 'viewer';
+  document.getElementById('user-modal').hidden = false;
+}
+
+async function editUser(username) {
+  editingUsername = username;
+  try {
+    const res = await fetch('/api/users');
+    const users = await res.json();
+    const u = users.find(x => x.username === username);
+    if (!u) return;
+    document.getElementById('user-modal-title').innerText = 'Edit User';
+    document.getElementById('user-username').value = u.username;
+    document.getElementById('user-username').disabled = true;
+    document.getElementById('user-fullname').value = u.full_name || '';
+    document.getElementById('user-email').value = u.email || '';
+    document.getElementById('user-pass').value = '';
+    document.getElementById('user-role').value = u.role;
+    document.getElementById('user-modal').hidden = false;
+  } catch(e) { alert(e.message); }
+}
+
+function closeUserModal() {
+  document.getElementById('user-modal').hidden = true;
+}
+
+document.getElementById('btn-save-user').onclick = async () => {
+  const u = {
+    username: document.getElementById('user-username').value,
+    full_name: document.getElementById('user-fullname').value,
+    email: document.getElementById('user-email').value,
+    password_hash: document.getElementById('user-pass').value, // server will hash
+    role: document.getElementById('user-role').value,
+    source: 'local'
+  };
+  try {
+    const res = await fetch('/api/users', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(u)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    closeUserModal();
+    fetchUsers();
+  } catch(e) { alert('Save failed: ' + e.message); }
+};
+
+async function deleteUser(username) {
+  if (!confirm(`Permanently delete user "${username}"?`)) return;
+  try {
+    const res = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    fetchUsers();
+  } catch(e) { alert('Delete failed: ' + e.message); }
+}
+
+// ── Bootstrap Logic ───────────────────────────────────────────────────────────
+
+async function checkBootstrap() {
+  try {
+    const res = await fetch('/api/me');
+    if (!res.ok) return;
+    const me = await res.json();
+    // If store is empty, API returns no role or empty user
+    if (me.role === 'admin' && !me.user) {
+       // Unauthenticated admin = potential bootstrap
+       const usersRes = await fetch('/api/users');
+       const users = await usersRes.json();
+       if (users.length === 0) {
+         document.getElementById('bootstrap-modal').hidden = false;
+       }
+    }
+  } catch(e) { console.error('Bootstrap check failed', e); }
+}
+
+document.getElementById('btn-finish-bootstrap').onclick = async () => {
+  const user = document.getElementById('boot-user').value;
+  const pass = document.getElementById('boot-pass').value;
+  const pass2 = document.getElementById('boot-pass2').value;
+  if (!user || !pass) { alert('Username and password required'); return; }
+  if (pass !== pass2) { alert('Passwords do not match'); return; }
+
+  try {
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: user,
+        password_hash: pass,
+        role: 'admin',
+        source: 'local'
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    document.getElementById('bootstrap-modal').hidden = true;
+    location.reload(); // reload to get authenticated session
+  } catch(e) { alert('Bootstrap failed: ' + e.message); }
+};
+
 window.addEventListener('DOMContentLoaded', () => {
+  checkBootstrap();
+
   const path = window.location.pathname.replace(/\/$/, '');
   const p = new URLSearchParams(location.search);
-
-  // /approvals path always wins
-  if (path === '/approvals') {
-    switchTab('approvals', { pushURL: false });
-    return;
-  }
-
-  // URL params take priority over localStorage
-  if (p.has('tab')) {
-    const tab = normalizeTab(p.get('tab')) || 'sessions';
-    switchTab(tab, { pushURL: false });
-    return;
-  }
 
   // ?tsid= means sessions tab — restoreFromURL() handles session selection after fetchSessions
   if (p.has('tsid')) return;
