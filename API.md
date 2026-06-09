@@ -1,105 +1,325 @@
 # sudo-logger API Reference
 
-This document outlines the HTTP API endpoints provided by the `sudo-logger` system. The system consists of two main API services: the **Replay Server** (UI and admin API) and the **Log Server** (internal agent-facing API).
+This document provides a detailed technical reference for all HTTP API endpoints in the `sudo-logger` system.
 
 ---
 
-## 1. Replay Server API
+## 1. Replay Server API (Web UI & Integrations)
 
-The Replay Server (`sudo-replay-server`) provides the endpoints used by the web UI and external integrations (like SIEMs or approval webhooks).
+The Replay Server (`sudo-replay-server`) provides the endpoints used by the web UI, SIEM systems, and chat integrations (e.g., Slack/Mattermost webhooks). All responses are in `application/json` unless otherwise specified.
 
-### Authentication & Authorization
+### 1.1 Identity & Access Management
 
-Most `/api/*` endpoints require authentication. The required role (`viewer` or `admin`) depends on the endpoint.
-Authentication is handled dynamically via the chosen **Authentication Strategy** (Local Database with Basic Auth, OIDC, or External Proxy).
+#### `GET /api/me`
+Returns the currently authenticated user's identity and effective role.
+*   **Role Required:** *None* (Open to all authenticated users; unauthenticated users get 401, or fallback to proxy mapping).
+*   **Response (200 OK):**
+    ```json
+    {
+      "user": "alice",
+      "role": "admin",
+      "logoutUrl": "/api/oidc/login"
+    }
+    ```
 
-- **Viewer Role:** Can access own sessions and replay them.
-- **Admin Role:** Can access all sessions, access logs, configurations, approvals, and delete sessions.
+#### `GET /api/users`
+Lists all users managed in the local database.
+*   **Role Required:** `admin`
+*   **Response (200 OK):**
+    ```json
+    [
+      {
+        "username": "alice",
+        "role": "admin",
+        "created_at": "2026-06-09T12:00:00Z"
+      }
+    ]
+    ```
 
-### Identity & Access Management
+#### `PUT / POST /api/users`
+Creates or updates a local user. During the very first launch (Bootstrap Mode), this endpoint bypasses authentication to allow creating the initial administrator.
+*   **Role Required:** `admin` (or Bootstrap Mode)
+*   **Request Body:**
+    ```json
+    {
+      "username": "bob",
+      "password": "SuperSecretPassword123!",
+      "role": "viewer"
+    }
+    ```
+    *(Note: If updating an existing user, sending an empty password keeps the existing password hash intact).*
+*   **Response (204 No Content)**
 
-| Method | Endpoint | Role | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/me` | *Any* | Returns the currently authenticated user's identity and role (`{"user": "name", "role": "admin|viewer"}`). |
-| `GET` | `/api/users` | `admin` | Lists all locally managed users. |
-| `PUT` / `POST` | `/api/users` | `admin`* | Creates or updates a local user. *(Allowed without auth during initial Bootstrap)*. |
-| `DELETE` | `/api/users/{username}` | `admin` | Permanently deletes a local user. |
-| `GET` | `/api/auth-config` | `admin` | Returns the current authentication strategy (Local, OIDC, Proxy) and settings. |
-| `PUT` | `/api/auth-config` | `admin` | Updates the authentication strategy and settings. |
-| `PUT` | `/api/auth-mapping` | `admin` | Updates the OIDC/Proxy group-to-admin role mapping. |
-| `GET` | `/api/oidc/login` | *None* | Redirects an unauthenticated user to the configured OIDC IdP. |
-| `GET` | `/api/oidc/callback` | *None* | Handles the callback from the OIDC IdP, establishes the session, and redirects to `/`. |
+#### `DELETE /api/users/{username}`
+Permanently deletes a local user.
+*   **Role Required:** `admin`
+*   **Response (204 No Content)**
 
-### Sessions & Playback
+#### `GET /api/auth-config`
+Retrieves the current authentication strategy (Local, OIDC, Proxy). OIDC client secrets are masked as `***`.
+*   **Role Required:** `admin`
+*   **Response (200 OK):**
+    ```json
+    {
+      "config": {
+        "source": "oidc",
+        "oidc": {
+          "issuer_url": "https://auth.example.com",
+          "client_id": "sudo-logger",
+          "client_secret": "***"
+        },
+        "proxy": {
+          "user_header": "",
+          "groups_header": ""
+        },
+        "admin_groups": "sudo-admins"
+      }
+    }
+    ```
 
-| Method | Endpoint | Role | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/sessions` | `viewer` | Lists recorded sessions. Admins see all sessions; viewers see only their own. Supports query params `q`, `from`, `to`, `sort`, `order`, `limit`, `offset`. |
-| `GET` | `/api/session/events?tsid={id}`| `viewer` | Retrieves the raw playback events (asciinema v2 format) for a specific session. |
-| `DELETE`| `/api/sessions/{tsid}` | `admin` | Permanently deletes a session and its associated files (GDPR Right to Erasure). Requires a JSON body `{"reason": "..."}`. |
-| `GET` | `/api/access-log` | `admin` | Returns the audit log of who has viewed which session replays. |
-| `GET` | `/api/hosts` | `viewer` | Returns a unique list of hostnames that have recorded sessions. |
+#### `PUT /api/auth-config`
+Updates the authentication strategy.
+*   **Role Required:** `admin`
+*   **Request Body:** Same as the `GET` response payload. If `client_secret` is sent as `***`, the existing secret in the database is preserved.
+*   **Response (204 No Content)**
 
-### Just-In-Time (JIT) Approvals
+#### `PUT /api/auth-mapping`
+Updates the mapping of External Groups (from OIDC or Proxy) to the `admin` role.
+*   **Role Required:** `admin`
+*   **Request Body:**
+    ```json
+    {
+      "admin_groups": "sudo-admins, security-ops"
+    }
+    ```
+*   **Response (204 No Content)**
 
-| Method | Endpoint | Role | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/approvals` | `admin` | Lists all pending and active JIT sudo approval requests and windows. |
-| `POST` | `/api/approvals/{id}` | `admin` | Approves (`{"action": "approve"}`) or denies (`{"action": "deny"}`) a specific JIT request. |
-| `PUT` | `/api/approvals/{id}` | `admin` | Revokes an already active approval window early. |
-| `GET` | `/api/approval-config` | `admin` | Retrieves the JIT approval configuration and webhook settings. |
-| `PUT` | `/api/approval-config` | `admin` | Updates the JIT approval configuration. |
-| `POST` | `/api/approvals/callback`| *None* | Webhook callback endpoint used by interactive Slack/Mattermost messages to approve/deny requests. Protected by HMAC signature. |
-| `GET` | `/api/jit-policy` | *None* | Returns public JIT policy requirements (used by the agent when evaluating if it should prompt for justification). |
+#### `GET /api/oidc/login`
+Redirects the user to the configured OIDC Identity Provider to initiate the OAuth2 flow.
+*   **Role Required:** *None*
 
-### Centralised Sudoers Management
+#### `GET /api/oidc/callback`
+Handles the redirect back from the OIDC IdP. Validates the `code` and `state`, exchanges them for an ID token, maps roles based on the `groups` claim, sets the `sudo_session` cookie, and redirects the user to `/`.
+*   **Role Required:** *None*
 
-| Method | Endpoint | Role | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/sudoers/hosts` | `admin` | Lists all hosts checking in for sudoers configuration, along with their sync status. |
-| `GET` | `/api/sudoers/snapshots` | `admin` | Retrieves the history of applied sudoers snapshots for a specific host. |
-| `GET` | `/api/sudoers/config` | `admin` | Retrieves the staged sudoers configuration for a specific host (or the global `_default` template). |
-| `PUT` | `/api/sudoers/config` | `admin` | Saves a new staged sudoers configuration for a specific host or template. |
-| `DELETE`| `/api/sudoers/config` | `admin` | Deletes a host-specific override, forcing it to fall back to the `_default` template. |
+---
 
-### Policies & Configuration
+### 1.2 Sessions & Playback
 
-| Method | Endpoint | Role | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/rules` | `admin` | Retrieves the risk scoring rules (`risk-rules.yaml`). |
-| `PUT` | `/api/rules` | `admin` | Updates the risk scoring rules. |
-| `GET` | `/api/sandbox` | `admin` | Retrieves the eBPF process sandbox configuration. |
-| `PUT` | `/api/sandbox` | `admin` | Updates the eBPF process sandbox configuration. |
-| `GET` | `/api/sandbox/templates`| `admin` | Retrieves pre-defined sandbox templates (LocalStore only). |
-| `GET` | `/api/blocked-users` | `admin` | Retrieves the list of blocked users/hosts. |
-| `PUT` | `/api/blocked-users` | `admin` | Updates the blocked users list. |
-| `GET` | `/api/whitelisted-users`| `admin` | Retrieves the list of JIT approval whitelisted users. |
-| `PUT` | `/api/whitelisted-users`| `admin` | Updates the whitelisted users. |
-| `GET` | `/api/retention` | `admin` | Retrieves data retention policies. |
-| `PUT` | `/api/retention` | `admin` | Updates data retention policies. |
-| `GET` | `/api/siem-config` | `admin` | Retrieves SIEM forwarding configuration. |
-| `PUT` | `/api/siem-config` | `admin` | Updates SIEM forwarding configuration. |
-| `PUT` | `/api/siem-cert` | `admin` | Uploads TLS certificates (CA, Client Cert, Client Key) for SIEM forwarding. |
+#### `GET /api/sessions`
+Searches and lists recorded sudo sessions.
+*   **Role Required:** `viewer` (Viewers only see their own sessions; Admins see all).
+*   **Query Parameters:**
+    *   `q` (string): Free-text search query.
+    *   `from` (string): Start date/time (e.g., `2026-06-01T00:00:00Z`).
+    *   `to` (string): End date/time.
+    *   `limit` (int): Max results to return (default 50).
+    *   `offset` (int): Pagination offset.
+    *   `sort` (string): Field to sort by (e.g., `timestamp`).
+    *   `order` (string): `asc` or `desc`.
+*   **Response (200 OK):**
+    ```json
+    [
+      {
+        "tsid": "0000018f-a1b2-c3d4-e5f6-000000000000",
+        "timestamp": "2026-06-09T15:30:00Z",
+        "user": "alice",
+        "host": "web-prod-01",
+        "run_as": "root",
+        "command": "/bin/bash",
+        "duration_ms": 45000,
+        "risk_score": 15,
+        "status": "complete"
+      }
+    ]
+    ```
 
-### System & Metrics
+#### `GET /api/session/events?tsid={id}`
+Streams the raw TTY playback events for the asciinema player.
+*   **Role Required:** `viewer` (must own the session unless admin).
+*   **Response (200 OK):** Newline-delimited JSON (Asciinema v2 format).
+    ```json
+    {"version": 2, "width": 80, "height": 24, "timestamp": 1717947000}
+    [0.105, "o", "root@web-prod-01:~# "]
+    [1.023, "o", "ls -l\r\n"]
+    ```
 
-| Method | Endpoint | Role | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/healthz` | *None* | Readiness/Liveness probe for Kubernetes. Returns `ok`. |
-| `GET` | `/metrics` | *None* | Prometheus metrics (session views, risk distributions). |
-| `GET` | `/api/report` | `viewer` | Generates a high-level summary report (session counts, anomalies) for the UI dashboard. |
+#### `DELETE /api/sessions/{tsid}`
+Permanently deletes a session and its associated recordings from disk/S3 (GDPR Right to Erasure).
+*   **Role Required:** `admin`
+*   **Request Body:**
+    ```json
+    {
+      "reason": "Accidental exposure of sensitive PII in terminal output."
+    }
+    ```
+*   **Response (204 No Content)**
+
+#### `GET /api/access-log`
+Returns the audit log detailing who has viewed or deleted which session replays.
+*   **Role Required:** `admin`
+*   **Response (200 OK):**
+    ```json
+    [
+      {
+        "timestamp": "2026-06-09T16:00:00Z",
+        "action": "view",
+        "actor": "bob",
+        "target_tsid": "0000018f-a1b2-c3d4-e5f6-000000000000"
+      }
+    ]
+    ```
+
+#### `GET /api/hosts`
+Returns a unique list of all hostnames that have ever submitted a session. Used for UI filtering dropdowns.
+*   **Role Required:** `viewer`
+*   **Response (200 OK):** `["web-prod-01", "db-main-02"]`
+
+---
+
+### 1.3 Just-In-Time (JIT) Approvals
+
+#### `GET /api/approvals`
+Lists pending, active, and recently expired JIT sudo approval requests.
+*   **Role Required:** `admin`
+*   **Response (200 OK):**
+    ```json
+    [
+      {
+        "id": "req-12345",
+        "user": "alice",
+        "host": "db-main-02",
+        "reason": "Restarting stuck postgres process",
+        "status": "pending",
+        "requested_at": "2026-06-09T16:05:00Z",
+        "expires_at": "2026-06-09T16:15:00Z"
+      }
+    ]
+    ```
+
+#### `POST /api/approvals/{id}`
+Approves or denies a pending JIT request.
+*   **Role Required:** `admin`
+*   **Request Body:**
+    ```json
+    {
+      "action": "approve"
+    }
+    ```
+    *(Action can be `"approve"` or `"deny"`).*
+*   **Response (200 OK):** Returns the updated approval object.
+
+#### `PUT /api/approvals/{id}`
+Revokes an already approved, active window before it expires naturally.
+*   **Role Required:** `admin`
+*   **Response (200 OK)**
+
+#### `GET /api/approval-config` & `PUT /api/approval-config`
+Manages the global configuration for JIT approvals (timeouts, slack webhook URLs).
+*   **Role Required:** `admin`
+*   **Request/Response Format:**
+    ```json
+    {
+      "enabled": true,
+      "default_duration_minutes": 60,
+      "webhook_url": "https://hooks.slack.com/services/...",
+      "require_justification": true
+    }
+    ```
+
+#### `POST /api/approvals/callback`
+Webhook endpoint designed to receive interactive button clicks directly from Slack or Mattermost.
+*   **Role Required:** *None* (Protected by HMAC-SHA256 signature validation against the webhook secret).
+*   **Request Body:** URL-encoded payload per Slack/Mattermost specifications.
+
+#### `GET /api/jit-policy`
+Public endpoint used by the `sudo-logger-agent` to evaluate whether the current user on the current host requires a justification prompt before executing sudo.
+*   **Role Required:** *None*
+
+---
+
+### 1.4 Centralised Sudoers Management
+
+#### `GET /api/sudoers/hosts`
+Lists all host machines and their current sudoers configuration sync status.
+*   **Role Required:** `admin`
+*   **Response (200 OK):**
+    ```json
+    [
+      {
+        "hostname": "web-prod-01",
+        "status": "in_sync",
+        "last_seen": "2026-06-09T16:10:00Z",
+        "applied_sha256": "abcdef123456..."
+      }
+    ]
+    ```
+
+#### `GET /api/sudoers/snapshots?host={hostname}`
+Retrieves the history of applied sudoers file versions for a host.
+*   **Role Required:** `admin`
+
+#### `GET /api/sudoers/config?host={hostname}`
+Retrieves the staged sudoers configuration (YAML or raw sudoers text) for a host. If `host=_default`, retrieves the global template.
+*   **Role Required:** `admin`
+
+#### `PUT /api/sudoers/config?host={hostname}`
+Saves a new staged configuration.
+*   **Role Required:** `admin`
+*   **Request Body:** Raw text payload containing the `sudoers` file content.
+*   **Response (204 No Content)**
+
+#### `DELETE /api/sudoers/config?host={hostname}`
+Deletes the specific host override, forcing the agent on that host to fall back to the `_default` global template on its next check-in.
+*   **Role Required:** `admin`
+*   **Response (204 No Content)**
+
+---
+
+### 1.5 System Configuration & Policies
+
+All endpoints in this section require the `admin` role and use `GET` to retrieve and `PUT` to update configurations.
+Responses and Requests share the same JSON shapes.
+
+*   `GET / PUT /api/rules` — Risk scoring engine rules (`risk-rules.yaml` format).
+*   `GET / PUT /api/sandbox` — eBPF process sandbox restrictions (preventing sudo from modifying specific files/sockets).
+*   `GET / PUT /api/blocked-users` — Array of strings representing users/hosts strictly blocked from executing sudo.
+*   `GET / PUT /api/whitelisted-users` — Array of strings representing users exempt from JIT approval prompts.
+*   `GET / PUT /api/retention` — Data retention policy (e.g., `{"days_to_keep": 90}`).
+*   `GET / PUT /api/siem-config` — Configuration for forwarding events to a remote SIEM (Syslog, HTTP, or stdout).
+*   `PUT /api/siem-cert` — Multipart form-data upload for SIEM mTLS certificates (`ca`, `cert`, `key`).
+
+---
+
+### 1.6 Health & Metrics
+
+#### `GET /healthz`
+Kubernetes Readiness/Liveness probe.
+*   **Role Required:** *None*
+*   **Response (200 OK):** `ok\n`
+
+#### `GET /metrics`
+Prometheus metrics exposition.
+*   **Role Required:** *None*
+*   **Response (200 OK):** Prometheus text format containing active sessions, risk distributions, and JIT request counts.
+
+#### `GET /api/report`
+Generates a high-level summary report for the UI dashboard (total sessions, high-risk counts, anomaly charts).
+*   **Role Required:** `viewer` (returns 200 OK with aggregated JSON statistics).
 
 ---
 
 ## 2. Log Server API (Agent Facing)
 
-The Log Server (`sudo-logserver`) provides endpoints strictly used by the `sudo-logger-agent` running on the monitored host machines. **These endpoints are highly sensitive and should generally only be accessible from internal networks.** Authentication is handled via mTLS.
+The Log Server (`sudo-logserver`) provides endpoints strictly used by the `sudo-logger-agent` binary running on the monitored host machines.
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/healthz` | Readiness/Liveness probe. Returns `ok`. |
-| `POST` | `/api/agent/session` | Called when a new sudo session starts. Transmits session metadata and evaluates JIT/Block policies. |
-| `POST` | `/api/agent/events` | Streams the real-time TTY I/O payload chunks to the server for an active session. |
-| `POST` | `/api/agent/heartbeat` | Periodic check-in from active sessions. Identifies network outages. |
-| `POST` | `/api/agent/approval` | Submits a JIT justification request to the server, waiting for admin approval. |
-| `GET` | `/api/agent/sudoers` | Checks for new centralised sudoers configuration updates for the agent's host. |
+> **Security Note:** These endpoints are highly sensitive and should never be exposed to the public internet. Authentication is handled via mTLS (Mutual TLS) using client certificates deployed to the agents.
+
+| Method | Endpoint | Description | Payload Format |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/healthz` | Readiness/Liveness probe. | N/A |
+| `POST` | `/api/agent/session` | Called immediately when a user types `sudo`. The agent transmits the command metadata (user, host, command, cwd, env). The server evaluates JIT and Block policies and responds with `allow`, `deny`, or `require_approval`. | JSON |
+| `POST` | `/api/agent/events` | Streams the real-time TTY I/O payload chunks to the server for an active session. Uses a custom chunked binary or JSON format depending on config. | Binary/JSON Stream |
+| `POST` | `/api/agent/heartbeat` | Periodic check-in from active sessions (every ~3s). Used by the server's watchdog to detect if a host has gone offline or if the agent was forcefully killed. | JSON |
+| `POST` | `/api/agent/approval` | Submits a JIT justification string to the server. The agent then polls or waits for a server push to determine if the admin approved the request. | JSON |
+| `GET` | `/api/agent/sudoers` | Checks for new centralised sudoers configuration updates specifically staged for the agent's hostname. The agent downloads it, runs `visudo -c`, and applies it atomically. | JSON |
