@@ -272,13 +272,20 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Allow OIDC endpoints to bypass Basic Auth
-		if strings.HasPrefix(r.URL.Path, "/api/oidc/") {
+		// Allow OIDC endpoints and health checks to bypass Basic Auth
+		if strings.HasPrefix(r.URL.Path, "/api/oidc/") || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
 		cfg, _ := sessionStore.GetAuthConfig(r.Context())
+
+		// Auto-detect legacy proxy config if source is not yet saved
+		if cfg.Source == "" || cfg.Source == "local" {
+			if *flagTrustedUserHeader != "" {
+				cfg.Source = "proxy"
+			}
+		}
 
 		if cfg.Source == "oidc" {
 			if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
@@ -299,10 +306,27 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			// In proxy mode, if the header is missing, we still let it pass to accessLogMiddleware
+			// which will treat the user as "-" (unauthenticated viewer).
+			next.ServeHTTP(w, r)
+			return
 		}
 
-		// Fallback for legacy trusted header
-		if *flagTrustedUserHeader != "" && r.Header.Get(*flagTrustedUserHeader) != "" {
+		// Local mode: only enforce Basic Auth if there is actually a user with a password,
+		// OR if the legacy htpasswd flag was provided.
+		// If no one has a password, we treat it as an open deployment.
+		hasLocalPasswords := *flagHTPasswd != ""
+		if !hasLocalPasswords {
+			users, _ := sessionStore.ListUsers(r.Context())
+			for _, u := range users {
+				if u.PasswordHash != "" { // pragma: allowlist secret
+					hasLocalPasswords = true
+					break
+				}
+			}
+		}
+
+		if !hasLocalPasswords {
 			next.ServeHTTP(w, r)
 			return
 		}
