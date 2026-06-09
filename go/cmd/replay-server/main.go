@@ -220,9 +220,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 			}
 		}
 
-		// Backward compatibility for unauthenticated/open deployments:
-		// if no auth is configured and no user header is present, treat as admin.
-		if user == "-" && trustedHeader == "" && *flagHTPasswd == "" && cfg.Source != "oidc" && cfg.Source != "proxy" {
+		if isBootstrapMode(r) {
 			role = RoleAdmin
 		}
 
