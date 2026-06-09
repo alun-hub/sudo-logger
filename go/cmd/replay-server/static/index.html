@@ -6676,6 +6676,9 @@ async function checkBootstrap() {
        console.log('Bootstrap check: found users:', users);
        if (users && (users.length === 0 || users === null)) {
          console.log('Triggering bootstrap modal');
+         if (me.user) {
+           document.getElementById('boot-user').value = me.user;
+         }
          document.getElementById('bootstrap-modal').hidden = false;
          document.getElementById('bootstrap-modal').style.display = 'flex';
        }
