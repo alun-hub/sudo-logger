@@ -223,22 +223,24 @@ notifications:
 
 ---
 
-## 4. Replay UI authentication (htpasswd)
+## 4. Replay UI authentication & Bootstrap
 
-The Replay UI has no authentication by default. To enable Basic Auth:
+The Replay UI requires authentication to restrict access to sensitive audit logs.
+
+By default, when you access the Replay UI for the first time, you will be greeted by a **Bootstrap Setup** screen. This allows you to create the first local administrator account securely.
+
+If you are deploying `sudo-logger` via an automated process (Infrastructure as Code) and want to seed the first admin user, you can configure it via the `REPLAY_ARGS` environment variable:
 
 ```bash
-# Create the password file
-htpasswd -c /etc/sudo-logger/replay.htpasswd admin
-
-# Add -htpasswd flag via the optional config file
-echo 'REPLAY_ARGS=-htpasswd /etc/sudo-logger/replay.htpasswd' \
+echo 'REPLAY_ARGS="-admin-users your_username"' \
     | sudo tee /etc/sudo-logger/replay.conf
 
 sudo systemctl restart sudo-replay
 ```
 
-Additional flags (TLS, trusted-user-header for SSO) can be appended to `REPLAY_ARGS` in the same file.
+Once the initial administrator is created, you can navigate to **Config -> Users & Auth** in the web interface to configure advanced authentication strategies such as **OIDC (Enterprise SSO)** or **External Proxy** (e.g., oauth2-proxy, Pomerium).
+
+Additional flags (TLS, etc.) can be appended to `REPLAY_ARGS` in the same file.
 
 ---
 

@@ -260,7 +260,7 @@ migrate-sessions \
 - Full session replay via web interface (asciinema v2 format; `sudoreplay` CLI not compatible)
 - **Centralised sudoers management**: push sudoers rules to all managed hosts from the replay UI; agents validate and apply atomically via `visudo -c` and report sync status in real time. Global default template with per-host overrides; visual card editor and raw editor with syntax highlighting.
 - **Just-In-Time (JIT) sudo approval**: require human justification and admin approval before sudo proceeds. Supports asynchronous requests with Mattermost/Slack notifications, interactive Approve/Deny buttons, and time-limited approval windows.
-- **Role-based access control (RBAC)**: `viewer` role sees only their own sessions; `admin` role sees all sessions, access logs, and can perform approval and deletion actions. Roles are assigned via `--admin-users` at startup.
+- **Role-based access control (RBAC)**: `viewer` role sees only their own sessions; `admin` role sees all sessions, access logs, and can perform approval and deletion actions. Configure authentication (Local, OIDC SSO, or Proxy) directly in the UI. Roles are mapped dynamically from OIDC groups, proxy headers, or managed locally.
 - **GDPR session deletion API**: permanently removes a session recording on request. Deletion requires a `reason`, is logged with a timestamp and deleted-by field (local: `.deletion-log.jsonl`; distributed: `sudo_deletion_log` table), and is forwarded to the configured SIEM as a `session_deleted` event.
 - **Automatic secret redaction**: the agent masks AWS keys, API tokens, Bearer headers, JWT tokens, URL passwords, and other secrets in terminal streams before they reach the log server. Custom regex patterns can be added via `mask_pattern` in `agent.conf`.
 - Active session terminated if agent is killed mid-session — plugin detects socket drop (EPIPE/ECONNRESET) and sends SIGTERM within 150 ms
@@ -1122,7 +1122,7 @@ xdg-open http://localhost:8080
   with syntax highlighting is also available. A real-time diff compares the staged
   config against the latest snapshot from the agent and shows a sync badge:
   ✓ in sync · ⏳ pending · ⚠ agent offline · ✖ apply error.
-- **Role-based access control (RBAC)** — `viewer` users see only their own sessions and can replay them; `admin` users see all sessions and have access to the access log, approval actions, and GDPR deletion. Assign admins via `--admin-users` at startup. The current user's role is reflected in the `/api/me` response and used to show or hide admin-only UI tabs.
+- **Role-based access control (RBAC)** — `viewer` users see only their own sessions and can replay them; `admin` users see all sessions and have access to the access log, approval actions, GDPR deletion, and configuration. Configure authentication (Local Database, OIDC SSO, or External Proxy) directly in the UI. Roles are assigned dynamically from OIDC group claims, proxy headers, or managed in the local user database. The current user's role is reflected in the `/api/me` response and used to show or hide admin-only UI tabs.
 - **Auto-refresh** — session list polls for new sessions every 15 seconds and
   immediately on tab focus; no manual browser refresh needed.
 - **Prometheus metrics** — `/metrics` endpoint with session counts, risk level
@@ -1286,24 +1286,36 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 
 ---
 
-### Role-based access control (RBAC)
+### Role-based access control (RBAC) & Enterprise SSO
 
 The replay server enforces two roles on every authenticated request:
 
-| Role | Session list | Session replay | Access log | Approvals | GDPR deletion |
-|------|-------------|---------------|-----------|-----------|---------------|
-| `viewer` | Own sessions only | Own sessions | — | — | — |
-| `admin` | All sessions | All sessions | Yes | Yes | Yes |
+| Role | Session list | Session replay | Access log | Approvals | GDPR deletion | UI Config |
+|------|-------------|---------------|-----------|-----------|---------------|-----------|
+| `viewer` | Own sessions only | Own sessions | — | — | — | — |
+| `admin` | All sessions | All sessions | Yes | Yes | Yes | Yes |
 
-Roles are assigned at startup via `--admin-users`. All authenticated users not in the list are viewers. Unauthenticated requests (no auth configured) are treated as admin to preserve backwards compatibility with open deployments.
+#### Authentication Strategies
+Authentication and RBAC are configured dynamically via the web UI under **Config -> Users & Auth**. Three strategies are supported:
 
-**Configuration example** (`/etc/sudo-logger/replay.conf`):
+1. **Local Database (Standalone)**: Users are managed directly in the UI. When running in this mode, the server uses HTTP Basic Auth.
+2. **OIDC (Enterprise SSO)**: The server acts as an OIDC relying party (e.g., Okta, Keycloak, Entra ID). Admins are mapped dynamically from the `groups` claim in the ID token.
+3. **External Proxy (e.g., oauth2-proxy, Pomerium)**: The server trusts headers injected by a reverse proxy.
 
+#### First-time Setup (Bootstrap)
+When starting the replay server for the first time (with an empty user database), the UI will present a **Bootstrap Modal** asking you to create the first `admin` account.
+
+Alternatively, you can automate the seeding of the first admin account using the CLI flag:
 ```bash
-REPLAY_ARGS=-trusted-user-header X-Forwarded-User -admin-users alice,bob
+REPLAY_ARGS=-admin-users alice,bob
 ```
+This flag is only evaluated when the database is completely empty (bootstrap phase) and inserts the users into the persistent database.
 
-The authenticated username is resolved from the request (Basic Auth, trusted header, or unauthenticated) and compared against the admin list at each request — no restart needed after editing the list via a config reload.
+#### Dynamic Role Mapping (OIDC & Proxy)
+If you configure an External Proxy or OIDC, you can define **Role Mapping** in the UI. For example, if you set the *Admin Groups* to `sudo-admins`, any user presenting that group (either via the proxy's group header like `X-Forwarded-Groups`, or the OIDC `groups` claim) is dynamically granted the `admin` role.
+
+#### Hybrid Proxy Mode
+If you use an External Proxy (like `oauth2-proxy`) but do not wish to use Group headers, the replay server will read the `User Header` (e.g., `X-Forwarded-User`) and perform a lookup in the **Local Database**. This allows you to let the proxy handle authentication (MFA, SSO), while you assign the `admin` role to specific users manually in the sudo-logger UI.
 
 The current user's role is exposed at `GET /api/me`:
 
