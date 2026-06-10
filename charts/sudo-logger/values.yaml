@@ -23,3 +23,12 @@ postgresql:
 
 minio:
   enabled: false
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: "sudo-logger.local"
+  tls:
+    enabled: false
+    secretName: "sudo-logger-ingress-tls" # pragma: allowlist secret
