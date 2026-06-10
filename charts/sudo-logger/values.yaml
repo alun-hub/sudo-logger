@@ -1,0 +1,19 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/alun-hub/sudo-logserver
+  pullPolicy: IfNotPresent
+  tag: "1.0"
+
+storage:
+  type: local
+
+tls:
+  mode: self-signed
+  existingSecret: ""
+
+postgresql:
+  enabled: false
+
+minio:
+  enabled: false
