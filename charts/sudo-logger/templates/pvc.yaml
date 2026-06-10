@@ -1,0 +1,14 @@
+{{- if eq .Values.storage.type "local" -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sudo-logger.fullname" . }}-logs
+  labels:
+    {{- include "sudo-logger.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.local.size | default "10Gi" }}
+{{- end }}
