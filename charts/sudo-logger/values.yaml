@@ -6,40 +6,14 @@ image:
   tag: "1.0"
 
 storage:
-  type: local
-  local:
-    size: 10Gi
+  type: local # local | distributed
 
 tls:
-  mode: self-signed
+  mode: self-signed # self-signed | provided | cert-manager
   existingSecret: ""
-  provided:
-    cert: ""
-    key: ""
-    ca: ""
 
 postgresql:
   enabled: false
 
 minio:
   enabled: false
-
-replay:
-  enabled: true
-  replicaCount: 1
-  image:
-    repository: ghcr.io/alun-hub/sudo-replay-server
-    pullPolicy: IfNotPresent
-    tag: "1.0"
-  service:
-    type: ClusterIP
-    port: 80
-
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  host: "sudo-logger.local"
-  tls:
-    enabled: false
-    secretName: "sudo-logger-ingress-tls" # pragma: allowlist secret
