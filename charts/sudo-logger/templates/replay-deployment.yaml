@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sudo-logger.fullname" . }}-replay
+  labels:
+    {{- include "sudo-logger.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replay.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "sudo-logger.selectorLabels" . | nindent 6 }}
+      app: replay
+  template:
+    metadata:
+      labels:
+        {{- include "sudo-logger.selectorLabels" . | nindent 8 }}
+        app: replay
+    spec:
+      containers:
+        - name: replay
+          image: "{{ .Values.replay.image.repository }}:{{ .Values.replay.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.replay.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http

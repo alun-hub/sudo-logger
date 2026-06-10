@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sudo-logger.fullname" . }}-replay
+  labels:
+    {{- include "sudo-logger.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "sudo-logger.selectorLabels" . | nindent 4 }}
+    app: replay
