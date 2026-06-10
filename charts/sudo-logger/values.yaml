@@ -1,47 +1,73 @@
+# Default values for sudo-logger.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Number of logserver replicas to run
 replicaCount: 1
 
 image:
+  # -- Logserver image repository
   repository: ghcr.io/alun-hub/sudo-logserver
+  # -- Image pull policy
   pullPolicy: IfNotPresent
+  # -- Image tag (defaults to chart appVersion if empty)
   tag: "1.0"
 
 storage:
-  type: local # local | distributed
+  # -- Storage type: 'local' for single-node PVC, 'distributed' for PostgreSQL + S3/MinIO
+  type: local
   local:
+    # -- PVC size for local storage
     size: 10Gi
 
 tls:
-  mode: self-signed # self-signed | provided | cert-manager
+  # -- TLS mode: 'self-signed', 'provided' (manual secret), or 'cert-manager'
+  mode: self-signed
+  # -- Name of an existing TLS secret to use
   existingSecret: ""
   provided:
+    # -- Base64 encoded certificate (if mode is 'provided')
     cert: ""
+    # -- Base64 encoded private key (if mode is 'provided')
     key: ""
+    # -- Base64 encoded CA certificate (if mode is 'provided')
     ca: ""
 
+# -- Enable/disable bundled PostgreSQL chart (used when storage.type is 'distributed')
 postgresql:
   enabled: false
 
+# -- Enable/disable bundled MinIO chart (used when storage.type is 'distributed')
 minio:
   enabled: false
 
 replay:
+  # -- Number of replay-server replicas to run
   replicaCount: 1
   image:
+    # -- Replay-server image repository
     repository: ghcr.io/alun-hub/sudo-replay-server
+    # -- Image pull policy
     pullPolicy: IfNotPresent
+    # -- Image tag (defaults to chart appVersion if empty)
     tag: "1.0"
 
 ingress:
+  # -- Enable ingress for the replay-server
   enabled: false
+  # -- Ingress class name
   className: ""
+  # -- Ingress annotations
   annotations: {}
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
+  # -- Ingress hosts configuration
   hosts:
     - host: sudo-logger.local
       paths:
         - path: /
           pathType: ImplementationSpecific
+  # -- Ingress TLS configuration
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:
