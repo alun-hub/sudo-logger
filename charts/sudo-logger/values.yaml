@@ -24,6 +24,17 @@ postgresql:
 minio:
   enabled: false
 
+replay:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/alun-hub/sudo-replay-server
+    pullPolicy: IfNotPresent
+    tag: "1.0"
+  service:
+    type: ClusterIP
+    port: 80
+
 ingress:
   enabled: false
   className: ""
