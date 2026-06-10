@@ -7,6 +7,8 @@ image:
 
 storage:
   type: local # local | distributed
+  local:
+    size: 10Gi
 
 tls:
   mode: self-signed # self-signed | provided | cert-manager
