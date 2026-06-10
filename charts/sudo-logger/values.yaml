@@ -13,6 +13,10 @@ storage:
 tls:
   mode: self-signed # self-signed | provided | cert-manager
   existingSecret: ""
+  provided:
+    cert: ""
+    key: ""
+    ca: ""
 
 postgresql:
   enabled: false

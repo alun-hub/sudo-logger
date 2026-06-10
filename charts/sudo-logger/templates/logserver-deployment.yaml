@@ -31,6 +31,11 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /var/log/sudo-logger
+            {{- if eq .Values.tls.mode "provided" }}
+            - name: tls
+              mountPath: /etc/sudo-logger
+              readOnly: true
+            {{- end }}
       volumes:
         - name: logs
           {{- if eq .Values.storage.type "local" }}
@@ -39,3 +44,8 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if eq .Values.tls.mode "provided" }}
+        - name: tls
+          secret:
+            secretName: {{ include "sudo-logger.fullname" . }}-tls
+        {{- end }}
