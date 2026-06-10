@@ -43,7 +43,7 @@ Creates or updates a local user. During the very first launch (Bootstrap Mode), 
     ```json
     {
       "username": "bob",
-      "password": "SuperSecretPassword123!",
+      "password": "ExamplePassword123!",
       "role": "viewer"
     }
     ```

@@ -43,6 +43,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
 	_ "time/tzdata" // embed IANA timezone data so TZ env var works in minimal containers
 
 	"golang.org/x/crypto/bcrypt"
@@ -757,6 +758,43 @@ func handlePutWhitelistedUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
+func validatePassword(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters long")
+	}
+	var (
+		hasUpper   = false
+		hasLower   = false
+		hasNumber  = false
+		hasSpecial = false
+	)
+	for _, char := range password {
+		switch {
+		case unicode.IsUpper(char):
+			hasUpper = true
+		case unicode.IsLower(char):
+			hasLower = true
+		case unicode.IsDigit(char):
+			hasNumber = true
+		case unicode.IsPunct(char) || unicode.IsSymbol(char):
+			hasSpecial = true
+		}
+	}
+	if !hasUpper {
+		return fmt.Errorf("password must contain at least one uppercase letter")
+	}
+	if !hasLower {
+		return fmt.Errorf("password must contain at least one lowercase letter")
+	}
+	if !hasNumber {
+		return fmt.Errorf("password must contain at least one number")
+	}
+	if !hasSpecial {
+		return fmt.Errorf("password must contain at least one special character")
+	}
+	return nil
+}
+
 func handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
 		return
@@ -790,6 +828,10 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 	// Hash password if provided
 	var password string
 	if err := json.Unmarshal([]byte(`"`+u.PasswordHash+`"`), &password); err == nil && password != "" {
+		if err := validatePassword(password); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			http.Error(w, "hash failed", http.StatusInternalServerError)

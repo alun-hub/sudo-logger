@@ -1739,9 +1739,10 @@
           <input type="password" id="boot-pass2" class="form-input" placeholder="••••••••">
         </div>
       </div>
+      <div id="boot-pass-msg" style="font-size:11px; margin-top:8px"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn-primary" id="btn-finish-bootstrap" style="width:100%">Create Admin & Start</button>
+      <button class="btn-primary" id="btn-finish-bootstrap" style="width:100%" disabled>Create Admin & Start</button>
     </div>
   </div>
 </div>
@@ -1778,6 +1779,7 @@
           </select>
         </div>
       </div>
+      <div id="user-pass-msg" style="font-size:11px; margin-top:8px"></div>
     </div>
     <div class="modal-footer">
       <button class="btn-primary" id="btn-save-user">Save User</button>
@@ -6558,6 +6560,31 @@ function showAuthStatus(msg, isErr) {
 document.getElementById('btn-save-auth').addEventListener('click', saveAuthStrategy);
 document.getElementById('btn-save-mapping').addEventListener('click', saveRoleMapping);
 
+function checkPasswordComplexity(p) {
+  if (!p) return { ok: false, msg: 'Password required' };
+  if (p.length < 8) return { ok: false, msg: 'Min 8 characters' };
+  if (!/[A-Z]/.test(p)) return { ok: false, msg: 'Need uppercase letter' };
+  if (!/[a-z]/.test(p)) return { ok: false, msg: 'Need lowercase letter' };
+  if (!/[0-9]/.test(p)) return { ok: false, msg: 'Need number' };
+  if (!/[^A-Za-z0-9]/.test(p)) return { ok: false, msg: 'Need special character' };
+  return { ok: true, msg: 'Password is strong' };
+}
+
+function updatePasswordUI(pass, msgId, btnId, allowEmpty=false) {
+  const msgEl = document.getElementById(msgId);
+  const btnEl = document.getElementById(btnId);
+  if (allowEmpty && !pass) {
+    msgEl.innerText = '';
+    btnEl.disabled = false;
+    return true;
+  }
+  const res = checkPasswordComplexity(pass);
+  msgEl.innerText = res.msg;
+  msgEl.style.color = res.ok ? 'var(--green)' : 'var(--red)';
+  btnEl.disabled = !res.ok;
+  return res.ok;
+}
+
 // ── User Management ───────────────────────────────────────────────────────────
 
 async function fetchUsers() {
@@ -6596,8 +6623,11 @@ function renderUsers(users) {
 
 let editingUsername = null;
 
+let userModalAllowEmpty = false;
+
 function showAddUserModal() {
   editingUsername = null;
+  userModalAllowEmpty = false;
   document.getElementById('user-modal-title').innerText = 'Add Local User';
   document.getElementById('user-username').value = '';
   document.getElementById('user-username').disabled = false;
@@ -6605,11 +6635,13 @@ function showAddUserModal() {
   document.getElementById('user-email').value = '';
   document.getElementById('user-pass').value = '';
   document.getElementById('user-role').value = 'viewer';
+  updatePasswordUI('', 'user-pass-msg', 'btn-save-user', false);
   document.getElementById('user-modal').hidden = false;
 }
 
 async function editUser(username) {
   editingUsername = username;
+  userModalAllowEmpty = true;
   try {
     const res = await fetch('/api/users');
     const users = await res.json();
@@ -6622,6 +6654,7 @@ async function editUser(username) {
     document.getElementById('user-email').value = u.email || '';
     document.getElementById('user-pass').value = '';
     document.getElementById('user-role').value = u.role;
+    updatePasswordUI('', 'user-pass-msg', 'btn-save-user', true);
     document.getElementById('user-modal').hidden = false;
   } catch(e) { alert(e.message); }
 }
@@ -6721,6 +6754,35 @@ document.getElementById('btn-finish-bootstrap').onclick = async () => {
     location.reload(); // reload to get authenticated session
   } catch(e) { alert('Bootstrap failed: ' + e.message); }
 };
+
+function updateBootstrapBtn() {
+  const p1 = document.getElementById('boot-pass').value;
+  const p2 = document.getElementById('boot-pass2').value;
+  const res = checkPasswordComplexity(p1);
+  const msgEl = document.getElementById('boot-pass-msg');
+  const btnEl = document.getElementById('btn-finish-bootstrap');
+
+  if (!res.ok) {
+    msgEl.innerText = res.msg;
+    msgEl.style.color = 'var(--red)';
+    btnEl.disabled = true;
+  } else if (p1 !== p2) {
+    msgEl.innerText = 'Passwords do not match';
+    msgEl.style.color = 'var(--red)';
+    btnEl.disabled = true;
+  } else {
+    msgEl.innerText = 'Password is strong and matches';
+    msgEl.style.color = 'var(--green)';
+    btnEl.disabled = false;
+  }
+}
+
+document.getElementById('boot-pass').addEventListener('input', updateBootstrapBtn);
+document.getElementById('boot-pass2').addEventListener('input', updateBootstrapBtn);
+
+document.getElementById('user-pass').addEventListener('input', (e) => {
+  updatePasswordUI(e.target.value, 'user-pass-msg', 'btn-save-user', userModalAllowEmpty);
+});
 
 window.addEventListener('DOMContentLoaded', () => {
   checkBootstrap();
