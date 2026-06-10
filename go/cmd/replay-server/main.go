@@ -99,6 +99,9 @@ var (
 // sessionStore is the active storage backend, initialised in main().
 var sessionStore store.SessionStore
 
+// validRoleName matches safe role names: lowercase letters, digits, hyphens, underscores; 1–64 chars.
+var validRoleName = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
+
 // sessionsCache caches the result of ListSessions to avoid an expensive
 // full directory walk on every /api/sudoers/hosts poll (called every 15 s).
 var sessionsCache struct {
@@ -1232,8 +1235,8 @@ func main() {
 				http.Error(w, "invalid JSON", http.StatusBadRequest)
 				return
 			}
-			if def.Name == "" {
-				http.Error(w, "name required", http.StatusBadRequest)
+			if !validRoleName.MatchString(def.Name) {
+				http.Error(w, "role name must match ^[a-z0-9_-]{1,64}$", http.StatusBadRequest)
 				return
 			}
 			if err := sessionStore.UpsertRole(r.Context(), def); err != nil {
@@ -1247,6 +1250,10 @@ func main() {
 	})
 	mux.HandleFunc("/api/roles/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/api/roles/")
+		if !validRoleName.MatchString(name) {
+			http.Error(w, "role name must match ^[a-z0-9_-]{1,64}$", http.StatusBadRequest)
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
 			if !require(w, r, store.PermUsersRead) {

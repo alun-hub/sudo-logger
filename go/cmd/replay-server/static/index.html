@@ -6734,16 +6734,30 @@ function renderRolesTable(roles) {
       const def = ALL_PERMISSIONS.find(d => d.id === p);
       return `<span class="sc-source" title="${escapeHtml(p)}" style="font-size:10px;margin:1px">${escapeHtml(def?.label||p)}</span>`;
     }).join(' ');
-    const lockIcon = r.built_in ? '🔒' : '';
-    const editBtn = r.built_in ? '' : `<button class="btn-icon" style="margin-right:4px" onclick="showEditRoleModal(${JSON.stringify(r.name)})">Edit</button>`;
-    const delBtn  = r.built_in ? '' : `<button class="btn-icon" style="color:#e05252" onclick="deleteRole(${JSON.stringify(r.name)})">Delete</button>`;
     const tr = document.createElement('tr');
+    // Name + description cells via innerHTML (fully escaped)
     tr.innerHTML = `
-      <td><strong>${escapeHtml(r.name)}</strong> ${lockIcon}</td>
+      <td><strong>${escapeHtml(r.name)}</strong>${r.built_in ? ' 🔒' : ''}</td>
       <td style="color:var(--muted)">${escapeHtml(r.description||'')}</td>
       <td>${permbadges||'<span style="color:var(--muted)">none</span>'}</td>
-      <td>${editBtn}${delBtn}</td>
+      <td></td>
     `;
+    // Action buttons built with createElement — no role name in HTML attributes
+    if (!r.built_in) {
+      const actionTd = tr.lastElementChild;
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn-icon';
+      editBtn.style.marginRight = '4px';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => showEditRoleModal(r.name));
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-icon';
+      delBtn.style.color = '#e05252';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', () => deleteRole(r.name));
+      actionTd.appendChild(editBtn);
+      actionTd.appendChild(delBtn);
+    }
     tbody.appendChild(tr);
   }
 }
