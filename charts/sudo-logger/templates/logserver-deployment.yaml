@@ -35,6 +35,8 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /var/log/sudoreplay
+            - name: tls
+              mountPath: /etc/sudo-logger
       volumes:
         - name: logs
           {{- if eq .Values.storage.type "local" }}
@@ -43,3 +45,6 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.existingSecret | default (printf "%s-tls" (include "sudo-logger.fullname" .)) }}
