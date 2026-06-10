@@ -2,30 +2,69 @@ package main
 
 import (
 	"net/http"
+
+	"sudo-logger/internal/store"
 )
 
-// Role represents an access level in the replay UI.
-type Role string
+// Role is the name of a role assigned to a user or derived from group membership.
+type Role = string
 
 const (
-	RoleViewer Role = "viewer" // can list and replay own sessions only
-	RoleAdmin  Role = "admin"  // can list and replay all sessions, access audit log, perform approvals
+	RoleViewer = "viewer"
+	RoleAdmin  = "admin"
 )
 
-const ctxRole ctxKey = 1
+// builtinAdminPerms is the fixed permission set for the locked "admin" role.
+var builtinAdminPerms = func() map[store.Permission]bool {
+	m := make(map[store.Permission]bool, len(store.AllPermissions))
+	for _, p := range store.AllPermissions {
+		m[p] = true
+	}
+	return m
+}()
 
-// roleFromContext returns the role stored in the request context.
-// Defaults to RoleViewer if none was set (open/unauthenticated deployments).
+// defaultViewerPerms is the permission set seeded for the "viewer" role on first start.
+var defaultViewerPerms = []store.Permission{
+	store.PermSessionsListOwn,
+	store.PermSessionsReplayOwn,
+}
+
+const ctxRole ctxKey = 1
+const ctxPermissions ctxKey = 2
+
+// roleFromContext returns the role name stored in the request context.
 func roleFromContext(r *http.Request) Role {
-	if v, ok := r.Context().Value(ctxRole).(Role); ok {
+	if v, ok := r.Context().Value(ctxRole).(Role); ok && v != "" {
 		return v
 	}
 	return RoleViewer
 }
 
-// isAdmin reports whether the request carries admin privileges.
+// permsFromContext returns the permission set injected by accessLogMiddleware.
+func permsFromContext(r *http.Request) map[store.Permission]bool {
+	if v, ok := r.Context().Value(ctxPermissions).(map[store.Permission]bool); ok {
+		return v
+	}
+	return map[store.Permission]bool{}
+}
+
+// can reports whether the request has the given permission.
+func can(r *http.Request, p store.Permission) bool {
+	return permsFromContext(r)[p]
+}
+
+// require writes 403 and returns false if the request lacks the given permission.
+func require(w http.ResponseWriter, r *http.Request, p store.Permission) bool {
+	if can(r, p) || isBootstrapMode(r) {
+		return true
+	}
+	http.Error(w, "forbidden: missing permission "+string(p), http.StatusForbidden)
+	return false
+}
+
+// isAdmin is true when the request has all config-write permissions (admin equivalent).
 func isAdmin(r *http.Request) bool {
-	return roleFromContext(r) == RoleAdmin
+	return can(r, store.PermConfigWrite)
 }
 
 // isBootstrapMode returns true if no users exist in the store, allowing the
@@ -36,10 +75,30 @@ func isBootstrapMode(r *http.Request) bool {
 }
 
 // requireAdmin writes 403 and returns false if the request is not admin.
+// Kept for the few paths that require full admin (bootstrap, user management).
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	if isAdmin(r) || isBootstrapMode(r) {
-		return true
+	return require(w, r, store.PermConfigWrite)
+}
+
+// resolveRolePerms looks up the permission set for a role name.
+// The built-in "admin" role is synthesized in-memory; other roles are fetched
+// from the store and cached per-request (cheap: one store lookup per request).
+func resolveRolePerms(r *http.Request, roleName string) map[store.Permission]bool {
+	if roleName == RoleAdmin {
+		return builtinAdminPerms
 	}
-	http.Error(w, "forbidden: admin role required", http.StatusForbidden)
-	return false
+	def, err := sessionStore.GetRole(r.Context(), roleName)
+	if err != nil || def.Name == "" {
+		// Unknown role → fall back to default viewer permissions (fail-safe).
+		m := make(map[store.Permission]bool, len(defaultViewerPerms))
+		for _, p := range defaultViewerPerms {
+			m[p] = true
+		}
+		return m
+	}
+	m := make(map[store.Permission]bool, len(def.Permissions))
+	for _, p := range def.Permissions {
+		m[p] = true
+	}
+	return m
 }

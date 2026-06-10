@@ -50,6 +50,11 @@ type LocalStore struct {
 	usersCfg      usersConfig
 	lastUsersHash string // SHA256 hex of last successfully loaded content
 
+	// roles state — reloaded every 30 s in background goroutine.
+	rolesMu       sync.RWMutex
+	rolesCfg      []RoleDefinition
+	lastRolesHash string // SHA256 hex of last successfully loaded content
+
 	// auth-config state — reloaded every 30 s in background goroutine.
 	authMu       sync.RWMutex
 	authCfg      AuthConfig
@@ -123,6 +128,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.UsersPath == "" {
 		cfg.UsersPath = "/etc/sudo-logger/users.yaml"
 	}
+	if cfg.RolesPath == "" {
+		cfg.RolesPath = "/etc/sudo-logger/roles.yaml"
+	}
 	if cfg.AuthConfigPath == "" {
 		cfg.AuthConfigPath = "/etc/sudo-logger/auth-config.yaml"
 	}
@@ -164,6 +172,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if err := ls.loadUsers(); err != nil {
 		log.Printf("store/local: users initial load: %v", err)
 	}
+	if err := ls.loadRoles(); err != nil {
+		log.Printf("store/local: roles initial load: %v", err)
+	}
 	if err := ls.loadAuthConfig(); err != nil {
 		log.Printf("store/local: auth-config initial load: %v", err)
 	}
@@ -186,6 +197,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 				}
 				if err := ls.loadUsers(); err != nil {
 					log.Printf("store/local: users reload: %v", err)
+				}
+				if err := ls.loadRoles(); err != nil {
+					log.Printf("store/local: roles reload: %v", err)
 				}
 				if err := ls.loadAuthConfig(); err != nil {
 					log.Printf("store/local: auth-config reload: %v", err)
@@ -378,6 +392,167 @@ func (ls *LocalStore) DeleteUser(_ context.Context, username string) error {
 	ls.usersCfg.Users = newUsers
 	ls.usersMu.Unlock()
 	return ls.saveUsers()
+}
+
+// ── Role Management ──────────────────────────────────────────────────────
+
+func (ls *LocalStore) loadRoles() error {
+	data, err := os.ReadFile(ls.cfg.RolesPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	h := sha256.Sum256(data)
+	newHash := hex.EncodeToString(h[:])
+
+	var defs []RoleDefinition
+	if err := yaml.Unmarshal(data, &defs); err != nil {
+		return fmt.Errorf("parse roles: %w", err)
+	}
+	ls.rolesMu.Lock()
+	changed := newHash != ls.lastRolesHash
+	ls.rolesCfg = defs
+	if changed {
+		ls.lastRolesHash = newHash
+	}
+	ls.rolesMu.Unlock()
+	if changed {
+		log.Printf(`{"time":%q,"event":"config_reload","config":"roles.yaml","sha256":%q,"entries":%d}`,
+			time.Now().UTC().Format(time.RFC3339), newHash, len(defs))
+	}
+	return nil
+}
+
+func (ls *LocalStore) saveRoles() error {
+	ls.rolesMu.RLock()
+	data, err := yaml.Marshal(ls.rolesCfg)
+	ls.rolesMu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("marshal roles: %w", err)
+	}
+	tmp := ls.cfg.RolesPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return fmt.Errorf("write tmp roles: %w", err)
+	}
+	if err := os.Rename(tmp, ls.cfg.RolesPath); err != nil {
+		return fmt.Errorf("rename tmp roles: %w", err)
+	}
+	h := sha256.Sum256(data)
+	ls.rolesMu.Lock()
+	ls.lastRolesHash = hex.EncodeToString(h[:])
+	ls.rolesMu.Unlock()
+	return nil
+}
+
+// seedViewerRole ensures the default "viewer" role exists in roles.yaml.
+// Called lazily on first GetRoles so the file is only created when needed.
+func (ls *LocalStore) seedViewerRole() {
+	ls.rolesMu.RLock()
+	for _, r := range ls.rolesCfg {
+		if r.Name == "viewer" {
+			ls.rolesMu.RUnlock()
+			return
+		}
+	}
+	ls.rolesMu.RUnlock()
+
+	ls.rolesMu.Lock()
+	// Double-check after acquiring write lock.
+	for _, r := range ls.rolesCfg {
+		if r.Name == "viewer" {
+			ls.rolesMu.Unlock()
+			return
+		}
+	}
+	ls.rolesCfg = append(ls.rolesCfg, RoleDefinition{
+		Name:        "viewer",
+		Description: "Default viewer: can list and replay own sessions",
+		Permissions: []Permission{PermSessionsListOwn, PermSessionsReplayOwn},
+	})
+	ls.rolesMu.Unlock()
+	if err := ls.saveRoles(); err != nil {
+		log.Printf("store/local: seed viewer role: %v", err)
+	}
+}
+
+// GetRoles implements SessionStore.
+func (ls *LocalStore) GetRoles(_ context.Context) ([]RoleDefinition, error) {
+	ls.seedViewerRole()
+	ls.rolesMu.RLock()
+	defer ls.rolesMu.RUnlock()
+
+	// Always include the locked built-in "admin" role synthesized in-memory.
+	admin := RoleDefinition{
+		Name:        "admin",
+		Description: "Built-in administrator: all permissions",
+		Permissions: AllPermissions,
+		BuiltIn:     true,
+	}
+	out := make([]RoleDefinition, 0, len(ls.rolesCfg)+1)
+	out = append(out, admin)
+	out = append(out, ls.rolesCfg...)
+	return out, nil
+}
+
+// GetRole implements SessionStore.
+func (ls *LocalStore) GetRole(_ context.Context, name string) (RoleDefinition, error) {
+	if name == "admin" {
+		return RoleDefinition{
+			Name:        "admin",
+			Description: "Built-in administrator: all permissions",
+			Permissions: AllPermissions,
+			BuiltIn:     true,
+		}, nil
+	}
+	ls.rolesMu.RLock()
+	defer ls.rolesMu.RUnlock()
+	for _, r := range ls.rolesCfg {
+		if r.Name == name {
+			return r, nil
+		}
+	}
+	return RoleDefinition{}, nil
+}
+
+// UpsertRole implements SessionStore.
+func (ls *LocalStore) UpsertRole(_ context.Context, def RoleDefinition) error {
+	if def.Name == "admin" {
+		return fmt.Errorf("role %q is built-in and cannot be modified", def.Name)
+	}
+	def.BuiltIn = false
+	ls.rolesMu.Lock()
+	found := false
+	for i, r := range ls.rolesCfg {
+		if r.Name == def.Name {
+			ls.rolesCfg[i] = def
+			found = true
+			break
+		}
+	}
+	if !found {
+		ls.rolesCfg = append(ls.rolesCfg, def)
+	}
+	ls.rolesMu.Unlock()
+	return ls.saveRoles()
+}
+
+// DeleteRole implements SessionStore.
+func (ls *LocalStore) DeleteRole(_ context.Context, name string) error {
+	if name == "admin" {
+		return fmt.Errorf("role %q is built-in and cannot be deleted", name)
+	}
+	ls.rolesMu.Lock()
+	newRoles := make([]RoleDefinition, 0, len(ls.rolesCfg))
+	for _, r := range ls.rolesCfg {
+		if r.Name != name {
+			newRoles = append(newRoles, r)
+		}
+	}
+	ls.rolesCfg = newRoles
+	ls.rolesMu.Unlock()
+	return ls.saveRoles()
 }
 
 // ── Auth Configuration ───────────────────────────────────────────────────

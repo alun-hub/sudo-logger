@@ -221,6 +221,23 @@ type SessionStore interface {
 	// SetAuthConfig saves the authentication strategy and settings.
 	SetAuthConfig(ctx context.Context, cfg AuthConfig) error
 
+	// ── Role Management ──────────────────────────────────────────────────────
+
+	// GetRoles returns all stored role definitions merged with the built-in "admin" role.
+	GetRoles(ctx context.Context) ([]RoleDefinition, error)
+
+	// GetRole returns a single role definition by name.
+	// Returns (RoleDefinition{}, nil) if not found.
+	GetRole(ctx context.Context, name string) (RoleDefinition, error)
+
+	// UpsertRole creates or replaces a custom role definition.
+	// Returns an error if name is "admin" (built-in, locked).
+	UpsertRole(ctx context.Context, def RoleDefinition) error
+
+	// DeleteRole removes a custom role definition.
+	// Returns an error if name is "admin" (built-in, locked).
+	DeleteRole(ctx context.Context, name string) error
+
 	// Close releases background resources (DB pool, fsnotify watchers, etc.).
 	Close() error
 }
@@ -237,19 +254,70 @@ type AuthConfig struct {
 		UserHeader   string `json:"user_header" yaml:"user_header"`
 		GroupsHeader string `json:"groups_header" yaml:"groups_header"`
 	} `json:"proxy" yaml:"proxy"`
+	// AdminGroups is kept for backward compatibility: each entry maps to the built-in "admin" role.
 	AdminGroups []string `json:"admin_groups" yaml:"admin_groups"`
+	// GroupMappings maps group names (from proxy/OIDC) to role names. First match wins.
+	GroupMappings []GroupRoleMapping `json:"group_mappings,omitempty" yaml:"group_mappings,omitempty"`
+}
+
+// GroupRoleMapping maps a group name (from proxy headers or OIDC claims) to a role name.
+type GroupRoleMapping struct {
+	Group string `json:"group" yaml:"group"`
+	Role  string `json:"role" yaml:"role"`
 }
 
 // User represents a person with access to the replay-server.
 type User struct {
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"` // bcrypt hash, only for Source="local"
-	Role         string    `json:"role"`     // "admin" | "viewer"
+	Role         string    `json:"role"`     // role name (e.g. "admin", "viewer", or custom)
 	Source       string    `json:"source"`   // "local" | "oidc" | "proxy"
 	FullName     string    `json:"full_name"`
 	Email        string    `json:"email"`
 	CreatedAt    time.Time `json:"created_at"`
 	LastLogin    time.Time `json:"last_login,omitempty"`
+}
+
+// Permission is a fine-grained capability that can be assigned to a role.
+type Permission string
+
+const (
+	PermSessionsListOwn   Permission = "sessions:list_own"
+	PermSessionsListAll   Permission = "sessions:list_all"
+	PermSessionsReplayOwn Permission = "sessions:replay_own"
+	PermSessionsReplayAll Permission = "sessions:replay_all"
+	PermSessionsDelete    Permission = "sessions:delete"
+	PermUsersRead         Permission = "users:read"
+	PermUsersWrite        Permission = "users:write"
+	PermAuditLogRead      Permission = "audit_log:read"
+	PermApprovalsRead     Permission = "approvals:read"
+	PermApprovalsDecide   Permission = "approvals:decide"
+	PermConfigRead        Permission = "config:read"
+	PermConfigWrite       Permission = "config:write"
+)
+
+// AllPermissions lists every defined permission, in display order.
+var AllPermissions = []Permission{
+	PermSessionsListOwn,
+	PermSessionsListAll,
+	PermSessionsReplayOwn,
+	PermSessionsReplayAll,
+	PermSessionsDelete,
+	PermUsersRead,
+	PermUsersWrite,
+	PermAuditLogRead,
+	PermApprovalsRead,
+	PermApprovalsDecide,
+	PermConfigRead,
+	PermConfigWrite,
+}
+
+// RoleDefinition describes a named set of permissions.
+type RoleDefinition struct {
+	Name        string       `json:"name" yaml:"name"`
+	Description string       `json:"description,omitempty" yaml:"description,omitempty"`
+	Permissions []Permission `json:"permissions" yaml:"permissions"`
+	BuiltIn     bool         `json:"built_in" yaml:"built_in"`
 }
 
 // ApprovalStore handles the state for the JIT sudo approval system.
@@ -414,6 +482,10 @@ type Config struct {
 	// UsersPath is the YAML file listing users and roles for the replay UI.
 	// Default: /etc/sudo-logger/users.yaml
 	UsersPath string
+
+	// RolesPath is the YAML file listing custom role definitions (LocalStore only).
+	// Default: /etc/sudo-logger/roles.yaml
+	RolesPath string
 
 	// AuthConfigPath is the YAML file containing auth settings (LocalStore only).
 	// Default: /etc/sudo-logger/auth-config.yaml

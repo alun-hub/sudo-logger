@@ -1046,6 +1046,7 @@
     <nav class="stab-nav">
       <button class="stab-btn active" data-stab="approval">JIT Approval</button>
       <button class="stab-btn" data-stab="users">Users & Auth</button>
+      <button class="stab-btn" data-stab="roles">Roles</button>
       <button class="stab-btn" data-stab="siem">SIEM</button>
       <button class="stab-btn" data-stab="sandbox">Sandbox</button>
       <button class="stab-btn" data-stab="retention">Retention</button>
@@ -1160,15 +1161,47 @@
         </div>
 
         <div class="siem-section" id="section-role-mapping" style="display:none">
-          <div class="siem-heading">Role Mapping (Group → Admin)</div>
-          <p class="siem-note">Users in these groups will be granted the <strong>admin</strong> role. Others will be viewers.</p>
-          <div class="siem-form">
-            <label>Admin Groups</label>
-            <input type="text" id="auth-admin-groups" placeholder="sudo-admins, security-ops">
+          <div class="siem-heading">
+            Group → Role Mapping
+            <span class="settings-status" id="mapping-status" style="display:none"></span>
           </div>
-          <div class="siem-footer">
+          <p class="siem-note">Map group names from proxy headers or OIDC claims to roles. First matching row wins. Unmapped users default to <strong>viewer</strong>.</p>
+          <table class="report-table" id="group-mapping-table" style="margin-bottom:8px">
+            <thead>
+              <tr><th>Group name</th><th>Role</th><th></th></tr>
+            </thead>
+            <tbody id="group-mapping-body">
+              <!-- populated by JS -->
+            </tbody>
+          </table>
+          <button class="btn-icon" style="width:auto;padding:0 10px;font-size:12px;margin-bottom:8px" onclick="addGroupMappingRow()">+ Add mapping</button>
+          <div class="siem-footer" style="margin-top:4px">
             <button class="btn-primary" id="btn-save-mapping">Save role mapping</button>
           </div>
+        </div>
+      </div>
+
+      <!-- ── Roles management ─────────────────────────────────────────────────── -->
+      <div class="stab-panel" id="stab-roles">
+        <div class="siem-section" style="margin-top:0">
+          <div class="siem-heading">
+            Roles
+            <span class="settings-status" id="roles-status" style="display:none"></span>
+            <button class="btn-icon" style="width:auto;padding:0 10px;font-size:12px" onclick="showAddRoleModal()">+ New Role</button>
+          </div>
+          <table class="report-table" id="roles-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Permissions</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="roles-list-body">
+              <!-- populated by JS -->
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1774,6 +1807,7 @@
         <div class="form-group">
           <label>Role</label>
           <select id="user-role" class="form-input" style="height:32px;padding:4px 8px">
+            <!-- populated dynamically by loadRolesIntoSelect() -->
             <option value="viewer">Viewer</option>
             <option value="admin">Administrator</option>
           </select>
@@ -1784,6 +1818,34 @@
     <div class="modal-footer">
       <button class="btn-primary" id="btn-save-user">Save User</button>
       <button class="theme-btn" onclick="closeUserModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Role modal ─────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="role-modal" hidden>
+  <div class="modal-box" style="max-width:520px">
+    <button class="modal-close" onclick="closeRoleModal()">&times;</button>
+    <div class="modal-title" id="role-modal-title">New Role</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="role-name" class="form-input" placeholder="e.g. operator">
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <input type="text" id="role-desc" class="form-input" placeholder="Optional description">
+      </div>
+      <div class="form-group">
+        <label>Permissions</label>
+        <div id="role-perms-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;margin-top:4px">
+          <!-- populated by JS -->
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="btn-save-role">Save Role</button>
+      <button class="theme-btn" onclick="closeRoleModal()">Cancel</button>
     </div>
   </div>
 </div>
@@ -3722,6 +3784,9 @@ function switchSettingsTab(stab) {
     fetchUsers();
     fetchAuthConfig();
   }
+  if (stab === 'roles') {
+    loadRoles();
+  }
 }
 
 document.getElementById('tab-config').querySelectorAll('.stab-btn[data-stab]').forEach(btn =>
@@ -5346,11 +5411,13 @@ fetchSessions();
 
 let currentUserIsAdmin = false;
 
+let currentUserPermissions = [];
+
 async function fetchCurrentUser() {
   try {
     const res = await fetch('/api/me');
     if (!res.ok) return;
-    const { user, logoutUrl, role } = await res.json();
+    const { user, logoutUrl, role, permissions } = await res.json();
     if (!user) return;
     document.getElementById('user-name').textContent = user;
     const logoutBtn = document.getElementById('logout-btn');
@@ -5360,10 +5427,16 @@ async function fetchCurrentUser() {
       logoutBtn.remove();
     }
     document.getElementById('user-chip').removeAttribute('hidden');
-    currentUserIsAdmin = (role === 'admin');
+    currentUserPermissions = permissions || [];
+    // Admin = has config:write permission (matches server-side isAdmin definition).
+    currentUserIsAdmin = currentUserPermissions.includes('config:write');
     if (!currentUserIsAdmin) {
       // Hide admin-only settings tab from viewer-role users.
       document.querySelector('.stab-btn[data-stab="approval"]')?.remove();
+    }
+    // Hide Roles tab if user cannot read users.
+    if (!currentUserPermissions.includes('users:read')) {
+      document.querySelector('.stab-btn[data-stab="roles"]')?.remove();
     }
   } catch (_) { /* not fatal */ }
 }
@@ -6498,7 +6571,16 @@ async function fetchAuthConfig() {
     document.getElementById('proxy-user-header').value = c.proxy?.user_header || '';
     document.getElementById('proxy-groups-header').value = c.proxy?.groups_header || '';
 
-    document.getElementById('auth-admin-groups').value = (c.admin_groups || []).join(', ');
+    // Populate group mapping table (GroupMappings + legacy AdminGroups → admin)
+    const tbody = document.getElementById('group-mapping-body');
+    tbody.innerHTML = '';
+    const mappings = c.group_mappings || [];
+    // Legacy: add AdminGroups as {group, role: 'admin'} rows if not already in group_mappings
+    const mappedGroups = new Set(mappings.map(m => m.group));
+    for (const g of (c.admin_groups || [])) {
+      if (g && !mappedGroups.has(g)) mappings.push({ group: g, role: 'admin' });
+    }
+    for (const m of mappings) addGroupMappingRow(m.group, m.role);
   } catch(e) {
     showAuthStatus('Failed to load config: ' + e.message, true);
   }
@@ -6535,19 +6617,226 @@ async function saveAuthStrategy() {
 async function saveRoleMapping() {
   const btn = document.getElementById('btn-save-mapping');
   btn.disabled = true;
-  const groups = document.getElementById('auth-admin-groups').value.split(',').map(s => s.trim()).filter(s => s);
+  // Collect rows from group-mapping table
+  const rows = document.querySelectorAll('#group-mapping-body tr');
+  const mappings = [];
+  for (const row of rows) {
+    const groupInput = row.querySelector('.gmap-group');
+    const roleSelect = row.querySelector('.gmap-role');
+    if (groupInput && roleSelect) {
+      const g = groupInput.value.trim();
+      if (g) mappings.push({ group: g, role: roleSelect.value });
+    }
+  }
+  // Also derive legacy admin_groups for backward compat
+  const adminGroups = mappings.filter(m => m.role === 'admin').map(m => m.group);
   try {
-    const res = await fetch('/api/auth-mapping', {
+    // Save to auth-config with full group_mappings
+    const cfgRes = await fetch('/api/auth-config');
+    const cfgData = cfgRes.ok ? await cfgRes.json() : { config: {} };
+    const cfg = cfgData.config || {};
+    cfg.group_mappings = mappings;
+    cfg.admin_groups = adminGroups;
+    const res = await fetch('/api/auth-config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin_groups: groups })
+      body: JSON.stringify({ config: cfg })
     });
     if (!res.ok) throw new Error(await res.text());
-    showAuthStatus('Mapping saved', false);
+    showMappingStatus('Mapping saved', false);
   } catch (e) {
-    showAuthStatus('Save failed: ' + e.message, true);
+    showMappingStatus('Save failed: ' + e.message, true);
   } finally { btn.disabled = false; }
 }
+
+function showMappingStatus(msg, isErr) {
+  const s = document.getElementById('mapping-status');
+  if (!s) return;
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
+
+let _cachedRoles = [];
+
+async function loadRolesIntoSelect(sel, currentVal) {
+  try {
+    if (_cachedRoles.length === 0) {
+      const r = await fetch('/api/roles');
+      if (r.ok) _cachedRoles = await r.json();
+    }
+    const prev = sel.value || currentVal || 'viewer';
+    sel.innerHTML = '';
+    for (const role of _cachedRoles) {
+      const opt = document.createElement('option');
+      opt.value = role.name;
+      opt.textContent = role.name.charAt(0).toUpperCase() + role.name.slice(1) + (role.built_in ? ' (built-in)' : '');
+      sel.appendChild(opt);
+    }
+    sel.value = prev;
+    if (!sel.value && _cachedRoles.length) sel.value = _cachedRoles[0].name;
+  } catch {}
+}
+
+function addGroupMappingRow(group = '', role = 'viewer') {
+  const tbody = document.getElementById('group-mapping-body');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="form-input gmap-group" value="${escapeHtml(group)}" placeholder="group-name" style="height:28px;padding:2px 6px"></td>
+    <td><select class="form-input gmap-role" style="height:28px;padding:2px 6px"></select></td>
+    <td><button class="btn-icon" style="color:#e05252" onclick="this.closest('tr').remove()" title="Remove">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+  const sel = tr.querySelector('.gmap-role');
+  loadRolesIntoSelect(sel, role);
+}
+
+// ── Roles management ──────────────────────────────────────────────────────────
+
+const ALL_PERMISSIONS = [
+  { id: 'sessions:list_own',   label: 'View own sessions' },
+  { id: 'sessions:list_all',   label: 'View all sessions' },
+  { id: 'sessions:replay_own', label: 'Replay own sessions' },
+  { id: 'sessions:replay_all', label: 'Replay all sessions' },
+  { id: 'sessions:delete',     label: 'Delete sessions (GDPR)' },
+  { id: 'users:read',          label: 'View users' },
+  { id: 'users:write',         label: 'Manage users & roles' },
+  { id: 'audit_log:read',      label: 'View audit log' },
+  { id: 'approvals:read',      label: 'View approvals' },
+  { id: 'approvals:decide',    label: 'Decide approvals' },
+  { id: 'config:read',         label: 'View configuration' },
+  { id: 'config:write',        label: 'Change configuration' },
+];
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadRoles() {
+  try {
+    const res = await fetch('/api/roles');
+    if (!res.ok) throw new Error(await res.text());
+    _cachedRoles = await res.json();
+    renderRolesTable(_cachedRoles);
+    // Refresh role select in user modal if open
+    loadRolesIntoSelect(document.getElementById('user-role'), document.getElementById('user-role').value);
+  } catch(e) {
+    showRolesStatus('Failed to load roles: ' + e.message, true);
+  }
+}
+
+function renderRolesTable(roles) {
+  const tbody = document.getElementById('roles-list-body');
+  tbody.innerHTML = '';
+  for (const r of roles) {
+    const permbadges = (r.permissions || []).map(p => {
+      const def = ALL_PERMISSIONS.find(d => d.id === p);
+      return `<span class="sc-source" title="${escapeHtml(p)}" style="font-size:10px;margin:1px">${escapeHtml(def?.label||p)}</span>`;
+    }).join(' ');
+    const lockIcon = r.built_in ? '🔒' : '';
+    const editBtn = r.built_in ? '' : `<button class="btn-icon" style="margin-right:4px" onclick="showEditRoleModal(${JSON.stringify(r.name)})">Edit</button>`;
+    const delBtn  = r.built_in ? '' : `<button class="btn-icon" style="color:#e05252" onclick="deleteRole(${JSON.stringify(r.name)})">Delete</button>`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${escapeHtml(r.name)}</strong> ${lockIcon}</td>
+      <td style="color:var(--muted)">${escapeHtml(r.description||'')}</td>
+      <td>${permbadges||'<span style="color:var(--muted)">none</span>'}</td>
+      <td>${editBtn}${delBtn}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+let _editingRoleName = null;
+
+function showAddRoleModal() {
+  _editingRoleName = null;
+  document.getElementById('role-modal-title').textContent = 'New Role';
+  document.getElementById('role-name').value = '';
+  document.getElementById('role-name').disabled = false;
+  document.getElementById('role-desc').value = '';
+  renderRolePermCheckboxes([]);
+  document.getElementById('role-modal').removeAttribute('hidden');
+}
+
+function showEditRoleModal(name) {
+  const r = _cachedRoles.find(r => r.name === name);
+  if (!r) return;
+  _editingRoleName = name;
+  document.getElementById('role-modal-title').textContent = 'Edit Role: ' + name;
+  document.getElementById('role-name').value = name;
+  document.getElementById('role-name').disabled = true; // name is immutable once created
+  document.getElementById('role-desc').value = r.description || '';
+  renderRolePermCheckboxes(r.permissions || []);
+  document.getElementById('role-modal').removeAttribute('hidden');
+}
+
+function renderRolePermCheckboxes(checked) {
+  const grid = document.getElementById('role-perms-grid');
+  grid.innerHTML = '';
+  for (const p of ALL_PERMISSIONS) {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = p.id;
+    cb.checked = checked.includes(p.id);
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(p.label));
+    grid.appendChild(label);
+  }
+}
+
+function closeRoleModal() {
+  document.getElementById('role-modal').setAttribute('hidden', '');
+}
+
+async function saveRole() {
+  const name = _editingRoleName || document.getElementById('role-name').value.trim();
+  if (!name) { alert('Name is required'); return; }
+  if (!/^[a-z0-9_-]+$/.test(name)) { alert('Name may only contain lowercase letters, digits, hyphens, underscores'); return; }
+  const desc = document.getElementById('role-desc').value.trim();
+  const perms = Array.from(document.querySelectorAll('#role-perms-grid input[type=checkbox]:checked')).map(cb => cb.value);
+  const method = _editingRoleName ? 'PUT' : 'POST';
+  const url = _editingRoleName ? `/api/roles/${encodeURIComponent(name)}` : '/api/roles';
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: desc, permissions: perms })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    closeRoleModal();
+    await loadRoles();
+    showRolesStatus('Role saved', false);
+  } catch(e) {
+    showRolesStatus('Save failed: ' + e.message, true);
+  }
+}
+
+async function deleteRole(name) {
+  if (!confirm(`Delete role "${name}"? Users with this role will fall back to viewer permissions.`)) return;
+  try {
+    const res = await fetch(`/api/roles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    await loadRoles();
+    showRolesStatus('Role deleted', false);
+  } catch(e) {
+    showRolesStatus('Delete failed: ' + e.message, true);
+  }
+}
+
+function showRolesStatus(msg, isErr) {
+  const s = document.getElementById('roles-status');
+  if (!s) return;
+  s.textContent = msg;
+  s.className = 'settings-status ' + (isErr ? 'err' : 'ok');
+  s.style.display = '';
+  setTimeout(() => { s.style.display = 'none'; }, 4000);
+}
+
+document.getElementById('btn-save-role').addEventListener('click', saveRole);
 
 function showAuthStatus(msg, isErr) {
   const s = document.getElementById('auth-status');
@@ -6634,7 +6923,7 @@ function showAddUserModal() {
   document.getElementById('user-fullname').value = '';
   document.getElementById('user-email').value = '';
   document.getElementById('user-pass').value = '';
-  document.getElementById('user-role').value = 'viewer';
+  loadRolesIntoSelect(document.getElementById('user-role'), 'viewer');
   updatePasswordUI('', 'user-pass-msg', 'btn-save-user', false);
   document.getElementById('user-modal').hidden = false;
 }
@@ -6653,7 +6942,7 @@ async function editUser(username) {
     document.getElementById('user-fullname').value = u.full_name || '';
     document.getElementById('user-email').value = u.email || '';
     document.getElementById('user-pass').value = '';
-    document.getElementById('user-role').value = u.role;
+    await loadRolesIntoSelect(document.getElementById('user-role'), u.role);
     updatePasswordUI('', 'user-pass-msg', 'btn-save-user', true);
     document.getElementById('user-modal').hidden = false;
   } catch(e) { alert(e.message); }

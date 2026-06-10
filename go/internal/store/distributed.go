@@ -143,7 +143,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	12 — added sudo_deletion_log for GDPR/audit deletion records
 //	13 — added sudo_users for Enterprise RBAC and Auth management
 //	14 — added sudo_auth_config for dynamic SSO configuration
-const currentSchemaVersion = 14
+//	15 — added sudo_roles for custom role definitions
+const currentSchemaVersion = 15
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -332,6 +333,17 @@ CREATE TABLE IF NOT EXISTS sudo_auth_config (
     config_json JSONB NOT NULL
 );
 INSERT INTO sudo_auth_config (id, config_json) VALUES (1, '{}') ON CONFLICT DO NOTHING;
+
+-- migration v15: custom role definitions
+CREATE TABLE IF NOT EXISTS sudo_roles (
+    name        TEXT PRIMARY KEY,
+    description TEXT NOT NULL DEFAULT '',
+    permissions JSONB NOT NULL DEFAULT '[]',
+    built_in    BOOLEAN NOT NULL DEFAULT FALSE
+);
+INSERT INTO sudo_roles (name, description, permissions) VALUES
+    ('viewer', 'Default viewer: can list and replay own sessions', '["sessions:list_own","sessions:replay_own"]')
+ON CONFLICT DO NOTHING;
 `); err != nil {
 		return err
 	}
@@ -865,6 +877,89 @@ func (d *DistributedStore) SetAuthConfig(ctx context.Context, cfg AuthConfig) er
 		return fmt.Errorf("set auth config: %w", err)
 	}
 	return nil
+}
+
+// ── Role Management ──────────────────────────────────────────────────────────
+
+// GetRoles implements SessionStore.
+func (d *DistributedStore) GetRoles(ctx context.Context) ([]RoleDefinition, error) {
+	rows, err := d.db.Query(ctx, `SELECT name, description, permissions FROM sudo_roles ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+	defer rows.Close()
+
+	// Always prepend the locked built-in admin role synthesised in-memory.
+	out := []RoleDefinition{{
+		Name:        "admin",
+		Description: "Built-in administrator: all permissions",
+		Permissions: AllPermissions,
+		BuiltIn:     true,
+	}}
+	for rows.Next() {
+		var name, desc string
+		var permsJSON []byte
+		if err := rows.Scan(&name, &desc, &permsJSON); err != nil {
+			return nil, err
+		}
+		var perms []Permission
+		if err := json.Unmarshal(permsJSON, &perms); err != nil {
+			return nil, fmt.Errorf("decode permissions for role %q: %w", name, err)
+		}
+		out = append(out, RoleDefinition{Name: name, Description: desc, Permissions: perms})
+	}
+	return out, rows.Err()
+}
+
+// GetRole implements SessionStore.
+func (d *DistributedStore) GetRole(ctx context.Context, name string) (RoleDefinition, error) {
+	if name == "admin" {
+		return RoleDefinition{
+			Name:        "admin",
+			Description: "Built-in administrator: all permissions",
+			Permissions: AllPermissions,
+			BuiltIn:     true,
+		}, nil
+	}
+	var desc string
+	var permsJSON []byte
+	err := d.db.QueryRow(ctx,
+		`SELECT description, permissions FROM sudo_roles WHERE name = $1`, name,
+	).Scan(&desc, &permsJSON)
+	if err != nil {
+		return RoleDefinition{}, nil // not found → empty
+	}
+	var perms []Permission
+	if err := json.Unmarshal(permsJSON, &perms); err != nil {
+		return RoleDefinition{}, fmt.Errorf("decode permissions for role %q: %w", name, err)
+	}
+	return RoleDefinition{Name: name, Description: desc, Permissions: perms}, nil
+}
+
+// UpsertRole implements SessionStore.
+func (d *DistributedStore) UpsertRole(ctx context.Context, def RoleDefinition) error {
+	if def.Name == "admin" {
+		return fmt.Errorf("role %q is built-in and cannot be modified", def.Name)
+	}
+	raw, err := json.Marshal(def.Permissions)
+	if err != nil {
+		return fmt.Errorf("marshal permissions: %w", err)
+	}
+	_, err = d.db.Exec(ctx, `
+		INSERT INTO sudo_roles (name, description, permissions)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description, permissions = EXCLUDED.permissions
+	`, def.Name, def.Description, raw)
+	return err
+}
+
+// DeleteRole implements SessionStore.
+func (d *DistributedStore) DeleteRole(ctx context.Context, name string) error {
+	if name == "admin" {
+		return fmt.Errorf("role %q is built-in and cannot be deleted", name)
+	}
+	_, err := d.db.Exec(ctx, `DELETE FROM sudo_roles WHERE name = $1`, name)
+	return err
 }
 
 // WatchSessions implements SessionStore.

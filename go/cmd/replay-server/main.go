@@ -174,18 +174,16 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 			if header != "" && r.Header.Get(header) != "" {
 				user = r.Header.Get(header)
 
-				// Optional: map roles from Proxy Groups header
+				// Map groups to roles: explicit GroupMappings take priority, then AdminGroups fallback.
 				if cfg.Proxy.GroupsHeader != "" {
 					groupsRaw := r.Header.Get(cfg.Proxy.GroupsHeader)
+					var groups []string
 					for _, g := range strings.Split(groupsRaw, ",") {
-						g = strings.TrimSpace(g)
-						for _, adminGroup := range cfg.AdminGroups {
-							if g == adminGroup {
-								role = RoleAdmin
-								break
-							}
+						if g = strings.TrimSpace(g); g != "" {
+							groups = append(groups, g)
 						}
 					}
+					role = resolveRoleFromGroups(groups, cfg)
 				}
 			}
 		}
@@ -196,7 +194,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 					parts := strings.SplitN(string(dec), ":", 2)
 					if len(parts) == 2 {
 						user = parts[0]
-						role = Role(parts[1])
+						role = parts[1]
 					}
 				}
 			}
@@ -217,7 +215,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 
 		if user != "-" && role == RoleViewer {
 			if u, err := sessionStore.GetUser(r.Context(), user); err == nil && u != nil {
-				role = Role(u.Role)
+				role = u.Role
 			}
 		}
 
@@ -225,13 +223,42 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 			role = RoleAdmin
 		}
 
+		// Build a temporary request with viewer/role already in context so that
+		// resolveRolePerms (which calls sessionStore.GetRole) can use r.Context().
+		tmpCtx := context.WithValue(r.Context(), ctxViewer, user)
+		tmpCtx = context.WithValue(tmpCtx, ctxRole, role)
+		tmpR := r.WithContext(tmpCtx)
+		perms := resolveRolePerms(tmpR, role)
+
 		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		ctx := context.WithValue(r.Context(), ctxViewer, user)
 		ctx = context.WithValue(ctx, ctxRole, role)
+		ctx = context.WithValue(ctx, ctxPermissions, perms)
 		next.ServeHTTP(lrw, r.WithContext(ctx))
 		log.Printf("access identity=%s role=%s addr=%s method=%s path=%s status=%d",
 			sanitizeForLog(user), role, r.RemoteAddr, r.Method, sanitizeForLog(r.URL.Path), lrw.status)
 	})
+}
+
+// resolveRoleFromGroups maps a set of group names to a role using GroupMappings
+// (first match wins) with AdminGroups as a fallback (maps to "admin").
+// Returns RoleViewer if no group matches.
+func resolveRoleFromGroups(groups []string, cfg store.AuthConfig) Role {
+	for _, g := range groups {
+		for _, m := range cfg.GroupMappings {
+			if g == m.Group {
+				return m.Role
+			}
+		}
+	}
+	for _, g := range groups {
+		for _, adminGroup := range cfg.AdminGroups {
+			if g == adminGroup {
+				return RoleAdmin
+			}
+		}
+	}
+	return RoleViewer
 }
 
 // sanitizeForLog replaces ASCII control characters with '_' to prevent log injection.
@@ -625,6 +652,9 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 // ── Blocked users API ─────────────────────────────────────────────────────────
 
 func handleGetBlockedUsers(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	policy, err := sessionStore.GetBlockedPolicy(r.Context())
 	if err != nil {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
@@ -654,6 +684,9 @@ func handleGetBlockedUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutBlockedUsers(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	var body struct {
 		Config BlockedUsersConfig `json:"config"`
 	}
@@ -693,6 +726,9 @@ func handlePutBlockedUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetWhitelistedUsers(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	policy, err := sessionStore.GetWhitelistPolicy(r.Context())
 	if err != nil {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
@@ -721,6 +757,9 @@ func handleGetWhitelistedUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutWhitelistedUsers(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	var body struct {
 		Config WhitelistedUsersConfig `json:"config"`
 	}
@@ -796,7 +835,7 @@ func validatePassword(password string) error {
 }
 
 func handleGetUsers(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
+	if !require(w, r, store.PermUsersRead) {
 		return
 	}
 	users, err := sessionStore.ListUsers(r.Context())
@@ -810,7 +849,7 @@ func handleGetUsers(w http.ResponseWriter, r *http.Request) {
 
 func handlePutUser(w http.ResponseWriter, r *http.Request) {
 	// Bootstrap exception: allow creating the first user without admin role.
-	if !isBootstrapMode(r) && !requireAdmin(w, r) {
+	if !isBootstrapMode(r) && !require(w, r, store.PermUsersWrite) {
 		return
 	}
 
@@ -846,7 +885,7 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if u.Role == "" {
-		u.Role = string(RoleViewer)
+		u.Role = RoleViewer
 	}
 	if u.Source == "" {
 		u.Source = "local"
@@ -865,7 +904,7 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
+	if !require(w, r, store.PermUsersWrite) {
 		return
 	}
 	username := strings.TrimPrefix(r.URL.Path, "/api/users/")
@@ -1036,14 +1075,26 @@ func main() {
 			log.Fatalf("admin token: %v", err)
 		}
 		mux.HandleFunc("/api/approvals", func(w http.ResponseWriter, r *http.Request) {
-			if !requireAdmin(w, r) {
-				return
+			if r.Method == http.MethodGet {
+				if !require(w, r, store.PermApprovalsRead) {
+					return
+				}
+			} else {
+				if !require(w, r, store.PermApprovalsDecide) {
+					return
+				}
 			}
 			proxyToLogServer(w, r, adminBase+"/api/approvals", adminToken, viewerFromContext(r))
 		})
 		mux.HandleFunc("/api/approvals/", func(w http.ResponseWriter, r *http.Request) {
-			if !requireAdmin(w, r) {
-				return
+			if r.Method == http.MethodGet {
+				if !require(w, r, store.PermApprovalsRead) {
+					return
+				}
+			} else {
+				if !require(w, r, store.PermApprovalsDecide) {
+					return
+				}
 			}
 			tail := strings.TrimPrefix(r.URL.Path, "/api/approvals/")
 			proxyToLogServer(w, r, adminBase+"/api/approvals/"+tail, adminToken, viewerFromContext(r))
@@ -1053,13 +1104,13 @@ func main() {
 			proxyToLogServer(w, r, adminBase+"/api/approvals/callback", adminToken, "")
 		})
 		mux.HandleFunc("/api/approval-config", func(w http.ResponseWriter, r *http.Request) {
-			if !requireAdmin(w, r) {
+			if !require(w, r, store.PermApprovalsDecide) {
 				return
 			}
 			proxyToLogServer(w, r, adminBase+"/api/approval-config", adminToken, viewerFromContext(r))
 		})
 		mux.HandleFunc("/api/jit-policy", func(w http.ResponseWriter, r *http.Request) {
-			if !requireAdmin(w, r) {
+			if !require(w, r, store.PermApprovalsDecide) {
 				return
 			}
 			proxyToLogServer(w, r, adminBase+"/api/jit-policy", adminToken, viewerFromContext(r))
@@ -1069,7 +1120,7 @@ func main() {
 				http.NotFound(w, r)
 				return
 			}
-			if !requireAdmin(w, r) {
+			if !require(w, r, store.PermSessionsDelete) {
 				return
 			}
 			tsid := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
@@ -1159,11 +1210,88 @@ func main() {
 		}
 		handleDeleteUser(w, r)
 	})
-	mux.HandleFunc("/api/auth-config", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdmin(w, r) {
-			return
+	mux.HandleFunc("/api/roles", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			if !require(w, r, store.PermUsersRead) {
+				return
+			}
+			roles, err := sessionStore.GetRoles(r.Context())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(roles)
+		case http.MethodPost, http.MethodPut:
+			if !require(w, r, store.PermUsersWrite) {
+				return
+			}
+			var def store.RoleDefinition
+			if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+			if def.Name == "" {
+				http.Error(w, "name required", http.StatusBadRequest)
+				return
+			}
+			if err := sessionStore.UpsertRole(r.Context(), def); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+	mux.HandleFunc("/api/roles/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/api/roles/")
+		switch r.Method {
+		case http.MethodGet:
+			if !require(w, r, store.PermUsersRead) {
+				return
+			}
+			def, err := sessionStore.GetRole(r.Context(), name)
+			if err != nil || def.Name == "" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(def)
+		case http.MethodPut:
+			if !require(w, r, store.PermUsersWrite) {
+				return
+			}
+			var def store.RoleDefinition
+			if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+			def.Name = name
+			if err := sessionStore.UpsertRole(r.Context(), def); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodDelete:
+			if !require(w, r, store.PermUsersWrite) {
+				return
+			}
+			if err := sessionStore.DeleteRole(r.Context(), name); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/auth-config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
+			if !require(w, r, store.PermConfigRead) {
+				return
+			}
 			cfg, err := sessionStore.GetAuthConfig(r.Context())
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1179,6 +1307,9 @@ func main() {
 		}
 
 		if r.Method == http.MethodPut {
+			if !require(w, r, store.PermConfigWrite) {
+				return
+			}
 			var body struct {
 				Config store.AuthConfig `json:"config"`
 			}
@@ -1187,15 +1318,17 @@ func main() {
 				return
 			}
 
+			oldCfg, _ := sessionStore.GetAuthConfig(r.Context())
+
 			// If client sends "***" or empty, keep the existing secret
 			if body.Config.OIDC.ClientSecret == "***" || body.Config.OIDC.ClientSecret == "" { // pragma: allowlist secret
-				oldCfg, _ := sessionStore.GetAuthConfig(r.Context())
 				body.Config.OIDC.ClientSecret = oldCfg.OIDC.ClientSecret // pragma: allowlist secret
 			}
 
-			// Keep existing admin groups intact
-			oldCfg, _ := sessionStore.GetAuthConfig(r.Context())
-			body.Config.AdminGroups = oldCfg.AdminGroups
+			// Keep existing admin_groups unless client explicitly sends them
+			if body.Config.AdminGroups == nil {
+				body.Config.AdminGroups = oldCfg.AdminGroups
+			}
 
 			if err := sessionStore.SetAuthConfig(r.Context(), body.Config); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1207,7 +1340,7 @@ func main() {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 	mux.HandleFunc("/api/auth-mapping", func(w http.ResponseWriter, r *http.Request) {
-		if !requireAdmin(w, r) {
+		if !require(w, r, store.PermConfigWrite) {
 			return
 		}
 		if r.Method == http.MethodPut {
@@ -1247,8 +1380,15 @@ func main() {
 		if *flagTrustedUserHeader != "" {
 			logoutURL = "/oauth2/sign_out"
 		}
+		perms := permsFromContext(r)
+		permList := make([]string, 0, len(perms))
+		for p := range perms {
+			permList = append(permList, string(p))
+		}
+		sort.Strings(permList)
+		permJSON, _ := json.Marshal(permList)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"user":%q,"logoutUrl":%q,"role":%q}`, user, logoutURL, roleFromContext(r))
+		fmt.Fprintf(w, `{"user":%q,"logoutUrl":%q,"role":%q,"permissions":%s}`, user, logoutURL, roleFromContext(r), permJSON)
 	})
 
 	mux.HandleFunc("/api/sudoers/hosts", func(w http.ResponseWriter, r *http.Request) {
@@ -1397,7 +1537,7 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ownerFilter string
-	if !isAdmin(r) {
+	if !can(r, store.PermSessionsListAll) {
 		ownerFilter = viewerFromContext(r)
 		if ownerFilter == "-" {
 			ownerFilter = "" // unauthenticated open deployment — show all
@@ -1430,9 +1570,9 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce viewer-role ownership: non-admin users may only replay their own sessions.
+	// Enforce viewer-role ownership: users without replay_all may only replay their own sessions.
 	viewer := viewerFromContext(r)
-	if !isAdmin(r) && viewer != "-" {
+	if !can(r, store.PermSessionsReplayAll) && viewer != "-" {
 		all := cachedListSessions(r.Context())
 		found := false
 		for _, s := range all {
@@ -1551,7 +1691,7 @@ func handleAccessLog(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !requireAdmin(w, r) {
+	if !require(w, r, store.PermAuditLogRead) {
 		return
 	}
 
@@ -2011,6 +2151,9 @@ func handleGetRules(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	rulesMu.RLock()
 	rules := make([]Rule, len(globalRules))
 	copy(rules, globalRules)
@@ -2024,6 +2167,9 @@ func handleGetRules(w http.ResponseWriter, r *http.Request) {
 func handlePutRules(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !require(w, r, store.PermConfigWrite) {
 		return
 	}
 	var body struct {
@@ -2058,6 +2204,9 @@ func handlePutRules(w http.ResponseWriter, r *http.Request) {
 // ── Retention API ──────────────────────────────────────────────────────────────
 
 func handleGetRetention(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	cfgStr, err := sessionStore.GetConfig(r.Context(), "retention_policy")
 	if err != nil {
 		http.Error(w, "read failed: "+err.Error(), http.StatusInternalServerError)
@@ -2072,6 +2221,9 @@ func handleGetRetention(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutRetention(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	var policy store.RetentionPolicy
 	if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -2124,6 +2276,9 @@ const (
 )
 
 func handleGetSandbox(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	content, err := sessionStore.GetConfig(r.Context(), "sandbox.yaml")
 	if err != nil {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
@@ -2139,6 +2294,9 @@ func handleGetSandbox(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxSandboxConfigSize)
 	var body struct {
 		Content string `json:"content"`
@@ -2166,6 +2324,9 @@ func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetSandboxTemplates(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	content, err := sessionStore.GetConfig(r.Context(), "sandbox_templates")
 	if err != nil {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
@@ -2179,6 +2340,9 @@ func handleGetSandboxTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutSandboxTemplates(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxSandboxConfigSize)
 	var templates map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&templates); err != nil {
@@ -2528,6 +2692,9 @@ func handleDeleteSudoersConfig(w http.ResponseWriter, r *http.Request) {
 // Using the store (rather than siem.Get()) ensures the response reflects the
 // persisted state even before the background reload cycle fires.
 func handleGetSiemConfig(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	text, err := sessionStore.GetConfig(r.Context(), "siem.yaml")
 	if err != nil {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
@@ -2572,6 +2739,9 @@ func validateTLSPaths(label string, c siem.TLSCfg) error {
 // handlePutSiemConfig validates and persists an updated SIEM config.
 // Both servers reload within 30 s (file poller for local, DB poll for distributed).
 func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	var body struct {
 		Config siem.Config `json:"config"`
 	}

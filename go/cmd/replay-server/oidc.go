@@ -167,19 +167,8 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		username = claims.Email
 	}
 
-	// 1. Check if user is mapped to admin via groups
-	role := RoleViewer
-	for _, g := range claims.Groups {
-		for _, adminGroup := range cfg.AdminGroups {
-			if g == adminGroup {
-				role = RoleAdmin
-				break
-			}
-		}
-		if role == RoleAdmin {
-			break
-		}
-	}
+	// 1. Resolve role from group claims using GroupMappings then AdminGroups fallback.
+	role := resolveRoleFromGroups(claims.Groups, cfg)
 
 	// 2. Set session cookie
 	sessionData := fmt.Sprintf("%s:%s", username, role)
