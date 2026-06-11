@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchOPAPolicy, saveOPAPolicy, type OPAPolicy } from '@/api/opa'
+import { fetchOPAPolicy, saveOPAPolicy, type OPAMatchRule, type OPAPolicy } from '@/api/opa'
 import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -8,11 +8,17 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Plus, Edit2, Trash2, ShieldCheck, Code, Save, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { OPARuleModal } from './OPARuleModal'
 
 export function OPAPolicyView() {
   const qc = useQueryClient()
   const { data, isPending } = useQuery({ queryKey: ['opa-policy'], queryFn: fetchOPAPolicy })
   const [draft, setDraft] = useState<OPAPolicy | null>(null)
+
+  const [editRule, setEditRule] = useState<{ rule: OPAMatchRule, idx: number } | null>(null)
+  const [isAddOpen, setIsAddOpen] = useState(false)
+
+  const [editGroup, setEditGroup] = useState<{ name: string, members: string[] } | null>(null)
 
   const mut = useMutation({
     mutationFn: saveOPAPolicy,
@@ -28,6 +34,37 @@ export function OPAPolicyView() {
   const isDirty = draft !== null
 
   const set = (patch: Partial<OPAPolicy>) => setDraft({ ...current, ...patch })
+
+  const onSaveRule = (rule: OPAMatchRule) => {
+    let nextRules = [...current.rules]
+    if (editRule) {
+      nextRules[editRule.idx] = rule
+    } else {
+      nextRules.push(rule)
+    }
+    set({ rules: nextRules })
+    setEditRule(null)
+    setIsAddOpen(false)
+  }
+
+  const deleteRule = (idx: number) => {
+    if (!confirm('Delete this policy rule?')) return
+    const nextRules = current.rules.filter((_, i) => i !== idx)
+    set({ rules: nextRules })
+  }
+
+  const onSaveGroup = (name: string, members: string[]) => {
+    const nextGroups = { ...current.groups, [name]: members }
+    set({ groups: nextGroups })
+    setEditGroup(null)
+  }
+
+  const deleteGroup = (name: string) => {
+    if (!confirm(`Delete group @${name}?`)) return
+    const nextGroups = { ...current.groups }
+    delete nextGroups[name]
+    set({ groups: nextGroups })
+  }
 
   return (
     <div className="flex flex-col h-full bg-bg text-text-sub overflow-hidden animate-in fade-in duration-200">
@@ -105,13 +142,14 @@ export function OPAPolicyView() {
                               {r.users?.length > 0 && <span className="text-blue">users: <span className="text-text-sub">{r.users.join(', ')}</span></span>}
                               {r.hosts?.length > 0 && <span className="text-amber">hosts: <span className="text-text-sub">{r.hosts.join(', ')}</span></span>}
                               {r.commands?.length > 0 && <span className="text-green">commands: <span className="text-text-sub">{r.commands.join(', ')}</span></span>}
+                              {(r.hour_from >= 0 || r.hour_to >= 0) && <span className="text-red">time: <span className="text-text-sub">{r.hour_from}:00-{r.hour_to}:00</span></span>}
                            </div>
                         </TableCell>
                         <TableCell className="text-text-dim italic">{r.comment || '—'}</TableCell>
                         <TableCell>
                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button className="p-1.5 text-text-dim hover:text-white"><Edit2 size={14} /></button>
-                              <button className="p-1.5 text-text-dim hover:text-red"><Trash2 size={14} /></button>
+                              <button onClick={() => setEditRule({ rule: r, idx: i })} className="p-1.5 text-text-dim hover:text-white"><Edit2 size={14} /></button>
+                              <button onClick={() => deleteRule(i)} className="p-1.5 text-text-dim hover:text-red"><Trash2 size={14} /></button>
                            </div>
                         </TableCell>
                       </TableRow>
@@ -122,7 +160,7 @@ export function OPAPolicyView() {
                   </TableBody>
                 </Table>
              </div>
-             <Button size="sm" variant="outline" className="h-9 border-border text-text-sub"><Plus size={16} className="mr-1" /> Add Policy Rule</Button>
+             <Button onClick={() => setIsAddOpen(true)} size="sm" variant="outline" className="h-9 border-border text-text-sub"><Plus size={16} className="mr-1" /> Add Policy Rule</Button>
           </TabsContent>
 
           <TabsContent value="groups" className="m-0 space-y-6 animate-in slide-in-from-left-2 duration-200">
@@ -147,8 +185,8 @@ export function OPAPolicyView() {
                         <TableCell className="font-mono text-[12px] text-text-sub">{members.join(', ')}</TableCell>
                         <TableCell>
                            <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button className="p-1.5 text-text-dim hover:text-white"><Edit2 size={14} /></button>
-                              <button className="p-1.5 text-text-dim hover:text-red"><Trash2 size={14} /></button>
+                              <button onClick={() => setEditGroup({ name, members })} className="p-1.5 text-text-dim hover:text-white"><Edit2 size={14} /></button>
+                              <button onClick={() => deleteGroup(name)} className="p-1.5 text-text-dim hover:text-red"><Trash2 size={14} /></button>
                            </div>
                         </TableCell>
                       </TableRow>
@@ -159,7 +197,15 @@ export function OPAPolicyView() {
                   </TableBody>
                 </Table>
              </div>
-             <Button size="sm" variant="outline" className="h-9 border-border text-text-sub"><Plus size={16} className="mr-1" /> Add Named Group</Button>
+             <Button
+                onClick={() => {
+                   const name = prompt('Group name (without @):')
+                   if (name) onSaveGroup(name.toLowerCase(), [])
+                }}
+                size="sm" variant="outline" className="h-9 border-border text-text-sub"
+             >
+                <Plus size={16} className="mr-1" /> Add Named Group
+             </Button>
           </TabsContent>
 
           <TabsContent value="rego" className="m-0 space-y-4 animate-in slide-in-from-left-2 duration-200">
@@ -173,6 +219,78 @@ export function OPAPolicyView() {
           </TabsContent>
         </div>
       </Tabs>
+
+      <OPARuleModal
+        rule={editRule?.rule || null}
+        open={!!editRule || isAddOpen}
+        onClose={() => { setEditRule(null); setIsAddOpen(false) }}
+        onSave={onSaveRule}
+      />
+
+      {editGroup && (
+         <GroupEditModal
+            name={editGroup.name}
+            members={editGroup.members}
+            open={!!editGroup}
+            onClose={() => setEditGroup(null)}
+            onSave={(members) => onSaveGroup(editGroup.name, members)}
+         />
+      )}
     </div>
   )
 }
+
+function GroupEditModal({ name, members, open, onClose, onSave }: { name: string, members: string[], open: boolean, onClose: () => void, onSave: (m: string[]) => void }) {
+    const [draft, setDraft] = useState(members)
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-md bg-surface border-border text-text">
+                <DialogHeader><DialogTitle>Edit Group: @{name}</DialogTitle></DialogHeader>
+                <div className="py-4">
+                    <TagInput label="Members" values={draft} onChange={setDraft} />
+                </div>
+                <DialogFooter>
+                    <Button variant="ghost" onClick={onClose}>Cancel</Button>
+                    <Button onClick={() => { onSave(draft); onClose() }} className="bg-green text-black font-bold">Save Group</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+function TagInput({ label, values, onChange }: { label: string, values: string[], onChange: (v: string[]) => void }) {
+  const [inp, setInp] = useState('')
+  const add = () => {
+    const val = inp.trim()
+    if (!val || values.includes(val)) return
+    onChange([...values, val])
+    setInp('')
+  }
+  const remove = (val: string) => onChange(values.filter(v => v !== val))
+
+  return (
+    <div className="space-y-1">
+      <label className="text-[10px] font-bold text-text-dim uppercase tracking-wider">{label}</label>
+      <div className="min-h-8 p-1 rounded-[4px] border border-border bg-card flex flex-wrap gap-1 items-center">
+        {values.map(v => (
+          <span key={v} className="bg-surface border border-border px-1.5 py-0.5 rounded-[2px] text-[11px] font-mono text-text flex items-center gap-1">
+            {v}
+            <button onClick={() => remove(v)} className="text-text-dim hover:text-red transition-colors"><X size={10} /></button>
+          </span>
+        ))}
+        <input
+          value={inp}
+          onChange={e => setInp(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add() }
+          }}
+          className="flex-1 bg-transparent border-none outline-none text-[11px] font-mono px-1 min-w-[60px]"
+          placeholder="..."
+        />
+      </div>
+    </div>
+  )
+}
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'

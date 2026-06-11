@@ -8,10 +8,12 @@ import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Users, Shield, Plus, Trash2, Edit2 } from 'lucide-react'
+import { Users, Shield, Plus, Trash2, Edit2, Mail, Calendar } from 'lucide-react'
 import { UserModal } from './UserModal'
 import { RoleModal } from './RoleModal'
 import type { UserInfo, Role } from '@/types/config'
+import { fmtDate } from '@/lib/date'
+import { cn } from '@/lib/utils'
 
 export function UsersRolesTab() {
   const qc = useQueryClient()
@@ -48,15 +50,20 @@ export function UsersRolesTab() {
   if (p1 || p2) return <div className="text-text-dim font-mono text-[13px]">Loading users & roles…</div>
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-12 max-w-6xl mx-auto animate-in fade-in duration-200">
+      {/* User Management Section */}
       <section className="space-y-6">
         <div className="flex items-center justify-between border-b border-border pb-2">
-          <h2 className="text-[16px] font-semibold text-text flex items-center gap-2">
-            <Users size={18} className="text-green" /> User Management
-          </h2>
+          <div className="space-y-1">
+            <h2 className="text-[16px] font-semibold text-text flex items-center gap-2">
+              <Users size={18} className="text-green" /> User Management
+            </h2>
+            <p className="text-[12px] text-text-dim">Manage administrative access to the replay server.</p>
+          </div>
           <Button
             onClick={() => setIsAddUserOpen(true)}
-            size="sm" variant="outline" className="h-8 border-border hover:bg-card-hover text-text-sub"
+            size="sm"
+            className="bg-green hover:bg-green/90 text-black font-bold h-8 rounded-[4px] px-6"
           >
             <Plus size={14} className="mr-1" /> Add User
           </Button>
@@ -66,19 +73,39 @@ export function UsersRolesTab() {
           <Table className="text-[13px]">
             <TableHeader className="bg-surface">
               <TableRow className="hover:bg-transparent border-border">
-                <TableHead className="text-text-dim h-10">Username</TableHead>
-                <TableHead className="text-text-dim h-10">Assigned Role</TableHead>
+                <TableHead className="text-text-dim h-10">User Identity</TableHead>
+                <TableHead className="text-text-dim h-10">Contact</TableHead>
+                <TableHead className="text-text-dim h-10">Role</TableHead>
+                <TableHead className="text-text-dim h-10">Created</TableHead>
                 <TableHead className="w-24 h-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(users ?? []).map(u => (
                 <TableRow key={u.username} className="hover:bg-card-hover border-border group">
-                  <TableCell className="font-mono font-bold text-blue">{u.username}</TableCell>
                   <TableCell>
-                    <span className="px-2 py-0.5 rounded-[3px] bg-surface border border-border text-[11px] font-semibold uppercase">
+                    <div className="flex flex-col">
+                       <span className="font-mono font-bold text-blue">{u.username}</span>
+                       <span className="text-[11px] text-text-dim">{u.full_name || '—'}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {u.email ? (
+                       <div className="flex items-center gap-2 text-text-sub">
+                          <Mail size={12} className="text-text-dim" />
+                          <span className="text-[12px]">{u.email}</span>
+                       </div>
+                    ) : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <span className="px-2 py-0.5 rounded-[3px] bg-surface border border-border text-[10px] font-bold uppercase tracking-tight">
                       {u.role}
                     </span>
+                  </TableCell>
+                  <TableCell className="text-text-dim font-mono text-[11px]">
+                     <div className="flex items-center gap-2">
+                        <Calendar size={12} /> {u.created_at ? fmtDate(Number(u.created_at)) : '—'}
+                     </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -99,11 +126,15 @@ export function UsersRolesTab() {
         </div>
       </section>
 
+      {/* Role Management Section */}
       <section className="space-y-6">
         <div className="flex items-center justify-between border-b border-border pb-2">
-          <h2 className="text-[16px] font-semibold text-text flex items-center gap-2">
-            <Shield size={18} className="text-blue" /> System Roles
-          </h2>
+          <div className="space-y-1">
+            <h2 className="text-[16px] font-semibold text-text flex items-center gap-2">
+              <Shield size={18} className="text-blue" /> System Roles
+            </h2>
+            <p className="text-[12px] text-text-dim">Define granular permissions for different user groups.</p>
+          </div>
           <Button
             onClick={() => setIsAddRoleOpen(true)}
             size="sm" variant="outline" className="h-8 border-border hover:bg-card-hover text-text-sub"
@@ -116,7 +147,7 @@ export function UsersRolesTab() {
           <Table className="text-[13px]">
             <TableHeader className="bg-surface">
               <TableRow className="hover:bg-transparent border-border">
-                <TableHead className="text-text-dim h-10">Role Name</TableHead>
+                <TableHead className="text-text-dim h-10 w-48">Role Name</TableHead>
                 <TableHead className="text-text-dim h-10">Permissions</TableHead>
                 <TableHead className="w-24 h-10"></TableHead>
               </TableRow>
@@ -128,8 +159,8 @@ export function UsersRolesTab() {
                   <TableCell className="py-3">
                     <div className="flex flex-wrap gap-1">
                       {r.permissions.map(p => (
-                        <span key={p} className="text-[11px] text-text-sub font-mono bg-surface border border-border px-1.5 rounded-[2px]">
-                          {p}
+                        <span key={p} className="text-[10px] text-text-dim font-mono bg-surface border border-border px-1.5 rounded-[2px]">
+                          {p.replace(':', ': ')}
                         </span>
                       ))}
                     </div>

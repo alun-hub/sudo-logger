@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { fetchMe } from '@/api/config'
+import { fetchApprovals } from '@/api/approvals'
 import { cn } from '@/lib/utils'
 import { User, LogOut } from 'lucide-react'
 
@@ -14,7 +15,14 @@ const tabs = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
+  const { data: apprs } = useQuery({
+    queryKey: ['approvals'],
+    queryFn: fetchApprovals,
+    refetchInterval: 15_000
+  })
   const location = useLocation()
+
+  const pendingCount = (apprs || []).filter(r => r.status === 'pending').length
 
   return (
     <div className="flex flex-col min-h-screen bg-bg text-text font-sans">
@@ -32,13 +40,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={t.to}
                   to={t.to}
                   className={cn(
-                    'px-3 py-1 text-[13px] rounded transition-colors font-medium border border-transparent',
+                    'px-3 py-1 text-[13px] rounded transition-colors font-medium border border-transparent flex items-center gap-2',
                     isActive
                       ? 'bg-green-dim text-green border-green/50'
                       : 'text-text-dim hover:text-text-sub hover:bg-card-hover',
                   )}
                 >
                   {t.label}
+                  {t.label === 'Approvals' && pendingCount > 0 && (
+                    <span className="bg-red text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 animate-pulse min-w-[18px] text-center">
+                       {pendingCount}
+                    </span>
+                  )}
                 </NavLink>
               )
             })}
