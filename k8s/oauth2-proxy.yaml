@@ -4,8 +4,8 @@
 # Prerequisites (one-time):
 #   1. Create a GitHub OAuth App at https://github.com/settings/developers
 #      - Application name:  sudo-replay (or anything)
-#      - Homepage URL:      http://replay.192.168.2.163.nip.io
-#      - Callback URL:      http://replay.192.168.2.163.nip.io/oauth2/callback
+#      - Homepage URL:      http://replay.192.168.1.176.nip.io
+#      - Callback URL:      http://replay.192.168.1.176.nip.io/oauth2/callback
 #      Copy the Client ID and Client Secret.
 #
 #   2. Generate a random 32-byte cookie secret:
@@ -23,7 +23,7 @@
 #
 #   5. kubectl apply -f k8s/oauth2-proxy.yaml
 #
-# Access: http://replay.192.168.2.163.nip.io  (redirects to GitHub login)
+# Access: http://replay.192.168.1.176.nip.io  (redirects to GitHub login)
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -56,7 +56,7 @@ spec:
             - --provider=github
             - --upstream=http://sudo-replay-server:8080
             - --http-address=0.0.0.0:4180
-            - --redirect-url=http://replay.192.168.2.163.nip.io/oauth2/callback
+            - --redirect-url=http://replay.192.168.1.176.nip.io/oauth2/callback
             # Restrict access to specific GitHub user(s) — comma-separated.
             # Replace with your GitHub username(s).
             # Alternatively use: --github-org=<your-org>
@@ -156,7 +156,7 @@ spec:
                 name: oauth2-proxy
                 port:
                   number: 4180
-    - host: replay.192.168.2.163.nip.io
+    - host: replay.192.168.1.176.nip.io
       http:
         paths:
           - path: /
