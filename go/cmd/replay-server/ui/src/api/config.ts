@@ -32,11 +32,8 @@ export const saveAuthMapping = (m: AuthMapping): Promise<void> =>
   apiFetch('/api/auth-mapping', { method: 'POST', body: JSON.stringify(m) })
 
 export const fetchUsers = (): Promise<UserInfo[]> => apiFetch('/api/users')
-export const createUser = (u: {
-  username: string
-  password: string
-  role: string
-}): Promise<void> => apiFetch('/api/users', { method: 'POST', body: JSON.stringify(u) })
+export const upsertUser = (u: any): Promise<void> =>
+  apiFetch('/api/users', { method: 'PUT', body: JSON.stringify(u) })
 export const deleteUser = (username: string): Promise<void> =>
   apiFetch(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
 

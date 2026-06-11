@@ -52,7 +52,12 @@ export interface JitPolicy {
 export interface ApprovalConfig {
   enabled: boolean
   webhook_url?: string
+  webhook_secret?: string
   bot_username?: string
+  request_channel?: string
+  replay_web_url?: string
+  mention_user?: boolean
+  default_window?: string
   ttl_seconds: number
   roles_that_can_approve: string[]
 }

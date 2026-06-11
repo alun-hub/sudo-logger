@@ -1,4 +1,4 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { SiemTab }       from './SiemTab'
 import { AuthTab }       from './AuthTab'
 import { UsersRolesTab } from './UsersRolesTab'
@@ -6,63 +6,51 @@ import { RetentionTab }  from './RetentionTab'
 import { SandboxTab }    from './SandboxTab'
 import { JitTab }        from './JitTab'
 import { Settings, Shield, Users, Database, Box, Mail } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 export function ConfigPanel() {
   return (
     <div className="flex flex-col h-[calc(100vh-[44px])] bg-bg text-text-sub overflow-hidden">
-      <Tabs defaultValue="jit" className="flex-1 flex flex-col">
-        <div className="px-4 border-b border-border bg-surface shrink-0">
-          <TabsList className="h-[44px] bg-transparent p-0 gap-1">
-            <TabsTrigger
-              value="jit"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Shield size={14} /> JIT / Approvals
-            </TabsTrigger>
-            <TabsTrigger
-              value="users"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Users size={14} /> Users & Roles
-            </TabsTrigger>
-            <TabsTrigger
-              value="siem"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Mail size={14} /> SIEM Forwarding
-            </TabsTrigger>
-            <TabsTrigger
-              value="retention"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Database size={14} /> Data Retention
-            </TabsTrigger>
-            <TabsTrigger
-              value="sandbox"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Box size={14} /> Process Sandbox
-            </TabsTrigger>
-            <TabsTrigger
-              value="auth"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Settings size={14} /> System Auth
-            </TabsTrigger>
-          </TabsList>
-        </div>
+      <div className="px-4 border-b border-border bg-surface shrink-0">
+        <nav className="h-[44px] flex items-center gap-1">
+          <SubTab to="jit"       label="JIT / Approvals" icon={<Shield size={14} />} />
+          <SubTab to="users"     label="Users & Roles"   icon={<Users size={14} />} />
+          <SubTab to="siem"      label="SIEM Forwarding" icon={<Mail size={14} />} />
+          <SubTab to="retention" label="Data Retention"  icon={<Database size={14} />} />
+          <SubTab to="sandbox"   label="Process Sandbox" icon={<Box size={14} />} />
+          <SubTab to="auth"      label="System Auth"     icon={<Settings size={14} />} />
+        </nav>
+      </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-4xl p-6 mx-auto">
-            <TabsContent value="jit" className="m-0 animate-in fade-in duration-200"><JitTab /></TabsContent>
-            <TabsContent value="users" className="m-0 animate-in fade-in duration-200"><UsersRolesTab /></TabsContent>
-            <TabsContent value="siem" className="m-0 animate-in fade-in duration-200"><SiemTab /></TabsContent>
-            <TabsContent value="retention" className="m-0 animate-in fade-in duration-200"><RetentionTab /></TabsContent>
-            <TabsContent value="sandbox" className="m-0 animate-in fade-in duration-200"><SandboxTab /></TabsContent>
-            <TabsContent value="auth" className="m-0 animate-in fade-in duration-200"><AuthTab /></TabsContent>
-          </div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl p-6 mx-auto">
+          <Routes>
+            <Route path="jit"       element={<div className="animate-in fade-in duration-200"><JitTab /></div>} />
+            <Route path="users"     element={<div className="animate-in fade-in duration-200"><UsersRolesTab /></div>} />
+            <Route path="siem"      element={<div className="animate-in fade-in duration-200"><SiemTab /></div>} />
+            <Route path="retention" element={<div className="animate-in fade-in duration-200"><RetentionTab /></div>} />
+            <Route path="sandbox"   element={<div className="animate-in fade-in duration-200"><SandboxTab /></div>} />
+            <Route path="auth"      element={<div className="animate-in fade-in duration-200"><AuthTab /></div>} />
+            <Route path=""          element={<Navigate to="jit" replace />} />
+          </Routes>
         </div>
-      </Tabs>
+      </div>
     </div>
+  )
+}
+
+function SubTab({ to, label, icon }: { to: string, label: string, icon: React.ReactNode }) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) => cn(
+        "h-full flex items-center gap-2 px-4 text-[13px] font-medium transition-all border-b-2",
+        isActive
+          ? "border-green text-green"
+          : "border-transparent text-text-dim hover:text-text-sub hover:bg-card-hover"
+      )}
+    >
+      {icon} {label}
+    </NavLink>
   )
 }

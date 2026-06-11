@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Plus, Edit2, Trash2, Shield, Users, Code, Search } from 'lucide-react'
+import { Plus, Edit2, Trash2, Shield, Users, Code, Search, Server } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   fetchRules, saveRules,
@@ -17,47 +17,46 @@ import {
 } from '@/api/policy'
 import { RuleModal } from './RuleModal'
 import { BlockedUserModal } from './BlockedUserModal'
+import { SudoersView } from './SudoersView'
 
 export function PolicyEditor() {
   return (
     <div className="flex flex-col h-[calc(100vh-[44px])] bg-bg text-text-sub overflow-hidden">
-      <Tabs defaultValue="rules" className="flex-1 flex flex-col">
-        <div className="px-4 border-b border-border bg-surface shrink-0">
-          <TabsList className="h-[44px] bg-transparent p-0 gap-1">
-            <TabsTrigger
-              value="rules"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Shield size={14} /> Risk Rules
-            </TabsTrigger>
-            <TabsTrigger
-              value="users"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Users size={14} /> User Groups
-            </TabsTrigger>
-            <TabsTrigger
-              value="opa"
-              className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-green data-[state=active]:bg-transparent data-[state=active]:text-green px-4 text-[13px] font-medium transition-all gap-2"
-            >
-              <Code size={14} /> Compiled Rego
-            </TabsTrigger>
-          </TabsList>
-        </div>
+      <div className="px-4 border-b border-border bg-surface shrink-0">
+        <nav className="h-[44px] flex items-center gap-1">
+          <SubTab to="rules" label="Risk Rules" icon={<Shield size={14} />} />
+          <SubTab to="sudoers" label="Sudoers" icon={<Server size={14} />} />
+          <SubTab to="users" label="User Groups" icon={<Users size={14} />} />
+          <SubTab to="opa" label="Compiled Rego" icon={<Code size={14} />} />
+        </nav>
+      </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <TabsContent value="rules" className="m-0 p-6 animate-in fade-in duration-200">
-            <RulesPanel />
-          </TabsContent>
-          <TabsContent value="users" className="m-0 p-6 animate-in fade-in duration-200">
-            <UserGroupsPanel />
-          </TabsContent>
-          <TabsContent value="opa" className="m-0 p-6 animate-in fade-in duration-200">
-            <RegoPanel />
-          </TabsContent>
-        </div>
-      </Tabs>
+      <div className="flex-1 overflow-y-auto">
+        <Routes>
+          <Route path="rules"   element={<div className="p-6 animate-in fade-in duration-200"><RulesPanel /></div>} />
+          <Route path="sudoers" element={<SudoersView />} />
+          <Route path="users"   element={<div className="p-6 animate-in fade-in duration-200"><UserGroupsPanel /></div>} />
+          <Route path="opa"     element={<div className="p-6 animate-in fade-in duration-200"><RegoPanel /></div>} />
+          <Route path=""        element={<Navigate to="rules" replace />} />
+        </Routes>
+      </div>
     </div>
+  )
+}
+
+function SubTab({ to, label, icon }: { to: string, label: string, icon: React.ReactNode }) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) => cn(
+        "h-full flex items-center gap-2 px-4 text-[13px] font-medium transition-all border-b-2",
+        isActive
+          ? "border-green text-green"
+          : "border-transparent text-text-dim hover:text-text-sub hover:bg-card-hover"
+      )}
+    >
+      {icon} {label}
+    </NavLink>
   )
 }
 
@@ -131,7 +130,7 @@ function RulesPanel() {
           </TableHeader>
           <TableBody>
             {filtered.map(r => (
-              <TableRow key={r.id} className="hover:bg-card-hover border-border">
+              <TableRow key={r.id} className="hover:bg-card-hover border-border group">
                 <TableCell className="text-center font-mono">
                   <span className={cn(
                     "px-1.5 py-0.5 rounded-[3px] text-[11px] font-bold",
@@ -156,7 +155,7 @@ function RulesPanel() {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div className="flex justify-end gap-1 px-2">
+                  <div className="flex justify-end gap-1 px-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => setEditing(r)}
                       className="p-1.5 text-text-dim hover:text-white transition-colors"
@@ -337,7 +336,7 @@ function RegoPanel() {
   if (!data) return null
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 text-left">
       <div className="flex items-center justify-between">
         <h2 className="text-[15px] font-semibold text-text">Compiled OPA Rego</h2>
         <div className="text-[11px] text-text-dim italic">Read-only generated policy</div>

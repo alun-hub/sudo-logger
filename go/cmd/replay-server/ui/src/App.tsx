@@ -11,13 +11,18 @@ const ApprovalsView = lazy(() => import('@/components/approvals/ApprovalsView').
 export default function App() {
   return (
     <AppShell>
-      <Suspense fallback={<div className="p-8 text-zinc-400">Loading…</div>}>
+      <Suspense fallback={<div className="p-8 text-text-dim font-mono text-[13px]">Loading…</div>}>
         <Routes>
           <Route path="/"          element={<SessionsView />} />
-          <Route path="/reports"   element={<ReportsView />} />
-          <Route path="/policy"    element={<PolicyEditor />} />
-          <Route path="/config"    element={<ConfigPanel />} />
+
+          <Route path="/reports/*" element={<ReportsView />} />
+
+          <Route path="/policy/*"  element={<PolicyEditor />} />
+
+          <Route path="/config/*"  element={<ConfigPanel />} />
+
           <Route path="/approvals" element={<ApprovalsView />} />
+
           <Route path="*"          element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
