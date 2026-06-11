@@ -1,9 +1,46 @@
 import { apiFetch } from './client'
 
+export interface ReportSummary {
+  total_sessions: number
+  unique_users: number
+  unique_hosts: number
+  incomplete_sessions: number
+  long_sessions: number
+  high_risk_sessions: number
+  critical_sessions: number
+  period_from: number
+  period_to: number
+}
+
+export interface UserStat {
+  user: string
+  sessions: number
+  hosts: number
+  host_counts: Array<{ host: string; count: number }>
+  avg_duration: number
+  top_commands: string[]
+  incomplete: number
+  long_sessions: number
+  high_risk: number
+  critical: number
+}
+
+export interface Anomaly {
+  kind: string
+  tsid: string
+  user: string
+  host: string
+  command: string
+  start_time: number
+  duration: number
+  detail: string
+  risk_score?: number
+}
+
 export interface ReportData {
-  top_users: Array<{ user: string; count: number; risk_score: number }>
-  top_hosts: Array<{ host: string; count: number }>
-  risky_commands: Array<{ command: string; count: number; level: string }>
+  summary: ReportSummary
+  per_user: UserStat[]
+  anomalies: Anomaly[]
 }
 
 export interface AccessLogEntry {
@@ -15,8 +52,12 @@ export interface AccessLogEntry {
   remote_addr: string
 }
 
-export function fetchReport(): Promise<ReportData> {
-  return apiFetch<ReportData>('/api/report')
+export function fetchReport(params?: { from?: number; to?: number }): Promise<ReportData> {
+  const query = new URLSearchParams()
+  if (params?.from) query.set('from', params.from.toString())
+  if (params?.to)   query.set('to', params.to.toString())
+  const qs = query.toString()
+  return apiFetch<ReportData>(`/api/report${qs ? '?' + qs : ''}`)
 }
 
 export function fetchAccessLog(): Promise<AccessLogEntry[]> {

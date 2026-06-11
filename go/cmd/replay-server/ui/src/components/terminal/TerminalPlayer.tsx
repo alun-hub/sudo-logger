@@ -153,13 +153,13 @@ export function TerminalPlayer({ session }: Props) {
   const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
 
   return (
-    <div className="flex flex-col h-full bg-[#09090f]">
+    <div className="flex flex-col h-full bg-bg">
       {/* Top Session Header */}
-      <div className="h-[44px] flex items-center px-4 border-b border-[#1e2230] bg-[#0f1117] shrink-0 text-[13px] font-mono text-[#d4daf0]">
-        <span className="text-[#00e87a] mr-2">{session.user}@{session.host}</span>
-        <span className="text-[#4a5068] mr-2">—</span>
-        <span className="text-[#8890a8] mr-2">{session.runas}</span>
-        <span className="text-[#4a5068] mr-2">—</span>
+      <div className="h-[44px] flex items-center px-4 border-b border-border bg-surface shrink-0 text-[13px] font-mono text-text">
+        <span className="text-green mr-2">{session.user}@{session.host}</span>
+        <span className="text-text-dim mr-2">—</span>
+        <span className="text-text-sub mr-2">{session.runas}</span>
+        <span className="text-text-dim mr-2">—</span>
         <span className="truncate">{session.command}</span>
       </div>
 
@@ -167,11 +167,11 @@ export function TerminalPlayer({ session }: Props) {
       <div ref={containerRef} className="flex-1 overflow-hidden p-2.5" />
 
       {/* Controls Bar */}
-      <div className="flex items-center gap-[10px] px-4 py-2.5 bg-[#0f1117] border-t border-[#1e2230] shrink-0">
+      <div className="flex items-center gap-[10px] px-4 py-2.5 bg-surface border-t border-border shrink-0">
         <button
           onClick={restart}
           disabled={loading || events.length === 0}
-          className="w-[30px] h-[30px] flex items-center justify-center rounded-[5px] bg-[#161921] border border-[#1e2230] text-[#8890a8] hover:bg-[#1c1f2e] hover:text-[#d4daf0] disabled:opacity-35 disabled:cursor-not-allowed transition-colors shrink-0"
+          className="w-[30px] h-[30px] flex items-center justify-center rounded-[5px] bg-card border border-border text-text-sub hover:bg-card-hover hover:text-text disabled:opacity-35 disabled:cursor-not-allowed transition-colors shrink-0"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
         </button>
@@ -179,7 +179,7 @@ export function TerminalPlayer({ session }: Props) {
         <button
           onClick={playing ? pause : play}
           disabled={loading || events.length === 0}
-          className="w-[34px] h-[30px] flex items-center justify-center rounded-[5px] bg-[#003d20] border border-[#00e87a] text-[#00e87a] hover:bg-[#00e87a]/25 disabled:opacity-35 disabled:cursor-not-allowed transition-colors shrink-0"
+          className="w-[34px] h-[30px] flex items-center justify-center rounded-[5px] bg-green-dim border border-green text-green hover:bg-green/25 disabled:opacity-35 disabled:cursor-not-allowed transition-colors shrink-0"
         >
           {playing ? (
              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
@@ -188,7 +188,7 @@ export function TerminalPlayer({ session }: Props) {
           )}
         </button>
 
-        <div className="text-[12px] text-[#00e87a] min-w-[36px] text-center font-mono shrink-0">
+        <div className="text-[12px] text-green min-w-[36px] text-center font-mono shrink-0">
           {fmtDuration(elapsed)}
         </div>
 
@@ -203,12 +203,12 @@ export function TerminalPlayer({ session }: Props) {
             disabled={loading || events.length === 0}
             className="w-full h-[3px] rounded-[2px] outline-none cursor-pointer appearance-none"
             style={{
-              background: `linear-gradient(to right, #00e87a 0%, #00e87a ${fillPct}%, #2a2f42 ${fillPct}%, #2a2f42 100%)`
+              background: `linear-gradient(to right, var(--color-green) 0%, var(--color-green) ${fillPct}%, var(--color-border-mid) ${fillPct}%, var(--color-border-mid) 100%)`
             }}
           />
         </div>
 
-        <div className="text-[12px] text-[#8890a8] min-w-[36px] text-center font-mono shrink-0">
+        <div className="text-[12px] text-text-sub min-w-[36px] text-center font-mono shrink-0">
           {fmtDuration(totalDuration)}
         </div>
 
@@ -219,15 +219,15 @@ export function TerminalPlayer({ session }: Props) {
             setSpeed(Number(e.target.value))
           }}
           disabled={loading || events.length === 0}
-          className="bg-transparent text-[#8890a8] font-mono text-[12px] h-[30px] outline-none cursor-pointer border-none"
+          className="bg-transparent text-text-sub font-mono text-[12px] h-[30px] outline-none cursor-pointer border-none"
         >
           {[0.25, 0.5, 1, 1.5, 2, 4, 8, 16].map(s => (
-            <option key={s} value={s} className="bg-[#161921]">{s}x</option>
+            <option key={s} value={s} className="bg-card">{s}x</option>
           ))}
         </select>
 
-        {loading && <span className="text-[12px] text-[#8890a8] ml-2 animate-pulse">Loading...</span>}
+        {loading && <span className="text-[12px] text-text-sub ml-2 animate-pulse">Loading...</span>}
       </div>
     </div>
   )
-}
+  }

@@ -7,6 +7,7 @@ export interface SessionsParams {
   to?: number
   cursor?: string
   limit?: number
+  sort?: string
 }
 
 export function fetchSessions(params: SessionsParams = {}): Promise<SessionsResponse> {
@@ -15,6 +16,7 @@ export function fetchSessions(params: SessionsParams = {}): Promise<SessionsResp
   if (params.from)   p.set('from', String(params.from))
   if (params.to)     p.set('to', String(params.to))
   if (params.cursor) p.set('cursor', params.cursor)
+  if (params.sort)   p.set('sort', params.sort)
   p.set('limit', String(params.limit ?? 50))
   return apiFetch<SessionsResponse>(`/api/sessions?${p}`)
 }

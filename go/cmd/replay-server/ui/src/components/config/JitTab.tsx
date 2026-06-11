@@ -1,18 +1,17 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchJitPolicy, saveJitPolicy, fetchApprovalConfig, saveApprovalConfig } from '@/api/config'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import type { JitPolicy, ApprovalConfig } from '@/types/config'
+import { ShieldCheck, BellRing } from 'lucide-react'
 
 export function JitTab() {
   const qc = useQueryClient()
 
-  const { data: jit }      = useQuery({ queryKey: ['jit-policy'], queryFn: fetchJitPolicy })
-  const { data: approval } = useQuery({ queryKey: ['approval-config'], queryFn: fetchApprovalConfig })
+  const { data: jit, isPending: p1 }      = useQuery({ queryKey: ['jit-policy'], queryFn: fetchJitPolicy })
+  const { data: approval, isPending: p2 } = useQuery({ queryKey: ['approval-config'], queryFn: fetchApprovalConfig })
 
   const [jitDraft, setJitDraft]           = useState<JitPolicy | null>(null)
   const [approvalDraft, setApprovalDraft] = useState<ApprovalConfig | null>(null)
@@ -26,64 +25,104 @@ export function JitTab() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['approval-config'] }); setApprovalDraft(null) },
   })
 
+  if (p1 || p2) return <div className="text-text-dim font-mono text-[13px]">Loading configuration…</div>
+
   const j = jitDraft ?? jit ?? { enabled: false, ttl_seconds: 3600 }
   const a = approvalDraft ?? approval ?? { enabled: false, ttl_seconds: 900, roles_that_can_approve: [] }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm flex justify-between">
-            JIT Policy
-            <Button size="sm" onClick={() => saveJit.mutate(j)} disabled={saveJit.isPending || jitDraft === null}>
-              {saveJit.isPending ? 'Saving…' : 'Save'}
-            </Button>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Switch checked={j.enabled} onCheckedChange={v => setJitDraft({ ...j, enabled: v })} />
-            <Label>Enable JIT approval</Label>
-          </div>
-          <div className="space-y-1">
-            <Label>TTL (seconds)</Label>
-            <Input type="number" value={j.ttl_seconds} className="w-32"
-              onChange={e => setJitDraft({ ...j, ttl_seconds: Number(e.target.value) })} />
-          </div>
-          {j.webhook_url !== undefined && (
-            <div className="space-y-1">
-              <Label>Webhook URL</Label>
-              <Input value={j.webhook_url ?? ''} onChange={e => setJitDraft({ ...j, webhook_url: e.target.value })} />
-            </div>
-          )}
-        </CardContent>
-      </Card>
+    <div className="space-y-12">
+      {/* JIT Policy Section */}
+      <section className="space-y-6">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <h2 className="text-[16px] font-semibold text-text flex items-center gap-2">
+            <ShieldCheck size={18} className="text-green" /> JIT Policy
+          </h2>
+          <Button
+            size="sm"
+            onClick={() => saveJit.mutate(j)}
+            disabled={saveJit.isPending || jitDraft === null}
+            className="bg-green hover:bg-green/90 text-black font-semibold h-8 rounded-[5px]"
+          >
+            {saveJit.isPending ? 'Saving…' : 'Save Changes'}
+          </Button>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm flex justify-between">
-            Approval Config
-            <Button size="sm" onClick={() => saveApproval.mutate(a)} disabled={saveApproval.isPending || approvalDraft === null}>
-              {saveApproval.isPending ? 'Saving…' : 'Save'}
-            </Button>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Switch checked={a.enabled} onCheckedChange={v => setApprovalDraft({ ...a, enabled: v })} />
-            <Label>Enable approval workflow</Label>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-[5px] bg-card border border-border">
+              <div className="space-y-0.5">
+                <div className="text-[14px] font-medium text-text">Just-In-Time Access</div>
+                <div className="text-[12px] text-text-dim">Require approval for high-risk sessions.</div>
+              </div>
+              <Switch checked={j.enabled} onCheckedChange={v => setJitDraft({ ...j, enabled: v })} />
+            </div>
+
+            <div className="space-y-1.5 px-1">
+              <label className="text-[12px] font-medium text-text-sub uppercase tracking-wider">Default TTL (Seconds)</label>
+              <Input
+                type="number"
+                value={j.ttl_seconds}
+                onChange={e => setJitDraft({ ...j, ttl_seconds: Number(e.target.value) })}
+                className="bg-card border-border text-text h-10 focus:border-green"
+              />
+              <p className="text-[11px] text-text-dim">How long an approval remains valid before expiring.</p>
+            </div>
           </div>
-          <div className="space-y-1">
-            <Label>Approval TTL (seconds)</Label>
-            <Input type="number" value={a.ttl_seconds} className="w-32"
-              onChange={e => setApprovalDraft({ ...a, ttl_seconds: Number(e.target.value) })} />
+
+          <div className="bg-surface border border-border p-4 rounded-[5px] space-y-3">
+             <h3 className="text-[13px] font-semibold text-text uppercase tracking-wider">How it works</h3>
+             <ul className="text-[12px] text-text-sub space-y-2 list-disc pl-4">
+               <li>When a user requests a session matching a JIT rule, it is blocked.</li>
+               <li>A request is sent to the configured webhooks.</li>
+               <li>Approvers can approve via CLI, API, or Replay UI.</li>
+               <li>Once approved, the user can run the command for the duration of the TTL.</li>
+             </ul>
           </div>
-          <div className="space-y-1">
-            <Label>Webhook URL (Mattermost/Slack)</Label>
-            <Input value={a.webhook_url ?? ''} onChange={e => setApprovalDraft({ ...a, webhook_url: e.target.value })} />
+        </div>
+      </section>
+
+      {/* Approval Config Section */}
+      <section className="space-y-6">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <h2 className="text-[16px] font-semibold text-text flex items-center gap-2">
+            <BellRing size={18} className="text-blue" /> Notification & Webhooks
+          </h2>
+          <Button
+            size="sm"
+            onClick={() => saveApproval.mutate(a)}
+            disabled={saveApproval.isPending || approvalDraft === null}
+            className="bg-green hover:bg-green/90 text-black font-semibold h-8 rounded-[5px]"
+          >
+            {saveApproval.isPending ? 'Saving…' : 'Save Changes'}
+          </Button>
+        </div>
+
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+             <div className="space-y-1.5 px-1">
+                <label className="text-[12px] font-medium text-text-sub uppercase tracking-wider">Webhook URL (Mattermost/Slack)</label>
+                <Input
+                  value={a.webhook_url ?? ''}
+                  onChange={e => setApprovalDraft({ ...a, webhook_url: e.target.value })}
+                  placeholder="https://chat.example.com/hooks/..."
+                  className="bg-card border-border text-text h-10 focus:border-green font-mono text-[12px]"
+                />
+                <p className="text-[11px] text-text-dim">Endpoint for incoming webhook notifications.</p>
+             </div>
+
+             <div className="space-y-1.5 px-1">
+                <label className="text-[12px] font-medium text-text-sub uppercase tracking-wider">Bot Username</label>
+                <Input
+                  value={a.bot_username ?? ''}
+                  onChange={e => setApprovalDraft({ ...a, bot_username: e.target.value })}
+                  placeholder="sudo-logger-bot"
+                  className="bg-card border-border text-text h-10 focus:border-green"
+                />
+             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
   )
 }
