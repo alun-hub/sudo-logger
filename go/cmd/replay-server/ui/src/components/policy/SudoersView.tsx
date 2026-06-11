@@ -6,7 +6,6 @@ import {
   saveSudoersConfig,
   deleteSudoersOverride,
   fetchSudoersSnapshots,
-  type SudoersHost,
 } from '@/api/sudoers'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
