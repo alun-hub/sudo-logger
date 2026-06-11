@@ -6,7 +6,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Edit2, Trash2, ShieldCheck, Code, Save, RotateCcw } from 'lucide-react'
+import { Plus, Edit2, Trash2, ShieldCheck, Code, Save, RotateCcw, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OPARuleModal } from './OPARuleModal'
 

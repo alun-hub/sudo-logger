@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { SiemConfig } from '@/types/config'
 import { Mail, ShieldAlert, FileKey, Globe, Zap } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 const TRANSPORTS = ['https', 'syslog'] as const
 const FORMATS    = ['json', 'cef'] as const

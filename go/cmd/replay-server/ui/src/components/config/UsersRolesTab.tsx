@@ -13,7 +13,6 @@ import { UserModal } from './UserModal'
 import { RoleModal } from './RoleModal'
 import type { UserInfo, Role } from '@/types/config'
 import { fmtDate } from '@/lib/date'
-import { cn } from '@/lib/utils'
 
 export function UsersRolesTab() {
   const qc = useQueryClient()

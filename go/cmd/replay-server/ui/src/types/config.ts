@@ -31,6 +31,7 @@ export interface Role {
 }
 
 export interface RetentionConfig {
+  enabled?: boolean
   delete_after_days?: number
   archive_cron?: string
 }

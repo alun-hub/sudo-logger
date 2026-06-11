@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchSandbox } from '@/api/config'
 import { Switch } from '@/components/ui/switch'
 import { Box, ShieldAlert, Lock, Zap } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 const FEATURES = [
   { id: 'deny-netlink', label: 'Deny Netlink', desc: 'Prevent network configuration changes.' },
