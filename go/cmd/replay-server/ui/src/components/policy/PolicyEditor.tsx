@@ -9,10 +9,14 @@ import { Plus, Edit2, Trash2, Shield, Users, Code, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   fetchRules, saveRules,
-  fetchBlockedUsers,
-  fetchWhitelistedUsers,
+  fetchBlockedUsers, setBlockedUsers,
+  fetchWhitelistedUsers, setWhitelistedUsers,
   fetchCompiledRego,
+  type Rule,
+  type BlockedUser,
 } from '@/api/policy'
+import { RuleModal } from './RuleModal'
+import { BlockedUserModal } from './BlockedUserModal'
 
 export function PolicyEditor() {
   return (
@@ -61,6 +65,8 @@ function RulesPanel() {
   const qc = useQueryClient()
   const { data, isPending } = useQuery({ queryKey: ['rules'], queryFn: fetchRules })
   const [q, setQ] = useState('')
+  const [editing, setEditing] = useState<Rule | null>(null)
+  const [isAddOpen, setIsAddOpen] = useState(false)
 
   const mutation = useMutation({
     mutationFn: saveRules,
@@ -74,6 +80,17 @@ function RulesPanel() {
     r.id.toLowerCase().includes(q.toLowerCase()) ||
     r.reason.toLowerCase().includes(q.toLowerCase())
   )
+
+  const onSave = (rule: Rule) => {
+    const isNew = !data.rules.find(r => r.id === rule.id)
+    let next: Rule[]
+    if (isNew) {
+      next = [...data.rules, rule]
+    } else {
+      next = data.rules.map(r => r.id === rule.id ? rule : r)
+    }
+    mutation.mutate(next)
+  }
 
   const deleteRule = (id: string) => {
     if (!confirm(`Are you sure you want to delete rule "${id}"?`)) return
@@ -93,7 +110,11 @@ function RulesPanel() {
             className="w-full h-9 bg-card border border-border rounded-[5px] pl-9 text-[13px] outline-none focus:border-green"
           />
         </div>
-        <Button size="sm" className="bg-green hover:bg-green/90 text-black font-semibold h-9 rounded-[5px]">
+        <Button
+          onClick={() => setIsAddOpen(true)}
+          size="sm"
+          className="bg-green hover:bg-green/90 text-black font-semibold h-9 rounded-[5px]"
+        >
           <Plus size={16} className="mr-1" /> Add Rule
         </Button>
       </div>
@@ -136,7 +157,10 @@ function RulesPanel() {
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-1 px-2">
-                    <button className="p-1.5 text-text-dim hover:text-white transition-colors"><Edit2 size={14} /></button>
+                    <button
+                      onClick={() => setEditing(r)}
+                      className="p-1.5 text-text-dim hover:text-white transition-colors"
+                    ><Edit2 size={14} /></button>
                     <button
                       onClick={() => deleteRule(r.id)}
                       className="p-1.5 text-text-dim hover:text-red transition-colors"
@@ -148,22 +172,79 @@ function RulesPanel() {
           </TableBody>
         </Table>
       </div>
+
+      <RuleModal
+        rule={editing}
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        onSave={onSave}
+      />
+      <RuleModal
+        rule={null}
+        open={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
+        onSave={onSave}
+      />
     </div>
   )
 }
 
 function UserGroupsPanel() {
+  const qc = useQueryClient()
   const { data: blocked } = useQuery({ queryKey: ['blocked-users'], queryFn: fetchBlockedUsers })
   const { data: white   } = useQuery({ queryKey: ['whitelisted-users'], queryFn: fetchWhitelistedUsers })
 
+  const [editBlock, setEditBlock] = useState<BlockedUser | null>(null)
+  const [isAddBlockOpen, setIsAddBlockOpen] = useState(false)
+
+  const mutBlock = useMutation({
+    mutationFn: setBlockedUsers,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['blocked-users'] }),
+  })
+  const mutWhite = useMutation({
+    mutationFn: setWhitelistedUsers,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['whitelisted-users'] }),
+  })
+
   if (!blocked || !white) return null
+
+  const onSaveBlock = (user: BlockedUser) => {
+    const isNew = !blocked.users.find(u => u.username === user.username)
+    let next: BlockedUser[]
+    if (isNew) {
+      next = [...blocked.users, user]
+    } else {
+      next = blocked.users.map(u => u.username === user.username ? user : u)
+    }
+    mutBlock.mutate(next)
+  }
+
+  const deleteBlock = (username: string) => {
+    if (!confirm(`Unblock user ${username}?`)) return
+    mutBlock.mutate(blocked.users.filter(u => u.username !== username))
+  }
+
+  const addWhite = () => {
+    const name = prompt('Enter username to whitelist:')
+    if (!name) return
+    if (white.users.includes(name)) return
+    mutWhite.mutate([...white.users, name])
+  }
+
+  const deleteWhite = (name: string) => {
+    if (!confirm(`Remove ${name} from whitelist?`)) return
+    mutWhite.mutate(white.users.filter(u => u !== name))
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-[15px] font-semibold text-text">Blocked Users</h2>
-          <Button size="sm" variant="outline" className="h-8 border-border hover:bg-card-hover text-text-sub">
+          <Button
+            onClick={() => setIsAddBlockOpen(true)}
+            size="sm" variant="outline" className="h-8 border-border hover:bg-card-hover text-text-sub"
+          >
             <Plus size={14} className="mr-1" /> Add Block
           </Button>
         </div>
@@ -173,21 +254,24 @@ function UserGroupsPanel() {
                <TableRow className="hover:bg-transparent border-border">
                  <TableHead className="text-text-dim h-9">User</TableHead>
                  <TableHead className="text-text-dim h-9">Reason / Hosts</TableHead>
-                 <TableHead className="w-16 h-9"></TableHead>
+                 <TableHead className="w-24 h-9"></TableHead>
                </TableRow>
              </TableHeader>
              <TableBody>
                {blocked.users.length === 0 ? (
                  <TableRow><TableCell colSpan={3} className="text-center py-8 text-text-dim italic">No users blocked.</TableCell></TableRow>
                ) : blocked.users.map(u => (
-                 <TableRow key={u.username} className="hover:bg-card-hover border-border">
+                 <TableRow key={u.username} className="hover:bg-card-hover border-border group">
                    <TableCell className="font-mono font-bold text-red">{u.username}</TableCell>
                    <TableCell>
                      <div className="text-text-sub">{u.reason}</div>
                      <div className="text-[11px] text-text-dim">Hosts: {u.hosts.length === 0 ? 'All' : u.hosts.join(', ')}</div>
                    </TableCell>
                    <TableCell>
-                     <button className="p-1.5 text-text-dim hover:text-red"><Trash2 size={14} /></button>
+                     <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setEditBlock(u)} className="p-1.5 text-text-dim hover:text-white"><Edit2 size={14} /></button>
+                        <button onClick={() => deleteBlock(u.username)} className="p-1.5 text-text-dim hover:text-red"><Trash2 size={14} /></button>
+                     </div>
                    </TableCell>
                  </TableRow>
                ))}
@@ -199,7 +283,10 @@ function UserGroupsPanel() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-[15px] font-semibold text-text">Whitelisted Users</h2>
-          <Button size="sm" variant="outline" className="h-8 border-border hover:bg-card-hover text-text-sub">
+          <Button
+            onClick={addWhite}
+            size="sm" variant="outline" className="h-8 border-border hover:bg-card-hover text-text-sub"
+          >
             <Plus size={14} className="mr-1" /> Add White
           </Button>
         </div>
@@ -215,10 +302,10 @@ function UserGroupsPanel() {
                 {white.users.length === 0 ? (
                   <TableRow><TableCell colSpan={2} className="text-center py-8 text-text-dim italic">No users whitelisted.</TableCell></TableRow>
                 ) : white.users.map(u => (
-                  <TableRow key={u} className="hover:bg-card-hover border-border">
+                  <TableRow key={u} className="hover:bg-card-hover border-border group">
                     <TableCell className="font-mono font-bold text-green">{u}</TableCell>
                     <TableCell>
-                      <button className="p-1.5 text-text-dim hover:text-red"><Trash2 size={14} /></button>
+                      <button onClick={() => deleteWhite(u)} className="p-1.5 text-text-dim hover:text-red opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -226,6 +313,19 @@ function UserGroupsPanel() {
            </Table>
         </div>
       </div>
+
+      <BlockedUserModal
+        user={editBlock}
+        open={!!editBlock}
+        onClose={() => setEditBlock(null)}
+        onSave={onSaveBlock}
+      />
+      <BlockedUserModal
+        user={null}
+        open={isAddBlockOpen}
+        onClose={() => setIsAddBlockOpen(false)}
+        onSave={onSaveBlock}
+      />
     </div>
   )
 }

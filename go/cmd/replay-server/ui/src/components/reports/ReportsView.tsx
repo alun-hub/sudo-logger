@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { fetchReport } from '@/api/reports'
 import {
@@ -10,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { X } from 'lucide-react'
 
 export function ReportsView() {
+  const navigate = useNavigate()
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
 
@@ -22,7 +24,7 @@ export function ReportsView() {
     refetchInterval: 60_000,
   })
 
-  if (isPending) return <div className="p-8 text-[#4a5068] font-mono text-[13px]">Loading…</div>
+  if (isPending) return <div className="p-8 text-text-dim font-mono text-[13px]">Loading…</div>
   if (isError)   return <div className="p-8 text-red font-mono text-[13px]">Failed to load report</div>
 
   const s = data.summary
@@ -166,8 +168,12 @@ export function ReportsView() {
                       </TableRow>
                     ) : (
                       data.anomalies.map((a, i) => (
-                        <TableRow key={i} className="hover:bg-card-hover border-border h-10">
-                          <TableCell className="text-text font-medium">{a.kind}</TableCell>
+                        <TableRow
+                          key={i}
+                          className="hover:bg-card-hover border-border h-10 cursor-pointer group"
+                          onClick={() => navigate(`/?tsid=${a.tsid}`)}
+                        >
+                          <TableCell className="text-text font-medium group-hover:text-green transition-colors">{a.kind}</TableCell>
                           <TableCell>
                             <span className={cn(
                               "px-1.5 py-0.5 rounded-[3px] text-[10px] font-bold uppercase",

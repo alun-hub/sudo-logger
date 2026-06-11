@@ -40,7 +40,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex items-center gap-4 text-xs text-text-dim">
           <label className="flex items-center gap-2 cursor-pointer hover:text-text-sub transition-colors">
-            <input type="checkbox" className="accent-green cursor-pointer" defaultChecked />
+            <input
+              type="checkbox"
+              className="accent-green cursor-pointer"
+              defaultChecked={localStorage.getItem('sudo-replay-autoplay') !== 'false'}
+              onChange={e => localStorage.setItem('sudo-replay-autoplay', String(e.target.checked))}
+            />
             autoplay
           </label>
           <a href="/oauth2/sign_out" className="flex items-center gap-1 hover:text-red transition-colors">

@@ -68,8 +68,8 @@ export function TerminalPlayer({ session }: Props) {
       .then(evs => {
         setEvents(evs)
         eventsRef.current = evs
-        // auto play if checked in top bar? we'll just play automatically for now to match old behavior
-        setTimeout(() => play(), 100)
+        const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
+        if (auto) setTimeout(() => play(), 100)
       })
       .finally(() => setLoading(false))
   }, [session.tsid])
@@ -148,6 +148,30 @@ export function TerminalPlayer({ session }: Props) {
       }
     }
   }, [pause])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      if (e.code === 'Space') {
+        e.preventDefault()
+        playingRef.current ? pause() : play()
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault()
+        seek(Math.max(0, elapsedRef.current - 5))
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault()
+        seek(Math.min(totalDuration, elapsedRef.current + 5))
+      } else if (e.code === 'KeyR') {
+        e.preventDefault()
+        restart()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [pause, play, restart, seek, totalDuration])
 
   const totalDuration = events.length > 0 ? events[events.length - 1].t : session.duration
   const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0

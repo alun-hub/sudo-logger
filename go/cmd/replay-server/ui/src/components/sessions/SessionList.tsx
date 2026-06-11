@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import { fetchSessions } from '@/api/sessions'
 import { SessionRow } from './SessionRow'
 import { Input } from '@/components/ui/input'
@@ -20,17 +20,30 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
   const fromTs = from ? Math.floor(new Date(from).getTime() / 1000) : undefined
   const toTs   = to   ? Math.floor(new Date(to).getTime() / 1000) : undefined
 
-  const { data, isPending, isError } = useQuery({
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isPending,
+    isError
+  } = useInfiniteQuery({
     queryKey: ['sessions', q, sort, fromTs, toTs],
-    queryFn: () => fetchSessions({
+    queryFn: ({ pageParam }) => fetchSessions({
       q,
       sort: sort.replace(' ↓', '').toLowerCase(),
       from: fromTs,
       to: toTs,
-      limit: 100
+      limit: 100,
+      cursor: pageParam as string | undefined
     }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.cursor,
     refetchInterval: 15_000,
   })
+
+  const sessions = data?.pages.flatMap(p => p.sessions) ?? []
+  const total    = data?.pages[0]?.total ?? 0
 
   return (
     <div className="flex flex-col h-full border-r border-border w-[320px] shrink-0 bg-surface">
@@ -39,6 +52,7 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
           <svg className="absolute left-3 top-[8px] text-text-dim" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <Input
             placeholder="Search user host command — space separated AND"
+            id="global-search"
             value={q}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
             className="w-full h-[32px] bg-card border-border text-text text-[13px] pl-9 rounded-[5px] focus:border-green placeholder:text-text-dim"
@@ -86,7 +100,7 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
       <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ scrollbarWidth: 'thin' }}>
         {isPending && <p className="p-3 text-[13px] text-text-dim">Loading…</p>}
         {isError && <p className="p-3 text-[13px] text-red">Failed to load sessions</p>}
-        {data?.sessions?.map(s => (
+        {sessions.map(s => (
           <SessionRow
             key={s.tsid}
             session={s}
@@ -94,17 +108,21 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
             onClick={() => onSelect(s)}
           />
         ))}
-        {data && (
-          <div className="p-3 text-center">
-            <button className="text-text-dim hover:text-text text-[12px] font-medium transition-colors">
-              Load more
+        {hasNextPage && (
+          <div className="p-4 text-center border-t border-border/50">
+            <button
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
+              className="text-text-dim hover:text-text text-[12px] font-medium transition-colors disabled:opacity-50"
+            >
+              {isFetchingNextPage ? 'Loading more…' : 'Load more'}
             </button>
           </div>
         )}
       </div>
       {data && (
         <div className="p-2 text-[11px] text-text-dim border-t border-border bg-surface">
-          {data.sessions.length} / {data.total} sessions
+          {sessions.length} / {total} sessions
         </div>
       )}
     </div>
