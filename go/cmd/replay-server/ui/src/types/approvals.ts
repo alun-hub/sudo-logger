@@ -6,4 +6,5 @@ export interface ApprovalRequest {
   requested_at: number
   status: 'pending' | 'approved' | 'denied' | 'expired'
   approved_by?: string
+  denied_by?: string
 }

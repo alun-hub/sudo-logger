@@ -10,10 +10,8 @@ import { cn } from '@/lib/utils'
 import {
   fetchRules, saveRules,
   fetchBlockedUsers, setBlockedUsers,
-  fetchWhitelistedUsers, setWhitelistedUsers,
+  fetchWhitelistedUsers,
   fetchCompiledRego,
-  type Rule,
-  type BlockedUser,
 } from '@/api/policy'
 
 export function PolicyEditor() {
@@ -70,6 +68,7 @@ function RulesPanel() {
   })
 
   if (isPending) return <div className="text-text-dim font-mono text-[13px]">Loading rules…</div>
+  if (!data) return null
 
   const filtered = data.rules.filter(r =>
     r.id.toLowerCase().includes(q.toLowerCase()) ||
@@ -154,14 +153,8 @@ function RulesPanel() {
 }
 
 function UserGroupsPanel() {
-  const qc = useQueryClient()
   const { data: blocked } = useQuery({ queryKey: ['blocked-users'], queryFn: fetchBlockedUsers })
   const { data: white   } = useQuery({ queryKey: ['whitelisted-users'], queryFn: fetchWhitelistedUsers })
-
-  const mutBlock = useMutation({
-    mutationFn: setBlockedUsers,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['blocked-users'] }),
-  })
 
   if (!blocked || !white) return null
 
@@ -241,6 +234,7 @@ function RegoPanel() {
   const { data, isPending } = useQuery({ queryKey: ['compiled-rego'], queryFn: fetchCompiledRego })
 
   if (isPending) return <div className="text-text-dim font-mono text-[13px]">Compiling policy…</div>
+  if (!data) return null
 
   return (
     <div className="space-y-4">

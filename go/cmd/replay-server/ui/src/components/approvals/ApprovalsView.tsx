@@ -6,7 +6,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { fmtDate } from '@/lib/date'
 import { ShieldCheck, Clock, CheckCircle, XCircle } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 export function ApprovalsView() {
   const qc = useQueryClient()
