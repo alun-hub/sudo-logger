@@ -39,7 +39,7 @@ export function ReportsView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.top_users.map(u => (
+                {data?.top_users?.map(u => (
                   <TableRow key={u.user}>
                     <TableCell className="font-mono text-xs">{u.user}</TableCell>
                     <TableCell className="text-right">{u.count}</TableCell>
@@ -62,7 +62,7 @@ export function ReportsView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.top_hosts.map(h => (
+                {data?.top_hosts?.map(h => (
                   <TableRow key={h.host}>
                     <TableCell className="font-mono text-xs">{h.host}</TableCell>
                     <TableCell className="text-right">{h.count}</TableCell>
@@ -85,7 +85,7 @@ export function ReportsView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.risky_commands.map((c, i) => (
+                {data?.risky_commands?.map((c, i) => (
                   <TableRow key={i}>
                     <TableCell className="font-mono text-xs truncate max-w-[12rem]">{c.command}</TableCell>
                     <TableCell>

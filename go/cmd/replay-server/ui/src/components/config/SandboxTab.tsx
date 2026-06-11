@@ -19,7 +19,7 @@ export function SandboxTab() {
           <Label>Sandbox enabled</Label>
         </div>
         <p className="text-xs text-zinc-400">
-          {data.templates.length} template{data.templates.length !== 1 ? 's' : ''} defined.
+          {data?.templates?.length ?? 0} template{data?.templates?.length !== 1 ? 's' : ''} defined.
           Full sandbox editor coming in a future release.
         </p>
       </CardContent>
