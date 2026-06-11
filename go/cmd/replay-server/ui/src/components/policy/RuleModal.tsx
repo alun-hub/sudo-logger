@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { X, Plus } from 'lucide-react'
 import type { Rule, MatchPattern } from '@/api/policy'
-import { cn } from '@/lib/utils'
 
 interface Props {
   rule: Rule | null

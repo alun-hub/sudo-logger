@@ -149,6 +149,8 @@ export function TerminalPlayer({ session }: Props) {
     }
   }, [pause])
 
+  const totalDuration = events.length > 0 ? events[events.length - 1].t : session.duration
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
@@ -173,7 +175,6 @@ export function TerminalPlayer({ session }: Props) {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [pause, play, restart, seek, totalDuration])
 
-  const totalDuration = events.length > 0 ? events[events.length - 1].t : session.duration
   const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
 
   return (
