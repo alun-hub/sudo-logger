@@ -37,6 +37,8 @@ export function TerminalPlayer({ session }: Props) {
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       cursorBlink: false,
+      convertEol: true,
+      lineHeight: 1.3,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
