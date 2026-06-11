@@ -60,3 +60,4 @@ GEMINI.md
 GUIRECORD-TODO.md
 go/sudo-replay-server-vps
 scripts/deploy-demo.sh
+go/cmd/replay-server/static/

@@ -1447,15 +1447,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("embed static: %v", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
-	mux.HandleFunc("/approvals/", func(w http.ResponseWriter, r *http.Request) {
-		index, err := staticFiles.ReadFile("static/index.html")
-		if err != nil {
-			http.Error(w, err.Error(), 500)
+	fileServer := http.FileServer(http.FS(staticFS))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Let the file server handle real static assets (JS, CSS, images).
+		// For all other non-API paths, serve index.html so React Router works.
+		if _, statErr := fs.Stat(staticFS, strings.TrimPrefix(r.URL.Path, "/")); statErr == nil {
+			fileServer.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(index)
+		idx, _ := staticFS.Open("index.html")
+		defer idx.Close()
+		http.ServeContent(w, r, "index.html", time.Time{}, idx.(io.ReadSeeker))
 	})
 
 	// Pre-warm the session cache so the first request is served from cache.
