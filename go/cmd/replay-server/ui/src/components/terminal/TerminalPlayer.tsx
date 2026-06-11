@@ -84,7 +84,7 @@ export function TerminalPlayer({ session }: Props) {
       evs[eventIdxRef.current].t <= elapsedRef.current
     ) {
       const ev = evs[eventIdxRef.current++]
-      if ((ev.type === 'o' || ev.type === 'i') && ev.data) {
+      if ((ev.type === 4 || ev.type === 3) && ev.data) {
         termRef.current?.write(atob(ev.data))
       } else if (ev.type === 'resize' && ev.cols && ev.rows) {
         termRef.current?.resize(ev.cols, ev.rows)
@@ -135,7 +135,7 @@ export function TerminalPlayer({ session }: Props) {
       evs[eventIdxRef.current].t <= targetSecs
     ) {
       const ev = evs[eventIdxRef.current++]
-      if ((ev.type === 'o' || ev.type === 'i') && ev.data) {
+      if ((ev.type === 4 || ev.type === 3) && ev.data) {
         termRef.current?.write(atob(ev.data))
       }
     }

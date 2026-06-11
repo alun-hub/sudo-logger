@@ -20,11 +20,13 @@ export interface SessionInfo {
   divergence_status?: string
   caller_process?: string
   parent_session_id?: string
+  cols?: number
+  rows?: number
 }
 
 export interface SessionEvent {
   t: number
-  type: 'o' | 'i' | 'resize'
+  type: 3 | 4 | 'resize'
   data?: string
   cols?: number
   rows?: number
