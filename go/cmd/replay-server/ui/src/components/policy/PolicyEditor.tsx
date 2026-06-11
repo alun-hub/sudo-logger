@@ -9,7 +9,7 @@ import { Plus, Edit2, Trash2, Shield, Users, Code, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   fetchRules, saveRules,
-  fetchBlockedUsers, setBlockedUsers,
+  fetchBlockedUsers,
   fetchWhitelistedUsers,
   fetchCompiledRego,
 } from '@/api/policy'
