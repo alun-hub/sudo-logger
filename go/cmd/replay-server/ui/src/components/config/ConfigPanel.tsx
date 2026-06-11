@@ -13,12 +13,12 @@ export function ConfigPanel() {
     <div className="flex flex-col h-[calc(100vh-[44px])] bg-bg text-text-sub overflow-hidden">
       <div className="px-4 border-b border-border bg-surface shrink-0">
         <nav className="h-[44px] flex items-center gap-1">
-          <SubTab to="jit"       label="JIT / Approvals" icon={<Shield size={14} />} />
-          <SubTab to="users"     label="Users & Roles"   icon={<Users size={14} />} />
-          <SubTab to="siem"      label="SIEM Forwarding" icon={<Mail size={14} />} />
-          <SubTab to="retention" label="Data Retention"  icon={<Database size={14} />} />
-          <SubTab to="sandbox"   label="Process Sandbox" icon={<Box size={14} />} />
-          <SubTab to="auth"      label="System Auth"     icon={<Settings size={14} />} />
+          <SubTab to="/config/jit"       label="JIT / Approvals" icon={<Shield size={14} />} />
+          <SubTab to="/config/users"     label="Users & Roles"   icon={<Users size={14} />} />
+          <SubTab to="/config/siem"      label="SIEM Forwarding" icon={<Mail size={14} />} />
+          <SubTab to="/config/retention" label="Data Retention"  icon={<Database size={14} />} />
+          <SubTab to="/config/sandbox"   label="Process Sandbox" icon={<Box size={14} />} />
+          <SubTab to="/config/auth"      label="System Auth"     icon={<Settings size={14} />} />
         </nav>
       </div>
 

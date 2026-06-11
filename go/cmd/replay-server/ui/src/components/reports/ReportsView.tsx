@@ -29,8 +29,8 @@ export function ReportsView() {
     <div className="flex flex-col h-[calc(100vh-[44px])] bg-bg text-text-sub overflow-hidden">
       <div className="px-4 border-b border-border bg-surface shrink-0 flex items-center justify-between">
         <nav className="h-[44px] flex items-center gap-1">
-          <SubTab to="summary"   label="Summary"   icon={<BarChart2 size={14} />} />
-          <SubTab to="anomalies" label="Anomalies" icon={<AlertCircle size={14} />} />
+          <SubTab to="/reports/summary"   label="Summary"   icon={<BarChart2 size={14} />} />
+          <SubTab to="/reports/anomalies" label="Anomalies" icon={<AlertCircle size={14} />} />
         </nav>
 
         <div className="flex items-center gap-2 text-[12px]">

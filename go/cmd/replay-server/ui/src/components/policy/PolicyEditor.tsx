@@ -24,10 +24,10 @@ export function PolicyEditor() {
     <div className="flex flex-col h-[calc(100vh-[44px])] bg-bg text-text-sub overflow-hidden">
       <div className="px-4 border-b border-border bg-surface shrink-0">
         <nav className="h-[44px] flex items-center gap-1">
-          <SubTab to="rules" label="Risk Rules" icon={<Shield size={14} />} />
-          <SubTab to="sudoers" label="Sudoers" icon={<Server size={14} />} />
-          <SubTab to="users" label="User Groups" icon={<Users size={14} />} />
-          <SubTab to="opa" label="Compiled Rego" icon={<Code size={14} />} />
+          <SubTab to="/policy/rules" label="Risk Rules" icon={<Shield size={14} />} />
+          <SubTab to="/policy/sudoers" label="Sudoers" icon={<Server size={14} />} />
+          <SubTab to="/policy/users" label="User Groups" icon={<Users size={14} />} />
+          <SubTab to="/policy/opa" label="Compiled Rego" icon={<Code size={14} />} />
         </nav>
       </div>
 
