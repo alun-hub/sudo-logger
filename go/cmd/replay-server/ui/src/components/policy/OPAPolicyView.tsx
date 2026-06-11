@@ -1,12 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchOPAPolicy, saveOPAPolicy, type OPAMatchRule, type OPAPolicy } from '@/api/opa'
+import { fetchOPAPolicy, saveOPAPolicy, type OPAPolicy } from '@/api/opa'
 import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Edit2, Trash2, ShieldCheck, Users, Code, Save, RotateCcw } from 'lucide-react'
+import { Plus, Edit2, Trash2, ShieldCheck, Code, Save, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export function OPAPolicyView() {
@@ -173,15 +173,6 @@ export function OPAPolicyView() {
           </TabsContent>
         </div>
       </Tabs>
-    </div>
-  )
-}
-
-function StatCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
-  return (
-    <div className="bg-card border border-border p-3 rounded-[5px] shadow-sm">
-      <div className="text-[11px] text-text-dim uppercase tracking-wider font-medium mb-1">{label}</div>
-      <div className={cn("text-xl font-mono font-bold tabular-nums", color || "text-text")}>{value}</div>
     </div>
   )
 }

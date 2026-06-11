@@ -12,7 +12,6 @@ import {
 import { Trash2, Plus, Edit2, ShieldAlert, CheckCircle2, MessageSquare, Save } from 'lucide-react'
 import { BlockedUserModal } from './BlockedUserModal'
 import { fmtDate } from '@/lib/date'
-import { cn } from '@/lib/utils'
 
 export function AccessControlView() {
   const qc = useQueryClient()
