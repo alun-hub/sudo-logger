@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { LogOut } from 'lucide-react'
 
 const tabs = [
   { to: '/',          label: 'Sessions'  },
