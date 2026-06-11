@@ -4,7 +4,6 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { X } from 'lucide-react'
 import type { UserInfo, Role } from '@/types/config'
 
 interface Props {

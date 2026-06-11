@@ -20,6 +20,8 @@ export interface AuthMapping {
 export interface UserInfo {
   username: string
   role: string
+  full_name?: string
+  email?: string
   created_at?: string
 }
 
