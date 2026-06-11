@@ -63,7 +63,7 @@ export function ReportsView() {
         <Routes>
           <Route path="summary"   element={<SummaryTab data={data} />} />
           <Route path="anomalies" element={<AnomaliesTab data={data} />} />
-          <Route path=""          element={<Navigate to="summary" replace />} />
+          <Route path=""          element={<Navigate to="/reports/summary" replace />} />
         </Routes>
       </div>
     </div>

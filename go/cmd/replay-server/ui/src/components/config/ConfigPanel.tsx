@@ -31,7 +31,7 @@ export function ConfigPanel() {
             <Route path="retention" element={<div className="animate-in fade-in duration-200"><RetentionTab /></div>} />
             <Route path="sandbox"   element={<div className="animate-in fade-in duration-200"><SandboxTab /></div>} />
             <Route path="auth"      element={<div className="animate-in fade-in duration-200"><AuthTab /></div>} />
-            <Route path=""          element={<Navigate to="jit" replace />} />
+            <Route path=""          element={<Navigate to="/config/jit" replace />} />
           </Routes>
         </div>
       </div>

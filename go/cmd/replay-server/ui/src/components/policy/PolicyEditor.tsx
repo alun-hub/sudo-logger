@@ -37,7 +37,7 @@ export function PolicyEditor() {
           <Route path="sudoers" element={<SudoersView />} />
           <Route path="users"   element={<div className="p-6 animate-in fade-in duration-200"><UserGroupsPanel /></div>} />
           <Route path="opa"     element={<div className="p-6 animate-in fade-in duration-200"><RegoPanel /></div>} />
-          <Route path=""        element={<Navigate to="rules" replace />} />
+          <Route path=""        element={<Navigate to="/policy/rules" replace />} />
         </Routes>
       </div>
     </div>
