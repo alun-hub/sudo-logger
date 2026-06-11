@@ -80,6 +80,23 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return require(w, r, store.PermConfigWrite)
 }
 
+// requirePermissionsContained returns false and writes 403 if the caller does
+// not hold every permission in perms. Prevents privilege escalation when
+// creating/modifying roles or assigning roles to users.
+func requirePermissionsContained(w http.ResponseWriter, r *http.Request, perms []store.Permission) bool {
+	if isBootstrapMode(r) {
+		return true
+	}
+	callerPerms := permsFromContext(r)
+	for _, p := range perms {
+		if !callerPerms[p] {
+			http.Error(w, "cannot grant permission you do not hold: "+string(p), http.StatusForbidden)
+			return false
+		}
+	}
+	return true
+}
+
 // resolveRolePerms looks up the permission set for a role name.
 // The built-in "admin" role is synthesized in-memory; other roles are fetched
 // from the store and cached per-request (cheap: one store lookup per request).

@@ -897,6 +897,18 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 		u.CreatedAt = time.Now()
 	}
 
+	// Prevent privilege escalation: caller cannot assign a role with permissions they lack.
+	if !isBootstrapMode(r) {
+		targetPerms := resolveRolePerms(r, u.Role)
+		callerPerms := permsFromContext(r)
+		for p := range targetPerms {
+			if !callerPerms[p] {
+				http.Error(w, "cannot assign role with permission you do not hold: "+string(p), http.StatusForbidden)
+				return
+			}
+		}
+	}
+
 	if err := sessionStore.UpsertUser(r.Context(), u); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1239,6 +1251,9 @@ func main() {
 				http.Error(w, "role name must match ^[a-z0-9_-]{1,64}$", http.StatusBadRequest)
 				return
 			}
+			if !requirePermissionsContained(w, r, def.Permissions) {
+				return
+			}
 			if err := sessionStore.UpsertRole(r.Context(), def); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -1276,6 +1291,9 @@ func main() {
 				return
 			}
 			def.Name = name
+			if !requirePermissionsContained(w, r, def.Permissions) {
+				return
+			}
 			if err := sessionStore.UpsertRole(r.Context(), def); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
