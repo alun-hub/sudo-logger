@@ -23,11 +23,9 @@ export function RulesPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['rules'] }),
   })
 
-  if (isPending) return <div className="text-text-dim font-mono text-[13px]">Loading rules…</div>
-  if (!data) return null
-
   const filtered = useMemo(() => {
-    let list = [...data.rules].filter(r =>
+    const rules = data?.rules ?? []
+    let list = [...rules].filter(r =>
       r.id.toLowerCase().includes(q.toLowerCase()) ||
       r.reason.toLowerCase().includes(q.toLowerCase())
     )
@@ -39,7 +37,10 @@ export function RulesPanel() {
       return 0
     })
     return list
-  }, [data.rules, q, sortCol, sortDir])
+  }, [data?.rules, q, sortCol, sortDir])
+
+  if (isPending) return <div className="text-text-dim font-mono text-[13px]">Loading rules…</div>
+  if (!data) return null
 
   const toggleSort = (col: string) => {
     if (sortCol === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
