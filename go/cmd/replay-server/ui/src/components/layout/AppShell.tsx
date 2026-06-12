@@ -53,12 +53,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <div className="flex flex-col h-screen bg-bg text-text font-sans overflow-hidden">
-      <header className="border-b border-border bg-[#09090f] flex items-center justify-between px-4 h-[48px] shrink-0 z-50">
+    <div className="flex flex-col h-screen bg-bg text-text font-sans overflow-hidden transition-colors duration-200">
+      <header className="border-b border-border bg-surface flex items-center justify-between px-4 h-[48px] shrink-0 z-50 shadow-sm">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-2.5">
             <img src="/logo-icon-72.svg" alt="sudo-logger" className="h-6 w-6" />
-            <span className="font-bold text-[16px] text-white tracking-tight uppercase">sudo-replay</span>
+            <span className="font-bold text-[16px] text-foreground tracking-tight uppercase">sudo-replay</span>
           </div>
           <nav className="flex gap-2">
             {tabs.map(t => {
@@ -68,7 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={t.to}
                   to={t.to}
                   className={cn(
-                    'px-4 py-1.5 text-[13px] rounded-[4px] transition-all font-semibold border-b-2 border-transparent hover:text-white',
+                    'px-4 py-1.5 text-[13px] rounded-[4px] transition-all font-semibold border-b-2 border-transparent hover:text-foreground',
                     isActive
                       ? 'text-green border-green bg-green/5'
                       : 'text-text-dim hover:bg-card-hover',

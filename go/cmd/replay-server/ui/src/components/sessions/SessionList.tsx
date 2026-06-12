@@ -67,8 +67,8 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
   }, [sessions, selectedTsid, onSelect])
 
   return (
-    <div className="flex flex-col h-full border-r border-border w-[380px] shrink-0 bg-[#09090f] z-40 shadow-xl shadow-black/50">
-      <div className="p-3 border-b border-border bg-surface/30 flex flex-col gap-3">
+    <div className="flex flex-col h-full border-r border-border w-[380px] shrink-0 bg-bg z-40 shadow-xl shadow-black/10 transition-colors duration-200">
+      <div className="p-3 border-b border-border bg-surface flex flex-col gap-3">
         <div className="relative group">
           <svg className="absolute left-3 top-[10px] text-text-dim group-focus-within:text-green transition-colors" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <Input
@@ -76,7 +76,7 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
             id="global-search"
             value={q}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
-            className="w-full h-[36px] bg-[#12121a] border-border text-text text-[13px] pl-10 rounded-[6px] focus:ring-1 focus:ring-green/50 focus:border-green placeholder:text-text-dim/60 transition-all"
+            className="w-full h-[36px] bg-card border-border text-text text-[13px] pl-10 rounded-[6px] focus:ring-1 focus:ring-green/50 focus:border-green placeholder:text-text-dim/60 transition-all"
           />
         </div>
 
@@ -88,7 +88,7 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
               className={cn(
                 "flex-1 text-[11px] font-bold py-1.5 rounded-[4px] border uppercase tracking-wider transition-all",
                 sort === s
-                  ? "bg-green border-green text-black shadow-[0_0_10px_rgba(0,232,122,0.2)]"
+                  ? "bg-green border-green text-primary-foreground shadow-[0_0_10px_rgba(0,232,122,0.2)]"
                   : "bg-transparent border-border text-text-dim hover:border-border-mid hover:text-text-sub"
               )}
             >
@@ -103,7 +103,7 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
                type="date"
                value={from}
                onChange={e => setFrom(e.target.value)}
-               className="h-[30px] text-[11px] bg-[#12121a] border-border text-text-sub w-full rounded-[4px] outline-none px-2 focus:border-green transition-colors"
+               className="h-[30px] text-[11px] bg-card border-border text-text-sub w-full rounded-[4px] outline-none px-2 focus:border-green transition-colors"
              />
           </div>
           <span className="text-text-dim text-[11px] font-bold">→</span>
@@ -112,7 +112,7 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
                type="date"
                value={to}
                onChange={e => setTo(e.target.value)}
-               className="h-[30px] text-[11px] bg-[#12121a] border-border text-text-sub w-full rounded-[4px] outline-none px-2 focus:border-green transition-colors"
+               className="h-[30px] text-[11px] bg-card border-border text-text-sub w-full rounded-[4px] outline-none px-2 focus:border-green transition-colors"
              />
           </div>
           <button

@@ -45,7 +45,7 @@ export function SessionsView() {
         {selected ? (
           <TerminalPlayer session={selected} key={selected.tsid} />
         ) : (
-          <div className="flex h-full items-center justify-center p-8 bg-[#09090f]">
+          <div className="flex h-full items-center justify-center p-8 bg-bg transition-colors duration-200">
             <div className="max-w-[600px] text-text-dim font-mono text-[13px] bg-card/20 p-8 rounded-lg border border-border/50">
               <div className="mb-8 text-[15px] flex items-center gap-3">
                  <img src="/logo-icon-72.svg" alt="logo" className="w-8 h-8 opacity-50" />

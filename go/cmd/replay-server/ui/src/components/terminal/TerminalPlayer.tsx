@@ -189,26 +189,26 @@ export function TerminalPlayer({ session }: Props) {
   const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
 
   return (
-    <div className="flex flex-col h-full bg-[#09090f] overflow-hidden relative">
+    <div className="flex flex-col h-full bg-bg overflow-hidden relative transition-colors duration-200">
       {/* Detailed Session Header */}
-      <div className="bg-[#0e0e15] border-b border-border p-4 space-y-4 shrink-0 z-30 shadow-md shadow-black/30">
+      <div className="bg-surface border-b border-border p-4 space-y-4 shrink-0 z-30 shadow-md shadow-black/5 transition-colors">
         {/* Row 1: Primary Identity */}
         <div className="flex items-center justify-center gap-x-8 text-[11px] font-black uppercase tracking-[0.15em]">
            <div className="flex gap-2 items-baseline">
-              <span className="text-green/60">user</span>
-              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.user}</span>
+              <span className="text-green/80">user</span>
+              <span className="text-foreground text-[13px] tracking-tight lowercase font-mono">{session.user}</span>
            </div>
            <div className="flex gap-2 items-baseline">
-              <span className="text-green/60">host</span>
-              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.host}</span>
+              <span className="text-green/80">host</span>
+              <span className="text-foreground text-[13px] tracking-tight lowercase font-mono">{session.host}</span>
            </div>
            <div className="flex gap-2 items-baseline">
-              <span className="text-green/60">runas</span>
-              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.runas}</span>
+              <span className="text-green/80">runas</span>
+              <span className="text-foreground text-[13px] tracking-tight lowercase font-mono">{session.runas}</span>
            </div>
            <div className="flex gap-2 items-baseline">
-              <span className="text-green/60">cmd</span>
-              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.command}</span>
+              <span className="text-green/80">cmd</span>
+              <span className="text-foreground text-[13px] tracking-tight lowercase font-mono">{session.command}</span>
            </div>
         </div>
 
