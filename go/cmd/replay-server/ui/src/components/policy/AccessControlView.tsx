@@ -129,7 +129,7 @@ export function AccessControlView() {
                  <TableRow key={u.username} className="hover:bg-card-hover border-border group">
                    <TableCell className="font-mono font-bold text-red">{u.username}</TableCell>
                    <TableCell className="font-mono text-[12px] text-text-sub">
-                     {u.hosts.length === 0 ? <span className="text-text-dim">All Hosts</span> : u.hosts.join(', ')}
+                     {(u.hosts ?? []).length === 0 ? <span className="text-text-dim">All Hosts</span> : u.hosts.join(', ')}
                    </TableCell>
                    <TableCell className="text-text-sub">{u.reason}</TableCell>
                    <TableCell className="text-text-dim font-mono text-[11px] whitespace-nowrap">
