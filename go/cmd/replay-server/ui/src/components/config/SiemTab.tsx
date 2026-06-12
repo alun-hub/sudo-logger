@@ -7,8 +7,8 @@ import { Switch } from '@/components/ui/switch'
 import type { SiemConfig } from '@/types/config'
 import { Mail, ShieldAlert, FileKey, Globe, Zap } from 'lucide-react'
 
-const TRANSPORTS = ['https', 'syslog'] as const
-const FORMATS    = ['json', 'cef'] as const
+const TRANSPORTS = ['https', 'syslog', 'stdout'] as const
+const FORMATS    = ['json', 'cef', 'ocsf'] as const
 
 export function SiemTab() {
   const qc = useQueryClient()
@@ -81,44 +81,49 @@ export function SiemTab() {
                 </div>
               </div>
 
-              <div className="space-y-1.5 px-1">
-                <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Endpoint URL / Host:Port</label>
-                <div className="relative">
-                   <Globe className="absolute left-3 top-2.5 text-text-dim" size={14} />
-                   <Input
-                    value={current.url ?? ''}
-                    onChange={e => set({ url: e.target.value })}
-                    placeholder={current.transport === 'syslog' ? 'logstash.example.com:514' : 'https://siem.example.com:8088/events'}
-                    className="bg-card border-border text-text h-10 pl-9 focus:border-green font-mono text-[12px]"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {current.transport !== 'stdout' && (
                 <div className="space-y-1.5 px-1">
-                  <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Auth Token / Kafka Topic</label>
+                  <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">{current.transport === 'syslog' ? 'Host:Port' : 'Endpoint URL'}</label>
                   <div className="relative">
-                    <Zap className="absolute left-3 top-2.5 text-text-dim" size={14} />
-                    <Input
-                      type="password"
-                      value={current.token ?? ''}
-                      onChange={e => set({ token: e.target.value })}
-                      placeholder="x-x-x-x-x"
+                     <Globe className="absolute left-3 top-2.5 text-text-dim" size={14} />
+                     <Input
+                      value={current.url ?? ''}
+                      onChange={e => set({ url: e.target.value })}
+                      placeholder={current.transport === 'syslog' ? 'syslog.example.com:514' : 'https://siem.example.com:8088/events'}
                       className="bg-card border-border text-text h-10 pl-9 focus:border-green font-mono text-[12px]"
                     />
                   </div>
                 </div>
-                <div className="space-y-1.5 px-1">
-                  <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Replay Web App URL</label>
-                  <Input
-                    value={current.replay_url ?? ''}
-                    onChange={e => set({ replay_url: e.target.value })}
-                    placeholder="https://replay.example.com"
-                    className="bg-card border-border text-text h-10 focus:border-green font-mono text-[12px]"
-                  />
-                </div>
-              </div>
+              )}
 
+              {current.transport !== 'stdout' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-1.5 px-1">
+                    <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Auth Token</label>
+                    <div className="relative">
+                      <Zap className="absolute left-3 top-2.5 text-text-dim" size={14} />
+                      <Input
+                        type="password"
+                        value={current.token ?? ''}
+                        onChange={e => set({ token: e.target.value })}
+                        placeholder="Bearer / Splunk HEC token"
+                        className="bg-card border-border text-text h-10 pl-9 focus:border-green font-mono text-[12px]"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5 px-1">
+                    <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Replay Web App URL</label>
+                    <Input
+                      value={current.replay_url ?? ''}
+                      onChange={e => set({ replay_url: e.target.value })}
+                      placeholder="https://replay.example.com"
+                      className="bg-card border-border text-text h-10 focus:border-green font-mono text-[12px]"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {current.transport !== 'stdout' && (
               <div className="space-y-4 pt-4 border-t border-border/50">
                 <h3 className="text-[12px] font-bold text-text uppercase tracking-widest flex items-center gap-2">
                    <FileKey size={14} className="text-blue" /> mTLS & Certificates
@@ -137,6 +142,7 @@ export function SiemTab() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           )}
         </div>
