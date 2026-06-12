@@ -73,7 +73,7 @@ export function RuleModal({ rule, open, onClose, onSave }: Props) {
           />
         </div>
 
-        <div className="space-y-6 mt-4">
+        <div className="space-y-6 mt-4 max-h-[60vh] overflow-y-auto px-1 scrollbar-thin">
           <section className="space-y-3">
             <h3 className="text-[13px] font-semibold text-blue border-b border-blue/20 pb-1">Command Matching</h3>
             <TagInput
@@ -100,9 +100,14 @@ export function RuleModal({ rule, open, onClose, onSave }: Props) {
               values={draft.content?.contains_any ?? []}
               onChange={v => updateMatch('content', 'contains_any', v)}
             />
+             <TagInput
+              label="AND Output contains ONE of"
+              values={draft.content?.also_any ?? []}
+              onChange={v => updateMatch('content', 'also_any', v)}
+            />
           </section>
 
-          <section className="grid grid-cols-2 gap-8 pt-2">
+          <section className="grid grid-cols-2 gap-8 pt-2 border-t border-border mt-4">
              <div className="space-y-4">
                 <div className="flex items-center justify-between p-2 rounded-[5px] border border-border bg-card/50">
                   <span className="text-[12px] font-medium text-text-sub">After Business Hours</span>
@@ -118,6 +123,15 @@ export function RuleModal({ rule, open, onClose, onSave }: Props) {
                     onCheckedChange={v => setDraft({ ...draft, incomplete: v })}
                   />
                 </div>
+                <div className="space-y-1.5 pt-2">
+                   <label className="text-[11px] font-bold text-text-dim uppercase tracking-wider">Min Duration (s)</label>
+                   <Input
+                      type="number"
+                      value={draft.min_duration || 0}
+                      onChange={e => setDraft({ ...draft, min_duration: Number(e.target.value) })}
+                      className="bg-card border-border h-9"
+                   />
+                </div>
              </div>
              <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-text-dim uppercase tracking-wider">Runas User</label>
@@ -132,6 +146,14 @@ export function RuleModal({ rule, open, onClose, onSave }: Props) {
                   value={draft.source ?? ''}
                   onChange={e => setDraft({ ...draft, source: e.target.value })}
                   placeholder="plugin, ebpf-tty..."
+                  className="bg-card border-border h-9 font-mono"
+                />
+                <label className="text-[11px] font-bold text-text-dim uppercase tracking-wider block mt-2">Exit Code</label>
+                <Input
+                  type="number"
+                  value={draft.exit_code ?? ''}
+                  onChange={e => setDraft({ ...draft, exit_code: e.target.value === '' ? undefined : Number(e.target.value) })}
+                  placeholder="0"
                   className="bg-card border-border h-9 font-mono"
                 />
              </div>

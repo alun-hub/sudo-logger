@@ -4,6 +4,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 import type { Role } from '@/types/config'
 
 interface Props {
@@ -102,5 +103,3 @@ export function RoleModal({ role, open, onClose, onSave }: Props) {
     </Dialog>
   )
 }
-
-import { cn } from '@/lib/utils'

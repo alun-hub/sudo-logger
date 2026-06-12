@@ -226,7 +226,7 @@ export function OPAPolicyView() {
                <div className="flex flex-col space-y-2">
                  <div className="text-[11px] font-bold text-text-dim uppercase tracking-wider">Compiled Module (read-only)</div>
                  <p className="text-[11px] text-text-dim">Full Rego module that OPA evaluates for every session.</p>
-                 <pre className="flex-1 p-3 bg-[#050508] border border-border rounded-[4px] font-mono text-[12px] text-blue/90 overflow-auto whitespace-pre-wrap">
+                 <pre className="flex-1 p-3 bg-bg border border-border rounded-[4px] font-mono text-[12px] text-blue/90 overflow-auto whitespace-pre-wrap">
                    {data.rego}
                  </pre>
                </div>

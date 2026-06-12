@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils'
 
 export function ConfigPanel() {
   return (
-    <div className="flex flex-col h-[calc(100vh-[44px])] bg-bg text-text-sub overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-44px)] bg-bg text-text-sub overflow-hidden">
       <div className="px-4 border-b border-border bg-surface shrink-0">
         <nav className="h-[44px] flex items-center gap-1">
           <SubTab to="/config/jit"       label="JIT / Approvals" icon={<Shield size={14} />} />

@@ -103,7 +103,7 @@ export function UsersRolesTab() {
                   </TableCell>
                   <TableCell className="text-text-dim font-mono text-[11px]">
                      <div className="flex items-center gap-2">
-                        <Calendar size={12} /> {u.created_at ? fmtDate(Number(u.created_at)) : '—'}
+                        <Calendar size={12} /> {u.created_at ? fmtDate(Math.floor(new Date(u.created_at).getTime() / 1000)) : '—'}
                      </div>
                   </TableCell>
                   <TableCell>

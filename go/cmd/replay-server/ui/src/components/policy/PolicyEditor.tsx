@@ -9,7 +9,7 @@ import { SudoersView }       from './SudoersView'
 
 export function PolicyEditor() {
   return (
-    <div className="flex flex-col h-[calc(100vh-[44px])] bg-bg text-text-sub overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-44px)] bg-bg text-text-sub overflow-hidden">
       <div className="px-4 border-b border-border bg-surface shrink-0">
         <nav className="h-[44px] flex items-center gap-1">
           <SubTab to="/policy/risk"   label="Risk Rules"     icon={<Shield size={14} />} />

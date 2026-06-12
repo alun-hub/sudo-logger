@@ -185,7 +185,7 @@ function EditorPanel({ host }: { host: string }) {
             value={currentContent}
             onChange={e => setContent(e.target.value)}
             spellCheck={false}
-            className="flex-1 bg-[#050508] text-[#d4daf0] font-mono text-[13px] p-6 outline-none resize-none leading-relaxed"
+            className="flex-1 bg-bg text-text font-mono text-[13px] p-6 outline-none resize-none leading-relaxed"
             placeholder="# Sudoers policy goes here..."
           />
         </div>

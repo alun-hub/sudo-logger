@@ -31,7 +31,9 @@ export function AccessControlView() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['whitelist-policy'] }),
   })
 
-  if (p1 || p2 || !blocked || !white) return <div className="p-8 text-text-dim font-mono text-[13px]">Loading access control…</div>
+  if (p1 || p2 || !blocked) return <div className="p-8 text-text-dim font-mono text-[13px]">Loading access control…</div>
+
+  const whiteUsers = white?.users ?? []
 
   const onSaveBlock = (user: BlockedUser) => {
     const isNew = !blocked.users.find(u => u.username === user.username)
@@ -58,13 +60,13 @@ export function AccessControlView() {
   const addWhite = () => {
     const name = prompt('Enter username to whitelist:')
     if (!name) return
-    if (white.users.includes(name)) return
-    mutWhite.mutate({ users: [...white.users, name] })
+    if (whiteUsers.includes(name)) return
+    mutWhite.mutate({ users: [...whiteUsers, name] })
   }
 
   const deleteWhite = (name: string) => {
     if (!confirm(`Remove ${name} from whitelist?`)) return
-    mutWhite.mutate({ users: white.users.filter(u => u !== name) })
+    mutWhite.mutate({ users: whiteUsers.filter(u => u !== name) })
   }
 
   return (
@@ -89,7 +91,7 @@ export function AccessControlView() {
           <textarea
             value={msgDraft ?? blocked.message}
             onChange={e => setMsgDraft(e.target.value)}
-            className="w-full bg-[#050508] text-text font-mono text-[13px] p-4 border border-border rounded-[5px] outline-none focus:border-green min-h-[80px] resize-none"
+            className="w-full bg-bg text-text font-mono text-[13px] p-4 border border-border rounded-[5px] outline-none focus:border-green min-h-[80px] resize-none"
             placeholder="Your sudo access has been temporarily suspended..."
           />
         </div>
@@ -169,9 +171,9 @@ export function AccessControlView() {
                </TableRow>
              </TableHeader>
              <TableBody>
-                {white.users.length === 0 ? (
+                {whiteUsers.length === 0 ? (
                   <TableRow><TableCell colSpan={2} className="text-center py-8 text-text-dim italic">No users whitelisted.</TableCell></TableRow>
-                ) : white.users.map(u => (
+                ) : whiteUsers.map(u => (
                   <TableRow key={u} className="hover:bg-card-hover border-border group">
                     <TableCell className="font-mono font-bold text-green">{u}</TableCell>
                     <TableCell>
