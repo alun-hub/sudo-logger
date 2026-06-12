@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { fetchSessionEvents } from '@/api/sessions'
 import { fmtDuration } from '@/lib/date'
+import { RiskBadge } from '../sessions/RiskBadge'
 import type { SessionInfo, SessionEvent } from '@/types/session'
 import '@xterm/xterm/css/xterm.css'
 
@@ -218,7 +219,7 @@ export function TerminalPlayer({ session }: Props) {
               </span>
            </div>
            <div className="flex items-center gap-6 text-[10px] text-text-dim/60 font-mono mt-1 uppercase tracking-widest">
-              <div className="flex gap-2"><span>bin</span> <span className="text-text-sub lowercase">{session.bin || 'unknown'}</span></div>
+              <div className="flex gap-2"><span>bin</span> <span className="text-text-sub lowercase">{session.resolved_command || 'unknown'}</span></div>
               <div className="flex gap-2"><span>cwd</span> <span className="text-text-sub lowercase">{session.cwd || '/'}</span></div>
               {session.flags && <div className="flex gap-2"><span>flags</span> <span className="text-text-sub lowercase">{session.flags}</span></div>}
            </div>
