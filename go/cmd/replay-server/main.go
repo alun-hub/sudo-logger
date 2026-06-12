@@ -1887,10 +1887,12 @@ func matchesAll(s SessionInfo, q string) bool {
 	user := strings.ToLower(s.User)
 	host := strings.ToLower(s.Host)
 	cmd  := strings.ToLower(s.Command)
+	tsid := strings.ToLower(s.TSID)
 	for _, term := range strings.Fields(q) {
 		if !strings.Contains(user, term) &&
 			!strings.Contains(host, term) &&
-			!strings.Contains(cmd, term) {
+			!strings.Contains(cmd, term) &&
+			!strings.Contains(tsid, term) {
 			return false
 		}
 	}
