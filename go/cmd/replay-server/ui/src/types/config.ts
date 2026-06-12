@@ -36,14 +36,9 @@ export interface RetentionConfig {
   archive_cron?: string
 }
 
-export interface SandboxConfig {
-  enabled: boolean
-  templates: SandboxTemplate[]
-}
-
-export interface SandboxTemplate {
-  name: string
-  yaml: string
+export interface SandboxRaw {
+  content: string
+  path: string
 }
 
 export interface JitPolicy {

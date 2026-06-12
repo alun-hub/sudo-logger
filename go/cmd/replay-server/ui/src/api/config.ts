@@ -6,8 +6,7 @@ import type {
   UserInfo,
   Role,
   RetentionConfig,
-  SandboxConfig,
-  SandboxTemplate,
+  SandboxRaw,
   JitPolicy,
   ApprovalConfig,
   MeResponse,
@@ -18,9 +17,9 @@ export const fetchMe = (): Promise<MeResponse> => apiFetch('/api/me')
 export const fetchSiemConfig = (): Promise<SiemConfig> => apiFetch('/api/siem-config')
 export const saveSiemConfig = (c: SiemConfig): Promise<void> =>
   apiFetch('/api/siem-config', { method: 'POST', body: JSON.stringify(c) })
-export const uploadSiemCert = (file: File): Promise<void> => {
+export const uploadSiemCert = (file: File): Promise<{ path: string }> => {
   const form = new FormData()
-  form.append('cert', file)
+  form.append('file', file, file.name)
   return apiFetch('/api/siem-cert', { method: 'POST', body: form, headers: {} })
 }
 
@@ -51,11 +50,13 @@ export const fetchRetention = (): Promise<RetentionConfig> => apiFetch('/api/ret
 export const saveRetention = (c: RetentionConfig): Promise<void> =>
   apiFetch('/api/retention', { method: 'POST', body: JSON.stringify(c) })
 
-export const fetchSandbox = (): Promise<SandboxConfig> => apiFetch('/api/sandbox')
-export const saveSandbox = (c: SandboxConfig): Promise<void> =>
-  apiFetch('/api/sandbox', { method: 'POST', body: JSON.stringify(c) })
-export const fetchSandboxTemplates = (): Promise<SandboxTemplate[]> =>
+export const fetchSandbox = (): Promise<SandboxRaw> => apiFetch('/api/sandbox')
+export const saveSandbox = (content: string): Promise<void> =>
+  apiFetch('/api/sandbox', { method: 'PUT', body: JSON.stringify({ content }) })
+export const fetchSandboxTemplates = (): Promise<Record<string, string>> =>
   apiFetch('/api/sandbox/templates')
+export const saveSandboxTemplates = (templates: Record<string, string>): Promise<void> =>
+  apiFetch('/api/sandbox/templates', { method: 'PUT', body: JSON.stringify(templates) })
 
 export const fetchJitPolicy = (): Promise<JitPolicy> => apiFetch('/api/jit-policy')
 export const saveJitPolicy = (p: JitPolicy): Promise<void> =>

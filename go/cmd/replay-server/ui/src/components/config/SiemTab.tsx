@@ -123,11 +123,19 @@ export function SiemTab() {
                 <h3 className="text-[12px] font-bold text-text uppercase tracking-widest flex items-center gap-2">
                    <FileKey size={14} className="text-blue" /> mTLS & Certificates
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                   <CertField label="CA Certificate" onUpload={f => certUpload.mutate(f)} />
-                   <CertField label="Client Certificate" onUpload={f => certUpload.mutate(f)} />
-                   <CertField label="Client Private Key" onUpload={f => certUpload.mutate(f)} />
-                </div>
+                {current.transport === 'syslog' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <CertField label="CA Certificate"     value={current.syslog_ca   ?? ''} onChange={v => set({ syslog_ca:   v })} onUpload={certUpload} />
+                    <CertField label="Client Certificate" value={current.syslog_cert ?? ''} onChange={v => set({ syslog_cert: v })} onUpload={certUpload} />
+                    <CertField label="Client Private Key" value={current.syslog_key  ?? ''} onChange={v => set({ syslog_key:  v })} onUpload={certUpload} />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <CertField label="CA Certificate"     value={current.https_ca   ?? ''} onChange={v => set({ https_ca:   v })} onUpload={certUpload} />
+                    <CertField label="Client Certificate" value={current.https_cert ?? ''} onChange={v => set({ https_cert: v })} onUpload={certUpload} />
+                    <CertField label="Client Private Key" value={current.https_key  ?? ''} onChange={v => set({ https_key:  v })} onUpload={certUpload} />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -152,21 +160,44 @@ export function SiemTab() {
   )
 }
 
-function CertField({ label, onUpload }: { label: string, onUpload: (f: File) => void }) {
+function CertField({ label, value, onChange, onUpload }: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  onUpload: { mutateAsync: (f: File) => Promise<any> }
+}) {
+  const [uploading, setUploading] = useState(false)
+
+  const handleFile = async (file: File) => {
+    setUploading(true)
+    try {
+      const res = await onUpload.mutateAsync(file)
+      if (res?.path) onChange(res.path)
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="space-y-1.5">
-       <label className="text-[10px] font-bold text-text-dim uppercase tracking-wider">{label}</label>
-       <div className="relative group">
+      <label className="text-[10px] font-bold text-text-dim uppercase tracking-wider">{label}</label>
+      <div className="flex gap-1">
+        <input
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="/etc/sudo-logger/siem-ca.crt"
+          className="flex-1 h-8 bg-card border border-border rounded-[4px] px-2 text-[11px] font-mono text-text-sub outline-none focus:border-green"
+        />
+        <label className={`h-8 px-2 flex items-center border border-border rounded-[4px] text-[11px] cursor-pointer transition-colors bg-card ${uploading ? 'opacity-50 cursor-not-allowed' : 'hover:border-border-mid hover:text-text text-text-dim'}`}>
+          {uploading ? '…' : 'Upload'}
           <input
             type="file"
             accept=".pem,.crt,.cer,.key"
-            onChange={e => e.target.files?.[0] && onUpload(e.target.files[0])}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+            className="hidden"
+            onChange={e => { if (!uploading && e.target.files?.[0]) handleFile(e.target.files[0]) }}
           />
-          <div className="h-9 border border-border border-dashed rounded-[4px] bg-card/50 flex items-center justify-center text-[11px] text-text-dim group-hover:border-green group-hover:text-text transition-colors">
-             Select file...
-          </div>
-       </div>
+        </label>
+      </div>
     </div>
   )
 }

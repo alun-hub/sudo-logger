@@ -3,10 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchOPAPolicy, saveOPAPolicy, type OPAMatchRule, type OPAPolicy } from '@/api/opa'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Edit2, Trash2, ShieldCheck, Code, Save, RotateCcw, X } from 'lucide-react'
+import { Plus, Edit2, Trash2, ShieldCheck, Save, RotateCcw, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OPARuleModal } from './OPARuleModal'
 
@@ -209,13 +212,25 @@ export function OPAPolicyView() {
           </TabsContent>
 
           <TabsContent value="rego" className="m-0 space-y-4 animate-in slide-in-from-left-2 duration-200">
-             <div className="flex items-center justify-between">
-                <h3 className="text-[14px] font-semibold text-text flex items-center gap-2"><Code size={16} className="text-blue" /> Generated Rego Source</h3>
-                <span className="text-[11px] text-text-dim uppercase tracking-wider">Read-only compiled output</span>
+             <div className="grid grid-cols-2 gap-6" style={{ minHeight: '480px' }}>
+               <div className="flex flex-col space-y-2">
+                 <div className="text-[11px] font-bold text-text-dim uppercase tracking-wider">Custom Rego Additions</div>
+                 <p className="text-[11px] text-text-dim">Appended after generated rules. Can add extra <code>_any_deny</code> / <code>_any_allow</code> clauses or override <code>decision</code>.</p>
+                 <textarea
+                   value={current.raw_rego ?? ''}
+                   onChange={e => set({ raw_rego: e.target.value })}
+                   placeholder={'# optional hand-written Rego\n# _any_allow if { input.user == "admin" }'}
+                   className="flex-1 font-mono text-[12px] resize-none bg-surface border border-border rounded-[4px] text-text p-3 outline-none focus:border-green"
+                 />
+               </div>
+               <div className="flex flex-col space-y-2">
+                 <div className="text-[11px] font-bold text-text-dim uppercase tracking-wider">Compiled Module (read-only)</div>
+                 <p className="text-[11px] text-text-dim">Full Rego module that OPA evaluates for every session.</p>
+                 <pre className="flex-1 p-3 bg-[#050508] border border-border rounded-[4px] font-mono text-[12px] text-blue/90 overflow-auto whitespace-pre-wrap">
+                   {data.rego}
+                 </pre>
+               </div>
              </div>
-             <pre className="p-6 bg-[#050508] border border-border rounded-[5px] font-mono text-[12px] text-blue/90 leading-relaxed overflow-x-auto whitespace-pre-wrap min-h-[400px]">
-                {data.rego}
-             </pre>
           </TabsContent>
         </div>
       </Tabs>
@@ -291,6 +306,3 @@ function TagInput({ label, values, onChange }: { label: string, values: string[]
     </div>
   )
 }
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog'

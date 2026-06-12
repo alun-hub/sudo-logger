@@ -23,17 +23,15 @@ export function ConfigPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl p-6 mx-auto">
-          <Routes>
-            <Route path="jit"       element={<div className="animate-in fade-in duration-200"><JitTab /></div>} />
-            <Route path="users"     element={<div className="animate-in fade-in duration-200"><UsersRolesTab /></div>} />
-            <Route path="siem"      element={<div className="animate-in fade-in duration-200"><SiemTab /></div>} />
-            <Route path="retention" element={<div className="animate-in fade-in duration-200"><RetentionTab /></div>} />
-            <Route path="sandbox"   element={<div className="animate-in fade-in duration-200"><SandboxTab /></div>} />
-            <Route path="auth"      element={<div className="animate-in fade-in duration-200"><AuthTab /></div>} />
-            <Route path=""          element={<Navigate to="/config/jit" replace />} />
-          </Routes>
-        </div>
+        <Routes>
+          <Route path="jit"       element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><JitTab /></div>} />
+          <Route path="users"     element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><UsersRolesTab /></div>} />
+          <Route path="siem"      element={<div className="max-w-5xl p-6 mx-auto animate-in fade-in duration-200"><SiemTab /></div>} />
+          <Route path="retention" element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><RetentionTab /></div>} />
+          <Route path="sandbox"   element={<SandboxTab />} />
+          <Route path="auth"      element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><AuthTab /></div>} />
+          <Route path=""          element={<Navigate to="/config/jit" replace />} />
+        </Routes>
       </div>
     </div>
   )

@@ -1,9 +1,22 @@
+import { useState, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { fetchMe } from '@/api/config'
 import { fetchApprovals } from '@/api/approvals'
 import { cn } from '@/lib/utils'
-import { User, LogOut } from 'lucide-react'
+import { User, LogOut, Sun, Moon } from 'lucide-react'
+
+function useTheme() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('sudo-replay-theme') as 'dark' | 'light') || 'dark'
+  })
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('sudo-replay-theme', theme)
+  }, [theme])
+  const toggle = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+  return { theme, toggle }
+}
 
 const tabs = [
   { to: '/',          label: 'Sessions'  },
@@ -21,6 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     refetchInterval: 15_000
   })
   const location = useLocation()
+  const { theme, toggle: toggleTheme } = useTheme()
 
   const pendingCount = (apprs || []).filter(r => r.status === 'pending').length
 
@@ -57,18 +71,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
         </div>
-        <div className="flex items-center gap-6 text-xs text-text-dim">
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 cursor-pointer hover:text-text-sub transition-colors">
-              <input
-                type="checkbox"
-                className="accent-green cursor-pointer"
-                defaultChecked={localStorage.getItem('sudo-replay-autoplay') !== 'false'}
-                onChange={e => localStorage.setItem('sudo-replay-autoplay', String(e.target.checked))}
-              />
-              autoplay
-            </label>
-          </div>
+        <div className="flex items-center gap-4 text-xs text-text-dim">
+          <label className="flex items-center gap-1.5 cursor-pointer hover:text-text-sub transition-colors">
+            <input
+              type="checkbox"
+              className="accent-green cursor-pointer"
+              defaultChecked={localStorage.getItem('sudo-replay-autoplay') !== 'false'}
+              onChange={e => localStorage.setItem('sudo-replay-autoplay', String(e.target.checked))}
+            />
+            autoplay
+          </label>
+
+          <div className="h-4 w-px bg-border-mid" />
+
+          <button
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="flex items-center justify-center w-7 h-7 border border-border rounded hover:border-border-mid hover:text-text-sub transition-colors"
+          >
+            {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+          </button>
 
           <div className="h-4 w-px bg-border-mid" />
 

@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent } from 'react'
+import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { fetchSessions } from '@/api/sessions'
 import { SessionRow } from './SessionRow'
@@ -44,6 +44,27 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
 
   const sessions = data?.pages.flatMap(p => p.sessions) ?? []
   const total    = data?.pages[0]?.total ?? 0
+  const listRef  = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+      e.preventDefault()
+      if (!sessions.length) return
+      const idx = selectedTsid ? sessions.findIndex(s => s.tsid === selectedTsid) : -1
+      let next = idx
+      if (e.key === 'ArrowDown') next = Math.min(idx + 1, sessions.length - 1)
+      if (e.key === 'ArrowUp')   next = Math.max(idx - 1, 0)
+      if (next !== idx && sessions[next]) {
+        onSelect(sessions[next])
+        listRef.current?.querySelectorAll('[data-tsid]')[next]?.scrollIntoView({ block: 'nearest' })
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [sessions, selectedTsid, onSelect])
 
   return (
     <div className="flex flex-col h-full border-r border-border w-[320px] shrink-0 bg-surface">
@@ -97,16 +118,17 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ scrollbarWidth: 'thin' }}>
+      <div ref={listRef} className="flex-1 overflow-y-auto overflow-x-hidden" style={{ scrollbarWidth: 'thin' }}>
         {isPending && <p className="p-3 text-[13px] text-text-dim">Loading…</p>}
         {isError && <p className="p-3 text-[13px] text-red">Failed to load sessions</p>}
         {sessions.map(s => (
-          <SessionRow
-            key={s.tsid}
-            session={s}
-            selected={s.tsid === selectedTsid}
-            onClick={() => onSelect(s)}
-          />
+          <div key={s.tsid} data-tsid={s.tsid}>
+            <SessionRow
+              session={s}
+              selected={s.tsid === selectedTsid}
+              onClick={() => onSelect(s)}
+            />
+          </div>
         ))}
         {hasNextPage && (
           <div className="p-4 text-center border-t border-border/50">

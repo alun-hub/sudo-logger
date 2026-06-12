@@ -51,6 +51,41 @@
     color-scheme: dark;
   }
 
+  /* Light theme: override CSS custom properties used by @theme utilities */
+  [data-theme="light"] {
+    color-scheme: light;
+    --color-bg:          #f0f2f6;
+    --color-surface:     #eef0f6;
+    --color-card:        #ffffff;
+    --color-card-hover:  #e8eaf2;
+    --color-card-active: #dde3f5;
+    --color-border:      rgba(0,0,0,0.1);
+    --color-border-mid:  rgba(0,0,0,0.18);
+    --color-text:        #1a1a2e;
+    --color-text-sub:    #374151;
+    --color-text-dim:    #6b7280;
+    --color-green:       #007a40;
+    --color-green-dim:   rgba(0,122,64,0.12);
+    --color-green-glow:  rgba(0,122,64,0.08);
+    --color-blue:        #0969da;
+    --color-red:         #c0001a;
+    --color-amber:       #8a6500;
+    --color-amber-dim:   rgba(138,101,0,0.12);
+    --color-background:  #f0f2f6;
+    --color-foreground:  #1a1a2e;
+    --color-popover:     #ffffff;
+    --color-popover-foreground: #1a1a2e;
+    --color-primary:     #007a40;
+    --color-primary-foreground: #ffffff;
+    --color-secondary:   #e8eaf2;
+    --color-secondary-foreground: #1a1a2e;
+    --color-muted:       #eef0f6;
+    --color-muted-foreground: #6b7280;
+    --color-accent:      #e8eaf2;
+    --color-accent-foreground: #1a1a2e;
+    --color-input:       rgba(0,0,0,0.1);
+  }
+
   body {
     background-color: var(--color-bg);
     color: var(--color-text);
