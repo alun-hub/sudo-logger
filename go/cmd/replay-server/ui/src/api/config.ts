@@ -6,7 +6,6 @@ import type {
   Role,
   RetentionConfig,
   SandboxRaw,
-  JitPolicy,
   ApprovalConfig,
   MeResponse,
 } from '@/types/config'
@@ -46,7 +45,7 @@ export const fetchHosts = (): Promise<{ hosts: string[] }> => apiFetch('/api/hos
 
 export const fetchRetention = (): Promise<RetentionConfig> => apiFetch('/api/retention')
 export const saveRetention = (c: RetentionConfig): Promise<void> =>
-  apiFetch('/api/retention', { method: 'POST', body: JSON.stringify(c) })
+  apiFetch('/api/retention', { method: 'PUT', body: JSON.stringify(c) })
 
 export const fetchSandbox = (): Promise<SandboxRaw> => apiFetch('/api/sandbox')
 export const saveSandbox = (content: string): Promise<void> =>
@@ -56,10 +55,7 @@ export const fetchSandboxTemplates = (): Promise<Record<string, string>> =>
 export const saveSandboxTemplates = (templates: Record<string, string>): Promise<void> =>
   apiFetch('/api/sandbox/templates', { method: 'PUT', body: JSON.stringify(templates) })
 
-export const fetchJitPolicy = (): Promise<JitPolicy> => apiFetch('/api/jit-policy')
-export const saveJitPolicy = (p: JitPolicy): Promise<void> =>
-  apiFetch('/api/jit-policy', { method: 'POST', body: JSON.stringify(p) })
-
-export const fetchApprovalConfig = (): Promise<ApprovalConfig> => apiFetch('/api/approval-config')
+export const fetchApprovalConfig = (): Promise<ApprovalConfig> =>
+  apiFetch('/api/approval-config').then((r: any) => r.config)
 export const saveApprovalConfig = (c: ApprovalConfig): Promise<void> =>
-  apiFetch('/api/approval-config', { method: 'POST', body: JSON.stringify(c) })
+  apiFetch('/api/approval-config', { method: 'PUT', body: JSON.stringify({ config: c }) })

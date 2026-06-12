@@ -65,23 +65,26 @@ export interface SandboxRaw {
   path: string
 }
 
-export interface JitPolicy {
-  enabled: boolean
-  ttl_seconds: number
-  webhook_url?: string
+
+export interface ApprovalNotifyCfg {
+  webhook_url: string
+  webhook_secret: string
+  mention_user: boolean
+  request_channel: string
+  replay_web_app_url: string
+}
+
+export interface ExemptRule {
+  user: string
+  hosts: string[]
 }
 
 export interface ApprovalConfig {
   enabled: boolean
-  webhook_url?: string
-  webhook_secret?: string
-  bot_username?: string
-  request_channel?: string
-  replay_web_url?: string
-  mention_user?: boolean
-  default_window?: string
-  ttl_seconds: number
-  roles_that_can_approve: string[]
+  default_window: string
+  pending_ttl: string
+  exempt: ExemptRule[]
+  notifications: ApprovalNotifyCfg
 }
 
 export interface MeResponse {
