@@ -27,7 +27,7 @@ export function RulesPanel() {
   if (!data) return null
 
   const filtered = useMemo(() => {
-    let list = data.rules.filter(r =>
+    let list = [...data.rules].filter(r =>
       r.id.toLowerCase().includes(q.toLowerCase()) ||
       r.reason.toLowerCase().includes(q.toLowerCase())
     )
@@ -54,12 +54,12 @@ export function RulesPanel() {
     } else {
       next = data.rules.map(r => r.id === rule.id ? rule : r)
     }
-    mutation.mutate({ rules: next })
+    mutation.mutate(next)
   }
 
   const onDelete = (id: string) => {
     if (!confirm(`Delete rule ${id}?`)) return
-    mutation.mutate({ rules: data.rules.filter(r => r.id !== id) })
+    mutation.mutate(data.rules.filter(r => r.id !== id))
   }
 
   return (
@@ -126,8 +126,8 @@ export function RulesPanel() {
                 </TableCell>
                 <TableCell className="font-mono text-[11px] text-text-dim">
                   <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    {r.command?.contains_any?.length > 0 && <span>cmd: <span className="text-blue">{r.command.contains_any.join(', ')}</span></span>}
-                    {r.content?.contains_any?.length > 0 && <span>tty: <span className="text-green">{r.content.contains_any.join(', ')}</span></span>}
+                    {(r.command?.contains_any ?? []).length > 0 && <span>cmd: <span className="text-blue">{r.command?.contains_any?.join(', ')}</span></span>}
+                    {(r.content?.contains_any ?? []).length > 0 && <span>tty: <span className="text-green">{r.content?.contains_any?.join(', ')}</span></span>}
                     {r.after_hours && <span className="text-amber">after-hours</span>}
                     {r.runas && <span>runas: <span className="text-amber">{r.runas}</span></span>}
                   </div>

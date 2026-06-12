@@ -17,6 +17,7 @@ export interface Rule {
   after_hours?: boolean
   min_duration?: number
   source?: string
+  exit_code?: number
 }
 
 export interface RulesResponse {
