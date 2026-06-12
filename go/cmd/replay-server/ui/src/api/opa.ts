@@ -50,13 +50,16 @@ export interface BlockedUser {
 }
 
 export function fetchBlockedPolicy(): Promise<BlockedPolicy> {
-  return apiFetch<BlockedPolicy>('/api/blocked-users')
+  return apiFetch<any>('/api/blocked-users').then((r: any) => ({
+    message: r.config?.block_message ?? '',
+    users: r.config?.users ?? [],
+  }))
 }
 
 export function saveBlockedPolicy(p: BlockedPolicy): Promise<{ ok: boolean }> {
   return apiFetch('/api/blocked-users', {
     method: 'PUT',
-    body: JSON.stringify(p),
+    body: JSON.stringify({ config: { block_message: p.message, users: p.users } }),
   })
 }
 
@@ -65,12 +68,18 @@ export interface WhitelistPolicy {
 }
 
 export function fetchWhitelistPolicy(): Promise<WhitelistPolicy> {
-  return apiFetch<WhitelistPolicy>('/api/whitelisted-users')
+  return apiFetch<any>('/api/whitelisted-users').then((r: any) => ({
+    users: ((r.config?.users ?? []) as any[]).map((u: any) =>
+      typeof u === 'string' ? u : u.username
+    ),
+  }))
 }
 
 export function saveWhitelistPolicy(p: WhitelistPolicy): Promise<{ ok: boolean }> {
   return apiFetch('/api/whitelisted-users', {
     method: 'PUT',
-    body: JSON.stringify(p),
+    body: JSON.stringify({
+      config: { users: p.users.map(u => ({ username: u, hosts: [], reason: '' })) },
+    }),
   })
 }
