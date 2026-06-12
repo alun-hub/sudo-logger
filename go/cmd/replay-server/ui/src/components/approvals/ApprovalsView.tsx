@@ -31,11 +31,19 @@ export function ApprovalsView() {
   const approve = useMutation({
     mutationFn: approveRequest,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['approvals'] }),
+    onError: (e: any) => alert(`Approve failed: ${e.message || e}`),
   })
   const deny = useMutation({
-    mutationFn: denyRequest,
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => denyRequest(id, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['approvals'] }),
+    onError: (e: any) => alert(`Deny failed: ${e.message || e}`),
   })
+
+  const handleDeny = (id: string) => {
+    const reason = prompt('Reason for denial (optional):') ?? null
+    if (reason === null) return  // user cancelled
+    deny.mutate({ id, reason })
+  }
 
   if (loading) return <div className="p-8 text-text-dim font-mono text-[13px]">Loading requests…</div>
   if (isError)  return <div className="p-8 text-red font-mono text-[13px]">Failed to load approvals — check server connectivity.</div>
@@ -131,7 +139,7 @@ export function ApprovalsView() {
                           size="sm"
                           variant="ghost"
                           className="h-8 text-text-dim hover:text-red hover:bg-red/10 font-bold text-[11px] px-4 rounded-[4px]"
-                          onClick={() => deny.mutate(r.id)}
+                          onClick={() => handleDeny(r.id)}
                           disabled={deny.isPending}
                         >DENY</Button>
                       </div>

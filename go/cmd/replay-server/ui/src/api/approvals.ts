@@ -6,15 +6,16 @@ export function fetchApprovals(): Promise<ApprovalRequest[]> {
 }
 
 export function approveRequest(id: string): Promise<void> {
-  return apiFetch(`/api/approvals/${encodeURIComponent(id)}`, {
+  // Use path-based action to match old UI: POST /api/approvals/{id}/approve
+  return apiFetch(`/api/approvals/${encodeURIComponent(id)}/approve`, {
     method: 'POST',
-    body: JSON.stringify({ action: 'approve' }),
   })
 }
 
-export function denyRequest(id: string): Promise<void> {
-  return apiFetch(`/api/approvals/${encodeURIComponent(id)}`, {
+export function denyRequest(id: string, reason = ''): Promise<void> {
+  // Use path-based action to match old UI: POST /api/approvals/{id}/deny
+  return apiFetch(`/api/approvals/${encodeURIComponent(id)}/deny`, {
     method: 'POST',
-    body: JSON.stringify({ action: 'deny' }),
+    body: JSON.stringify({ reason }),
   })
 }
