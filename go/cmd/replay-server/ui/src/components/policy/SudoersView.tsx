@@ -213,52 +213,58 @@ function EditorPanel({ host }: { host: string }) {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header toolbar */}
-      <div className="h-[52px] border-b border-border bg-surface px-4 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Shield size={18} className={isGlobal ? "text-blue" : "text-green"} />
-            <span className="text-[14px] font-bold text-text">
-              {isGlobal ? 'Global sudoers Template' : `Override: ${host}`}
-            </span>
-          </div>
-          {/* Mode toggle */}
-          <div className="flex rounded-[4px] border border-border overflow-hidden text-[12px]">
-            <button
-              onClick={() => switchMode('visual')}
-              className={cn("px-3 py-1 font-semibold transition-colors", mode === 'visual' ? "bg-green text-black" : "text-text-dim hover:text-text hover:bg-card-hover")}
-            >
-              Visual Editor
-            </button>
-            <button
-              onClick={() => switchMode('raw')}
-              className={cn("px-3 py-1 font-semibold border-l border-border transition-colors", mode === 'raw' ? "bg-green text-black" : "text-text-dim hover:text-text hover:bg-card-hover")}
-            >
-              Raw
-            </button>
-          </div>
+      {/* Title row */}
+      <div className="h-[44px] border-b border-border bg-surface px-4 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          <Shield size={16} className={isGlobal ? "text-blue" : "text-green"} />
+          <span className="text-[14px] font-bold text-text">
+            {isGlobal ? 'Global sudoers Template' : `Override: ${host}`}
+          </span>
+          <span className="text-[11px] text-text-dim ml-1">
+            {isGlobal ? '— base policy inherited by all hosts' : config?.is_override ? '— custom policy active' : '— inheriting global default'}
+          </span>
         </div>
-
         <div className="flex items-center gap-2">
           {isDirty && (
-            <Button variant="ghost" size="sm" onClick={() => { setRawContent(null); setRules(null) }} className="h-8 text-text-dim hover:text-text">
-              <RotateCcw size={14} className="mr-1.5" /> Discard
+            <Button variant="ghost" size="sm" onClick={() => { setRawContent(null); setRules(null) }} className="h-7 text-text-dim hover:text-text text-[12px]">
+              <RotateCcw size={13} className="mr-1" /> Discard
             </Button>
           )}
           {!isGlobal && config?.is_override && (
             <Button variant="ghost" size="sm"
               onClick={() => confirm(`Revert ${host} to global default?`) && remove.mutate()}
-              className="h-8 text-text-dim hover:text-red"
+              className="h-7 text-text-dim hover:text-red text-[12px]"
             >
-              <Trash2 size={14} className="mr-1.5" /> Revert
+              <Trash2 size={13} className="mr-1" /> Revert
             </Button>
           )}
           <Button size="sm" disabled={!isDirty || save.isPending} onClick={handleSave}
-            className="h-8 bg-green hover:bg-green/90 text-black font-bold px-4 rounded-[4px]"
+            className="h-7 bg-green hover:bg-green/90 text-black font-bold px-4 rounded-[4px] text-[12px]"
           >
-            <Save size={14} className="mr-1.5" /> {save.isPending ? 'Saving…' : 'Save Changes'}
+            <Save size={13} className="mr-1" /> {save.isPending ? 'Saving…' : 'Save Changes'}
           </Button>
         </div>
+      </div>
+
+      {/* Mode toggle toolbar */}
+      <div className="h-[36px] border-b border-border bg-surface/60 px-4 flex items-center gap-3 shrink-0">
+        <div className="flex rounded-[4px] border border-border overflow-hidden text-[12px]">
+          <button
+            onClick={() => switchMode('visual')}
+            className={cn("px-4 py-1 font-semibold transition-colors", mode === 'visual' ? "bg-green text-black" : "text-text-dim hover:text-text hover:bg-card-hover")}
+          >
+            Visual Editor
+          </button>
+          <button
+            onClick={() => switchMode('raw')}
+            className={cn("px-4 py-1 font-semibold border-l border-border transition-colors", mode === 'raw' ? "bg-green text-black" : "text-text-dim hover:text-text hover:bg-card-hover")}
+          >
+            Raw
+          </button>
+        </div>
+        {mode === 'visual' && (
+          <span className="text-[11px] text-text-dim">Click a rule to edit · <strong className="text-text-sub">+&nbsp;New</strong> to add</span>
+        )}
       </div>
 
       {/* Banner for non-override hosts */}
@@ -287,7 +293,7 @@ function EditorPanel({ host }: { host: string }) {
         ) : (
           <>
             {/* Rules list column */}
-            <div className="w-[260px] border-r border-border flex flex-col bg-surface shrink-0">
+            <div className="w-[300px] border-r border-border flex flex-col bg-surface shrink-0">
               <div className="p-2 border-b border-border flex gap-2">
                 <input
                   value={ruleFilter}
