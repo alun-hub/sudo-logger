@@ -2,7 +2,6 @@ import { apiFetch } from './client'
 import type {
   SiemConfig,
   AuthConfig,
-  AuthMapping,
   UserInfo,
   Role,
   RetentionConfig,
@@ -14,21 +13,20 @@ import type {
 
 export const fetchMe = (): Promise<MeResponse> => apiFetch('/api/me')
 
-export const fetchSiemConfig = (): Promise<SiemConfig> => apiFetch('/api/siem-config')
+export const fetchSiemConfig = (): Promise<SiemConfig> =>
+  apiFetch('/api/siem-config').then((r: any) => r.config)
 export const saveSiemConfig = (c: SiemConfig): Promise<void> =>
-  apiFetch('/api/siem-config', { method: 'POST', body: JSON.stringify(c) })
+  apiFetch('/api/siem-config', { method: 'PUT', body: JSON.stringify({ config: c }) })
 export const uploadSiemCert = (file: File): Promise<{ path: string }> => {
   const form = new FormData()
   form.append('file', file, file.name)
   return apiFetch('/api/siem-cert', { method: 'POST', body: form, headers: {} })
 }
 
-export const fetchAuthConfig = (): Promise<AuthConfig> => apiFetch('/api/auth-config')
+export const fetchAuthConfig = (): Promise<AuthConfig> =>
+  apiFetch('/api/auth-config').then((r: any) => r.config)
 export const saveAuthConfig = (c: AuthConfig): Promise<void> =>
-  apiFetch('/api/auth-config', { method: 'POST', body: JSON.stringify(c) })
-export const fetchAuthMapping = (): Promise<AuthMapping> => apiFetch('/api/auth-mapping')
-export const saveAuthMapping = (m: AuthMapping): Promise<void> =>
-  apiFetch('/api/auth-mapping', { method: 'POST', body: JSON.stringify(m) })
+  apiFetch('/api/auth-config', { method: 'PUT', body: JSON.stringify({ config: c }) })
 
 export const fetchUsers = (): Promise<UserInfo[]> => apiFetch('/api/users')
 export const upsertUser = (u: any): Promise<void> =>

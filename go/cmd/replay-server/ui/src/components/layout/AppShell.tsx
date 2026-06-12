@@ -5,6 +5,9 @@ import { fetchMe } from '@/api/config'
 import { fetchApprovals } from '@/api/approvals'
 import { cn } from '@/lib/utils'
 import { User, LogOut, Sun, Moon } from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 
 function useTheme() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -37,6 +40,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, toggle: toggleTheme } = useTheme()
 
   const pendingCount = (apprs || []).filter(r => r.status === 'pending').length
+  const [showHelp, setShowHelp] = useState(false)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.key === '?') setShowHelp(v => !v)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [])
 
   return (
     <div className="flex flex-col min-h-screen bg-bg text-text font-sans">
@@ -94,6 +108,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="h-4 w-px bg-border-mid" />
 
+          <button
+            onClick={() => setShowHelp(true)}
+            title="Keyboard shortcuts"
+            className="flex items-center justify-center w-7 h-7 border border-border rounded hover:border-border-mid hover:text-text-sub transition-colors font-bold text-[13px]"
+          >?</button>
+
+          <div className="h-4 w-px bg-border-mid" />
+
           {me && (
             <div className="flex items-center gap-2 text-text-sub font-mono">
               <User size={14} className="text-text-dim" />
@@ -109,6 +131,49 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <main className="flex-1 overflow-hidden bg-bg">{children}</main>
+
+      <Dialog open={showHelp} onOpenChange={setShowHelp}>
+        <DialogContent className="max-w-md bg-surface border-border text-text">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Keyboard Shortcuts</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2 text-[13px]">
+            <Section title="Player">
+              <KbdRow keys={['Space']}      desc="Play / pause" />
+              <KbdRow keys={['←']}          desc="Seek back 5 seconds" />
+              <KbdRow keys={['→']}          desc="Seek forward 5 seconds" />
+            </Section>
+            <Section title="Session list">
+              <KbdRow keys={['↑', '↓']}    desc="Navigate sessions" />
+            </Section>
+            <Section title="General">
+              <KbdRow keys={['?']}          desc="Show this help" />
+            </Section>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] font-bold text-text-dim uppercase tracking-wider mb-2">{title}</div>
+      <div className="space-y-1.5">{children}</div>
+    </div>
+  )
+}
+
+function KbdRow({ keys, desc }: { keys: string[]; desc: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex gap-1 shrink-0">
+        {keys.map(k => (
+          <kbd key={k} className="px-1.5 py-0.5 rounded-[3px] bg-card border border-border font-mono text-[11px] text-text-sub">{k}</kbd>
+        ))}
+      </div>
+      <span className="text-text-sub">{desc}</span>
     </div>
   )
 }

@@ -22,11 +22,18 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 describe('SiemTab', () => {
   it('renders siem configuration fields', async () => {
-    vi.mocked(api.fetchSiemConfig).mockResolvedValue({ type: 'splunk', url: 'http://splunk:8088', token: 'secret' })
+    vi.mocked(api.fetchSiemConfig).mockResolvedValue({
+      enabled: true,
+      transport: 'https',
+      format: 'json',
+      https: { url: 'http://splunk:8088', token: 'secret', tls: { ca: '', cert: '', key: '' } },
+      syslog: { addr: '', protocol: 'udp', tls: { ca: '', cert: '', key: '' } },
+      replay_url_base: '',
+    })
 
     render(<SiemTab />, { wrapper })
 
     expect(await screen.findByDisplayValue('http://splunk:8088')).toBeInTheDocument()
-    expect(screen.getByText('SIEM Integration')).toBeInTheDocument()
+    expect(screen.getByText('SIEM Forwarding')).toBeInTheDocument()
   })
 })

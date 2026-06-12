@@ -1,20 +1,44 @@
+export interface SiemTLSCfg {
+  ca: string
+  cert: string
+  key: string
+}
+
 export interface SiemConfig {
-  type: 'splunk' | 'kafka' | 'webhook' | 'disabled'
-  url?: string
-  token?: string
-  topic?: string
+  enabled: boolean
+  transport: 'https' | 'syslog' | 'stdout'
+  format: 'json' | 'cef' | 'ocsf'
+  https: {
+    url: string
+    token: string
+    tls: SiemTLSCfg
+  }
+  syslog: {
+    addr: string
+    protocol: 'udp' | 'tcp' | 'tcp-tls'
+    tls: SiemTLSCfg
+  }
+  replay_url_base: string
+}
+
+export interface GroupRoleMapping {
+  group: string
+  role: string
 }
 
 export interface AuthConfig {
-  mode: 'local' | 'oidc' | 'proxy'
-  oidc_issuer?: string
-  oidc_client_id?: string
-  proxy_header?: string
-  admin_users?: string[]
-}
-
-export interface AuthMapping {
-  group_role_map: Record<string, string>
+  source: 'local' | 'oidc' | 'proxy'
+  oidc: {
+    issuer: string
+    client_id: string
+    client_secret: string
+  }
+  proxy: {
+    user_header: string
+    groups_header: string
+  }
+  admin_groups: string[]
+  group_mappings: GroupRoleMapping[]
 }
 
 export interface UserInfo {

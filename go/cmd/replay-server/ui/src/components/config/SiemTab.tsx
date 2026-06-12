@@ -9,12 +9,22 @@ import { Mail, ShieldAlert, FileKey, Globe, Zap } from 'lucide-react'
 
 const TRANSPORTS = ['https', 'syslog', 'stdout'] as const
 const FORMATS    = ['json', 'cef', 'ocsf'] as const
+const PROTOCOLS  = ['udp', 'tcp', 'tcp-tls'] as const
+
+const EMPTY_SIEM: SiemConfig = {
+  enabled: false,
+  transport: 'https',
+  format: 'json',
+  https: { url: '', token: '', tls: { ca: '', cert: '', key: '' } },
+  syslog: { addr: '', protocol: 'udp', tls: { ca: '', cert: '', key: '' } },
+  replay_url_base: '',
+}
 
 export function SiemTab() {
   const qc = useQueryClient()
   const { data, isPending } = useQuery({ queryKey: ['siem-config'], queryFn: fetchSiemConfig })
   const [cfg, setCfg] = useState<SiemConfig | null>(null)
-  const current: any = cfg ?? data ?? { enabled: false, transport: 'https', format: 'json' }
+  const current: SiemConfig = cfg ?? data ?? EMPTY_SIEM
 
   const save = useMutation({
     mutationFn: saveSiemConfig,
@@ -23,9 +33,19 @@ export function SiemTab() {
 
   const certUpload = useMutation({ mutationFn: uploadSiemCert })
 
-  const set = (patch: any) => setCfg({ ...current, ...patch })
+  const set = (patch: Partial<SiemConfig>) => setCfg({ ...current, ...patch })
+  const setHttps = (patch: Partial<SiemConfig['https']>) =>
+    set({ https: { ...current.https, ...patch } })
+  const setHttpsTls = (patch: Partial<SiemConfig['https']['tls']>) =>
+    setHttps({ tls: { ...current.https.tls, ...patch } })
+  const setSyslog = (patch: Partial<SiemConfig['syslog']>) =>
+    set({ syslog: { ...current.syslog, ...patch } })
+  const setSyslogTls = (patch: Partial<SiemConfig['syslog']['tls']>) =>
+    setSyslog({ tls: { ...current.syslog.tls, ...patch } })
 
   if (isPending) return <div className="text-text-dim font-mono text-[13px]">Loading SIEM config…</div>
+
+  const transport = current.transport || 'https'
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto animate-in fade-in duration-200">
@@ -62,8 +82,8 @@ export function SiemTab() {
                 <div className="space-y-1.5 px-1">
                   <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Transport</label>
                   <select
-                    value={current.transport || 'https'}
-                    onChange={e => set({ transport: e.target.value })}
+                    value={transport}
+                    onChange={e => set({ transport: e.target.value as SiemConfig['transport'] })}
                     className="block w-full rounded-[5px] border border-border bg-card px-3 h-10 text-[13px] outline-none focus:border-green"
                   >
                     {TRANSPORTS.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
@@ -73,7 +93,7 @@ export function SiemTab() {
                   <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Format</label>
                   <select
                     value={current.format || 'json'}
-                    onChange={e => set({ format: e.target.value })}
+                    onChange={e => set({ format: e.target.value as SiemConfig['format'] })}
                     className="block w-full rounded-[5px] border border-border bg-card px-3 h-10 text-[13px] outline-none focus:border-green"
                   >
                     {FORMATS.map(f => <option key={f} value={f}>{f.toUpperCase()}</option>)}
@@ -81,67 +101,113 @@ export function SiemTab() {
                 </div>
               </div>
 
-              {current.transport !== 'stdout' && (
-                <div className="space-y-1.5 px-1">
-                  <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">{current.transport === 'syslog' ? 'Host:Port' : 'Endpoint URL'}</label>
-                  <div className="relative">
-                     <Globe className="absolute left-3 top-2.5 text-text-dim" size={14} />
-                     <Input
-                      value={current.url ?? ''}
-                      onChange={e => set({ url: e.target.value })}
-                      placeholder={current.transport === 'syslog' ? 'syslog.example.com:514' : 'https://siem.example.com:8088/events'}
-                      className="bg-card border-border text-text h-10 pl-9 focus:border-green font-mono text-[12px]"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {current.transport !== 'stdout' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {transport === 'https' && (
+                <>
                   <div className="space-y-1.5 px-1">
-                    <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Auth Token</label>
+                    <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Endpoint URL</label>
                     <div className="relative">
-                      <Zap className="absolute left-3 top-2.5 text-text-dim" size={14} />
+                      <Globe className="absolute left-3 top-2.5 text-text-dim" size={14} />
                       <Input
-                        type="password"
-                        value={current.token ?? ''}
-                        onChange={e => set({ token: e.target.value })}
-                        placeholder="Bearer / Splunk HEC token"
+                        value={current.https.url ?? ''}
+                        onChange={e => setHttps({ url: e.target.value })}
+                        placeholder="https://siem.example.com:8088/events"
                         className="bg-card border-border text-text h-10 pl-9 focus:border-green font-mono text-[12px]"
                       />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-1.5 px-1">
+                      <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Auth Token</label>
+                      <div className="relative">
+                        <Zap className="absolute left-3 top-2.5 text-text-dim" size={14} />
+                        <Input
+                          type="password"
+                          value={current.https.token ?? ''}
+                          onChange={e => setHttps({ token: e.target.value })}
+                          placeholder="Bearer / Splunk HEC token"
+                          className="bg-card border-border text-text h-10 pl-9 focus:border-green font-mono text-[12px]"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 px-1">
+                      <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Replay Web App URL</label>
+                      <Input
+                        value={current.replay_url_base ?? ''}
+                        onChange={e => set({ replay_url_base: e.target.value })}
+                        placeholder="https://replay.example.com"
+                        className="bg-card border-border text-text h-10 focus:border-green font-mono text-[12px]"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-4 pt-4 border-t border-border/50">
+                    <h3 className="text-[12px] font-bold text-text uppercase tracking-widest flex items-center gap-2">
+                      <FileKey size={14} className="text-blue" /> mTLS Certificates
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <CertField label="CA Certificate"     value={current.https.tls.ca   ?? ''} onChange={v => setHttpsTls({ ca:   v })} onUpload={certUpload} />
+                      <CertField label="Client Certificate" value={current.https.tls.cert ?? ''} onChange={v => setHttpsTls({ cert: v })} onUpload={certUpload} />
+                      <CertField label="Client Private Key" value={current.https.tls.key  ?? ''} onChange={v => setHttpsTls({ key:  v })} onUpload={certUpload} />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {transport === 'syslog' && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5 px-1">
+                      <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Host:Port</label>
+                      <div className="relative">
+                        <Globe className="absolute left-3 top-2.5 text-text-dim" size={14} />
+                        <Input
+                          value={current.syslog.addr ?? ''}
+                          onChange={e => setSyslog({ addr: e.target.value })}
+                          placeholder="syslog.example.com:514"
+                          className="bg-card border-border text-text h-10 pl-9 focus:border-green font-mono text-[12px]"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 px-1">
+                      <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Protocol</label>
+                      <select
+                        value={current.syslog.protocol || 'udp'}
+                        onChange={e => setSyslog({ protocol: e.target.value as SiemConfig['syslog']['protocol'] })}
+                        className="block w-full rounded-[5px] border border-border bg-card px-3 h-10 text-[13px] outline-none focus:border-green"
+                      >
+                        {PROTOCOLS.map(p => (
+                          <option key={p} value={p}>{p.toUpperCase()}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                   <div className="space-y-1.5 px-1">
                     <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Replay Web App URL</label>
                     <Input
-                      value={current.replay_url ?? ''}
-                      onChange={e => set({ replay_url: e.target.value })}
+                      value={current.replay_url_base ?? ''}
+                      onChange={e => set({ replay_url_base: e.target.value })}
                       placeholder="https://replay.example.com"
                       className="bg-card border-border text-text h-10 focus:border-green font-mono text-[12px]"
                     />
                   </div>
-                </div>
+                  {current.syslog.protocol === 'tcp-tls' && (
+                    <div className="space-y-4 pt-4 border-t border-border/50 animate-in slide-in-from-top-2 duration-200">
+                      <h3 className="text-[12px] font-bold text-text uppercase tracking-widest flex items-center gap-2">
+                        <FileKey size={14} className="text-blue" /> mTLS Certificates
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <CertField label="CA Certificate"     value={current.syslog.tls.ca   ?? ''} onChange={v => setSyslogTls({ ca:   v })} onUpload={certUpload} />
+                        <CertField label="Client Certificate" value={current.syslog.tls.cert ?? ''} onChange={v => setSyslogTls({ cert: v })} onUpload={certUpload} />
+                        <CertField label="Client Private Key" value={current.syslog.tls.key  ?? ''} onChange={v => setSyslogTls({ key:  v })} onUpload={certUpload} />
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
-              {current.transport !== 'stdout' && (
-              <div className="space-y-4 pt-4 border-t border-border/50">
-                <h3 className="text-[12px] font-bold text-text uppercase tracking-widest flex items-center gap-2">
-                   <FileKey size={14} className="text-blue" /> mTLS & Certificates
-                </h3>
-                {current.transport === 'syslog' ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <CertField label="CA Certificate"     value={current.syslog_ca   ?? ''} onChange={v => set({ syslog_ca:   v })} onUpload={certUpload} />
-                    <CertField label="Client Certificate" value={current.syslog_cert ?? ''} onChange={v => set({ syslog_cert: v })} onUpload={certUpload} />
-                    <CertField label="Client Private Key" value={current.syslog_key  ?? ''} onChange={v => set({ syslog_key:  v })} onUpload={certUpload} />
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <CertField label="CA Certificate"     value={current.https_ca   ?? ''} onChange={v => set({ https_ca:   v })} onUpload={certUpload} />
-                    <CertField label="Client Certificate" value={current.https_cert ?? ''} onChange={v => set({ https_cert: v })} onUpload={certUpload} />
-                    <CertField label="Client Private Key" value={current.https_key  ?? ''} onChange={v => set({ https_key:  v })} onUpload={certUpload} />
-                  </div>
-                )}
-              </div>
+              {transport === 'stdout' && (
+                <div className="p-4 rounded-[5px] bg-card border border-border text-[13px] text-text-sub">
+                  Session events are written to the log-server's stdout in the selected format. No network configuration needed.
+                </div>
               )}
             </div>
           )}
