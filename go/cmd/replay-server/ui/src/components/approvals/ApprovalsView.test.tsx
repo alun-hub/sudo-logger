@@ -23,7 +23,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 describe('ApprovalsView', () => {
   it('renders pending approvals', async () => {
     vi.mocked(api.fetchApprovals).mockResolvedValue([
-      { id: '1', user: 'alice', host: 'host1', command: 'ls', status: 'pending', requested_at: Math.floor(Date.now() / 1000) }
+      { id: '1', user: 'alice', host: 'host1', command: 'ls', status: 'pending', submitted_at: new Date().toISOString() }
     ])
 
     render(<ApprovalsView />, { wrapper })

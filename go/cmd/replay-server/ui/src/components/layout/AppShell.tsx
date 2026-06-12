@@ -34,12 +34,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: apprs } = useQuery({
     queryKey: ['approvals'],
     queryFn: fetchApprovals,
-    refetchInterval: 15_000
+    refetchInterval: 5_000,
   })
   const location = useLocation()
   const { theme, toggle: toggleTheme } = useTheme()
 
-  const pendingCount = (apprs || []).filter(r => r.status === 'pending').length
+  const pendingCount = (apprs || []).filter(r => !r.status || r.status === 'pending').length
   const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
