@@ -53,14 +53,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <div className="flex flex-col min-h-screen bg-bg text-text font-sans">
-      <header className="border-b border-border bg-surface flex items-center justify-between px-4 h-[44px] shrink-0">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <img src="/logo-icon-72.svg" alt="sudo-logger" className="h-5 w-5" />
-            <span className="font-medium text-[15px] text-white tracking-tight">sudo-replay</span>
+    <div className="flex flex-col h-screen bg-bg text-text font-sans overflow-hidden">
+      <header className="border-b border-border bg-[#09090f] flex items-center justify-between px-4 h-[48px] shrink-0 z-50">
+        <div className="flex items-center gap-8">
+          <div className="flex items-center gap-2.5">
+            <img src="/logo-icon-72.svg" alt="sudo-logger" className="h-6 w-6" />
+            <span className="font-bold text-[16px] text-white tracking-tight uppercase">sudo-replay</span>
           </div>
-          <nav className="flex gap-1">
+          <nav className="flex gap-2">
             {tabs.map(t => {
               const isActive = t.to === '/' ? location.pathname === '/' : location.pathname.startsWith(t.to)
               return (
@@ -68,15 +68,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={t.to}
                   to={t.to}
                   className={cn(
-                    'px-3 py-1 text-[13px] rounded transition-colors font-medium border border-transparent flex items-center gap-2',
+                    'px-4 py-1.5 text-[13px] rounded-[4px] transition-all font-semibold border-b-2 border-transparent hover:text-white',
                     isActive
-                      ? 'bg-green-dim text-green border-green/50'
-                      : 'text-text-dim hover:text-text-sub hover:bg-card-hover',
+                      ? 'text-green border-green bg-green/5'
+                      : 'text-text-dim hover:bg-card-hover',
                   )}
                 >
                   {t.label}
                   {t.label === 'Approvals' && pendingCount > 0 && (
-                    <span className="bg-red text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 animate-pulse min-w-[18px] text-center">
+                    <span className="ml-2 bg-red text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 animate-pulse min-w-[18px] text-center">
                        {pendingCount}
                     </span>
                   )}
@@ -85,18 +85,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
         </div>
-        <div className="flex items-center gap-4 text-xs text-text-dim">
-          <label className="flex items-center gap-1.5 cursor-pointer hover:text-text-sub transition-colors">
-            <input
-              type="checkbox"
-              className="accent-green cursor-pointer"
-              defaultChecked={localStorage.getItem('sudo-replay-autoplay') !== 'false'}
-              onChange={e => localStorage.setItem('sudo-replay-autoplay', String(e.target.checked))}
-            />
-            autoplay
+        <div className="flex items-center gap-5 text-xs text-text-dim">
+          <label className="flex items-center gap-2 cursor-pointer hover:text-green transition-colors font-medium">
+            <div className="relative">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                defaultChecked={localStorage.getItem('sudo-replay-autoplay') !== 'false'}
+                onChange={e => localStorage.setItem('sudo-replay-autoplay', String(e.target.checked))}
+              />
+              <div className="w-8 h-4 bg-card rounded-full border border-border peer-checked:bg-green peer-checked:border-green transition-colors"></div>
+              <div className="absolute left-[2px] top-[2px] w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-4"></div>
+            </div>
+            <span className="peer-checked:text-green flex items-center gap-1">
+               {localStorage.getItem('sudo-replay-autoplay') !== 'false' && <span className="w-1.5 h-1.5 bg-green rounded-full animate-pulse" />}
+               autoplay
+            </span>
           </label>
 
-          <div className="h-4 w-px bg-border-mid" />
+          <div className="h-5 w-px bg-border/50" />
 
           <button
             onClick={toggleTheme}

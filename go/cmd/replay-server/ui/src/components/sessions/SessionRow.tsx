@@ -32,55 +32,55 @@ export function SessionRow({ session: s, selected, onClick }: Props) {
     >
       <div className="flex items-center justify-between gap-2 w-full">
         <div className="flex items-center gap-1.5 overflow-hidden">
-          <span className={cn("text-sm font-semibold font-mono truncate", selected ? "text-green" : "text-text")}>
+          <span className={cn("text-[13.5px] font-bold font-mono truncate tracking-tight", selected ? "text-green" : "text-text")}>
             {s.user}@{s.host}
           </span>
           <span className={cn(
-            "text-[10px] px-1.5 py-[1px] rounded border font-medium shrink-0",
+            "text-[9px] px-1.5 py-[0.5px] rounded-[3px] border font-black uppercase tracking-tighter shrink-0",
             s.runas === 'root'
-              ? "text-text-sub border-border bg-card"
-              : "text-blue border-blue/30 bg-blue/10"
+              ? "text-text-dim border-border bg-card/50"
+              : "text-blue border-blue/40 bg-blue/10"
           )}>
-            -- {isEbpfPkexec ? 'pkexec' : s.runas}
+            → {isEbpfPkexec ? 'pkexec' : s.runas}
           </span>
         </div>
-        <RiskBadge level={s.risk_level} />
+        <RiskBadge level={s.risk_level} score={s.risk_score} />
       </div>
 
-      <div className="text-[13px] text-text-sub font-mono truncate mt-1 w-full text-left">
+      <div className="text-[12.5px] text-text-sub font-mono truncate mt-1.5 w-full text-left font-medium">
         {s.command}
       </div>
 
-      <div className="text-[11px] text-text-dim font-mono truncate mt-0.5 w-full text-left">
+      <div className="text-[10.5px] text-text-dim font-mono truncate mt-0.5 w-full text-left opacity-70">
         {isDbusPolkit ? `caller: ${s.caller_process}` : (s.cwd || s.tty || 'no tty')}
       </div>
 
-      <div className="flex items-center justify-between w-full mt-1.5">
-        <span className="text-[11px] text-text-sub font-sans">
-          {fmtDate(s.start_time)}
-        </span>
+      <div className="flex items-center justify-between w-full mt-2.5">
+        <div className="flex items-center gap-1.5 text-[10px] text-text-dim/80 font-mono uppercase tracking-widest">
+           {fmtDate(s.start_time)}
+        </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
           {s.in_progress && (
-            <span className="text-[11px] text-[#4caf50] bg-[#4caf50]/10 border border-[#4caf50]/30 px-1.5 py-[1px] rounded font-sans flex items-center">
+            <span className="text-[9px] text-[#4caf50] bg-[#4caf50]/10 border border-[#4caf50]/30 px-1.5 py-[0.5px] rounded-[3px] font-black uppercase tracking-widest flex items-center">
               <span className="mr-1 animate-pulse">●</span> live
             </span>
           )}
-          {s.network_outage && (
-            <span className="text-[11px] text-[#e67e00] bg-[#e67e00]/10 border border-[#e67e00]/30 px-1.5 py-[1px] rounded font-sans">
-              ⏱ network outage
+          {s.incomplete && (
+            <span className="text-[9px] text-red bg-red/10 border border-red/30 px-1.5 py-[0.5px] rounded-[3px] font-black uppercase tracking-widest flex items-center">
+              ⚠ incomplete
             </span>
           )}
-          {isMissingPlugin && (
-            <span className="text-[11px] text-red bg-red/10 border border-red/30 px-1.5 py-[1px] rounded font-semibold font-sans">
-              ⚠ no plugin
+          {s.network_outage && (
+            <span className="text-[9px] text-[#e67e00] bg-[#e67e00]/10 border border-[#e67e00]/30 px-1.5 py-[0.5px] rounded-[3px] font-black uppercase tracking-widest">
+              ⏱ outage
             </span>
           )}
           <span className={cn(
-            "text-[11px] px-1.5 py-[1px] rounded border font-sans",
+            "text-[10px] px-1.5 py-[0.5px] rounded-[3px] border font-mono font-bold",
             selected
-              ? "text-green border-green-dim bg-transparent"
-              : "text-blue border-border bg-card"
+              ? "text-green border-green-dim bg-green/5"
+              : "text-blue border-border bg-card/30"
           )}>
             {fmtDuration(s.duration)}
           </span>

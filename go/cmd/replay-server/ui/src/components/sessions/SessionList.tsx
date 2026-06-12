@@ -67,28 +67,28 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
   }, [sessions, selectedTsid, onSelect])
 
   return (
-    <div className="flex flex-col h-full border-r border-border w-[320px] shrink-0 bg-surface">
-      <div className="p-2.5 border-b border-border flex flex-col gap-2">
-        <div className="relative">
-          <svg className="absolute left-3 top-[8px] text-text-dim" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <div className="flex flex-col h-full border-r border-border w-[380px] shrink-0 bg-[#09090f] z-40 shadow-xl shadow-black/50">
+      <div className="p-3 border-b border-border bg-surface/30 flex flex-col gap-3">
+        <div className="relative group">
+          <svg className="absolute left-3 top-[10px] text-text-dim group-focus-within:text-green transition-colors" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
           <Input
-            placeholder="Search user host command — space separated AND"
+            placeholder="Search sessions... ( / )"
             id="global-search"
             value={q}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
-            className="w-full h-[32px] bg-card border-border text-text text-[13px] pl-9 rounded-[5px] focus:border-green placeholder:text-text-dim"
+            className="w-full h-[36px] bg-[#12121a] border-border text-text text-[13px] pl-10 rounded-[6px] focus:ring-1 focus:ring-green/50 focus:border-green placeholder:text-text-dim/60 transition-all"
           />
         </div>
 
-        <div className="flex gap-1">
+        <div className="flex gap-1.5">
           {['Date ↓', 'User', 'Host', 'Dur', 'Risk'].map(s => (
             <button
               key={s}
               onClick={() => setSort(s)}
               className={cn(
-                "flex-1 text-[11px] font-medium py-1 rounded-[5px] border transition-colors",
+                "flex-1 text-[11px] font-bold py-1.5 rounded-[4px] border uppercase tracking-wider transition-all",
                 sort === s
-                  ? "bg-green-dim border-green text-green"
+                  ? "bg-green border-green text-black shadow-[0_0_10px_rgba(0,232,122,0.2)]"
                   : "bg-transparent border-border text-text-dim hover:border-border-mid hover:text-text-sub"
               )}
             >
@@ -97,23 +97,28 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
           ))}
         </div>
 
-        <div className="flex items-center gap-1">
-          <Input
-            type="date"
-            value={from}
-            onChange={e => setFrom(e.target.value)}
-            className="h-[28px] text-[11px] bg-card border-border text-text-sub flex-1 rounded-[5px] outline-none"
-          />
-          <span className="text-text-dim text-[11px] px-1">→</span>
-          <Input
-            type="date"
-            value={to}
-            onChange={e => setTo(e.target.value)}
-            className="h-[28px] text-[11px] bg-card border-border text-text-sub flex-1 rounded-[5px] outline-none"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+             <Input
+               type="date"
+               value={from}
+               onChange={e => setFrom(e.target.value)}
+               className="h-[30px] text-[11px] bg-[#12121a] border-border text-text-sub w-full rounded-[4px] outline-none px-2 focus:border-green transition-colors"
+             />
+          </div>
+          <span className="text-text-dim text-[11px] font-bold">→</span>
+          <div className="relative flex-1">
+             <Input
+               type="date"
+               value={to}
+               onChange={e => setTo(e.target.value)}
+               className="h-[30px] text-[11px] bg-[#12121a] border-border text-text-sub w-full rounded-[4px] outline-none px-2 focus:border-green transition-colors"
+             />
+          </div>
           <button
             onClick={() => { setFrom(''); setTo('') }}
-            className="text-text-dim hover:text-red px-2 text-[14px]"
+            title="Clear filters"
+            className="w-[30px] h-[30px] flex items-center justify-center rounded-[4px] bg-card/50 border border-border text-text-dim hover:text-red hover:border-red/50 transition-colors shrink-0"
           >×</button>
         </div>
       </div>

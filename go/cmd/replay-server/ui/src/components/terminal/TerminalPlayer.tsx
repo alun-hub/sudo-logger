@@ -178,46 +178,89 @@ export function TerminalPlayer({ session }: Props) {
   const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
 
   return (
-    <div className="flex flex-col h-full bg-bg">
-      {/* Top Session Header */}
-      <div className="h-[44px] flex items-center px-4 border-b border-border bg-surface shrink-0 text-[13px] font-mono text-text">
-        <span className="text-green mr-2">{session.user}@{session.host}</span>
-        <span className="text-text-dim mr-2">—</span>
-        <span className="text-text-sub mr-2">{session.runas}</span>
-        <span className="text-text-dim mr-2">—</span>
-        <span className="truncate">{session.command}</span>
+    <div className="flex flex-col h-full bg-[#09090f] overflow-hidden relative">
+      {/* Detailed Session Header */}
+      <div className="bg-[#0e0e15] border-b border-border p-4 space-y-4 shrink-0 z-30 shadow-md shadow-black/30">
+        {/* Row 1: Primary Identity */}
+        <div className="flex items-center justify-center gap-x-8 text-[11px] font-black uppercase tracking-[0.15em]">
+           <div className="flex gap-2 items-baseline">
+              <span className="text-green/60">user</span>
+              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.user}</span>
+           </div>
+           <div className="flex gap-2 items-baseline">
+              <span className="text-green/60">host</span>
+              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.host}</span>
+           </div>
+           <div className="flex gap-2 items-baseline">
+              <span className="text-green/60">runas</span>
+              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.runas}</span>
+           </div>
+           <div className="flex gap-2 items-baseline">
+              <span className="text-green/60">cmd</span>
+              <span className="text-white text-[13px] tracking-tight lowercase font-mono">{session.command}</span>
+           </div>
+        </div>
+
+        {/* Row 2: Incomplete Banner (Conditional) */}
+        {session.incomplete && (
+          <div className="max-w-4xl mx-auto py-1 px-4 bg-red-950/40 border border-red-500/30 rounded-[4px] flex items-center justify-center gap-3 text-[11px] text-red-400 font-bold uppercase tracking-widest animate-pulse">
+             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+             Session incomplete — agent was killed or crashed before session_end. Recording may be truncated.
+          </div>
+        )}
+
+        {/* Row 3: Risk & Reasons */}
+        <div className="flex flex-col items-center gap-1">
+           <div className="flex items-center gap-3">
+              <RiskBadge level={session.risk_level} score={session.risk_score} className="scale-110" />
+              <span className="text-text-dim text-[12px] font-medium tracking-tight">
+                 {session.risk_reasons?.join(' — ') || 'No significant risk anomalies detected'}
+              </span>
+           </div>
+           <div className="flex items-center gap-6 text-[10px] text-text-dim/60 font-mono mt-1 uppercase tracking-widest">
+              <div className="flex gap-2"><span>bin</span> <span className="text-text-sub lowercase">{session.bin || 'unknown'}</span></div>
+              <div className="flex gap-2"><span>cwd</span> <span className="text-text-sub lowercase">{session.cwd || '/'}</span></div>
+              {session.flags && <div className="flex gap-2"><span>flags</span> <span className="text-text-sub lowercase">{session.flags}</span></div>}
+           </div>
+        </div>
       </div>
 
       {/* Terminal Viewport */}
-      <div ref={containerRef} className="flex-1 overflow-hidden p-2.5" />
+      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center p-6 pb-24">
+         <div className="w-full max-w-[1200px] h-full shadow-2xl shadow-black/80 border border-border/20 rounded-lg overflow-hidden bg-black">
+            <div ref={containerRef} className="w-full h-full p-2" />
+         </div>
+      </div>
 
-      {/* Controls Bar */}
-      <div className="flex items-center gap-[10px] px-4 py-2.5 bg-surface border-t border-border shrink-0">
+      {/* Controls Bar - Fixed at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 z-40 bg-surface/95 backdrop-blur-md border-t border-border px-6 py-3 flex items-center gap-4 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
         <button
           onClick={restart}
           disabled={loading || events.length === 0}
-          className="w-[30px] h-[30px] flex items-center justify-center rounded-[5px] bg-card border border-border text-text-sub hover:bg-card-hover hover:text-text disabled:opacity-35 disabled:cursor-not-allowed transition-colors shrink-0"
+          title="Restart (R)"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-card border border-border text-text-dim hover:text-white hover:border-border-mid transition-all shrink-0"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
         </button>
 
         <button
           onClick={playing ? pause : play}
           disabled={loading || events.length === 0}
-          className="w-[34px] h-[30px] flex items-center justify-center rounded-[5px] bg-green-dim border border-green text-green hover:bg-green/25 disabled:opacity-35 disabled:cursor-not-allowed transition-colors shrink-0"
+          title="Play/Pause (Space)"
+          className="w-11 h-9 flex items-center justify-center rounded-md bg-green border border-green text-black hover:bg-green/90 transition-all shrink-0 shadow-[0_0_15px_rgba(0,232,122,0.3)]"
         >
           {playing ? (
-             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
           ) : (
-             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           )}
         </button>
 
-        <div className="text-[12px] text-green min-w-[36px] text-center font-mono shrink-0">
+        <div className="text-[13px] text-green font-mono font-bold min-w-[50px] shrink-0">
           {fmtDuration(elapsed)}
         </div>
 
-        <div className="flex-1 flex items-center px-2">
+        <div className="flex-1 group">
           <input
             type="range"
             min={0}
@@ -226,33 +269,35 @@ export function TerminalPlayer({ session }: Props) {
             value={elapsed}
             onChange={e => seek(Number(e.target.value))}
             disabled={loading || events.length === 0}
-            className="w-full h-[3px] rounded-[2px] outline-none cursor-pointer appearance-none"
+            className="w-full h-1.5 rounded-full outline-none cursor-pointer appearance-none bg-border/30 overflow-hidden"
             style={{
-              background: `linear-gradient(to right, var(--color-green) 0%, var(--color-green) ${fillPct}%, var(--color-border-mid) ${fillPct}%, var(--color-border-mid) 100%)`
+              background: `linear-gradient(to right, var(--color-green) 0%, var(--color-green) ${fillPct}%, #1e1e2e ${fillPct}%, #1e1e2e 100%)`
             }}
           />
         </div>
 
-        <div className="text-[12px] text-text-sub min-w-[36px] text-center font-mono shrink-0">
+        <div className="text-[13px] text-text-dim font-mono min-w-[50px] shrink-0">
           {fmtDuration(totalDuration)}
         </div>
 
-        <select
-          value={speed}
-          onChange={e => {
-            speedRef.current = Number(e.target.value)
-            setSpeed(Number(e.target.value))
-          }}
-          disabled={loading || events.length === 0}
-          className="bg-transparent text-text-sub font-mono text-[12px] h-[30px] outline-none cursor-pointer border-none"
-        >
-          {[0.25, 0.5, 1, 1.5, 2, 4, 8, 16].map(s => (
-            <option key={s} value={s} className="bg-card">{s}x</option>
-          ))}
-        </select>
+        <div className="flex items-center bg-card border border-border rounded-md px-2 h-9 shrink-0">
+           <select
+             value={speed}
+             onChange={e => {
+               speedRef.current = Number(e.target.value)
+               setSpeed(Number(e.target.value))
+             }}
+             disabled={loading || events.length === 0}
+             className="bg-transparent text-text-sub font-mono text-[12px] outline-none cursor-pointer border-none"
+           >
+             {[0.25, 0.5, 1, 1.5, 2, 4, 8, 16].map(s => (
+               <option key={s} value={s} className="bg-[#12121a]">{s}x</option>
+             ))}
+           </select>
+        </div>
 
-        {loading && <span className="text-[12px] text-text-sub ml-2 animate-pulse">Loading...</span>}
+        {loading && <div className="absolute top-[-30px] right-6 px-3 py-1 bg-green/10 border border-green/20 rounded-full text-[10px] text-green font-bold uppercase tracking-widest animate-pulse">Streaming data...</div>}
       </div>
     </div>
   )
-  }
+}
