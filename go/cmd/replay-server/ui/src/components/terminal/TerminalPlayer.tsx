@@ -89,7 +89,12 @@ export function TerminalPlayer({ session }: Props) {
     ) {
       const ev = evs[eventIdxRef.current++]
       if (ev.type === 4 && ev.data) {
-        termRef.current?.write(atob(ev.data))
+        try {
+          const raw = atob(ev.data)
+          const bytes = new Uint8Array(raw.length)
+          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+          termRef.current?.write(bytes)
+        } catch (e) { console.error('Failed to decode event data', e) }
       } else if (ev.type === 'resize' && ev.cols && ev.rows) {
         termRef.current?.resize(ev.cols, ev.rows)
       }
@@ -145,7 +150,12 @@ export function TerminalPlayer({ session }: Props) {
     ) {
       const ev = evs[eventIdxRef.current++]
       if (ev.type === 4 && ev.data) {
-        termRef.current?.write(atob(ev.data))
+        try {
+          const raw = atob(ev.data)
+          const bytes = new Uint8Array(raw.length)
+          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+          termRef.current?.write(bytes)
+        } catch (e) {}
       }
     }
   }, [pause])
@@ -227,9 +237,9 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center p-6 pb-24">
-         <div className="w-full max-w-[1200px] h-full shadow-2xl shadow-black/80 border border-border/20 rounded-lg overflow-hidden bg-black">
-            <div ref={containerRef} className="w-full h-full p-2" />
+      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center bg-black">
+         <div className="w-full h-full p-2.5">
+            <div ref={containerRef} className="w-full h-full" />
          </div>
       </div>
 
