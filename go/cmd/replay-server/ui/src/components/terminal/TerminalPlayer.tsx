@@ -21,10 +21,10 @@ export function TerminalPlayer({ session }: Props) {
       speed: 1.0,
       idleTimeLimit: 2,
       theme: 'asciinema',
-      terminalFontSize: '13px',
+      terminalFontSize: '14px',
       terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       terminalLineHeight: 1.3,
-      fit: 'both',
+      fit: false,
     })
 
     return () => {

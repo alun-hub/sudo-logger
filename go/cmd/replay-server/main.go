@@ -1759,7 +1759,37 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.cast", url.QueryEscape(tsid)))
-	io.Copy(w, rc)
+
+	// Intercept the header line to fix legacy 220x50 dimensions on the fly
+	br := bufio.NewReader(rc)
+	headerLine, err := br.ReadBytes('\n')
+	if err == nil {
+		var hdr map[string]interface{}
+		if jsonErr := json.Unmarshal(headerLine, &hdr); jsonErr == nil {
+			modified := false
+			if width, ok := hdr["width"].(float64); ok && width == 220 {
+				hdr["width"] = 80
+				modified = true
+			}
+			if height, ok := hdr["height"].(float64); ok && height == 50 {
+				hdr["height"] = 24
+				modified = true
+			}
+
+			if modified {
+				fixedHdr, _ := json.Marshal(hdr)
+				w.Write(fixedHdr)
+				w.Write([]byte("\n"))
+			} else {
+				w.Write(headerLine)
+			}
+		} else {
+			w.Write(headerLine)
+		}
+		io.Copy(w, br)
+	} else {
+		w.Write(headerLine)
+	}
 }
 
 // handleAccessLog returns the view audit log as JSON, newest entries first.
