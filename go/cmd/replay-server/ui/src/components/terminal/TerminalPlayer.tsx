@@ -12,6 +12,7 @@ interface Props {
 
 export function TerminalPlayer({ session }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const wrapperRef   = useRef<HTMLDivElement>(null)
   const termRef      = useRef<Terminal | null>(null)
   const rafRef       = useRef<number>(0)
 
@@ -20,6 +21,7 @@ export function TerminalPlayer({ session }: Props) {
   const [playing, setPlaying] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [speed, setSpeed]     = useState(1)
+  const [scale, setScale]     = useState(1)
 
   const playingRef  = useRef(false)
   const elapsedRef  = useRef(0)
@@ -43,7 +45,28 @@ export function TerminalPlayer({ session }: Props) {
     term.open(containerRef.current)
     termRef.current = term
 
+    const updateScale = () => {
+      if (!wrapperRef.current || !containerRef.current) return
+      const pad = 32 // matching p-4 * 2
+      const availW = wrapperRef.current.clientWidth - pad
+      const availH = wrapperRef.current.clientHeight - pad
+      const termW  = containerRef.current.offsetWidth
+      const termH  = containerRef.current.offsetHeight
+
+      if (termW > 0 && termH > 0) {
+        const s = Math.min(availW / termW, availH / termH, 1)
+        setScale(s)
+      }
+    }
+
+    const observer = new ResizeObserver(updateScale)
+    if (wrapperRef.current) observer.observe(wrapperRef.current)
+
+    // Initial scale check after xterm renders
+    setTimeout(updateScale, 50)
+
     return () => {
+      observer.disconnect()
       term.dispose()
     }
   }, [session.tsid, session.cols, session.rows])
@@ -227,9 +250,12 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div className="flex-1 overflow-auto relative flex flex-col items-center justify-center bg-black">
-         <div className="p-4">
-            <div ref={containerRef} className="shadow-[0_0_50px_rgba(0,0,0,0.8)]" />
+      <div ref={wrapperRef} className="flex-1 overflow-hidden relative flex items-center justify-center bg-black p-4">
+         <div
+           className="transition-transform duration-200 ease-out origin-center"
+           style={{ transform: `scale(${scale})` }}
+         >
+            <div ref={containerRef} className="shadow-[0_0_60px_rgba(0,0,0,0.9)] border border-white/5" />
          </div>
       </div>
 
