@@ -8,13 +8,51 @@ interface Props {
   session: SessionInfo
 }
 
+function detectDimensions(castData: string): { cols: number, rows: number } {
+  let cols = 80;
+  let rows = 24;
+
+  // Match CUP (Cursor Position) and HVP (Horizontal and Vertical Position)
+  // e.g. \x1b[24;80H
+  const reCUP = /(?:\\u001b|\\x1b|\x1b)\[(\d+);(\d+)[Hf]/gi;
+  let match;
+  while ((match = reCUP.exec(castData)) !== null) {
+    const r = parseInt(match[1], 10);
+    const c = parseInt(match[2], 10);
+    if (r > rows) rows = r;
+    if (c > cols) cols = c;
+  }
+
+  // Match VPA (Line Position Absolute)
+  const reVPA = /(?:\\u001b|\\x1b|\x1b)\[(\d+)d/gi;
+  while ((match = reVPA.exec(castData)) !== null) {
+    const r = parseInt(match[1], 10);
+    if (r > rows) rows = r;
+  }
+
+  // Match CHA (Cursor Character Absolute)
+  const reCHA = /(?:\\u001b|\\x1b|\x1b)\[(\d+)G/gi;
+  while ((match = reCHA.exec(castData)) !== null) {
+    const c = parseInt(match[1], 10);
+    if (c > cols) cols = c;
+  }
+
+  // Cap at reasonable max bounds so malformed ANSI doesn't crash the browser
+  return {
+    cols: Math.min(cols, 500),
+    rows: Math.min(rows, 150)
+  };
+}
+
 export function TerminalPlayer({ session }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<any>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!containerRef.current) return
+    const el = containerRef.current as HTMLElement | null;
+    if (!el) return;
+
     let blobUrl: string | null = null;
     let isMounted = true;
 
@@ -26,28 +64,16 @@ export function TerminalPlayer({ session }: Props) {
 
         if (!isMounted) return;
 
-        // DYNAMIC SIZING: Mimic legacy SPA and native CLI behavior
-        // Instead of guessing dimensions from ANSI, we calculate how many characters
-        // can physically fit inside the current browser container. This prevents
-        // asciinema-player from word-wrapping (which destroys vi/ncurses) or
-        // scaling the font out of proportion.
-        const rect = containerRef.current!.getBoundingClientRect();
+        // Find the absolute maximum grid size required by the app (vi/ncurses)
+        const { cols, rows } = detectDimensions(text);
 
-        // Approximate character sizes for 14px monospace font
-        const charWidth = 8.4;
-        const charHeight = 18.2; // 14px * 1.3 line-height
-
-        // Subtract a small margin (10px) to ensure no scrollbars appear
-        const dynamicCols = Math.max(80, Math.floor((rect.width - 10) / charWidth));
-        const dynamicRows = Math.max(24, Math.floor((rect.height - 10) / charHeight));
-
-        // Rewrite the header line to inject our calculated true-to-viewport dimensions
+        // Rewrite the asciicast header in-memory
         const lines = text.split('\n');
         if (lines.length > 0 && lines[0].startsWith('{')) {
           try {
             const header = JSON.parse(lines[0]);
-            header.width = dynamicCols;
-            header.height = dynamicRows;
+            header.width = cols;
+            header.height = rows;
             lines[0] = JSON.stringify(header);
           } catch (e) {
             console.error('Failed to parse cast header', e);
@@ -62,15 +88,14 @@ export function TerminalPlayer({ session }: Props) {
           playerRef.current.dispose();
         }
 
-        playerRef.current = AsciinemaPlayer.create(blobUrl, containerRef.current!, {
+        playerRef.current = AsciinemaPlayer.create(blobUrl, el as HTMLElement, {
           autoPlay: localStorage.getItem('sudo-replay-autoplay') !== 'false',
           speed: 1.0,
           idleTimeLimit: 2,
           theme: 'asciinema',
-          terminalFontSize: '14px',
           terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
           terminalLineHeight: 1.3,
-          fit: false, // Turn off automatic scaling! Render 1:1 crisp pixels using our calculated grid.
+          fit: 'both', // Scale the player so the detected grid fits perfectly on screen
         });
       } catch (e: any) {
          if (isMounted) setError(e.message);
@@ -79,20 +104,8 @@ export function TerminalPlayer({ session }: Props) {
 
     initPlayer();
 
-    // Handle window resize by re-initializing the player (simple debounce)
-    let resizeTimer: any;
-    const handleResize = () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        if (isMounted) initPlayer();
-      }, 300);
-    };
-    window.addEventListener('resize', handleResize);
-
     return () => {
       isMounted = false;
-      window.removeEventListener('resize', handleResize);
-      clearTimeout(resizeTimer);
       if (playerRef.current) {
         playerRef.current.dispose()
         playerRef.current = null
@@ -149,11 +162,11 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative bg-black flex items-center justify-center p-4">
+      <div className="flex-1 overflow-hidden relative bg-black p-4">
          {error ? (
-            <div className="text-red-400 font-mono text-sm">{error}</div>
+            <div className="text-red-400 font-mono text-sm p-4">{error}</div>
          ) : (
-            <div ref={containerRef} className="w-full h-full" />
+            <div ref={containerRef} className="absolute inset-0 flex items-center justify-center p-4 w-full h-full" />
          )}
       </div>
     </div>
