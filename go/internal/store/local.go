@@ -1389,6 +1389,65 @@ func localReadEvents(sessDir string) ([]RawEvent, error) {
 	return parseRawEvents(f)
 }
 
+// unescapeJSONString recovers raw bytes from a JSON string literal.
+// It handles standard JSON escapes and \uXXXX unicode escapes in a
+// binary-safe way, treating \u00XX as raw byte 0xXX.
+func unescapeJSONString(raw []byte) []byte {
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return raw
+	}
+	s := raw[1 : len(raw)-1]
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"':
+				out = append(out, '"')
+				i++
+			case '\\':
+				out = append(out, '\\')
+				i++
+			case '/':
+				out = append(out, '/')
+				i++
+			case 'b':
+				out = append(out, '\b')
+				i++
+			case 'f':
+				out = append(out, '\f')
+				i++
+			case 'n':
+				out = append(out, '\n')
+				i++
+			case 'r':
+				out = append(out, '\r')
+				i++
+			case 't':
+				out = append(out, '\t')
+				i++
+			case 'u':
+				if i+5 < len(s) {
+					// Handle \uXXXX. We specifically want to recover bytes from \u00XX.
+					var u uint16
+					if _, err := fmt.Sscanf(string(s[i+2:i+6]), "%04x", &u); err == nil {
+						// For binary integrity, we treat each \uXXXX as a single byte
+						// if it's in the 0-255 range. This reverses our encoder's logic.
+						out = append(out, byte(u))
+						i += 5
+						continue
+					}
+				}
+				out = append(out, '\\')
+			default:
+				out = append(out, '\\')
+			}
+		} else {
+			out = append(out, s[i])
+		}
+	}
+	return out
+}
+
 // parseRawEvents reads asciinema v2 events from r, skipping the header line.
 func parseRawEvents(r io.Reader) ([]RawEvent, error) {
 	scanner := bufio.NewScanner(r)
@@ -1405,36 +1464,25 @@ func parseRawEvents(r io.Reader) ([]RawEvent, error) {
 		if len(line) == 0 || line[0] != '[' {
 			continue
 		}
-		var raw [3]json.RawMessage
-		if json.Unmarshal(line, &raw) != nil {
+		var raw []json.RawMessage
+		if json.Unmarshal(line, &raw) != nil || len(raw) < 3 {
 			continue
 		}
 		var t float64
-		var kind, dataStr string
+		var kind string
 		if json.Unmarshal(raw[0], &t) != nil {
 			continue
 		}
 		if json.Unmarshal(raw[1], &kind) != nil {
 			continue
 		}
-		if json.Unmarshal(raw[2], &dataStr) != nil {
-			continue
-		}
 
-		// Convert UTF-8 string back to raw bytes. json.Unmarshal to string
-		// converts our \u00XX escapes into 2-byte UTF-8 sequences for bytes > 127.
-		// We treat each rune as a byte to restore the original binary stream.
-		runes := []rune(dataStr)
-		data := make([]byte, len(runes))
-		for i, r := range runes {
-			data[i] = byte(r)
-		}
-
+		// Use our binary-safe unescaper to get the data bytes.
+		data := unescapeJSONString(raw[2])
 		events = append(events, RawEvent{T: t, Kind: kind, Data: data})
 	}
 	return events, scanner.Err()
 }
-
 // localLoadRiskCache reads risk.json from sessDir and returns it if the stored
 // rules hash matches rulesHash.  Returns nil on cache miss or mismatch.
 func localLoadRiskCache(sessDir, rulesHash string) *RiskCache {

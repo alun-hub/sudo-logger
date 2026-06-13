@@ -35,9 +35,10 @@ export function TerminalPlayer({ session }: Props) {
     if (!containerRef.current) return
 
     // HEURISTIC: Backend defaults to 220x50 if unknown.
-    // This breaks vi if the real session was smaller.
-    // If we see these suspicious defaults, we let FitAddon decide the grid.
+    // This breaks vi. We use 80x24 as a safer baseline for legacy sessions.
     const hasRealDims = session.cols && session.rows && session.cols !== 220 && session.rows !== 50
+    const cols = hasRealDims ? session.cols : 80
+    const rows = hasRealDims ? session.rows : 24
 
     const term = new Terminal({
       theme: {
@@ -57,8 +58,8 @@ export function TerminalPlayer({ session }: Props) {
       cursorBlink: true,
       convertEol: true,
       lineHeight: 1.3,
-      cols: hasRealDims ? session.cols : undefined,
-      rows: hasRealDims ? session.rows : undefined,
+      cols: cols,
+      rows: rows,
       scrollback: 5000,
     })
 
@@ -69,19 +70,19 @@ export function TerminalPlayer({ session }: Props) {
     termRef.current = term
     fitRef.current  = fit
 
-    // 2. Robust Sizing Logic
+    // 2. Sizing Strategy:
+    // We want the terminal to fill the viewport (FitAddon), BUT we must
+    // respect the grid recorded during the session.
     const syncSize = () => {
       if (!containerRef.current || !termRef.current || !fitRef.current) return
       try {
         fitRef.current.fit()
-        // If we have real dimensions, re-apply them AFTER fit has calculated the base size
-        if (hasRealDims) {
-          termRef.current.resize(session.cols!, session.rows!)
-        }
+        // If it's a legacy session (we guessed 80x24), we MUST force it back
+        // to 80x24 after fit() tried to expand it, otherwise vi breaks.
+        termRef.current.resize(cols!, rows!)
       } catch (e) {}
     }
 
-    // Multiple attempts to handle React view transition timing
     const timers = [
       setTimeout(syncSize, 50),
       setTimeout(syncSize, 250),
@@ -97,7 +98,6 @@ export function TerminalPlayer({ session }: Props) {
       term.dispose()
     }
   }, [session.tsid, session.cols, session.rows])
-
   // 3. Event Loading & Playback Control
   useEffect(() => {
     setLoading(true)

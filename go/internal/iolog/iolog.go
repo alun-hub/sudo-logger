@@ -227,7 +227,9 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 		case '\t':
 			buf.WriteString(`\t`)
 		default:
-			if b < 0x20 || b >= 0x80 {
+			// Escape everything outside the printable ASCII range to ensure
+			// Go's JSON parser (and other parsers) don't try to "fix" UTF-8.
+			if b < 0x20 || b >= 0x7f {
 				fmt.Fprintf(&buf, "\\u00%02x", b)
 			} else {
 				buf.WriteByte(b)
