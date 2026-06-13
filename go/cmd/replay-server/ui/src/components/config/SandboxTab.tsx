@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { BookOpen } from 'lucide-react'
 import { InputDialog } from '@/components/ui/confirm-dialog'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchSandbox, saveSandbox, fetchSandboxTemplates, saveSandboxTemplates } from '@/api/config'
@@ -265,6 +266,14 @@ export function SandboxTab() {
               {status.msg}
             </span>
           )}
+          <a
+            href="/docs/portal.html#yaml-sandbox"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-[12px] text-text-dim hover:text-green transition-colors"
+          >
+            <BookOpen size={13} /> Docs
+          </a>
           <button
             onClick={() => setTmplNameOpen(true)}
             className="h-8 px-3 bg-card border border-border rounded-[4px] text-[12px] text-text-dim hover:border-border-mid hover:text-text transition-colors"

@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { SiemConfig } from '@/types/config'
-import { Mail, ShieldAlert, FileKey, Globe, Zap } from 'lucide-react'
+import { Mail, ShieldAlert, FileKey, Globe, Zap, BookOpen } from 'lucide-react'
 
 const TRANSPORTS = ['https', 'syslog', 'stdout'] as const
 const FORMATS    = ['json', 'cef', 'ocsf'] as const
@@ -56,14 +56,24 @@ export function SiemTab() {
           </h2>
           <p className="text-[12px] text-text-dim">Forward audit logs and session I/O to a central security monitoring platform.</p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => save.mutate(current)}
-          disabled={save.isPending || cfg === null}
-          className="bg-green hover:bg-green/90 text-black font-bold h-8 rounded-[4px] px-6"
-        >
-          {save.isPending ? 'Saving…' : 'Save Config'}
-        </Button>
+        <div className="flex items-center gap-3">
+          <a
+            href="/docs/portal.html#yaml-siem"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-[12px] text-text-dim hover:text-green transition-colors"
+          >
+            <BookOpen size={13} /> Docs
+          </a>
+          <Button
+            size="sm"
+            onClick={() => save.mutate(current)}
+            disabled={save.isPending || cfg === null}
+            className="bg-green hover:bg-green/90 text-black font-bold h-8 rounded-[4px] px-6"
+          >
+            {save.isPending ? 'Saving…' : 'Save Config'}
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

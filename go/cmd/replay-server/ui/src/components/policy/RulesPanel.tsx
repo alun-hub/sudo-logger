@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Plus, Edit2, Trash2, Search } from 'lucide-react'
+import { Plus, Edit2, Trash2, Search, BookOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fetchRules, saveRules, type Rule } from '@/api/policy'
 import { RuleModal } from './RuleModal'
@@ -74,12 +74,22 @@ export function RulesPanel() {
             className="h-9 w-full bg-card border border-border rounded-[5px] pl-9 pr-4 text-[13px] outline-none focus:border-green transition-all"
           />
         </div>
-        <Button
-          onClick={() => setIsAddOpen(true)}
-          className="bg-green hover:bg-green/90 text-black font-bold h-9 rounded-[4px] px-6"
-        >
-          <Plus size={16} className="mr-1.5" /> Add Risk Rule
-        </Button>
+        <div className="flex items-center gap-3">
+          <a
+            href="/docs/portal.html#yaml-risk"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-[12px] text-text-dim hover:text-green transition-colors"
+          >
+            <BookOpen size={13} /> Docs
+          </a>
+          <Button
+            onClick={() => setIsAddOpen(true)}
+            className="bg-green hover:bg-green/90 text-black font-bold h-9 rounded-[4px] px-6"
+          >
+            <Plus size={16} className="mr-1.5" /> Add Risk Rule
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-[5px] border border-border bg-card overflow-hidden shadow-xl">

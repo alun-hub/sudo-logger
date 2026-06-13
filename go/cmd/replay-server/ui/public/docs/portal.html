@@ -1,0 +1,1701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>sudo-logger · Documentation Portal</title>
+<style>
+:root {
+  --bg:        #0d0f11;
+  --surface:   #141618;
+  --card:      #1a1d20;
+  --border:    #2a2d31;
+  --text:      #e8eaed;
+  --text-sub:  #9ba1aa;
+  --text-dim:  #5c6370;
+  --green:     #00e87a;
+  --blue:      #4d9fff;
+  --red:       #ff4d4d;
+  --amber:     #ffb830;
+  --purple:    #c084fc;
+  --sidebar-w: 260px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+  display: flex;
+  min-height: 100vh;
+}
+a { color: var(--green); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+  font-size: 12.5px;
+}
+code {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--blue);
+}
+pre {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  color: var(--text);
+  line-height: 1.55;
+}
+pre code { background: none; border: none; padding: 0; color: inherit; }
+h1 { font-size: 28px; font-weight: 800; color: var(--text); }
+h2 { font-size: 20px; font-weight: 700; color: var(--text); margin-top: 48px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 16px; font-weight: 700; color: var(--text); margin-top: 32px; margin-bottom: 12px; }
+h4 { font-size: 13px; font-weight: 700; color: var(--text-sub); margin-top: 20px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
+p { color: var(--text-sub); margin-bottom: 12px; }
+ul, ol { color: var(--text-sub); padding-left: 20px; margin-bottom: 12px; }
+li { margin-bottom: 4px; }
+strong { color: var(--text); font-weight: 600; }
+
+/* Sidebar */
+nav#sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+  padding: 20px 0;
+  flex-shrink: 0;
+}
+.sidebar-logo {
+  padding: 0 16px 20px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.sidebar-logo span { font-size: 15px; font-weight: 800; color: var(--green); letter-spacing: -0.02em; text-transform: uppercase; }
+.sidebar-logo small { display: block; color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+.nav-group { margin-bottom: 4px; }
+.nav-group-label {
+  padding: 6px 16px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.nav-group a {
+  display: block;
+  padding: 5px 16px 5px 24px;
+  font-size: 12.5px;
+  color: var(--text-sub);
+  border-left: 2px solid transparent;
+  transition: all 0.1s;
+}
+.nav-group a:hover { color: var(--text); background: var(--card); text-decoration: none; border-left-color: var(--border); }
+.nav-group a.active { color: var(--green); border-left-color: var(--green); background: rgba(0,232,122,0.06); }
+
+/* Main content */
+main {
+  flex: 1;
+  min-width: 0;
+  padding: 40px 48px 80px;
+  max-width: 960px;
+}
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px; }
+thead th { background: var(--surface); text-align: left; padding: 9px 12px; color: var(--text-dim); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text-sub); }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: var(--card); }
+td code { font-size: 11.5px; }
+td:first-child { white-space: nowrap; }
+
+/* Flag name cell */
+.flag-name { font-family: monospace; font-weight: 700; color: var(--text); font-size: 12.5px; }
+.flag-default { display: block; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.flag-env { display: inline-block; font-size: 10px; color: var(--amber); border: 1px solid rgba(255,184,48,0.3); border-radius: 3px; padding: 1px 4px; margin-top: 3px; font-family: monospace; }
+
+/* Badges */
+.badge { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.04em; }
+.badge-green  { background: rgba(0,232,122,0.15); color: var(--green); border: 1px solid rgba(0,232,122,0.3); }
+.badge-red    { background: rgba(255,77,77,0.15);  color: var(--red);   border: 1px solid rgba(255,77,77,0.3); }
+.badge-blue   { background: rgba(77,159,255,0.15); color: var(--blue);  border: 1px solid rgba(77,159,255,0.3); }
+.badge-amber  { background: rgba(255,184,48,0.15); color: var(--amber); border: 1px solid rgba(255,184,48,0.3); }
+.badge-purple { background: rgba(192,132,252,0.15); color: var(--purple); border: 1px solid rgba(192,132,252,0.3); }
+.badge-gray   { background: var(--surface); color: var(--text-sub); border: 1px solid var(--border); }
+
+/* Callout boxes */
+.callout { border-radius: 6px; padding: 14px 16px; margin: 20px 0; font-size: 13px; }
+.callout-info    { background: rgba(77,159,255,0.08); border: 1px solid rgba(77,159,255,0.25); }
+.callout-warn    { background: rgba(255,184,48,0.08); border: 1px solid rgba(255,184,48,0.25); }
+.callout-danger  { background: rgba(255,77,77,0.08);  border: 1px solid rgba(255,77,77,0.25); }
+.callout-success { background: rgba(0,232,122,0.08);  border: 1px solid rgba(0,232,122,0.25); }
+.callout-title { font-weight: 700; margin-bottom: 4px; }
+.callout-info .callout-title    { color: var(--blue); }
+.callout-warn .callout-title    { color: var(--amber); }
+.callout-danger .callout-title  { color: var(--red); }
+.callout-success .callout-title { color: var(--green); }
+
+/* Method badges for API table */
+.method { display: inline-block; font-family: monospace; font-size: 10px; font-weight: 800; padding: 2px 5px; border-radius: 3px; min-width: 36px; text-align: center; }
+.method-get    { background: rgba(0,232,122,0.15); color: var(--green); }
+.method-post   { background: rgba(77,159,255,0.15); color: var(--blue); }
+.method-put    { background: rgba(255,184,48,0.15); color: var(--amber); }
+.method-delete { background: rgba(255,77,77,0.15); color: var(--red); }
+
+/* Hero */
+.hero { padding: 0 0 40px; border-bottom: 1px solid var(--border); margin-bottom: 40px; }
+.hero-title { font-size: 32px; font-weight: 800; color: var(--text); letter-spacing: -0.02em; }
+.hero-title span { color: var(--green); }
+.hero-sub { color: var(--text-sub); margin-top: 8px; font-size: 15px; }
+.hero-badges { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Section anchors */
+.section-anchor { display: block; height: 0; }
+
+/* Endpoint path */
+.ep-path { font-family: monospace; font-size: 12.5px; color: var(--text); font-weight: 600; }
+.ep-auth  { font-size: 11px; color: var(--text-dim); }
+
+/* ASCII diagram */
+.ascii { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 20px 24px; font-family: monospace; font-size: 12px; color: var(--text-sub); line-height: 1.5; overflow-x: auto; white-space: pre; }
+
+/* Permission badge list */
+.perm-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.perm-tag { font-family: monospace; font-size: 10.5px; background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 2px 7px; color: var(--text-sub); }
+
+.tag { display: inline-block; font-size: 10px; font-weight: 700; background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════ SIDEBAR ═══════════════════════════════════════════ -->
+<nav id="sidebar">
+  <div class="sidebar-logo">
+    <span>sudo-logger</span>
+    <small>Documentation Portal</small>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Overview</div>
+    <a href="#intro">Introduction</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#components">Components</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Installation</div>
+    <a href="#install-rpm">RPM install</a>
+    <a href="#install-manual">Manual install</a>
+    <a href="#install-verify">Verification</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Configuration</div>
+    <a href="#config-agent">Agent (agent.conf)</a>
+    <a href="#config-server">Log server flags</a>
+    <a href="#config-replay">Replay server flags</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">YAML References</div>
+    <a href="#yaml-risk">Risk rules</a>
+    <a href="#yaml-sandbox">Sandbox policy</a>
+    <a href="#yaml-jit">JIT approval policy</a>
+    <a href="#yaml-siem">SIEM forwarding</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Access Control</div>
+    <a href="#rbac-roles">Roles &amp; permissions</a>
+    <a href="#rbac-auth">Authentication modes</a>
+    <a href="#rbac-blocked">Blocked users</a>
+    <a href="#rbac-whitelist">Whitelisted users</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">API Reference</div>
+    <a href="#api-sessions">Sessions</a>
+    <a href="#api-policy">Policy</a>
+    <a href="#api-config">Config</a>
+    <a href="#api-approvals">Approvals</a>
+    <a href="#api-admin">Admin</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Operations</div>
+    <a href="#metrics">Prometheus metrics</a>
+    <a href="#backup">Backup &amp; rotation</a>
+    <a href="#upgrade">Upgrade procedure</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Security</div>
+    <a href="#security-hardening">Hardening checklist</a>
+    <a href="#security-tls">TLS setup</a>
+    <a href="#security-audit">Auditd integration</a>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-group-label">Troubleshooting</div>
+    <a href="#ts-agent">Agent issues</a>
+    <a href="#ts-server">Log server issues</a>
+    <a href="#ts-replay">Replay server issues</a>
+    <a href="#ts-plugin">Plugin issues</a>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════ CONTENT ═══════════════════════════════════════════ -->
+<main>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-title">sudo-logger <span>Documentation</span></div>
+  <div class="hero-sub">Complete reference for installation, configuration, API usage, and operations.</div>
+  <div class="hero-badges">
+    <span class="badge badge-green">v1.20+</span>
+    <span class="badge badge-blue">Go 1.25+</span>
+    <span class="badge badge-gray">RHEL / Fedora / Rocky</span>
+    <span class="badge badge-gray">sudo 1.9.13+</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ OVERVIEW ══════════════════════════════ -->
+<a class="section-anchor" id="intro"></a>
+<h2>Introduction</h2>
+<p>sudo-logger records every sudo session — terminal I/O, metadata, and risk context — and streams it to a central audit server in real time. Recordings survive agent failures via a freeze-and-buffer mechanism. Sessions are searchable, replayable, and scored against a configurable risk rule set.</p>
+<p>Three core components must be deployed together:</p>
+<ul>
+  <li><strong>Plugin</strong> (<code>plugin.so</code>) — loaded by sudo on every monitored host. Captures I/O and pushes events to the local agent via a Unix socket.</li>
+  <li><strong>Agent</strong> (<code>sudo-logger-agent</code>) — local daemon that buffers and forwards session data to the log server over mTLS. Applies the sandbox policy and freeze-on-disconnect logic.</li>
+  <li><strong>Log server</strong> (<code>sudo-logger-server</code>) — central receiver. Writes sessions to disk (or S3). Manages JIT approvals and SIEM forwarding.</li>
+  <li><strong>Replay server</strong> (<code>sudo-logger-replay</code>) — web UI. Reads sessions from the same storage backend, scores them against risk rules, and provides the management API.</li>
+</ul>
+
+<a class="section-anchor" id="architecture"></a>
+<h2>Architecture</h2>
+<div class="ascii">
+  Monitored host                        Central server (gnarg / k3s)
+  ─────────────────────────────         ─────────────────────────────────────
+                                        ┌─────────────────────────────────┐
+  sudo ──plugin.so──► agent.sock        │  sudo-logger-server  :9876      │
+                         │              │  mTLS listener                  │
+                    agent (Go)          │  ├─ /api/session/*  (ingest)    │
+                    ├─ buffer           │  ├─ /api/approvals  (JIT REST)  │
+                    ├─ freeze/thaw      │  └─ /healthz + /metrics :9877   │
+                    ├─ sandbox BPF      └────────┬────────────────────────┘
+                    └─ HMAC-signed chunks         │ shared filesystem or S3
+                              │   mTLS            │
+                              └──────────────────►│  /var/log/sudoreplay/
+                                                  │
+                                          ┌───────┴────────────────────────┐
+                                          │  sudo-logger-replay  :8080     │
+                                          │  ├─ /api/*  (REST, RBAC)       │
+                                          │  ├─ /metrics                   │
+                                          │  └─ /  (React SPA)             │
+                                          └────────────────────────────────┘
+                                                          │
+                                                     Browser (OIDC / Basic Auth)
+</div>
+
+<p>Sessions are written as a directory tree under <code>logdir</code>: <code>YYYY/MM/DD/&lt;sessionid&gt;/</code>, containing a JSON metadata file and optional binary I/O chunks. The replay server embeds the React SPA and serves it from the same binary.</p>
+
+<a class="section-anchor" id="components"></a>
+<h2>Components</h2>
+<table>
+  <thead><tr><th>Binary / file</th><th>Package</th><th>Deployed to</th><th>Listens</th></tr></thead>
+  <tbody>
+    <tr><td><code class="flag-name">plugin.so</code></td><td>sudo-logger-client</td><td>every monitored host</td><td>Unix socket (no port)</td></tr>
+    <tr><td><code class="flag-name">sudo-logger-agent</code></td><td>sudo-logger-client</td><td>every monitored host</td><td>no port (client only)</td></tr>
+    <tr><td><code class="flag-name">sudo-logger-server</code></td><td>sudo-logger-server</td><td>log server (gnarg)</td><td>:9876 mTLS, optionally :9877 plain</td></tr>
+    <tr><td><code class="flag-name">sudo-logger-replay</code></td><td>sudo-logger-replay</td><td>replay server (gnarg)</td><td>:8080 (HTTP or HTTPS)</td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════ INSTALLATION ══════════════════════════════ -->
+<a class="section-anchor" id="install-rpm"></a>
+<h2>RPM Install</h2>
+<p>Build RPMs with the <code>/rpm-builder</code> script (runs in a Fedora 42 container), then deploy:</p>
+<pre><code># Build — run on dev machine
+/rpm-builder client   # produces sudo-logger-client-*.rpm
+/rpm-builder server   # produces sudo-logger-server-*.rpm
+/rpm-builder replay   # produces sudo-logger-replay-*.rpm
+
+# Deploy client to all monitored hosts
+sudo dnf install sudo-logger-client-*.rpm
+sudo systemctl enable --now sudo-logger-agent
+
+# Deploy server + replay to gnarg
+sudo dnf install sudo-logger-server-*.rpm sudo-logger-replay-*.rpm
+sudo systemctl enable --now sudo-logger-server sudo-logger-replay</code></pre>
+
+<div class="callout callout-info">
+  <div class="callout-title">File layout after RPM install</div>
+  <code>/usr/libexec/sudo/plugin.so</code> — sudo I/O plugin<br>
+  <code>/usr/bin/sudo-logger-agent</code> — agent binary<br>
+  <code>/etc/sudo-logger/</code> — all config files<br>
+  <code>/var/log/sudoreplay/</code> — session storage<br>
+  <code>/etc/sudoers.d/sudo-logger</code> — <code>Plugin</code> line for sudo
+</div>
+
+<a class="section-anchor" id="install-manual"></a>
+<h2>Manual Install</h2>
+<pre><code># Build all binaries
+make -C go
+
+# Install plugin
+sudo install -m 0755 plugin/plugin.so /usr/libexec/sudo/sudo_logger.so
+echo 'Plugin sudo_logger /usr/libexec/sudo/sudo_logger.so' \
+  | sudo tee /etc/sudo.conf.d/sudo-logger.conf
+
+# Install agent
+sudo install -m 0755 go/cmd/agent/agent /usr/bin/sudo-logger-agent
+sudo install -m 0644 go/systemd/sudo-logger-agent.service \
+  /etc/systemd/system/sudo-logger-agent.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now sudo-logger-agent</code></pre>
+
+<a class="section-anchor" id="install-verify"></a>
+<h2>Verification</h2>
+<pre><code># Check agent is connected to log server
+sudo journalctl -u sudo-logger-agent -n 30
+
+# Trigger a test session
+sudo -u nobody id
+
+# Confirm session arrived at replay server
+curl -s http://localhost:8080/api/sessions | python3 -m json.tool | head -40</code></pre>
+<p>File integrity can be verified at any time: <code>./scripts/verify-integrity.sh &lt;session-dir&gt;</code></p>
+
+<!-- ══════════════════════════════ CONFIGURATION ══════════════════════════════ -->
+<a class="section-anchor" id="config-agent"></a>
+<h2>Agent Configuration (<code>agent.conf</code>)</h2>
+<p>The agent reads <code>/etc/sudo-logger/agent.conf</code> (INI-style, key = value, <code>#</code> comments). All keys are optional — defaults are production-safe.</p>
+
+<table>
+  <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="flag-name">server</span></td>
+      <td><code>logserver:9876</code></td>
+      <td>Log server address (host:port). Uses mTLS — cert/key/ca must match.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">socket</span></td>
+      <td><code>/run/sudo-logger/plugin.sock</code></td>
+      <td>Unix socket path shared with the sudo plugin. Must be writable by sudo (root-owned, mode 0700).</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">cert</span></td>
+      <td><code>/etc/sudo-logger/client.crt</code></td>
+      <td>Client TLS certificate for connecting to the log server. Presented during mTLS handshake.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">key</span></td>
+      <td><code>/etc/sudo-logger/client.key</code></td>
+      <td>Private key for the client TLS certificate. File must be mode 0600, root-readable only.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">ca</span></td>
+      <td><code>/etc/sudo-logger/ca.crt</code></td>
+      <td>CA certificate used to verify the log server's TLS certificate.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">verify_key</span></td>
+      <td><code>/etc/sudo-logger/ack-sign.pub</code></td>
+      <td>ed25519 public key for verifying ACK signatures from the log server. Prevents replay attacks on the chunk acknowledge flow.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">mask_pattern</span></td>
+      <td><em>empty</em></td>
+      <td>Regex applied to terminal output. Matching lines are replaced with <code>[REDACTED]</code> before storage. Use to suppress passwords in non-PTY sessions.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">freeze_timeout</span></td>
+      <td><code>3m</code></td>
+      <td>How long to freeze new sudo sessions when the log server is unreachable. Format: Go duration (<code>30s</code>, <code>5m</code>, <code>1h</code>). After this period, sessions are allowed to proceed without blocking.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">idle_timeout</span></td>
+      <td><code>30m</code></td>
+      <td>Inactivity timeout for the agent's log server connection. Connection is re-established automatically.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">debug</span></td>
+      <td><code>false</code></td>
+      <td>Enable verbose logging to journald. Include raw chunk sizes and TLS handshake detail. Never enable in production — logs may contain session data.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">disclaimer</span></td>
+      <td><em>empty</em></td>
+      <td>Banner message shown to users before each sudo session. Leave empty to disable. Example: <code>This system is monitored. All sudo activity is recorded.</code></td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">disclaimer_color</span></td>
+      <td><code>yellow</code></td>
+      <td>ANSI color for the disclaimer banner. Options: <code>red</code>, <code>yellow</code>, <code>green</code>, <code>blue</code>, <code>white</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">ebpf</span></td>
+      <td><code>true</code></td>
+      <td>Enable the eBPF TTY recorder for sessions not handled by the sudo plugin (e.g. <code>su</code>, <code>screen</code>, <code>tmux</code>, <code>pkexec</code>). Requires kernel 5.15+ and <code>CAP_BPF</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">sandbox_config</span></td>
+      <td><code>/etc/sudo-logger/sandbox.yaml</code></td>
+      <td>Path to the sandbox policy file. The agent fetches an updated copy from the log server every 60 s — this path is only used as a read-fallback when the server is unreachable.</td>
+    </tr>
+    <tr>
+      <td><span class="flag-name">hostname</span></td>
+      <td><em>OS hostname</em></td>
+      <td>Override the hostname reported to the log server. Useful in containerised environments or when the OS hostname is not meaningful.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Example <code>agent.conf</code></h3>
+<pre><code># /etc/sudo-logger/agent.conf
+server          = logserver.internal:9876
+cert            = /etc/sudo-logger/client.crt
+key             = /etc/sudo-logger/client.key
+ca              = /etc/sudo-logger/ca.crt
+verify_key      = /etc/sudo-logger/ack-sign.pub
+freeze_timeout  = 3m
+idle_timeout    = 30m
+ebpf            = true
+disclaimer      = This system is monitored. All sudo activity is recorded and reviewed.
+disclaimer_color = yellow
+</code></pre>
+
+<a class="section-anchor" id="config-server"></a>
+<h2>Log Server Flags</h2>
+<p>Flags are passed to <code>sudo-logger-server</code> on the command line (or via the systemd unit's <code>ExecStart</code>).</p>
+
+<table>
+  <thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><span class="flag-name">-listen</span><span class="flag-default">:9876</span></td><td></td><td>mTLS listener address. Clients connect here to submit sessions.</td></tr>
+    <tr><td><span class="flag-name">-health-listen</span><span class="flag-default">empty</span></td><td></td><td>Plain HTTP address for <code>/healthz</code> and <code>/metrics</code>. Recommended: <code>:9877</code>. Empty = disabled.</td></tr>
+    <tr><td><span class="flag-name">-logdir</span><span class="flag-default">/var/log/sudoreplay</span></td><td></td><td>Root directory for session storage. Needs ~500 MB/day per 100 active users.</td></tr>
+    <tr><td><span class="flag-name">-cert</span><span class="flag-default">/etc/sudo-logger/server.crt</span></td><td></td><td>Server TLS certificate presented to agents during mTLS handshake.</td></tr>
+    <tr><td><span class="flag-name">-key</span><span class="flag-default">/etc/sudo-logger/server.key</span></td><td></td><td>Server TLS private key. Mode 0600, root-readable only.</td></tr>
+    <tr><td><span class="flag-name">-ca</span><span class="flag-default">/etc/sudo-logger/ca.crt</span></td><td></td><td>CA certificate for verifying client (agent) certificates.</td></tr>
+    <tr><td><span class="flag-name">-signkey</span><span class="flag-default">/etc/sudo-logger/ack-sign.key</span></td><td></td><td>ed25519 private key for HMAC-signing chunk acknowledgements. The agent's <code>verify_key</code> must contain the matching public key.</td></tr>
+    <tr><td><span class="flag-name">-strict-cert-host</span><span class="flag-default">false</span></td><td></td><td>Reject sessions where the agent-reported hostname does not match the client certificate CN or SAN. Enable in high-security environments with per-host certificates.</td></tr>
+    <tr><td><span class="flag-name">-blocked-users</span><span class="flag-default">/etc/sudo-logger/blocked-users.yaml</span></td><td></td><td>Blocked users policy file. Reloaded every 30 s. Managed via the replay server UI.</td></tr>
+    <tr><td><span class="flag-name">-whitelisted-users</span><span class="flag-default">/etc/sudo-logger/whitelisted-users.yaml</span></td><td></td><td>Whitelisted users file. These users bypass JIT approval. Reloaded every 30 s.</td></tr>
+    <tr><td><span class="flag-name">-approval-policy</span><span class="flag-default">/etc/sudo-logger/approval-policy.yaml</span></td><td></td><td>JIT approval policy file. JIT is disabled entirely when this file is absent.</td></tr>
+    <tr><td><span class="flag-name">-approval-token</span><span class="flag-default">empty</span></td><td></td><td>Bearer token for the approval REST API (<code>/api/approvals</code>). Required to enable JIT. Also accepts env <code>SUDO_LOGGER_APPROVAL_TOKEN</code>.</td></tr>
+    <tr><td><span class="flag-name">-approval-token-file</span><span class="flag-default">empty</span></td><td></td><td>File containing the approval token (alternative to <code>-approval-token</code>).</td></tr>
+    <tr><td><span class="flag-name">-sandbox</span><span class="flag-default">/etc/sudo-logger/sandbox.yaml</span></td><td></td><td>Sandbox policy file. Served to agents on demand; agents cache and apply it locally.</td></tr>
+    <tr><td><span class="flag-name">-sandbox-templates</span><span class="flag-default">/etc/sudo-logger/sandbox-templates.json</span></td><td></td><td>JSON file containing named sandbox templates (local storage only).</td></tr>
+    <tr><td><span class="flag-name">-storage</span><span class="flag-default">local</span></td><td></td><td>Storage backend: <code>local</code> (filesystem) or <code>distributed</code> (PostgreSQL + S3).</td></tr>
+    <tr><td><span class="flag-name">-db-url</span><span class="flag-default">empty</span></td><td></td><td>PostgreSQL DSN. Required for distributed storage. Example: <code>postgres://user:pass@host/db?sslmode=require</code></td></tr><!-- pragma: allowlist secret -->
+    <tr><td><span class="flag-name">-s3-bucket</span><span class="flag-default">empty</span></td><td></td><td>S3 bucket name for session file storage (distributed mode).</td></tr>
+    <tr><td><span class="flag-name">-s3-region</span><span class="flag-default">us-east-1</span></td><td></td><td>AWS region or equivalent. Not used with <code>-s3-endpoint</code>.</td></tr>
+    <tr><td><span class="flag-name">-s3-endpoint</span><span class="flag-default">empty</span></td><td></td><td>S3-compatible endpoint URL. Use for MinIO, Ceph, StorageGRID. Example: <code>https://minio.internal:9000</code></td></tr>
+    <tr><td><span class="flag-name">-s3-path-style</span><span class="flag-default">false</span></td><td></td><td>Enable path-style S3 URLs (required for MinIO).</td></tr>
+    <tr><td><span class="flag-name">-buffer-dir</span><span class="flag-default">/var/lib/sudo-logger/buffer</span></td><td></td><td>Local write buffer for S3 uploads. Data is staged here before being uploaded to S3.</td></tr>
+  </tbody>
+</table>
+
+<h3>Example systemd unit override</h3>
+<pre><code># /etc/systemd/system/sudo-logger-server.service.d/override.conf
+[Service]
+ExecStart=
+ExecStart=/usr/bin/sudo-logger-server \
+  -listen :9876 \
+  -health-listen :9877 \
+  -logdir /var/log/sudoreplay \
+  -cert /etc/sudo-logger/server.crt \
+  -key /etc/sudo-logger/server.key \
+  -ca /etc/sudo-logger/ca.crt \
+  -approval-token-file /etc/sudo-logger/approval-token \
+  -approval-policy /etc/sudo-logger/approval-policy.yaml
+</code></pre>
+
+<a class="section-anchor" id="config-replay"></a>
+<h2>Replay Server Flags</h2>
+<p>All flags for <code>sudo-logger-replay</code>. Flags that accept files also look for an env-var alternative where noted.</p>
+
+<table>
+  <thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><span class="flag-name">-listen</span><span class="flag-default">:8080</span></td><td></td><td>HTTP/HTTPS listen address. Use <code>0.0.0.0:8080</code> to bind all interfaces.</td></tr>
+    <tr><td><span class="flag-name">-logdir</span><span class="flag-default">/var/log/sudoreplay</span></td><td></td><td>Session storage root. Must match the log server's <code>-logdir</code>.</td></tr>
+    <tr><td><span class="flag-name">-rules</span><span class="flag-default">/etc/sudo-logger/risk-rules.yaml</span></td><td></td><td>Risk scoring rules file. Reloaded on every session list request.</td></tr>
+    <tr><td><span class="flag-name">-sandbox</span><span class="flag-default">/etc/sudo-logger/sandbox.yaml</span></td><td></td><td>Sandbox policy file — the UI reads and writes this path.</td></tr>
+    <tr><td><span class="flag-name">-sandbox-templates</span><span class="flag-default">/etc/sudo-logger/sandbox-templates.json</span></td><td></td><td>Named sandbox templates file (local storage only).</td></tr>
+    <tr><td><span class="flag-name">-siem-config</span><span class="flag-default">/etc/sudo-logger/siem.yaml</span></td><td></td><td>SIEM forwarding config. Shared with the log server — both processes read the same file.</td></tr>
+    <tr><td><span class="flag-name">-blocked-users</span><span class="flag-default">/etc/sudo-logger/blocked-users.yaml</span></td><td></td><td>Blocked users config (managed by this UI; shared with log server).</td></tr>
+    <tr><td><span class="flag-name">-whitelisted-users</span><span class="flag-default">/etc/sudo-logger/whitelisted-users.yaml</span></td><td></td><td>Whitelisted users config (managed by this UI; shared with log server).</td></tr>
+    <tr><td><span class="flag-name">-tls-cert</span><span class="flag-default">empty</span></td><td></td><td>TLS certificate file. Setting this enables HTTPS.</td></tr>
+    <tr><td><span class="flag-name">-tls-key</span><span class="flag-default">empty</span></td><td></td><td>TLS private key. Required when <code>-tls-cert</code> is set.</td></tr>
+    <tr><td><span class="flag-name">-htpasswd</span><span class="flag-default">empty</span></td><td></td><td>htpasswd file for HTTP Basic Auth (bcrypt hashes only). Reloaded on SIGHUP.</td></tr>
+    <tr><td><span class="flag-name">-trusted-user-header</span><span class="flag-default">empty</span></td><td></td><td>Trusted header name for pre-authenticated users (e.g. <code>X-Forwarded-User</code> from oauth2-proxy). Only accepts connections from <code>127.0.0.1</code> or a trusted proxy.</td></tr>
+    <tr><td><span class="flag-name">-admin-users</span><span class="flag-default">empty</span></td><td></td><td>Comma-separated list of usernames granted the built-in <code>admin</code> role (full permissions). Effective regardless of which auth mode is used.</td></tr>
+    <tr><td><span class="flag-name">-logserver-admin</span><span class="flag-default">empty</span></td><td></td><td>Log server admin address for proxying the approvals API. Example: <code>http://localhost:9877</code>. Enables the Approvals tab when set.</td></tr>
+    <tr><td><span class="flag-name">-logserver-admin-token</span><span class="flag-default">empty</span></td><td></td><td>Bearer token for authenticating to the log server approval API. Must match the log server's <code>-approval-token</code>. Also accepts env <code>SUDO_LOGGER_ADMIN_TOKEN</code>.</td></tr>
+    <tr><td><span class="flag-name">-logserver-admin-token-file</span><span class="flag-default">empty</span></td><td></td><td>File containing the admin token (alternative to <code>-logserver-admin-token</code>).</td></tr>
+    <tr><td><span class="flag-name">-oidc-issuer</span><span class="flag-default">empty</span></td><td></td><td>OIDC provider issuer URL. Example: <code>https://accounts.google.com</code> or <code>https://login.microsoftonline.com/{tenant}/v2.0</code></td></tr>
+    <tr><td><span class="flag-name">-oidc-client-id</span><span class="flag-default">empty</span></td><td></td><td>OIDC client ID registered with your identity provider.</td></tr>
+    <tr><td><span class="flag-name">-oidc-client-secret</span><span class="flag-default">empty</span></td><td></td><td>OIDC client secret.</td></tr>
+    <tr><td><span class="flag-name">-oidc-redirect-url</span><span class="flag-default">empty</span></td><td></td><td>OIDC redirect URL. Must match what is registered with the IdP. Example: <code>https://replay.example.com/api/oidc/callback</code></td></tr>
+    <tr><td><span class="flag-name">-storage</span><span class="flag-default">local</span></td><td></td><td>Storage backend: <code>local</code> or <code>distributed</code>. Must match log server.</td></tr>
+    <tr><td><span class="flag-name">-db-url</span><span class="flag-default">empty</span></td><td></td><td>PostgreSQL DSN (distributed storage). Example: <code>postgres://user:pass@host/db?sslmode=require</code></td></tr><!-- pragma: allowlist secret -->
+    <tr><td><span class="flag-name">-s3-bucket</span><span class="flag-default">empty</span></td><td></td><td>S3 bucket name (distributed storage).</td></tr>
+    <tr><td><span class="flag-name">-s3-region</span><span class="flag-default">us-east-1</span></td><td></td><td>AWS/S3 region.</td></tr>
+    <tr><td><span class="flag-name">-s3-endpoint</span><span class="flag-default">empty</span></td><td></td><td>S3-compatible endpoint URL (MinIO, Ceph). Example: <code>https://minio.internal:9000</code></td></tr>
+    <tr><td><span class="flag-name">-s3-path-style</span><span class="flag-default">false</span></td><td></td><td>Enable path-style S3 URLs (required for MinIO).</td></tr>
+    <tr><td><span class="flag-name">-s3-access-key</span><span class="flag-default">empty</span></td><td></td><td>Static S3 access key. Leave empty to use IAM instance role or <code>AWS_ACCESS_KEY_ID</code> env.</td></tr>
+    <tr><td><span class="flag-name">-s3-secret-key</span><span class="flag-default">empty</span></td><td></td><td>Static S3 secret key. Leave empty to use IAM or <code>AWS_SECRET_ACCESS_KEY</code> env.</td></tr>
+    <tr><td><span class="flag-name">-s3-prefix</span><span class="flag-default">sessions/</span></td><td></td><td>Key prefix for all S3 objects. Use to namespace multiple deployments in one bucket.</td></tr>
+    <tr><td><span class="flag-name">-buffer-dir</span><span class="flag-default">/var/lib/sudo-logger/buffer</span></td><td></td><td>Local write-buffer directory for S3 uploads.</td></tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════ YAML REFERENCES ══════════════════════════════ -->
+<a class="section-anchor" id="yaml-risk"></a>
+<h2>Risk Rules YAML Reference</h2>
+<p>File: <code>/etc/sudo-logger/risk-rules.yaml</code> — loaded by the replay server and recalculated per session on read. Each rule adds its <code>score</code> to the session's total (capped at 100). Rules are evaluated independently and scores accumulate.</p>
+
+<h3>Rule structure</h3>
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>score</code></td><td>int (1–100)</td><td>Points added when this rule matches. Multiple matching rules accumulate.</td></tr>
+    <tr><td><code>id</code></td><td>string</td><td>Unique identifier. Use <code>snake_case</code>. Shown in anomaly reports.</td></tr>
+    <tr><td><code>reason</code></td><td>string</td><td>Short label shown in the session info bar and anomalies tab. Be specific.</td></tr>
+    <tr><td><code>command.contains_any</code></td><td>[]string</td><td>Command line must contain at least one of these substrings (case-insensitive).</td></tr>
+    <tr><td><code>command.also_any</code></td><td>[]string</td><td>AND — command line must also contain at least one of these.</td></tr>
+    <tr><td><code>command_base_any</code></td><td>[]string</td><td>Matches only the program basename (<code>argv[0]</code>). More reliable for shell detection than substring.</td></tr>
+    <tr><td><code>content.contains_any</code></td><td>[]string</td><td>Scans tty output for at least one substring. ANSI escape codes are stripped. Only available for sessions with recorded I/O.</td></tr>
+    <tr><td><code>content.also_any</code></td><td>[]string</td><td>AND — tty output must also contain at least one of these.</td></tr>
+    <tr><td><code>runas</code></td><td>string</td><td>Only match sessions where sudo ran as this user. Default (empty) matches any.</td></tr>
+    <tr><td><code>min_duration_s</code></td><td>int</td><td>Minimum session duration in seconds. Useful for flagging long interactive shells.</td></tr>
+    <tr><td><code>incomplete</code></td><td>bool</td><td>Only match sessions that ended without a clean <code>SESSION_END</code> event.</td></tr>
+    <tr><td><code>after_hours</code></td><td>bool</td><td>Only match sessions that started between 23:00 and 05:59 local time.</td></tr>
+  </tbody>
+</table>
+
+<h4>Score thresholds</h4>
+<table>
+  <thead><tr><th>Score range</th><th>Level</th><th>Colour</th></tr></thead>
+  <tbody>
+    <tr><td>0–24</td><td>Low</td><td>Gray</td></tr>
+    <tr><td>25–49</td><td>Medium</td><td>Yellow</td></tr>
+    <tr><td>50–74</td><td>High</td><td>Orange</td></tr>
+    <tr><td>75–100</td><td>Critical</td><td>Red</td></tr>
+  </tbody>
+</table>
+
+<h3>Complete example</h3>
+<pre><code>rules:
+  # Stop or disable the audit daemon
+  - score: 80
+    id:    stop_auditd
+    reason: Audit daemon stopped or disabled
+    command:
+      contains_any: [auditd]
+      also_any:     [stop, disable, mask, kill]
+
+  # Direct root shell via any interpreter
+  - score: 50
+    id:    root_shell
+    reason: Direct root shell
+    command_base_any: [bash, sh, zsh, fish, ksh, dash]
+
+  # Auth file manipulation inside a shell
+  - score: 70
+    id:    auth_file_tamper
+    reason: Auth file manipulation
+    content:
+      contains_any: [/etc/passwd, /etc/shadow, /etc/sudoers, /etc/pam.d]
+
+  # Late-night root activity
+  - score: 20
+    id:    after_hours_root
+    reason: After-hours root activity
+    runas: root
+    after_hours: true
+
+  # Long-running interactive shell (>10 min)
+  - score: 30
+    id:    long_shell
+    reason: Long interactive root shell (&gt;10 min)
+    command_base_any: [bash, sh, zsh]
+    min_duration_s: 600
+
+  # Incomplete session — agent was killed
+  - score: 40
+    id:    incomplete_session
+    reason: Session ended unexpectedly (agent killed?)
+    incomplete: true
+
+  # Kernel module loading
+  - score: 90
+    id:    kernel_module
+    reason: Kernel module loaded
+    command:
+      contains_any: [insmod, modprobe, rmmod]
+
+  # SELinux disabled
+  - score: 95
+    id:    selinux_disabled
+    reason: SELinux enforcement changed
+    command:
+      contains_any: [setenforce, semodule]
+</code></pre>
+
+<!-- ══════════════ SANDBOX ══════════════ -->
+<a class="section-anchor" id="yaml-sandbox"></a>
+<h2>Sandbox Policy YAML Reference</h2>
+<p>File: <code>/etc/sudo-logger/sandbox.yaml</code> — served to agents on demand. The agent applies it via eBPF seccomp + BPF-LSM. Changes propagate to all agents within 60 seconds without restart.</p>
+
+<h3>Top-level sections</h3>
+<table>
+  <thead><tr><th>Section</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>features</code></td><td>Boolean flags controlling which BPF enforcement modules are active.</td></tr>
+    <tr><td><code>protect</code></td><td>Lists of resources that the sandbox will deny access to for sudo sessions.</td></tr>
+  </tbody>
+</table>
+
+<h3><code>features</code> keys</h3>
+<table>
+  <thead><tr><th>Key</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>deny_netlink</code></td><td>true</td><td>Block <code>AF_NETLINK</code> socket creation. Prevents iptables, nftables, ip route, auditctl from working inside the session.</td></tr>
+    <tr><td><code>deny_mount</code></td><td>true</td><td>Block bind-mount operations. Prevents overmounting protected paths.</td></tr>
+    <tr><td><code>deny_ptrace</code></td><td>true</td><td>Block ptrace. Prevents code injection into root daemons from within the session.</td></tr>
+    <tr><td><code>deny_cap_audit_control</code></td><td>true</td><td>Drop <code>CAP_AUDIT_CONTROL</code>. Defence-in-depth for auditctl bypass.</td></tr>
+    <tr><td><code>deny_cap_net_admin</code></td><td>false</td><td>Drop <code>CAP_NET_ADMIN</code>. Blocks raw sockets and network configuration. May break iproute2.</td></tr>
+    <tr><td><code>deny_cap_sys_module</code></td><td>true</td><td>Drop <code>CAP_SYS_MODULE</code>. Prevents kernel module loading via insmod/modprobe.</td></tr>
+    <tr><td><code>deny_cap_mac_admin</code></td><td>true</td><td>Drop <code>CAP_MAC_ADMIN</code>. Prevents setenforce and semodule from within the session.</td></tr>
+    <tr><td><code>deny_cap_sys_rawio</code></td><td>true</td><td>Drop <code>CAP_SYS_RAWIO</code>. Blocks direct access to <code>/dev/mem</code>, <code>/dev/port</code>.</td></tr>
+    <tr><td><code>deny_cap_sys_boot</code></td><td>true</td><td>Drop <code>CAP_SYS_BOOT</code>. Prevents kexec_load and reboot from within the session.</td></tr>
+    <tr><td><code>deny_systemd_ipc</code></td><td>false</td><td>Restrict systemd D-Bus IPC. Blocks <code>systemctl</code>, <code>loginctl</code> from within sessions. Off by default because many legitimate admin tasks need it.</td></tr>
+  </tbody>
+</table>
+
+<h3><code>protect</code> sub-keys</h3>
+<table>
+  <thead><tr><th>Key</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>files</code></td><td>Paths (files or directories) that sessions may not write to or delete.</td></tr>
+    <tr><td><code>forbidden</code></td><td>Executable paths that sessions may not exec. Checked against <code>execve</code> path.</td></tr>
+    <tr><td><code>noexec</code></td><td>Directories where execution is blocked (no exec from /tmp, /dev/shm etc.).</td></tr>
+    <tr><td><code>devices</code></td><td>Device nodes that sessions may not open.</td></tr>
+    <tr><td><code>proc</code></td><td>Specific <code>/proc</code> entries that sessions may not write to.</td></tr>
+    <tr><td><code>sockets</code></td><td>Unix sockets that sessions may not connect to.</td></tr>
+    <tr><td><code>processes</code></td><td>Process <code>comm</code> names that sessions may not send signals to.</td></tr>
+  </tbody>
+</table>
+
+<h3>Complete example</h3>
+<pre><code># /etc/sudo-logger/sandbox.yaml
+features:
+  deny_netlink:           true
+  deny_mount:             true
+  deny_ptrace:            true
+  deny_cap_audit_control: true
+  deny_cap_net_admin:     false
+  deny_cap_sys_module:    true
+  deny_cap_mac_admin:     true
+  deny_cap_sys_rawio:     true
+  deny_cap_sys_boot:      true
+  deny_systemd_ipc:       false
+
+protect:
+  files:
+    - /etc/sudo
+    - /etc/sudoers
+    - /etc/sudoers.d
+    - /etc/sudo-logger
+    - /etc/pam.d
+    - /etc/audit/audit.rules
+    - /etc/audit/rules.d
+    - /etc/rsyslog.conf
+    - /etc/systemd
+    - /root/.ssh
+    - /etc/pki
+  forbidden:
+    - /usr/bin/systemd-run
+    - /usr/sbin/auditctl
+    - /usr/sbin/setenforce
+    - /usr/sbin/semodule
+    - /usr/sbin/kexec
+    - /usr/bin/busctl
+  noexec:
+    - /tmp
+    - /var/tmp
+    - /dev/shm
+  devices:
+    - /dev/mem
+    - /dev/kmem
+    - /dev/port
+  proc:
+    - /proc/sysrq-trigger
+    - /proc/kcore
+    - /proc/kallsyms
+    - /proc/sys/kernel/core_pattern
+  sockets:
+    - /run/sudo-logger/plugin.sock
+    - /run/systemd/journal/socket
+  processes:
+    - auditd
+    - rsyslogd
+    - sshd
+    - sudo-logger-agent
+</code></pre>
+
+<div class="callout callout-warn">
+  <div class="callout-title">Compatibility note</div>
+  The sandbox uses eBPF BPF-LSM and requires kernel 5.15+ with <code>CONFIG_BPF_LSM=y</code>. On Fedora 38+, Rocky Linux 9+ and RHEL 9+ all prerequisites are met. Disable with <code>ebpf = false</code> in <code>agent.conf</code> on older kernels.
+</div>
+
+<!-- ══════════════ JIT POLICY ══════════════ -->
+<a class="section-anchor" id="yaml-jit"></a>
+<h2>JIT Approval Policy YAML Reference</h2>
+<p>File: <code>/etc/sudo-logger/approval-policy.yaml</code> — controls the JIT (Just-In-Time) approval workflow. When a user runs sudo, the agent prompts for a justification. The OPA-compiled policy then decides whether the session is automatically allowed, requires synchronous approval, or is denied.</p>
+
+<div class="callout callout-info">
+  <div class="callout-title">How the policy compiles</div>
+  The YAML policy is compiled to an OPA Rego module by the log server. You can see the compiled output in the replay UI under Policy → JIT → Compiled Rego. The policy is re-evaluated for every approval request in real time.
+</div>
+
+<h3>Policy structure</h3>
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>default_action</code></td><td>string</td><td><code>allow</code> or <code>challenge</code>. Applied when no rules match. Default: <code>challenge</code>.</td></tr>
+    <tr><td><code>groups</code></td><td>map[string][]string</td><td>Named groups of users, hosts, or roles. Reference as <code>@groupname</code> in rule fields.</td></tr>
+    <tr><td><code>rules</code></td><td>[]Rule</td><td>Ordered list of policy rules. Evaluated in order; first match wins for <code>deny</code>.</td></tr>
+    <tr><td><code>raw_rego</code></td><td>string</td><td>Optional hand-written Rego appended after the compiled rules. Can override <code>decision</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3>Rule fields</h3>
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>id</code></td><td>string</td><td>Optional unique identifier shown in decision logs.</td></tr>
+    <tr><td><code>comment</code></td><td>string</td><td>Human-readable description, visible in the UI rules table.</td></tr>
+    <tr><td><code>action</code></td><td>string</td><td><code>allow</code>, <code>challenge</code>, or <code>deny</code>. Required.</td></tr>
+    <tr><td><code>users</code></td><td>[]string</td><td>Match if the sudo user is in this list. Supports <code>@groupname</code> references and glob patterns.</td></tr>
+    <tr><td><code>hosts</code></td><td>[]string</td><td>Match if the session host is in this list. Globs supported.</td></tr>
+    <tr><td><code>commands</code></td><td>[]string</td><td>Match if the command (argv[0] basename) is in this list. Globs supported.</td></tr>
+    <tr><td><code>runas</code></td><td>[]string</td><td>Match if sudo runs as one of these users.</td></tr>
+    <tr><td><code>sys_groups</code></td><td>[]string</td><td>Match if the user belongs to one of these system groups (resolved live via NSS).</td></tr>
+    <tr><td><code>weekdays</code></td><td>[]int</td><td>Match if today is one of these weekdays (0=Sunday, 1=Monday … 6=Saturday).</td></tr>
+    <tr><td><code>hour_from</code></td><td>int</td><td>Match if current hour ≥ this value (0–23). Use with <code>hour_to</code>.</td></tr>
+    <tr><td><code>hour_to</code></td><td>int</td><td>Match if current hour &lt; this value (0–23). Use with <code>hour_from</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3>Complete example</h3>
+<pre><code># /etc/sudo-logger/approval-policy.yaml
+default_action: challenge
+
+groups:
+  sre:
+    - alice
+    - bob
+    - carol
+  infra-hosts:
+    - prod-web-*
+    - prod-db-*
+
+rules:
+  # SRE team can run sudo freely on production during business hours
+  - id:      sre_business_hours
+    comment: SRE unrestricted during 08:00-18:00 weekdays
+    action:  allow
+    users:   [@sre]
+    hosts:   [@infra-hosts]
+    weekdays: [1, 2, 3, 4, 5]
+    hour_from: 8
+    hour_to:   18
+
+  # On-call SRE can always run sudo on production hosts
+  - id:      sre_oncall
+    comment: On-call SRE anytime
+    action:  allow
+    users:   [alice]
+    hosts:   [@infra-hosts]
+
+  # Database admin commands always require approval
+  - id:      db_commands
+    comment: Database commands require approval
+    action:  challenge
+    commands: [psql, mysqldump, pg_dump, redis-cli]
+
+  # Deny any attempt to change audit configuration
+  - id:      no_audit_changes
+    comment: Audit configuration changes are blocked
+    action:  deny
+    commands: [auditctl, ausearch, aureport]
+</code></pre>
+
+<!-- ══════════════ SIEM ══════════════ -->
+<a class="section-anchor" id="yaml-siem"></a>
+<h2>SIEM Forwarding YAML Reference</h2>
+<p>File: <code>/etc/sudo-logger/siem.yaml</code> — read by both the log server and replay server. The log server does the actual forwarding; the replay server provides the UI to manage the config.</p>
+
+<h3>Top-level fields</h3>
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>enabled</code></td><td>bool</td><td>Master switch. Set to <code>false</code> to disable all forwarding without deleting the config.</td></tr>
+    <tr><td><code>transport</code></td><td>string</td><td><code>https</code>, <code>syslog</code>, or <code>stdout</code>.</td></tr>
+    <tr><td><code>format</code></td><td>string</td><td><code>json</code> (default), <code>cef</code> (ArcSight), or <code>ocsf</code> (OCSF 1.0).</td></tr>
+    <tr><td><code>replay_url_base</code></td><td>string</td><td>Base URL of this replay server, e.g. <code>https://replay.example.com</code>. Appended to SIEM events as a deep-link to the session.</td></tr>
+    <tr><td><code>https</code></td><td>object</td><td>HTTPS transport configuration (ignored unless <code>transport: https</code>).</td></tr>
+    <tr><td><code>syslog</code></td><td>object</td><td>Syslog transport configuration (ignored unless <code>transport: syslog</code>).</td></tr>
+  </tbody>
+</table>
+
+<h3><code>https</code> object</h3>
+<table>
+  <thead><tr><th>Field</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>url</code></td><td>Full HTTPS endpoint URL. Example: <code>https://splunk.example.com:8088/services/collector/event</code></td></tr>
+    <tr><td><code>token</code></td><td>Bearer token or Splunk HEC token. Sent as <code>Authorization: Splunk &lt;token&gt;</code> or <code>Bearer &lt;token&gt;</code>.</td></tr>
+    <tr><td><code>tls.ca</code></td><td>Path to CA certificate for verifying the SIEM endpoint's TLS certificate.</td></tr>
+    <tr><td><code>tls.cert</code></td><td>Path to client certificate for mTLS to the SIEM endpoint.</td></tr>
+    <tr><td><code>tls.key</code></td><td>Path to client private key for mTLS.</td></tr>
+  </tbody>
+</table>
+
+<h3><code>syslog</code> object</h3>
+<table>
+  <thead><tr><th>Field</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>addr</code></td><td>Syslog server address. Example: <code>syslog.example.com:514</code></td></tr>
+    <tr><td><code>protocol</code></td><td><code>udp</code>, <code>tcp</code>, or <code>tcp-tls</code>.</td></tr>
+    <tr><td><code>tls.ca</code></td><td>CA certificate for verifying the syslog server (tcp-tls only).</td></tr>
+    <tr><td><code>tls.cert</code></td><td>Client certificate for mTLS to syslog server (tcp-tls only).</td></tr>
+    <tr><td><code>tls.key</code></td><td>Client private key for mTLS to syslog server (tcp-tls only).</td></tr>
+  </tbody>
+</table>
+
+<h3>Examples</h3>
+<pre><code># Splunk HEC over HTTPS
+enabled:   true
+transport: https
+format:    json
+replay_url_base: https://replay.example.com
+
+https:
+  url:   https://splunk.example.com:8088/services/collector/event
+  token: &lt;your-splunk-hec-token&gt;
+  tls:
+    ca: /etc/sudo-logger/splunk-ca.crt
+</code></pre>
+
+<pre><code># Syslog over TLS to a SIEM
+enabled:   true
+transport: syslog
+format:    cef
+replay_url_base: https://replay.example.com
+
+syslog:
+  addr:     siem.example.com:6514
+  protocol: tcp-tls
+  tls:
+    ca:   /etc/sudo-logger/siem-ca.crt
+    cert: /etc/sudo-logger/siem-client.crt
+    key:  /etc/sudo-logger/siem-client.key
+</code></pre>
+
+<div class="callout callout-warn">
+  <div class="callout-title">Data sovereignty</div>
+  All session events including sensitive terminal I/O are forwarded in real time. Ensure your SIEM endpoint is protected by high-entropy tokens and robust TLS. Events are buffered locally on the log server for up to 1 hour if the SIEM is unreachable.
+</div>
+
+<!-- ══════════════════════════════ ACCESS CONTROL ══════════════════════════════ -->
+<a class="section-anchor" id="rbac-roles"></a>
+<h2>Roles &amp; Permissions</h2>
+<p>The replay server uses RBAC with fine-grained permissions. Roles are defined in the UI (Config → Users &amp; Roles) and assigned to users. The built-in <code>admin</code> role has all permissions and is assigned to users listed in <code>-admin-users</code>.</p>
+
+<h3>Permission reference</h3>
+<table>
+  <thead><tr><th>Permission</th><th>Allows</th></tr></thead>
+  <tbody>
+    <tr><td><code>sessions:read</code></td><td>View the session list and read session metadata.</td></tr>
+    <tr><td><code>sessions:replay</code></td><td>Play back session terminal recordings.</td></tr>
+    <tr><td><code>sessions:delete</code></td><td>Delete session recordings (irreversible).</td></tr>
+    <tr><td><code>audit_log:read</code></td><td>View the Reports tab: access log, anomalies, risk summary.</td></tr>
+    <tr><td><code>policy:read</code></td><td>View risk rules, sandbox config, OPA policy, access control lists.</td></tr>
+    <tr><td><code>policy:write</code></td><td>Edit and save risk rules, sandbox config, OPA policy, blocked/whitelisted users.</td></tr>
+    <tr><td><code>config:read</code></td><td>View SIEM config, auth settings, users and roles, retention settings.</td></tr>
+    <tr><td><code>config:write</code></td><td>Modify SIEM config, auth settings, users and roles, retention settings.</td></tr>
+    <tr><td><code>approvals:read</code></td><td>View pending JIT approval requests.</td></tr>
+    <tr><td><code>approvals:decide</code></td><td>Approve or deny pending JIT approval requests.</td></tr>
+    <tr><td><code>users:write</code></td><td>Create, update, and delete portal users.</td></tr>
+    <tr><td><code>roles:write</code></td><td>Create, update, and delete custom roles.</td></tr>
+  </tbody>
+</table>
+
+<h3>Built-in roles</h3>
+<table>
+  <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
+  <tbody>
+    <tr><td><code>admin</code></td><td>All permissions. Granted to users in <code>-admin-users</code> flag.</td></tr>
+    <tr><td><code>viewer</code></td><td><code>sessions:read</code>, <code>sessions:replay</code>, <code>audit_log:read</code></td></tr>
+  </tbody>
+</table>
+
+<a class="section-anchor" id="rbac-auth"></a>
+<h2>Authentication Modes</h2>
+<table>
+  <thead><tr><th>Mode</th><th>Flag</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>HTTP Basic Auth</strong></td>
+      <td><code>-htpasswd /path/to/.htpasswd</code></td>
+      <td>Bcrypt hashes only (<code>htpasswd -B</code>). Reloaded on SIGHUP. Use with TLS — Basic Auth over plain HTTP is insecure.</td>
+    </tr>
+    <tr>
+      <td><strong>Trusted header</strong></td>
+      <td><code>-trusted-user-header X-Forwarded-User</code></td>
+      <td>For use behind oauth2-proxy or a reverse proxy that sets the header after authentication. Only trusted from <code>127.0.0.1</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>OIDC</strong></td>
+      <td><code>-oidc-issuer</code>, <code>-oidc-client-id</code>, <code>-oidc-client-secret</code>, <code>-oidc-redirect-url</code></td>
+      <td>Full OIDC code flow. Supports Google, Entra ID, Keycloak, Okta. Group claims can be mapped to roles.</td>
+    </tr>
+  </tbody>
+</table>
+
+<a class="section-anchor" id="rbac-blocked"></a>
+<h2>Blocked Users</h2>
+<p>Managed at Policy → Access Control. The log server reloads the blocked users file every 30 seconds. When a user is blocked, the agent shows the configured block message and prevents the session from starting.</p>
+<pre><code># /etc/sudo-logger/blocked-users.yaml
+config:
+  block_message: "Your sudo access has been suspended. Contact your manager."
+  users:
+    - username: jsmith
+      hosts: [prod-web-01, prod-web-02]
+      reason: "Security incident investigation (ticket #4192)"
+      blocked_at: 1749823200
+    - username: malicious
+      hosts: []   # empty = all hosts
+      reason: "Account compromised"
+      blocked_at: 1749823200
+</code></pre>
+
+<a class="section-anchor" id="rbac-whitelist"></a>
+<h2>Whitelisted Users</h2>
+<p>Users in the whitelist bypass the JIT approval prompt entirely — their sudo sessions proceed without requiring justification or approval. Managed at Policy → Access Control.</p>
+<pre><code># /etc/sudo-logger/whitelisted-users.yaml
+config:
+  users:
+    - username: alice
+      hosts: [prod-db-01]
+      reason: "DBA — permanent exception approved by CISO"
+    - username: deploy-bot
+      hosts: []   # empty = all hosts
+      reason: "CI/CD service account"
+</code></pre>
+
+<!-- ══════════════════════════════ API REFERENCE ══════════════════════════════ -->
+<a class="section-anchor" id="api-sessions"></a>
+<h2>API — Sessions</h2>
+<p>All API endpoints require authentication (same as the web UI). Responses are JSON.</p>
+
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Permission</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/sessions</code></td>
+      <td><code>sessions:read</code></td>
+      <td>List all sessions. Supports query params: <code>q</code> (search), <code>user</code>, <code>host</code>, <code>min_risk</code>, <code>has_io</code>, <code>limit</code>, <code>offset</code>. Returns array of <code>SessionInfo</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/session/events?id=&lt;id&gt;</code></td>
+      <td><code>sessions:replay</code></td>
+      <td>Stream session events for the terminal player. Returns newline-delimited JSON objects with <code>type</code>, <code>data</code>, <code>time</code> fields.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-delete">DELETE</span></td>
+      <td><code>/api/session?id=&lt;id&gt;</code></td>
+      <td><code>sessions:delete</code></td>
+      <td>Permanently delete a session and all its stored files. Also removes from the S3 bucket (distributed mode). Irreversible.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/access-log</code></td>
+      <td><code>audit_log:read</code></td>
+      <td>Return the last 200 replay-server access log entries (who viewed which session). Sorted by time descending.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/report</code></td>
+      <td><code>audit_log:read</code></td>
+      <td>Return aggregate statistics: top users by risk score, top hosts, risky commands, recent security anomalies.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>SessionInfo object</h3>
+<pre><code>{
+  "id":         "20260611-143022-alice-prodweb01",
+  "user":       "alice",
+  "host":       "prod-web-01",
+  "command":    "/bin/bash",
+  "started_at": "2026-06-11T14:30:22Z",
+  "duration_s": 187,
+  "risk_score": 75,
+  "risk_reasons": ["root_shell", "after_hours_root"],
+  "has_io":     true,
+  "live":       false,
+  "incomplete": false,
+  "source":     "plugin"   // "plugin" | "ebpf" | "pkexec"
+}</code></pre>
+
+<a class="section-anchor" id="api-policy"></a>
+<h2>API — Policy</h2>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Permission</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/rules</code></td>
+      <td><code>policy:read</code></td>
+      <td>Return parsed risk rules as JSON array.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/rules</code></td>
+      <td><code>policy:write</code></td>
+      <td>Replace risk rules. Body: <code>{"rules": [...]}</code>. Validates schema before writing to disk.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/blocked-users</code></td>
+      <td><code>policy:read</code></td>
+      <td>Return blocked users config as JSON.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/blocked-users</code></td>
+      <td><code>policy:write</code></td>
+      <td>Replace blocked users config. Body: <code>{"config": {"block_message": "...", "users": [...]}}</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/whitelisted-users</code></td>
+      <td><code>policy:read</code></td>
+      <td>Return whitelisted users as JSON.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/whitelisted-users</code></td>
+      <td><code>policy:write</code></td>
+      <td>Replace whitelisted users. Body: <code>{"config": {"users": [...]}}</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/sudoers</code></td>
+      <td><code>policy:read</code></td>
+      <td>Return parsed sudoers rules from all files under <code>/etc/sudoers.d/</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/sudoers/:file</code></td>
+      <td><code>policy:write</code></td>
+      <td>Write a sudoers file. Runs <code>visudo -c</code> to validate before saving.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-delete">DELETE</span></td>
+      <td><code>/api/sudoers/:file</code></td>
+      <td><code>policy:write</code></td>
+      <td>Delete a file from <code>/etc/sudoers.d/</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<a class="section-anchor" id="api-config"></a>
+<h2>API — Config</h2>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Permission</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/siem-config</code></td>
+      <td><code>config:read</code></td>
+      <td>Return current SIEM config as JSON.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/siem-config</code></td>
+      <td><code>config:write</code></td>
+      <td>Save SIEM config. Body: full config object. Applied on next log server reload.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-post">POST</span></td>
+      <td><code>/api/siem-cert</code></td>
+      <td><code>config:write</code></td>
+      <td>Upload a TLS certificate/key file. Multipart form. Returns <code>{"path": "/etc/sudo-logger/..."}</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/sandbox</code></td>
+      <td><code>config:read</code></td>
+      <td>Return sandbox YAML content and path.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/sandbox</code></td>
+      <td><code>config:write</code></td>
+      <td>Save sandbox YAML. Agents pick up the change within 60 s.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/sandbox-templates</code></td>
+      <td><code>config:read</code></td>
+      <td>Return named sandbox templates as a JSON map.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/sandbox-templates</code></td>
+      <td><code>config:write</code></td>
+      <td>Save sandbox templates map.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/auth-config</code></td>
+      <td><code>config:read</code></td>
+      <td>Return current auth configuration (htpasswd mode vs OIDC, trusted header).</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/auth-config</code></td>
+      <td><code>config:write</code></td>
+      <td>Update auth settings. Effective after restart.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/users</code></td>
+      <td><code>config:read</code></td>
+      <td>List all portal users with roles and metadata.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/users/:username</code></td>
+      <td><code>users:write</code></td>
+      <td>Create or update a portal user. Body: <code>{"username", "full_name", "email", "role", "password"}</code>. Password field only required for Basic Auth mode.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-delete">DELETE</span></td>
+      <td><code>/api/users/:username</code></td>
+      <td><code>users:write</code></td>
+      <td>Delete a portal user.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/roles</code></td>
+      <td><code>config:read</code></td>
+      <td>List all custom roles with their permission sets.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-post">POST</span></td>
+      <td><code>/api/roles</code></td>
+      <td><code>roles:write</code></td>
+      <td>Create a new role. Body: <code>{"name": "...", "permissions": [...]}</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/roles/:name</code></td>
+      <td><code>roles:write</code></td>
+      <td>Update a role's permission set.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-delete">DELETE</span></td>
+      <td><code>/api/roles/:name</code></td>
+      <td><code>roles:write</code></td>
+      <td>Delete a custom role.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/retention</code></td>
+      <td><code>config:read</code></td>
+      <td>Return current retention policy settings.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/retention</code></td>
+      <td><code>config:write</code></td>
+      <td>Update retention policy. Body: <code>{"days": 365, "max_size_gb": 50}</code>.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/me</code></td>
+      <td><em>any authenticated</em></td>
+      <td>Return the currently authenticated user's username and role.</td>
+    </tr>
+  </tbody>
+</table>
+
+<a class="section-anchor" id="api-approvals"></a>
+<h2>API — JIT Approvals</h2>
+<p>The approvals API is proxied from the log server. It is only available when <code>-logserver-admin</code> is set on the replay server.</p>
+
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Permission</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/approvals</code></td>
+      <td><code>approvals:read</code></td>
+      <td>List all pending approval requests. Sorted by creation time.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-post">POST</span></td>
+      <td><code>/api/approvals/:id/approve</code></td>
+      <td><code>approvals:decide</code></td>
+      <td>Approve a pending request. The agent is notified and the sudo session proceeds.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-post">POST</span></td>
+      <td><code>/api/approvals/:id/deny</code></td>
+      <td><code>approvals:decide</code></td>
+      <td>Deny a pending request. Body: <code>{"reason": "..."}</code>. The agent notifies the user with the reason.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/approval-config</code></td>
+      <td><code>approvals:decide</code></td>
+      <td>Return JIT approval configuration (timeout, notification settings).</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/approval-config</code></td>
+      <td><code>approvals:decide</code></td>
+      <td>Update JIT approval configuration.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/jit-policy</code></td>
+      <td><code>approvals:decide</code></td>
+      <td>Return the OPA JIT policy as JSON (parsed rules + compiled Rego module).</td>
+    </tr>
+    <tr>
+      <td><span class="method method-put">PUT</span></td>
+      <td><code>/api/jit-policy</code></td>
+      <td><code>approvals:decide</code></td>
+      <td>Update the OPA JIT policy. Body: OPA policy object. Server recompiles Rego immediately.</td>
+    </tr>
+  </tbody>
+</table>
+
+<a class="section-anchor" id="api-admin"></a>
+<h2>API — Admin &amp; Diagnostics</h2>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/healthz</code></td>
+      <td>none</td>
+      <td>Returns <code>ok</code>. Used by load balancers and Kubernetes liveness probes.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/metrics</code></td>
+      <td>none</td>
+      <td>Prometheus metrics in text exposition format.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/oidc/login</code></td>
+      <td>none</td>
+      <td>Initiates OIDC login flow. Redirects to the identity provider.</td>
+    </tr>
+    <tr>
+      <td><span class="method method-get">GET</span></td>
+      <td><code>/api/oidc/callback</code></td>
+      <td>none</td>
+      <td>OIDC callback URL. Exchanges code for tokens and sets session cookie.</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════ PROMETHEUS ══════════════════════════════ -->
+<a class="section-anchor" id="metrics"></a>
+<h2>Prometheus Metrics</h2>
+<p>Exposed at <code>/metrics</code> (replay server) and <code>/metrics</code> on the health-listen port of the log server. All metrics use the prefix <code>sudoreplay_</code>.</p>
+
+<table>
+  <thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>sudoreplay_sessions_total</code></td>
+      <td>counter</td>
+      <td>Total sessions received by the log server since start. Labels: <code>host</code>, <code>user</code>.</td>
+    </tr>
+    <tr>
+      <td><code>sudoreplay_sessions_active</code></td>
+      <td>gauge</td>
+      <td>Number of sessions currently in progress (no SESSION_END yet). Useful for capacity planning.</td>
+    </tr>
+    <tr>
+      <td><code>sudoreplay_sessions_incomplete</code></td>
+      <td>counter</td>
+      <td>Total sessions that ended without a clean SESSION_END (agent killed, network outage). High values indicate agent stability issues.</td>
+    </tr>
+    <tr>
+      <td><code>sudoreplay_sessions_by_risk</code></td>
+      <td>gauge</td>
+      <td>Current session count broken down by risk level. Labels: <code>level</code> (low/medium/high/critical).</td>
+    </tr>
+    <tr>
+      <td><code>sudoreplay_session_views_total</code></td>
+      <td>counter</td>
+      <td>Total replay session views in the web UI. Labels: <code>viewer</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Example Prometheus scrape config</h3>
+<pre><code># prometheus.yml
+scrape_configs:
+  - job_name: sudo-logger-replay
+    static_configs:
+      - targets: ['replay.internal:8080']
+
+  - job_name: sudo-logger-server
+    static_configs:
+      - targets: ['logserver.internal:9877']
+</code></pre>
+
+<!-- ══════════════════════════════ BACKUP ══════════════════════════════ -->
+<a class="section-anchor" id="backup"></a>
+<h2>Backup &amp; Rotation</h2>
+<p>Session files are written to <code>logdir/YYYY/MM/DD/&lt;id&gt;/</code>. The directory structure makes daily snapshots trivial.</p>
+
+<h3>Daily backup (local storage)</h3>
+<pre><code># /etc/cron.daily/sudo-logger-backup
+#!/bin/bash
+set -euo pipefail
+LOGDIR=/var/log/sudoreplay
+BACKUP=/mnt/backup/sudo-logger
+DATE=$(date +%Y-%m-%d)
+
+# Snapshot previous day to backup storage (rsync + hardlinks)
+rsync -a --link-dest="$BACKUP/latest" \
+  "$LOGDIR/$(date -d yesterday +%Y/%m/%d)/" \
+  "$BACKUP/$DATE/"
+
+# Update 'latest' symlink
+ln -sfn "$BACKUP/$DATE" "$BACKUP/latest"
+
+# Verify integrity of backed-up sessions
+find "$BACKUP/$DATE" -name '*.json' -exec \
+  /opt/sudo-logger/scripts/verify-integrity.sh {} \;
+</code></pre>
+
+<h3>Retention policy</h3>
+<p>Managed via the UI (Config → Retention) or directly:</p>
+<pre><code># Remove sessions older than 365 days
+find /var/log/sudoreplay -mindepth 3 -maxdepth 3 -type d \
+  -mtime +365 -exec rm -rf {} +</code></pre>
+
+<h3>S3 lifecycle (distributed storage)</h3>
+<pre><code># AWS CLI — transition to Glacier after 90 days, expire after 365 days
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket my-sudo-logger-bucket \
+  --lifecycle-configuration file://lifecycle.json</code></pre>
+<pre><code>// lifecycle.json
+{
+  "Rules": [{
+    "ID": "sudo-logger-retention",
+    "Status": "Enabled",
+    "Prefix": "sessions/",
+    "Transitions": [{"Days": 90, "StorageClass": "GLACIER"}],
+    "Expiration": {"Days": 365}
+  }]
+}</code></pre>
+
+<a class="section-anchor" id="upgrade"></a>
+<h2>Upgrade Procedure</h2>
+<ol>
+  <li>Build the new RPMs: <code>/rpm-builder client|server|replay</code></li>
+  <li>On the log server, install and restart in order: <strong>server first, then replay</strong>. This prevents the replay server from reading sessions that the new server format hasn't yet created.</li>
+  <li>On monitored hosts, install the new client package and restart the agent. Sessions in progress are completed with the old agent before drain.</li>
+  <li>Check <code>journalctl -u sudo-logger-server -n 50</code> and <code>journalctl -u sudo-logger-agent -n 50</code> for errors after restart.</li>
+  <li>Run a test session: <code>sudo -u nobody id</code> and confirm it appears in the replay UI.</li>
+</ol>
+
+<div class="callout callout-warn">
+  <div class="callout-title">Database migrations</div>
+  The replay server applies PostgreSQL migrations automatically at startup (distributed storage only). Always back up the database before upgrading. The migration version is visible in the startup logs.
+</div>
+
+<!-- ══════════════════════════════ SECURITY HARDENING ══════════════════════════════ -->
+<a class="section-anchor" id="security-hardening"></a>
+<h2>Security Hardening Checklist</h2>
+
+<table>
+  <thead><tr><th>Item</th><th>Command / action</th></tr></thead>
+  <tbody>
+    <tr><td>TLS certificates from internal CA</td><td>Set <code>-cert</code>, <code>-key</code>, <code>-ca</code> flags on server; <code>cert</code>, <code>key</code>, <code>ca</code> in agent.conf</td></tr>
+    <tr><td>Per-host client certificates</td><td>Enable <code>-strict-cert-host</code> on log server (requires each monitored host to have its own cert with matching CN/SAN)</td></tr>
+    <tr><td>Rotate ACK signing key annually</td><td><code>openssl genpkey -algorithm ed25519 -out ack-sign.key</code>, update <code>ack-sign.pub</code></td></tr>
+    <tr><td>File permissions on key material</td><td><code>chmod 0600 /etc/sudo-logger/*.key</code></td></tr>
+    <tr><td>Replay server behind a reverse proxy</td><td>Use nginx + oauth2-proxy with <code>-trusted-user-header X-Forwarded-User</code></td></tr>
+    <tr><td>Sandbox enabled on all agents</td><td>Verify <code>ebpf = true</code> in agent.conf and deploy sandbox.yaml</td></tr>
+    <tr><td>Session log directory permissions</td><td><code>chmod 0750 /var/log/sudoreplay</code>, owned by <code>sudo-logger:sudo-logger</code></td></tr>
+    <tr><td>SELinux enforcing</td><td>Deploy the <code>sudo_logger</code> SELinux module from RPM; verify with <code>sestatus</code></td></tr>
+    <tr><td>Prometheus endpoint not public</td><td>Bind <code>-health-listen</code> to loopback or internal network only</td></tr>
+    <tr><td>Approval token entropy</td><td><code>openssl rand -hex 32 &gt; /etc/sudo-logger/approval-token</code></td></tr>
+  </tbody>
+</table>
+
+<a class="section-anchor" id="security-tls"></a>
+<h2>TLS Setup (Internal CA)</h2>
+<pre><code># Generate CA
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out ca.key
+openssl req -new -x509 -key ca.key -days 3650 \
+  -subj "/CN=sudo-logger CA" -out ca.crt
+
+# Generate server certificate (for log server)
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out server.key
+openssl req -new -key server.key \
+  -subj "/CN=logserver.internal" -out server.csr
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+  -CAcreateserial -days 365 -out server.crt
+
+# Generate client certificate (for agent — per host)
+HOSTNAME="prod-web-01"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out "client-${HOSTNAME}.key"
+openssl req -new -key "client-${HOSTNAME}.key" \
+  -subj "/CN=${HOSTNAME}" -out "client-${HOSTNAME}.csr"
+openssl x509 -req -in "client-${HOSTNAME}.csr" -CA ca.crt -CAkey ca.key \
+  -CAcreateserial -days 365 -out "client-${HOSTNAME}.crt"
+
+# Generate ACK signing key
+openssl genpkey -algorithm ed25519 -out ack-sign.key
+openssl pkey -in ack-sign.key -pubout -out ack-sign.pub
+
+# Distribute to agents
+scp ca.crt ack-sign.pub "client-${HOSTNAME}.crt" "client-${HOSTNAME}.key" \
+  "root@${HOSTNAME}:/etc/sudo-logger/"
+</code></pre>
+
+<a class="section-anchor" id="security-audit"></a>
+<h2>Auditd Integration</h2>
+<p>Add these rules to <code>/etc/audit/rules.d/sudo-logger.rules</code> to log access to the sudo-logger config files themselves:</p>
+<pre><code># Monitor config file changes
+-w /etc/sudo-logger -p wa -k sudo-logger-config
+-w /etc/sudo.conf -p wa -k sudo-config
+-w /etc/sudoers -p wa -k sudo-config
+-w /etc/sudoers.d -p wa -k sudo-config
+
+# Monitor plugin binary
+-w /usr/libexec/sudo/sudo_logger.so -p wa -k sudo-logger-plugin
+
+# Alert on direct manipulation of session logs
+-w /var/log/sudoreplay -p wa -k sudo-logger-sessions
+
+# Reload auditd after adding rules
+augenrules --load
+</code></pre>
+
+<!-- ══════════════════════════════ TROUBLESHOOTING ══════════════════════════════ -->
+<a class="section-anchor" id="ts-agent"></a>
+<h2>Troubleshooting — Agent</h2>
+
+<h3>Agent can't connect to log server</h3>
+<pre><code>sudo journalctl -u sudo-logger-agent -n 50
+# Look for: "tls: certificate signed by unknown authority"
+# or: "connection refused"
+
+# Check cert paths
+sudo openssl verify -CAfile /etc/sudo-logger/ca.crt \
+  /etc/sudo-logger/client.crt
+
+# Test raw TLS connection
+openssl s_client -connect logserver:9876 \
+  -cert /etc/sudo-logger/client.crt \
+  -key /etc/sudo-logger/client.key \
+  -CAfile /etc/sudo-logger/ca.crt
+</code></pre>
+
+<h3>Sessions are freezing</h3>
+<p>Symptoms: sudo hangs at startup for up to <code>freeze_timeout</code> seconds. Root cause: agent cannot reach the log server.</p>
+<pre><code># Check agent status
+systemctl status sudo-logger-agent
+
+# Verify network connectivity to log server
+nc -zv logserver.internal 9876
+
+# Reduce freeze timeout temporarily for testing
+# Edit /etc/sudo-logger/agent.conf:
+# freeze_timeout = 5s
+systemctl restart sudo-logger-agent
+</code></pre>
+
+<h3>"chunk data truncated" or "session incomplete"</h3>
+<p>Indicates the plugin socket had a write error mid-session. Usually caused by the agent being restarted while sessions were in progress. Check: <code>journalctl -u sudo-logger-agent --since "1 hour ago"</code> for restart events.</p>
+
+<h3>eBPF not loading</h3>
+<pre><code># Check kernel version (requires 5.15+)
+uname -r
+
+# Check BPF LSM is enabled
+cat /sys/kernel/security/lsm | grep -o bpf
+
+# Check CAP_BPF is available
+sudo /usr/bin/sudo-logger-agent --check-bpf
+
+# Disable eBPF if not needed:
+# ebpf = false in /etc/sudo-logger/agent.conf
+</code></pre>
+
+<a class="section-anchor" id="ts-server"></a>
+<h2>Troubleshooting — Log Server</h2>
+
+<h3>Approvals API returns 503</h3>
+<p>The approval API is disabled when the log server is started without <code>-approval-token</code>. Check: <code>grep approval-token /etc/systemd/system/sudo-logger-server.service.d/*.conf</code></p>
+
+<h3>Sessions not appearing</h3>
+<pre><code># Check log server is receiving connections
+sudo journalctl -u sudo-logger-server -n 50 | grep "new session"
+
+# Check disk space on logdir
+df -h /var/log/sudoreplay
+
+# Check file permissions
+ls -la /var/log/sudoreplay/
+stat /var/log/sudoreplay
+</code></pre>
+
+<h3>SIEM forwarding not working</h3>
+<pre><code># Test HTTPS endpoint manually
+curl -v -H "Authorization: Splunk &lt;token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"event": "test"}' \
+  https://splunk.example.com:8088/services/collector/event
+
+# Check log server logs for SIEM errors
+sudo journalctl -u sudo-logger-server -n 100 | grep -i siem
+
+# Reload SIEM config (server reads it every 5 min; or restart to force reload)
+sudo systemctl reload sudo-logger-server  # sends SIGHUP
+</code></pre>
+
+<a class="section-anchor" id="ts-replay"></a>
+<h2>Troubleshooting — Replay Server</h2>
+
+<h3>Blank page / React app not loading</h3>
+<pre><code># Check static files are embedded
+sudo systemctl status sudo-logger-replay
+curl -s http://localhost:8080/healthz
+
+# Rebuild UI and package
+cd /path/to/sudo-logger/go/cmd/replay-server/ui
+npm ci &amp;&amp; npm run build
+# Then rebuild the RPM and redeploy
+</code></pre>
+
+<h3>Sessions have NaN dates or missing risk scores</h3>
+<p>Old session metadata files may not have the <code>started_at</code> field in ISO 8601 format. The UI handles both Unix timestamps (numbers) and ISO strings — if you see <code>—</code> dates, check the raw metadata JSON:</p>
+<pre><code>cat /var/log/sudoreplay/2026/06/11/&lt;session-id&gt;/meta.json | python3 -m json.tool</code></pre>
+
+<h3>RBAC: user sees "permission denied"</h3>
+<pre><code># Check the /api/me endpoint to see what role was assigned
+curl -u username:password http://localhost:8080/api/me
+
+# Check admin-users flag
+grep admin-users /etc/systemd/system/sudo-logger-replay.service.d/*.conf
+
+# Add user to admin role temporarily:
+# Add username to -admin-users flag and restart
+</code></pre>
+
+<h3>Approvals tab is missing</h3>
+<p>The Approvals tab only appears when <code>-logserver-admin</code> is set on the replay server. Verify the flag is present and the log server's health port is reachable from the replay server:</p>
+<pre><code>curl http://logserver.internal:9877/healthz</code></pre>
+
+<a class="section-anchor" id="ts-plugin"></a>
+<h2>Troubleshooting — Plugin</h2>
+
+<h3>Plugin not loading</h3>
+<pre><code># Verify the Plugin line in sudo.conf
+grep Plugin /etc/sudo.conf /etc/sudo.conf.d/*.conf 2>/dev/null
+
+# Check plugin file exists and is executable
+ls -la /usr/libexec/sudo/sudo_logger.so
+
+# Test with sudo -V
+sudo -V 2>&amp;1 | grep -i plugin
+
+# Check SELinux context
+ls -lZ /usr/libexec/sudo/sudo_logger.so
+# Expected: system_u:object_r:sudo_exec_t:s0
+# Restore if wrong:
+restorecon -v /usr/libexec/sudo/sudo_logger.so
+</code></pre>
+
+<h3>Plugin socket errors</h3>
+<pre><code># Check socket exists
+ls -la /run/sudo-logger/plugin.sock
+
+# Check agent is running
+systemctl status sudo-logger-agent
+
+# Restart agent to recreate socket
+systemctl restart sudo-logger-agent
+</code></pre>
+
+<h3>Sessions captured by eBPF but not plugin</h3>
+<p>If you see sessions with the <code>ebpf</code> badge but no sessions from the plugin, the plugin is either not loaded or not writing to the socket. Check the agent log for <code>"no plugin"</code> warnings. Also verify <code>/etc/sudo.conf</code> has the correct <code>Plugin</code> line and the sudo version is 1.9.13+.</p>
+
+<div class="callout callout-success">
+  <div class="callout-title">Still stuck?</div>
+  Enable <code>debug = true</code> in <code>agent.conf</code>, restart the agent, reproduce the issue, and check <code>journalctl -u sudo-logger-agent -n 200</code> for detailed output. Remember to disable debug after collecting logs — it may capture session data.
+</div>
+
+<!-- footer spacer -->
+<div style="height: 40px;"></div>
+
+</main>
+
+<script>
+// Highlight active sidebar link based on scroll position
+(function() {
+  const sections = document.querySelectorAll('.section-anchor');
+  const links = document.querySelectorAll('nav#sidebar a');
+
+  function updateActive() {
+    let current = '';
+    sections.forEach(s => {
+      if (window.scrollY >= s.offsetTop - 80) current = s.id;
+    });
+    links.forEach(l => {
+      l.classList.toggle('active', l.getAttribute('href') === '#' + current);
+    });
+  }
+
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+})();
+</script>
+</body>
+</html>

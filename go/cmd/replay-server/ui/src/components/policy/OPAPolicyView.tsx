@@ -9,7 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Plus, Edit2, Trash2, ShieldCheck, Save, RotateCcw, X } from 'lucide-react'
+import { Plus, Edit2, Trash2, ShieldCheck, Save, RotateCcw, X, BookOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OPARuleModal } from './OPARuleModal'
 import { ConfirmDialog, InputDialog } from '@/components/ui/confirm-dialog'
@@ -74,6 +74,14 @@ export function OPAPolicyView() {
           <p className="text-[12px] text-text-dim">Define who can run sudo without a justification (allow), who must provide one (challenge), and who is blocked (deny).</p>
         </div>
         <div className="flex items-center gap-2">
+           <a
+             href="/docs/portal.html#yaml-jit"
+             target="_blank"
+             rel="noopener noreferrer"
+             className="flex items-center gap-1.5 text-[12px] text-text-dim hover:text-green transition-colors mr-1"
+           >
+             <BookOpen size={13} /> Docs
+           </a>
            {isDirty && (
              <Button variant="ghost" size="sm" onClick={() => setDraft(null)} className="h-8 text-text-dim hover:text-text">
                <RotateCcw size={14} className="mr-1.5" /> Discard

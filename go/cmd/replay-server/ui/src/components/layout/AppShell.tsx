@@ -5,7 +5,7 @@ import { fetchMe } from '@/api/config'
 import { fetchApprovals } from '@/api/approvals'
 import { cn } from '@/lib/utils'
 import { useCan } from '@/lib/perms'
-import { User, LogOut, Sun, Moon } from 'lucide-react'
+import { User, LogOut, Sun, Moon, BookOpen } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -117,6 +117,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
 
           <div className="h-4 w-px bg-border-mid" />
+
+          <a
+            href="/docs/portal.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Documentation"
+            className="flex items-center justify-center w-7 h-7 border border-border rounded hover:border-border-mid hover:text-text-sub transition-colors"
+          >
+            <BookOpen size={13} />
+          </a>
 
           <button
             onClick={() => setShowHelp(true)}
@@ -279,6 +289,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </ul>
             </HelpSection>
 
+          </div>
+          <div className="border-t border-border pt-4 flex justify-end">
+            <a
+              href="/docs/portal.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-[12px] text-text-dim hover:text-green transition-colors"
+            >
+              <BookOpen size={13} />
+              Full documentation →
+            </a>
           </div>
         </DialogContent>
       </Dialog>
