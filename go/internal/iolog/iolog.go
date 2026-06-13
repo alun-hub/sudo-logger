@@ -14,7 +14,6 @@ package iolog
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -203,42 +202,13 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	}
 
 	// Event: [elapsed_seconds, "o"/"i", "data"]
-	// We MUST NOT use json.Marshal(string(data)) because Go's JSON encoder
-	// destructiveley washes non-UTF8 bytes into replacement characters (0xFFFD).
-	// Terminal data is binary (ANSI). We manually build the JSON line to
-	// preserve every single byte using standard JSON \uXXXX escapes.
-
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "[%f, %q, \"", elapsed, kind)
-	for _, b := range data {
-		switch b {
-		case '"':
-			buf.WriteString(`\"`)
-		case '\\':
-			buf.WriteString(`\\`)
-		case '\b':
-			buf.WriteString(`\b`)
-		case '\f':
-			buf.WriteString(`\f`)
-		case '\n':
-			buf.WriteString(`\n`)
-		case '\r':
-			buf.WriteString(`\r`)
-		case '\t':
-			buf.WriteString(`\t`)
-		default:
-			// Escape everything outside the printable ASCII range to ensure
-			// Go's JSON parser (and other parsers) don't try to "fix" UTF-8.
-			if b < 0x20 || b >= 0x7f {
-				fmt.Fprintf(&buf, "\\u00%02x", b)
-			} else {
-				buf.WriteByte(b)
-			}
-		}
+	// Data must be valid UTF-8; replace invalid bytes with the replacement char.
+	event := []any{elapsed, kind, strings.ToValidUTF8(string(data), "\ufffd")}
+	b, err := json.Marshal(event)
+	if err != nil {
+		return err
 	}
-	buf.WriteString("\"]\n")
-
-	_, err := w.castBuf.Write(buf.Bytes())
+	_, err = w.castBuf.Write(append(b, '\n'))
 	return err
 }
 

@@ -1,53 +1,21 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import { fetchSessionEvents } from '@/api/sessions'
 import { fmtDuration } from '@/lib/date'
 import { RiskBadge } from '../sessions/RiskBadge'
 import type { SessionInfo, SessionEvent } from '@/types/session'
 import '@xterm/xterm/css/xterm.css'
 
-// Scan the first few output events for ESC[1;Nr (scroll-region set), which
-// vi/ncurses emit as their very first output to declare the terminal height.
-// iolog.go defaults height:50 when the plugin sends 0 — the cast header lies.
-// The ANSI stream never lies: if vi sets ESC[1;51r it uses 51 rows.
-function detectActualRows(events: SessionEvent[], fallback: number): number {
-  const re = /\x1b\[1;(\d+)r/
-  let checked = 0
-  for (const ev of events) {
-    if (ev.type !== 4 || !ev.data) continue
-    const raw = atob(ev.data)
-    const m = re.exec(raw)
-    if (m) return parseInt(m[1], 10)
-    if (++checked >= 3) break
-  }
-  return fallback
-}
-
-// Calculate font size so that cols×rows fits within vpW×vpH.
-// Uses approximations: char width ≈ fontSize × 0.601, line height = 1.3 × fontSize.
-// Clamped to [9, 16] px.
-function calcFontSize(cols: number, rows: number, vpW: number, vpH: number): number {
-  if (vpW <= 0 || vpH <= 0) return 13
-  const fromW = Math.floor(vpW / (cols * 0.601))
-  const fromH = Math.floor(vpH / (rows * 1.3))
-  return Math.max(9, Math.min(16, Math.min(fromW, fromH)))
-}
-
 interface Props {
   session: SessionInfo
 }
 
 export function TerminalPlayer({ session }: Props) {
-  const containerRef  = useRef<HTMLDivElement>(null)
-  const viewportRef   = useRef<HTMLDivElement>(null)
-  const termRef       = useRef<Terminal | null>(null)
-  const rafRef        = useRef<number>(0)
-
-  // actDims: [cols, rows] — updated after events load to reflect actual terminal size
-  const [actDims, setActDims] = useState<[number, number]>([
-    session.cols || 220,
-    session.rows || 50,
-  ])
+  const containerRef = useRef<HTMLDivElement>(null)
+  const termRef      = useRef<Terminal | null>(null)
+  const fitRef       = useRef<FitAddon | null>(null)
+  const rafRef       = useRef<number>(0)
 
   const [events, setEvents]   = useState<SessionEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -55,14 +23,58 @@ export function TerminalPlayer({ session }: Props) {
   const [elapsed, setElapsed] = useState(0)
   const [speed, setSpeed]     = useState(1)
 
-  const playingRef   = useRef(false)
-  const elapsedRef   = useRef(0)
-  const speedRef     = useRef(1)
-  const eventsRef    = useRef<SessionEvent[]>([])
-  const eventIdxRef  = useRef(0)
-  const lastRafTs    = useRef(0)
-  // Indirection so effects can always call the latest play() without capturing stale closures
-  const playRef      = useRef<() => void>(() => {})
+  const playingRef  = useRef(false)
+  const elapsedRef  = useRef(0)
+  const speedRef    = useRef(1)
+  const eventsRef   = useRef<SessionEvent[]>([])
+  const eventIdxRef = useRef(0)
+  const lastRafTs   = useRef(0)
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const term = new Terminal({
+      theme: { background: '#09090f', foreground: '#d4daf0', cursor: '#d4daf0' },
+      fontSize: 13,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      cursorBlink: false,
+      convertEol: true,
+      lineHeight: 1.3,
+    })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(containerRef.current)
+    fit.fit()
+    termRef.current = term
+    fitRef.current  = fit
+
+    const observer = new ResizeObserver(() => fit.fit())
+    observer.observe(containerRef.current)
+
+    return () => {
+      observer.disconnect()
+      term.dispose()
+    }
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    setPlaying(false)
+    playingRef.current  = false
+    setElapsed(0)
+    elapsedRef.current  = 0
+    eventIdxRef.current = 0
+    termRef.current?.clear()
+
+    fetchSessionEvents(session.tsid)
+      .then(evs => {
+        setEvents(evs)
+        eventsRef.current = evs
+        fitRef.current?.fit()
+        const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
+        if (auto) setTimeout(() => play(), 100)
+      })
+      .finally(() => setLoading(false))
+  }, [session.tsid])
 
   const tick = useCallback((ts: number) => {
     if (!playingRef.current) return
@@ -79,7 +91,7 @@ export function TerminalPlayer({ session }: Props) {
       const ev = evs[eventIdxRef.current++]
       if (ev.type === 4 && ev.data) {
         try {
-          const raw   = atob(ev.data)
+          const raw = atob(ev.data)
           const bytes = new Uint8Array(raw.length)
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
           termRef.current?.write(bytes)
@@ -108,9 +120,6 @@ export function TerminalPlayer({ session }: Props) {
     rafRef.current = requestAnimationFrame(tick)
   }, [tick])
 
-  // Keep the ref in sync so effects never capture a stale play()
-  useEffect(() => { playRef.current = play }, [play])
-
   const pause = useCallback(() => {
     playingRef.current = false
     cancelAnimationFrame(rafRef.current)
@@ -122,13 +131,13 @@ export function TerminalPlayer({ session }: Props) {
     elapsedRef.current  = 0
     eventIdxRef.current = 0
     setElapsed(0)
-    termRef.current?.reset()
+    termRef.current?.clear()
     play()
   }, [pause, play])
 
   const seek = useCallback((targetSecs: number) => {
     pause()
-    termRef.current?.reset()
+    termRef.current?.clear()
     elapsedRef.current  = targetSecs
     eventIdxRef.current = 0
     setElapsed(targetSecs)
@@ -141,7 +150,7 @@ export function TerminalPlayer({ session }: Props) {
       const ev = evs[eventIdxRef.current++]
       if (ev.type === 4 && ev.data) {
         try {
-          const raw   = atob(ev.data)
+          const raw = atob(ev.data)
           const bytes = new Uint8Array(raw.length)
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
           termRef.current?.write(bytes)
@@ -150,110 +159,7 @@ export function TerminalPlayer({ session }: Props) {
     }
   }, [pause])
 
-  // Terminal lifecycle — recreated whenever session or detected dims change.
-  // Font-size-to-fit: keep xterm.js logical grid at recorded dimensions and
-  // shrink/grow the font so the rendered terminal fills the viewport.
-  // This avoids CSS transform clipping issues and keeps ANSI positions correct.
-  useEffect(() => {
-    if (!containerRef.current || !viewportRef.current) return
-
-    cancelAnimationFrame(rafRef.current)
-    playingRef.current = false
-    setPlaying(false)
-
-    const [cols, rows] = actDims
-    const vpW = viewportRef.current.offsetWidth
-    const vpH = viewportRef.current.offsetHeight
-    const fontSize = calcFontSize(cols, rows, vpW, vpH)
-
-    const term = new Terminal({
-      cols,
-      rows,
-      theme: {
-        background: '#09090f',
-        foreground: '#d4daf0',
-        cursor: '#00e87a',
-        cursorAccent: '#09090f',
-        selectionBackground: 'rgba(77,168,255,0.25)',
-        black:        '#1e2230', red:          '#ff5f6d',
-        green:        '#00e87a', yellow:       '#ffd666',
-        blue:         '#4da8ff', magenta:      '#c984f8',
-        cyan:         '#4dd5f8', white:        '#d4daf0',
-        brightBlack:  '#4a5068', brightRed:    '#ff8089',
-        brightGreen:  '#33ffaa', brightYellow: '#ffe080',
-        brightBlue:   '#80c4ff', brightMagenta:'#d9aaff',
-        brightCyan:   '#80e8ff', brightWhite:  '#eef0ff',
-      },
-      fontSize,
-      fontFamily:  "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-      cursorBlink: true,
-      convertEol:  true,
-      lineHeight:  1.3,
-      scrollback:  5000,
-    })
-
-    term.open(containerRef.current)
-    termRef.current = term
-
-    // On viewport resize: recalculate font size and update in-place.
-    // Changing fontSize on an existing terminal avoids full re-init.
-    const adjustFont = () => {
-      if (!viewportRef.current || !termRef.current) return
-      const w = viewportRef.current.offsetWidth
-      const h = viewportRef.current.offsetHeight
-      const newSize = calcFontSize(cols, rows, w, h)
-      if (newSize !== termRef.current.options.fontSize) {
-        termRef.current.options.fontSize = newSize
-      }
-    }
-
-    const observer = new ResizeObserver(adjustFont)
-    observer.observe(viewportRef.current)
-
-    return () => {
-      observer.disconnect()
-      cancelAnimationFrame(rafRef.current)
-      term.dispose()
-      termRef.current = null
-    }
-  }, [session.tsid, actDims[0], actDims[1]])
-
-  // Event loading — fetch events, detect actual terminal rows, update dims.
-  useEffect(() => {
-    setLoading(true)
-    setPlaying(false)
-    playingRef.current  = false
-    setElapsed(0)
-    elapsedRef.current  = 0
-    eventIdxRef.current = 0
-    eventsRef.current   = []
-    setEvents([])
-    termRef.current?.reset()
-
-    // Reset to header dims while events are in flight
-    setActDims([session.cols || 220, session.rows || 50])
-
-    fetchSessionEvents(session.tsid)
-      .then(evs => {
-        eventsRef.current = evs
-        setEvents(evs)
-
-        const rows = detectActualRows(evs, session.rows || 50)
-        const cols = session.cols || 220
-
-        // Update dims — if different from header, triggers terminal re-init.
-        // Either way, wait 150 ms for the terminal to be fully ready before
-        // starting autoplay (covers both: re-init path and no-change path).
-        setActDims([cols, rows])
-
-        const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
-        if (auto) setTimeout(() => playRef.current(), 150)
-      })
-      .finally(() => setLoading(false))
-  }, [session.tsid])
-
   const totalDuration = events.length > 0 ? events[events.length - 1].t : session.duration
-  const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -279,10 +185,13 @@ export function TerminalPlayer({ session }: Props) {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [pause, play, restart, seek, totalDuration])
 
+  const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
+
   return (
     <div className="flex flex-col h-full bg-bg overflow-hidden relative transition-colors duration-200">
-      {/* Session Header */}
+      {/* Detailed Session Header */}
       <div className="bg-surface border-b border-border p-4 space-y-4 shrink-0 z-30 shadow-md shadow-black/5 transition-colors">
+        {/* Row 1: Primary Identity */}
         <div className="flex items-center justify-center gap-x-8 text-[11px] font-black uppercase tracking-[0.15em]">
            <div className="flex gap-2 items-baseline">
               <span className="text-green/80">user</span>
@@ -302,6 +211,7 @@ export function TerminalPlayer({ session }: Props) {
            </div>
         </div>
 
+        {/* Row 2: Incomplete Banner (Conditional) */}
         {session.incomplete && (
           <div className="max-w-4xl mx-auto py-1 px-4 bg-red-950/40 border border-red-500/30 rounded-[4px] flex items-center justify-center gap-3 text-[11px] text-red-400 font-bold uppercase tracking-widest animate-pulse">
              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
@@ -309,6 +219,7 @@ export function TerminalPlayer({ session }: Props) {
           </div>
         )}
 
+        {/* Row 3: Risk & Reasons */}
         <div className="flex flex-col items-center gap-1">
            <div className="flex items-center gap-3">
               <RiskBadge level={session.risk_level} score={session.risk_score} className="scale-110" />
@@ -324,13 +235,15 @@ export function TerminalPlayer({ session }: Props) {
         </div>
       </div>
 
-      {/* Terminal Viewport — viewportRef measures available space; containerRef is xterm's mount */}
-      <div ref={viewportRef} className="flex-1 overflow-hidden relative bg-black p-2.5">
-        <div ref={containerRef} />
+      {/* Terminal Viewport */}
+      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center bg-black">
+         <div className="w-full h-full p-2.5">
+            <div ref={containerRef} className="w-full h-full" />
+         </div>
       </div>
 
-      {/* Controls Bar */}
-      <div className="bg-surface/95 backdrop-blur-md border-t border-border px-6 py-3 flex items-center gap-4 shadow-md z-40 shrink-0">
+      {/* Controls Bar - Fixed at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 z-40 bg-surface/95 backdrop-blur-md border-t border-border px-6 py-3 flex items-center gap-4 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
         <button
           onClick={restart}
           disabled={loading || events.length === 0}

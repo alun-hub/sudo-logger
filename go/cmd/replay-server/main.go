@@ -1586,62 +1586,6 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// unescapeJSONString recovers raw bytes from a JSON string literal.
-// It handles standard JSON escapes and \uXXXX unicode escapes in a
-// binary-safe way, treating \u00XX as raw byte 0xXX.
-func unescapeJSONString(raw []byte) []byte {
-	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
-		return raw
-	}
-	s := raw[1 : len(raw)-1]
-	out := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			switch s[i+1] {
-			case '"':
-				out = append(out, '"')
-				i++
-			case '\\':
-				out = append(out, '\\')
-				i++
-			case '/':
-				out = append(out, '/')
-				i++
-			case 'b':
-				out = append(out, '\b')
-				i++
-			case 'f':
-				out = append(out, '\f')
-				i++
-			case 'n':
-				out = append(out, '\n')
-				i++
-			case 'r':
-				out = append(out, '\r')
-				i++
-			case 't':
-				out = append(out, '\t')
-				i++
-			case 'u':
-				if i+5 < len(s) {
-					var u uint16
-					if _, err := fmt.Sscanf(string(s[i+2:i+6]), "%04x", &u); err == nil {
-						out = append(out, byte(u))
-						i += 5
-						continue
-					}
-				}
-				out = append(out, '\\')
-			default:
-				out = append(out, '\\')
-			}
-		} else {
-			out = append(out, s[i])
-		}
-	}
-	return out
-}
-
 func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1733,11 +1677,10 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 
 		var relTime float64
 		var kind string
+		var dataStr string
 		_ = json.Unmarshal(raw[0], &relTime)
 		_ = json.Unmarshal(raw[1], &kind)
-
-		// Recover raw bytes from \u00XX escapes without UTF-8 coercion
-		dataBytes := unescapeJSONString(raw[2])
+		_ = json.Unmarshal(raw[2], &dataStr)
 
 		evType := 4 // TtyOut
 		if kind == "i" {
@@ -1747,7 +1690,7 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		event := PlaybackEvent{
 			T:    relTime,
 			Type: evType,
-			Data: base64.StdEncoding.EncodeToString(dataBytes),
+			Data: base64.StdEncoding.EncodeToString([]byte(dataStr)),
 		}
 
 		if err := enc.Encode(event); err != nil {
