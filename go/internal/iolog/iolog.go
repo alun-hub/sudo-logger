@@ -202,8 +202,9 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	}
 
 	// Event: [elapsed_seconds, "o"/"i", "data"]
-	// Data must be valid UTF-8; replace invalid bytes with the replacement char.
-	event := []any{elapsed, kind, strings.ToValidUTF8(string(data), "\ufffd")}
+	// Use json.Marshal on the string(data) which will correctly escape non-UTF-8 bytes
+	// and preserve the binary integrity of ANSI sequences.
+	event := []any{elapsed, kind, string(data)}
 	b, err := json.Marshal(event)
 	if err != nil {
 		return err

@@ -1410,17 +1410,17 @@ func parseRawEvents(r io.Reader) ([]RawEvent, error) {
 			continue
 		}
 		var t float64
-		var kind, data string
+		var kind, dataStr string
 		if json.Unmarshal(raw[0], &t) != nil {
 			continue
 		}
 		if json.Unmarshal(raw[1], &kind) != nil {
 			continue
 		}
-		if json.Unmarshal(raw[2], &data) != nil {
+		if json.Unmarshal(raw[2], &dataStr) != nil {
 			continue
 		}
-		events = append(events, RawEvent{T: t, Kind: kind, Data: []byte(data)})
+		events = append(events, RawEvent{T: t, Kind: kind, Data: []byte(dataStr)})
 	}
 	return events, scanner.Err()
 }
