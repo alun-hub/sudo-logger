@@ -22,6 +22,11 @@ export function TerminalPlayer({ session }: Props) {
       playerRef.current.dispose()
     }
 
+    // Fallback to 80x24 if dimensions are unknown or the legacy 220x50 default
+    const hasRealDims = session.cols && session.rows && session.cols !== 220 && session.rows !== 50
+    const cols = hasRealDims ? session.cols : 80
+    const rows = hasRealDims ? session.rows : 24
+
     playerRef.current = AsciinemaPlayer.create(castUrl, containerRef.current, {
       autoPlay: localStorage.getItem('sudo-replay-autoplay') !== 'false',
       speed: 1.0,
@@ -30,6 +35,8 @@ export function TerminalPlayer({ session }: Props) {
       terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       terminalLineHeight: 1.3,
       fit: 'both', // Scale perfectly within both width and height constraints
+      cols: cols,  // Explicitly set cols to override broken .cast headers
+      rows: rows,  // Explicitly set rows to override broken .cast headers
     })
 
     return () => {
@@ -87,8 +94,7 @@ export function TerminalPlayer({ session }: Props) {
 
       {/* Terminal Viewport */}
       <div className="flex-1 overflow-hidden relative bg-black p-4">
-         {/* Container strictly styled for asciinema fit="both" by expanding to full absolute dimensions */}
-         <div ref={containerRef} className="absolute inset-4 flex items-center justify-center" />
+         <div ref={containerRef} className="w-full h-full" />
       </div>
     </div>
   )
