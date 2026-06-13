@@ -1,11 +1,27 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import { fetchSessionEvents } from '@/api/sessions'
 import { fmtDuration } from '@/lib/date'
 import { RiskBadge } from '../sessions/RiskBadge'
 import type { SessionInfo, SessionEvent } from '@/types/session'
 import '@xterm/xterm/css/xterm.css'
+
+// Scan the first few output events for ESC[1;Nr (scroll-region set), which
+// vi/ncurses emit as their very first output to declare the terminal height.
+// iolog.go defaults height:50 when the plugin sends 0 — the cast header lies.
+// The ANSI stream never lies: if vi sets ESC[1;51r it uses 51 rows.
+function detectActualRows(events: SessionEvent[], fallback: number): number {
+  const re = /\x1b\[1;(\d+)r/
+  let checked = 0
+  for (const ev of events) {
+    if (ev.type !== 4 || !ev.data) continue
+    const raw = atob(ev.data)
+    const m = re.exec(raw)
+    if (m) return parseInt(m[1], 10)
+    if (++checked >= 3) break
+  }
+  return fallback
+}
 
 interface Props {
   session: SessionInfo
@@ -13,9 +29,15 @@ interface Props {
 
 export function TerminalPlayer({ session }: Props) {
   const containerRef  = useRef<HTMLDivElement>(null)
+  const viewportRef   = useRef<HTMLDivElement>(null)
   const termRef       = useRef<Terminal | null>(null)
-  const fitRef        = useRef<FitAddon | null>(null)
   const rafRef        = useRef<number>(0)
+
+  // actDims: [cols, rows] — updated after events load to reflect actual terminal size
+  const [actDims, setActDims] = useState<[number, number]>([
+    session.cols || 220,
+    session.rows || 50,
+  ])
 
   const [events, setEvents]   = useState<SessionEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -23,101 +45,14 @@ export function TerminalPlayer({ session }: Props) {
   const [elapsed, setElapsed] = useState(0)
   const [speed, setSpeed]     = useState(1)
 
-  const playingRef  = useRef(false)
-  const elapsedRef  = useRef(0)
-  const speedRef    = useRef(1)
-  const eventsRef   = useRef<SessionEvent[]>([])
-  const eventIdxRef = useRef(0)
-  const lastRafTs   = useRef(0)
-
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    // Recorded terminal dimensions. iolog.go defaults to 220×50 when the
-    // plugin doesn't capture terminal size, so these are always non-zero.
-    const recCols = session.cols || 220
-    const recRows = session.rows || 50
-
-    const term = new Terminal({
-      // Initial cols/rows; FitAddon will resize to viewport below.
-      cols: recCols,
-      rows: recRows,
-      theme: {
-        background: '#09090f',
-        foreground: '#d4daf0',
-        cursor: '#00e87a',
-        cursorAccent: '#09090f',
-        selectionBackground: 'rgba(77,168,255,0.25)',
-        black:'#1e2230',red:'#ff5f6d',green:'#00e87a',yellow:'#ffd666',
-        blue:'#4da8ff',magenta:'#c984f8',cyan:'#4dd5f8',white:'#d4daf0',
-        brightBlack:'#4a5068',brightRed:'#ff8089',brightGreen:'#33ffaa',
-        brightYellow:'#ffe080',brightBlue:'#80c4ff',brightMagenta:'#d9aaff',
-        brightCyan:'#80e8ff',brightWhite:'#eef0ff',
-      },
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-      cursorBlink: true,
-      convertEol: true,
-      lineHeight: 1.3,
-      scrollback: 5000,
-    })
-
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(containerRef.current)
-    termRef.current = term
-    fitRef.current  = fit
-
-    // Sizing strategy: fill the viewport (FitAddon), then cap at the recorded
-    // dimensions so we never give the terminal MORE columns/rows than what was
-    // recorded. This ensures ANSI cursor positions always stay within the
-    // recorded grid. When the viewport is smaller than the recording (common
-    // for wide sessions), vi's status bar is clamped to the last visible row —
-    // which looks correct. When the viewport is larger, we lock to the
-    // recording size for exact fidelity.
-    const syncSize = () => {
-      if (!containerRef.current || !termRef.current || !fitRef.current) return
-      try {
-        fitRef.current.fit()
-        const c = Math.min(termRef.current.cols, recCols)
-        const r = Math.min(termRef.current.rows, recRows)
-        if (c !== termRef.current.cols || r !== termRef.current.rows) {
-          termRef.current.resize(c, r)
-        }
-      } catch (e) {}
-    }
-
-    const timers = [50, 250, 1000].map(d => setTimeout(syncSize, d))
-    const observer = new ResizeObserver(syncSize)
-    observer.observe(containerRef.current)
-
-    return () => {
-      observer.disconnect()
-      timers.forEach(clearTimeout)
-      term.dispose()
-      termRef.current = null
-    }
-  }, [session.tsid, session.cols, session.rows])
-
-  useEffect(() => {
-    setLoading(true)
-    setPlaying(false)
-    playingRef.current  = false
-    setElapsed(0)
-    elapsedRef.current  = 0
-    eventIdxRef.current = 0
-    termRef.current?.reset()
-
-    fetchSessionEvents(session.tsid)
-      .then(evs => {
-        setEvents(evs)
-        eventsRef.current = evs
-
-        const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
-        if (auto) setTimeout(() => play(), 100)
-      })
-      .finally(() => setLoading(false))
-  }, [session.tsid])
+  const playingRef   = useRef(false)
+  const elapsedRef   = useRef(0)
+  const speedRef     = useRef(1)
+  const eventsRef    = useRef<SessionEvent[]>([])
+  const eventIdxRef  = useRef(0)
+  const lastRafTs    = useRef(0)
+  // Indirection so effects can always call the latest play() without capturing stale closures
+  const playRef      = useRef<() => void>(() => {})
 
   const tick = useCallback((ts: number) => {
     if (!playingRef.current) return
@@ -134,7 +69,7 @@ export function TerminalPlayer({ session }: Props) {
       const ev = evs[eventIdxRef.current++]
       if (ev.type === 4 && ev.data) {
         try {
-          const raw = atob(ev.data)
+          const raw   = atob(ev.data)
           const bytes = new Uint8Array(raw.length)
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
           termRef.current?.write(bytes)
@@ -162,6 +97,9 @@ export function TerminalPlayer({ session }: Props) {
     setPlaying(true)
     rafRef.current = requestAnimationFrame(tick)
   }, [tick])
+
+  // Keep the ref in sync so effects never capture a stale play()
+  useEffect(() => { playRef.current = play }, [play])
 
   const pause = useCallback(() => {
     playingRef.current = false
@@ -193,7 +131,7 @@ export function TerminalPlayer({ session }: Props) {
       const ev = evs[eventIdxRef.current++]
       if (ev.type === 4 && ev.data) {
         try {
-          const raw = atob(ev.data)
+          const raw   = atob(ev.data)
           const bytes = new Uint8Array(raw.length)
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
           termRef.current?.write(bytes)
@@ -202,7 +140,113 @@ export function TerminalPlayer({ session }: Props) {
     }
   }, [pause])
 
+  // Terminal lifecycle — recreated whenever session or detected dims change.
+  // CSS scale-to-fit: xterm.js logical grid stays at recorded dimensions;
+  // a CSS transform scales the rendered element to fill the viewport.
+  // This is the only approach that keeps all ANSI cursor positions correct.
+  useEffect(() => {
+    if (!containerRef.current || !viewportRef.current) return
+
+    cancelAnimationFrame(rafRef.current)
+    playingRef.current = false
+    setPlaying(false)
+
+    const [cols, rows] = actDims
+
+    const term = new Terminal({
+      cols,
+      rows,
+      theme: {
+        background: '#09090f',
+        foreground: '#d4daf0',
+        cursor: '#00e87a',
+        cursorAccent: '#09090f',
+        selectionBackground: 'rgba(77,168,255,0.25)',
+        black:        '#1e2230', red:          '#ff5f6d',
+        green:        '#00e87a', yellow:       '#ffd666',
+        blue:         '#4da8ff', magenta:      '#c984f8',
+        cyan:         '#4dd5f8', white:        '#d4daf0',
+        brightBlack:  '#4a5068', brightRed:    '#ff8089',
+        brightGreen:  '#33ffaa', brightYellow: '#ffe080',
+        brightBlue:   '#80c4ff', brightMagenta:'#d9aaff',
+        brightCyan:   '#80e8ff', brightWhite:  '#eef0ff',
+      },
+      fontSize:    13,
+      fontFamily:  "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      cursorBlink: true,
+      convertEol:  true,
+      lineHeight:  1.3,
+      scrollback:  5000,
+    })
+
+    term.open(containerRef.current)
+    termRef.current = term
+
+    const scaleToFit = () => {
+      if (!viewportRef.current || !containerRef.current) return
+      const screen = containerRef.current.querySelector('.xterm-screen') as HTMLElement
+      if (!screen) return
+      const vpW = viewportRef.current.offsetWidth
+      const vpH = viewportRef.current.offsetHeight
+      const tW  = screen.offsetWidth
+      const tH  = screen.offsetHeight
+      if (tW <= 0 || tH <= 0 || vpW <= 0 || vpH <= 0) return
+      const scale   = Math.min(vpW / tW, vpH / tH)
+      const offsetX = (vpW - tW * scale) / 2
+      const offsetY = (vpH - tH * scale) / 2
+      containerRef.current!.style.transform      = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`
+      containerRef.current!.style.transformOrigin = 'top left'
+    }
+
+    const timers  = [50, 250, 1000].map(d => setTimeout(scaleToFit, d))
+    const observer = new ResizeObserver(scaleToFit)
+    observer.observe(viewportRef.current)
+
+    return () => {
+      observer.disconnect()
+      timers.forEach(clearTimeout)
+      cancelAnimationFrame(rafRef.current)
+      term.dispose()
+      termRef.current = null
+    }
+  }, [session.tsid, actDims[0], actDims[1]])
+
+  // Event loading — fetch events, detect actual terminal rows, update dims.
+  useEffect(() => {
+    setLoading(true)
+    setPlaying(false)
+    playingRef.current  = false
+    setElapsed(0)
+    elapsedRef.current  = 0
+    eventIdxRef.current = 0
+    eventsRef.current   = []
+    setEvents([])
+    termRef.current?.reset()
+
+    // Reset to header dims while events are in flight
+    setActDims([session.cols || 220, session.rows || 50])
+
+    fetchSessionEvents(session.tsid)
+      .then(evs => {
+        eventsRef.current = evs
+        setEvents(evs)
+
+        const rows = detectActualRows(evs, session.rows || 50)
+        const cols = session.cols || 220
+
+        // Update dims — if different from header, triggers terminal re-init.
+        // Either way, wait 150 ms for the terminal to be fully ready before
+        // starting autoplay (covers both: re-init path and no-change path).
+        setActDims([cols, rows])
+
+        const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
+        if (auto) setTimeout(() => playRef.current(), 150)
+      })
+      .finally(() => setLoading(false))
+  }, [session.tsid])
+
   const totalDuration = events.length > 0 ? events[events.length - 1].t : session.duration
+  const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -227,8 +271,6 @@ export function TerminalPlayer({ session }: Props) {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [pause, play, restart, seek, totalDuration])
-
-  const fillPct = totalDuration > 0 ? Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)) : 0
 
   return (
     <div className="flex flex-col h-full bg-bg overflow-hidden relative transition-colors duration-200">
@@ -275,9 +317,9 @@ export function TerminalPlayer({ session }: Props) {
         </div>
       </div>
 
-      {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative bg-black p-2.5">
-        <div ref={containerRef} className="w-full h-full" />
+      {/* Terminal Viewport — outer div clips; inner div is xterm's mount point */}
+      <div ref={viewportRef} className="flex-1 overflow-hidden relative bg-black p-2.5">
+        <div ref={containerRef} className="absolute" style={{ top: 0, left: 0 }} />
       </div>
 
       {/* Controls Bar */}
