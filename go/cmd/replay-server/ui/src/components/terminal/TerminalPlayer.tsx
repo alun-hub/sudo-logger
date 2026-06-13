@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import * as AsciinemaPlayer from 'asciinema-player'
 import 'asciinema-player/dist/bundle/asciinema-player.css'
 import { RiskBadge } from '../sessions/RiskBadge'
@@ -8,110 +8,34 @@ interface Props {
   session: SessionInfo
 }
 
-function detectDimensions(castData: string): { cols: number, rows: number } {
-  let cols = 80;
-  let rows = 24;
-
-  // Match CUP (Cursor Position) and HVP (Horizontal and Vertical Position)
-  // e.g. \x1b[24;80H
-  const reCUP = /(?:\\u001b|\\x1b|\x1b)\[(\d+);(\d+)[Hf]/gi;
-  let match;
-  while ((match = reCUP.exec(castData)) !== null) {
-    const r = parseInt(match[1], 10);
-    const c = parseInt(match[2], 10);
-    if (r > rows) rows = r;
-    if (c > cols) cols = c;
-  }
-
-  // Match VPA (Line Position Absolute)
-  const reVPA = /(?:\\u001b|\\x1b|\x1b)\[(\d+)d/gi;
-  while ((match = reVPA.exec(castData)) !== null) {
-    const r = parseInt(match[1], 10);
-    if (r > rows) rows = r;
-  }
-
-  // Match CHA (Cursor Character Absolute)
-  const reCHA = /(?:\\u001b|\\x1b|\x1b)\[(\d+)G/gi;
-  while ((match = reCHA.exec(castData)) !== null) {
-    const c = parseInt(match[1], 10);
-    if (c > cols) cols = c;
-  }
-
-  // Cap at reasonable max bounds so malformed ANSI doesn't crash the browser
-  return {
-    cols: Math.min(cols, 500),
-    rows: Math.min(rows, 150)
-  };
-}
-
 export function TerminalPlayer({ session }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<any>(null)
-  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const el = containerRef.current as HTMLElement | null;
-    if (!el) return;
+    if (!containerRef.current) return
 
-    let blobUrl: string | null = null;
-    let isMounted = true;
+    const castUrl = `/api/session/cast?tsid=${encodeURIComponent(session.tsid)}`
 
-    async function initPlayer() {
-      try {
-        const res = await fetch(`/api/session/cast?tsid=${encodeURIComponent(session.tsid)}`);
-        if (!res.ok) throw new Error(`Failed to fetch cast data: ${res.status}`);
-        const text = await res.text();
-
-        if (!isMounted) return;
-
-        // Find the absolute maximum grid size required by the app (vi/ncurses)
-        const { cols, rows } = detectDimensions(text);
-
-        // Rewrite the asciicast header in-memory
-        const lines = text.split('\n');
-        if (lines.length > 0 && lines[0].startsWith('{')) {
-          try {
-            const header = JSON.parse(lines[0]);
-            header.width = cols;
-            header.height = rows;
-            lines[0] = JSON.stringify(header);
-          } catch (e) {
-            console.error('Failed to parse cast header', e);
-          }
-        }
-
-        const modifiedText = lines.join('\n');
-        const blob = new Blob([modifiedText], { type: 'application/x-ndjson' });
-        blobUrl = URL.createObjectURL(blob);
-
-        if (playerRef.current) {
-          playerRef.current.dispose();
-        }
-
-        playerRef.current = AsciinemaPlayer.create(blobUrl, el as HTMLElement, {
-          autoPlay: localStorage.getItem('sudo-replay-autoplay') !== 'false',
-          speed: 1.0,
-          idleTimeLimit: 2,
-          theme: 'asciinema',
-          terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-          terminalLineHeight: 1.3,
-          fit: 'both', // Scale the player so the detected grid fits perfectly on screen
-        });
-      } catch (e: any) {
-         if (isMounted) setError(e.message);
-      }
+    // Clean up previous player instance
+    if (playerRef.current) {
+      playerRef.current.dispose()
     }
 
-    initPlayer();
+    playerRef.current = AsciinemaPlayer.create(castUrl, containerRef.current, {
+      autoPlay: localStorage.getItem('sudo-replay-autoplay') !== 'false',
+      speed: 1.0,
+      idleTimeLimit: 2,
+      theme: 'asciinema',
+      terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      terminalLineHeight: 1.3,
+      fit: 'width', // Use width fit as recommended by best practices
+    })
 
     return () => {
-      isMounted = false;
       if (playerRef.current) {
         playerRef.current.dispose()
         playerRef.current = null
-      }
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl)
       }
     }
   }, [session.tsid])
@@ -162,12 +86,11 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative bg-black p-4">
-         {error ? (
-            <div className="text-red-400 font-mono text-sm p-4">{error}</div>
-         ) : (
-            <div ref={containerRef} className="absolute inset-0 flex items-center justify-center p-4 w-full h-full" />
-         )}
+      <div className="flex-1 overflow-hidden relative bg-black p-4 flex items-center justify-center">
+         {/* Container strictly styled for asciinema fit="width" */}
+         <div style={{ maxWidth: '100%', overflow: 'hidden', width: '100%' }}>
+           <div ref={containerRef} />
+         </div>
       </div>
     </div>
   )
