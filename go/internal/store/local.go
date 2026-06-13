@@ -1420,7 +1420,17 @@ func parseRawEvents(r io.Reader) ([]RawEvent, error) {
 		if json.Unmarshal(raw[2], &dataStr) != nil {
 			continue
 		}
-		events = append(events, RawEvent{T: t, Kind: kind, Data: []byte(dataStr)})
+
+		// Convert UTF-8 string back to raw bytes. json.Unmarshal to string
+		// converts our \u00XX escapes into 2-byte UTF-8 sequences for bytes > 127.
+		// We treat each rune as a byte to restore the original binary stream.
+		runes := []rune(dataStr)
+		data := make([]byte, len(runes))
+		for i, r := range runes {
+			data[i] = byte(r)
+		}
+
+		events = append(events, RawEvent{T: t, Kind: kind, Data: data})
 	}
 	return events, scanner.Err()
 }

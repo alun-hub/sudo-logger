@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import { fetchSessionEvents } from '@/api/sessions'
 import { fmtDuration } from '@/lib/date'
 import { RiskBadge } from '../sessions/RiskBadge'
@@ -12,8 +13,8 @@ interface Props {
 
 export function TerminalPlayer({ session }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const wrapperRef   = useRef<HTMLDivElement>(null)
   const termRef      = useRef<Terminal | null>(null)
+  const fitRef       = useRef<FitAddon | null>(null)
   const rafRef       = useRef<number>(0)
 
   const [events, setEvents]   = useState<SessionEvent[]>([])
@@ -21,7 +22,6 @@ export function TerminalPlayer({ session }: Props) {
   const [playing, setPlaying] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [speed, setSpeed]     = useState(1)
-  const [scale, setScale]     = useState(1)
 
   const playingRef  = useRef(false)
   const elapsedRef  = useRef(0)
@@ -35,16 +35,16 @@ export function TerminalPlayer({ session }: Props) {
     if (!containerRef.current) return
 
     // HEURISTIC: Backend defaults to 220x50 if unknown.
-    // This breaks vi. We fallback to 80x24 if we see these suspicious defaults.
-    const cols = (session.cols && session.cols !== 220) ? session.cols : 80
-    const rows = (session.rows && session.rows !== 50) ? session.rows : 24
+    // This breaks vi if the real session was smaller.
+    // If we see these suspicious defaults, we let FitAddon decide the grid.
+    const hasRealDims = session.cols && session.rows && session.cols !== 220 && session.rows !== 50
 
     const term = new Terminal({
       theme: {
-        background: '#000000',
+        background: '#09090f',
         foreground: '#d4daf0',
         cursor: '#00e87a',
-        cursorAccent: '#000000',
+        cursorAccent: '#09090f',
         selectionBackground: 'rgba(77,168,255,0.25)',
         black:'#1e2230',red:'#ff5f6d',green:'#00e87a',yellow:'#ffd666',
         blue:'#4da8ff',magenta:'#c984f8',cyan:'#4dd5f8',white:'#d4daf0',
@@ -52,42 +52,52 @@ export function TerminalPlayer({ session }: Props) {
         brightYellow:'#ffe080',brightBlue:'#80c4ff',brightMagenta:'#d9aaff',
         brightCyan:'#80e8ff',brightWhite:'#eef0ff',
       },
-      fontSize: 16, // Use a larger base size and scale down
+      fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       cursorBlink: true,
       convertEol: true,
-      lineHeight: 1.2,
-      cols: cols,
-      rows: rows,
+      lineHeight: 1.3,
+      cols: hasRealDims ? session.cols : undefined,
+      rows: hasRealDims ? session.rows : undefined,
       scrollback: 5000,
     })
 
+    const fit = new FitAddon()
+    term.loadAddon(fit)
     term.open(containerRef.current)
+
     termRef.current = term
+    fitRef.current  = fit
 
-    // 2. CSS Scaling Logic (Fit-to-Viewport while preserving Grid)
-    const updateScale = () => {
-      if (!wrapperRef.current || !containerRef.current) return
-      const availW = wrapperRef.current.clientWidth - 40 // padding
-      const availH = wrapperRef.current.clientHeight - 40
-      const termW  = containerRef.current.offsetWidth
-      const termH  = containerRef.current.offsetHeight
-
-      if (termW > 0 && termH > 0) {
-        const s = Math.min(availW / termW, availH / termH, 1.2) // allow slight upscale
-        setScale(s)
-      }
+    // 2. Robust Sizing Logic
+    const syncSize = () => {
+      if (!containerRef.current || !termRef.current || !fitRef.current) return
+      try {
+        fitRef.current.fit()
+        // If we have real dimensions, re-apply them AFTER fit has calculated the base size
+        if (hasRealDims) {
+          termRef.current.resize(session.cols!, session.rows!)
+        }
+      } catch (e) {}
     }
 
-    const observer = new ResizeObserver(updateScale)
-    observer.observe(wrapperRef.current!)
-    setTimeout(updateScale, 100)
+    // Multiple attempts to handle React view transition timing
+    const timers = [
+      setTimeout(syncSize, 50),
+      setTimeout(syncSize, 250),
+      setTimeout(syncSize, 1000)
+    ]
+
+    const observer = new ResizeObserver(syncSize)
+    observer.observe(containerRef.current)
 
     return () => {
       observer.disconnect()
+      timers.forEach(clearTimeout)
       term.dispose()
     }
   }, [session.tsid, session.cols, session.rows])
+
   // 3. Event Loading & Playback Control
   useEffect(() => {
     setLoading(true)
@@ -96,15 +106,16 @@ export function TerminalPlayer({ session }: Props) {
     setElapsed(0)
     elapsedRef.current  = 0
     eventIdxRef.current = 0
-    termRef.current?.reset() // reset() instead of clear() for parity
+    termRef.current?.reset()
 
     fetchSessionEvents(session.tsid)
       .then(evs => {
         setEvents(evs)
         eventsRef.current = evs
+        // Re-fit once data is loaded
+        setTimeout(() => fitRef.current?.fit(), 100)
 
         const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
-
         if (auto) setTimeout(() => play(), 100)
       })
       .finally(() => setLoading(false))
@@ -266,16 +277,12 @@ export function TerminalPlayer({ session }: Props) {
         </div>
       </div>
 
-      {/* Terminal Viewport - Now robust against clipping and distortion */}
-      <div ref={wrapperRef} className="flex-1 overflow-hidden relative flex items-center justify-center bg-black p-4">
-         <div
-           className="transition-transform duration-200 ease-out origin-center"
-           style={{ transform: `scale(${scale})` }}
-         >
-            <div ref={containerRef} className="shadow-[0_0_60px_rgba(0,0,0,0.9)] border border-white/5" />
-         </div>
+      {/* Terminal Viewport - Pure legacy layout (no CSS scaling, just FitAddon) */}
+      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center bg-black p-2.5">
+         <div ref={containerRef} className="w-full h-full" />
       </div>
-      {/* Controls Bar - Flex participation prevents clipping */}
+
+      {/* Controls Bar */}
       <div className="bg-surface/95 backdrop-blur-md border-t border-border px-6 py-3 flex items-center gap-4 shadow-md z-40 shrink-0">
         <button
           onClick={restart}

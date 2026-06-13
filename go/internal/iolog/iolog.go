@@ -14,6 +14,7 @@ package iolog
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -202,14 +203,40 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	}
 
 	// Event: [elapsed_seconds, "o"/"i", "data"]
-	// Use json.Marshal on the string(data) which will correctly escape non-UTF-8 bytes
-	// and preserve the binary integrity of ANSI sequences.
-	event := []any{elapsed, kind, string(data)}
-	b, err := json.Marshal(event)
-	if err != nil {
-		return err
+	// We MUST NOT use json.Marshal(string(data)) because Go's JSON encoder
+	// destructiveley washes non-UTF8 bytes into replacement characters (0xFFFD).
+	// Terminal data is binary (ANSI). We manually build the JSON line to
+	// preserve every single byte using standard JSON \uXXXX escapes.
+
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "[%f, %q, \"", elapsed, kind)
+	for _, b := range data {
+		switch b {
+		case '"':
+			buf.WriteString(`\"`)
+		case '\\':
+			buf.WriteString(`\\`)
+		case '\b':
+			buf.WriteString(`\b`)
+		case '\f':
+			buf.WriteString(`\f`)
+		case '\n':
+			buf.WriteString(`\n`)
+		case '\r':
+			buf.WriteString(`\r`)
+		case '\t':
+			buf.WriteString(`\t`)
+		default:
+			if b < 0x20 || b >= 0x80 {
+				fmt.Fprintf(&buf, "\\u00%02x", b)
+			} else {
+				buf.WriteByte(b)
+			}
+		}
 	}
-	_, err = w.castBuf.Write(append(b, '\n'))
+	buf.WriteString("\"]\n")
+
+	_, err := w.castBuf.Write(buf.Bytes())
 	return err
 }
 
