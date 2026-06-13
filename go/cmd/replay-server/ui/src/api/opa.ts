@@ -67,7 +67,6 @@ export interface WhitelistedUser {
   username: string
   hosts: string[]
   reason: string
-  whitelisted_at?: number
 }
 
 export interface WhitelistPolicy {
@@ -79,7 +78,7 @@ export function fetchWhitelistPolicy(): Promise<WhitelistPolicy> {
     users: ((r.config?.users ?? []) as any[]).map((u: any) =>
       typeof u === 'string'
         ? { username: u, hosts: [], reason: '' }
-        : { username: u.username ?? '', hosts: u.hosts ?? [], reason: u.reason ?? '', whitelisted_at: u.whitelisted_at }
+        : { username: u.username ?? '', hosts: u.hosts ?? [], reason: u.reason ?? '' }
     ),
   }))
 }

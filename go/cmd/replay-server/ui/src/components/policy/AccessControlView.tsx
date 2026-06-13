@@ -67,7 +67,7 @@ export function AccessControlView() {
   const onSaveWhite = (user: WhitelistedUser) => {
     const isNew = !whiteUsers.find(u => u.username === user.username)
     const next: WhitelistedUser[] = isNew
-      ? [...whiteUsers, { ...user, whitelisted_at: Math.floor(Date.now() / 1000) }]
+      ? [...whiteUsers, user]
       : whiteUsers.map(u => u.username === user.username ? user : u)
     mutWhite.mutate({ users: next })
   }
@@ -180,13 +180,12 @@ export function AccessControlView() {
                 <TableHead className="text-text-dim h-9">Username</TableHead>
                 <TableHead className="text-text-dim h-9">Hosts</TableHead>
                 <TableHead className="text-text-dim h-9">Reason</TableHead>
-                <TableHead className="text-text-dim h-9">Whitelisted at</TableHead>
                 <TableHead className="w-24 h-9"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {whiteUsers.length === 0 ? (
-                <TableRow><TableCell colSpan={5} className="text-center py-8 text-text-dim italic">No users whitelisted.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={4} className="text-center py-8 text-text-dim italic">No users whitelisted.</TableCell></TableRow>
               ) : whiteUsers.map(u => (
                 <TableRow key={u.username} className="hover:bg-card-hover border-border group">
                   <TableCell className="font-mono font-bold text-green">{u.username}</TableCell>
@@ -194,9 +193,6 @@ export function AccessControlView() {
                     {(u.hosts ?? []).length === 0 ? <span className="text-text-dim">All Hosts</span> : u.hosts.join(', ')}
                   </TableCell>
                   <TableCell className="text-text-sub">{u.reason || <span className="text-text-dim italic">—</span>}</TableCell>
-                  <TableCell className="text-text-dim font-mono text-[11px] whitespace-nowrap">
-                    {u.whitelisted_at ? fmtDate(u.whitelisted_at) : '—'}
-                  </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => setEditWhite(u)} className="p-1.5 text-text-dim hover:text-white"><Edit2 size={14} /></button>
