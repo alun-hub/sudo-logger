@@ -30,8 +30,10 @@ export function TerminalPlayer({ session }: Props) {
   const eventIdxRef = useRef(0)
   const lastRafTs   = useRef(0)
 
+  // 1. Terminal Initialization & Parity
   useEffect(() => {
     if (!containerRef.current) return
+
     const term = new Terminal({
       theme: {
         background: '#09090f',
@@ -52,31 +54,52 @@ export function TerminalPlayer({ session }: Props) {
       lineHeight: 1.3,
       scrollback: 5000,
     })
+
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(containerRef.current)
 
-    // Initial fit after a short delay
-    const initialFit = () => {
-      try { fit.fit() } catch (e) {}
-    }
-    setTimeout(initialFit, 50)
-    setTimeout(initialFit, 150)
-
     termRef.current = term
     fitRef.current  = fit
 
-    const observer = new ResizeObserver(() => {
-      try { fit.fit() } catch (e) {}
-    })
+    // 2. Smart Sizing Logic
+    const syncSize = () => {
+      if (!containerRef.current || !termRef.current || !fitRef.current) return
+      try {
+        fitRef.current.fit()
+
+        // If session has explicit dimensions and they aren't the suspicious default (220x50),
+        // we force them to ensure vi doesn't corrupt the screen.
+        const cols = session.cols || 0
+        const rows = session.rows || 0
+
+        // Only trust non-default dimensions (220x50 is usually a backend fallback)
+        if (cols > 0 && rows > 0 && (cols !== 220 || rows !== 50)) {
+          termRef.current.resize(cols, rows)
+        }
+      } catch (e) {
+        console.warn('Failed to sync terminal size', e)
+      }
+    }
+
+    // Delay fits to handle React layout/transition timing
+    const timers = [
+      setTimeout(syncSize, 50),
+      setTimeout(syncSize, 250),
+      setTimeout(syncSize, 1000)
+    ]
+
+    const observer = new ResizeObserver(syncSize)
     observer.observe(containerRef.current)
 
     return () => {
       observer.disconnect()
+      timers.forEach(clearTimeout)
       term.dispose()
     }
-  }, [session.tsid]) // Re-create terminal on session change to ensure clean state
+  }, [session.tsid, session.cols, session.rows])
 
+  // 3. Event Loading & Playback Control
   useEffect(() => {
     setLoading(true)
     setPlaying(false)
@@ -84,13 +107,15 @@ export function TerminalPlayer({ session }: Props) {
     setElapsed(0)
     elapsedRef.current  = 0
     eventIdxRef.current = 0
-    termRef.current?.reset()
+    termRef.current?.reset() // reset() instead of clear() for parity
 
     fetchSessionEvents(session.tsid)
       .then(evs => {
         setEvents(evs)
         eventsRef.current = evs
-        fitRef.current?.fit()
+        // Auto-fit again after data is in
+        setTimeout(() => fitRef.current?.fit(), 50)
+
         const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
         if (auto) setTimeout(() => play(), 100)
       })
@@ -212,7 +237,6 @@ export function TerminalPlayer({ session }: Props) {
     <div className="flex flex-col h-full bg-bg overflow-hidden relative transition-colors duration-200">
       {/* Detailed Session Header */}
       <div className="bg-surface border-b border-border p-4 space-y-4 shrink-0 z-30 shadow-md shadow-black/5 transition-colors">
-        {/* Row 1: Primary Identity */}
         <div className="flex items-center justify-center gap-x-8 text-[11px] font-black uppercase tracking-[0.15em]">
            <div className="flex gap-2 items-baseline">
               <span className="text-green/80">user</span>
@@ -232,7 +256,6 @@ export function TerminalPlayer({ session }: Props) {
            </div>
         </div>
 
-        {/* Row 2: Incomplete Banner (Conditional) */}
         {session.incomplete && (
           <div className="max-w-4xl mx-auto py-1 px-4 bg-red-950/40 border border-red-500/30 rounded-[4px] flex items-center justify-center gap-3 text-[11px] text-red-400 font-bold uppercase tracking-widest animate-pulse">
              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
@@ -240,7 +263,6 @@ export function TerminalPlayer({ session }: Props) {
           </div>
         )}
 
-        {/* Row 3: Risk & Reasons */}
         <div className="flex flex-col items-center gap-1">
            <div className="flex items-center gap-3">
               <RiskBadge level={session.risk_level} score={session.risk_score} className="scale-110" />
@@ -256,20 +278,21 @@ export function TerminalPlayer({ session }: Props) {
         </div>
       </div>
 
-      {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative flex items-center justify-center bg-black p-6">
+      {/* Terminal Viewport - Now robust against clipping and distortion */}
+      <div className="flex-1 overflow-hidden relative flex items-center justify-center bg-black p-4">
          <div
            className="w-full h-full max-w-full max-h-full flex items-center justify-center"
            style={{
-             aspectRatio: `${session.cols || 80} / ${session.rows || 24}`,
-             maxWidth: `calc(${(session.cols || 80) * 9.5}px)`, // approximate char width
+             aspectRatio: (session.cols && session.rows && session.cols !== 220)
+               ? `${session.cols} / ${session.rows}`
+               : undefined
            }}
          >
             <div ref={containerRef} className="w-full h-full shadow-[0_0_60px_rgba(0,0,0,0.9)] border border-white/5" />
          </div>
       </div>
 
-      {/* Controls Bar */}
+      {/* Controls Bar - Flex participation prevents clipping */}
       <div className="bg-surface/95 backdrop-blur-md border-t border-border px-6 py-3 flex items-center gap-4 shadow-md z-40 shrink-0">
         <button
           onClick={restart}
