@@ -33,10 +33,8 @@ export interface SessionInfo {
 
 export interface SessionEvent {
   t: number
-  type: 3 | 4 | 'resize'
+  type: 3 | 4
   data?: string
-  cols?: number
-  rows?: number
 }
 
 export interface SessionsResponse {

@@ -9,8 +9,8 @@ import { Database, Clock, HardDrive } from 'lucide-react'
 export function RetentionTab() {
   const qc = useQueryClient()
   const { data, isPending } = useQuery({ queryKey: ['retention'], queryFn: fetchRetention })
-  const [cfg, setCfg] = useState<{ enabled?: boolean, delete_after_days?: number; archive_cron?: string } | null>(null)
-  const current = cfg ?? data ?? { enabled: false, delete_after_days: 90, archive_cron: '0 2 * * *' }
+  const [cfg, setCfg] = useState<{ enabled?: boolean, days?: number } | null>(null)
+  const current = cfg ?? data ?? { enabled: false, days: 90 }
 
   const save = useMutation({
     mutationFn: saveRetention,
@@ -56,22 +56,11 @@ export function RetentionTab() {
               type="number"
               min={1}
               disabled={!current.enabled}
-              value={current.delete_after_days ?? 90}
-              onChange={e => setCfg({ ...current, delete_after_days: Number(e.target.value) })}
+              value={current.days ?? 90}
+              onChange={e => setCfg({ ...current, days: Number(e.target.value) })}
               className="bg-card border-border text-text h-10 w-32 focus:border-green font-mono"
             />
             <p className="text-[11px] text-text-dim">Sessions older than this will be permanently purged.</p>
-          </div>
-
-          <div className="space-y-1.5 px-1">
-            <label className="text-[11px] font-bold text-text-sub uppercase tracking-wider">Background Archive (Cron)</label>
-            <Input
-              value={current.archive_cron ?? '0 2 * * *'}
-              onChange={e => setCfg({ ...current, archive_cron: e.target.value })}
-              placeholder="0 2 * * *"
-              className="bg-card border-border text-text h-10 focus:border-green font-mono"
-            />
-            <p className="text-[11px] text-text-dim">Schedule for database maintenance and log compression.</p>
           </div>
         </div>
 

@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
-import { useNavigate, Routes, Route, NavLink, Navigate } from 'react-router-dom'
+import { useNavigate, Routes, Route, NavLink, Navigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { fetchReport } from '@/api/reports'
+import { fetchReport, fetchAccessLog } from '@/api/reports'
+import { useCan } from '@/lib/perms'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -9,10 +10,11 @@ import { fmtDate, fmtDuration } from '@/lib/date'
 import { cn } from '@/lib/utils'
 import {
   X, BarChart2, AlertCircle, ShieldAlert, Clock, Zap,
-  ShieldX, AlertTriangle, Box, PlayCircle
+  ShieldX, AlertTriangle, Box, PlayCircle, Eye
 } from 'lucide-react'
 
 export function ReportsView() {
+  const can = useCan()
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
 
@@ -34,6 +36,9 @@ export function ReportsView() {
         <nav className="h-[44px] flex items-center gap-1">
           <SubTab to="/reports/summary"   label="Summary"   icon={<BarChart2 size={14} />} />
           <SubTab to="/reports/anomalies" label="Anomalies" icon={<AlertCircle size={14} />} />
+          {can('audit_log:read') && (
+            <SubTab to="/reports/audit" label="View Audit" icon={<Eye size={14} />} />
+          )}
         </nav>
 
         <div className="flex items-center gap-4 text-[12px]">
@@ -70,6 +75,7 @@ export function ReportsView() {
         <Routes>
           <Route path="summary"   element={<SummaryTab data={data} />} />
           <Route path="anomalies" element={<AnomaliesTab data={data} />} />
+          <Route path="audit"     element={<ViewAuditTab />} />
           <Route path=""          element={<Navigate to="/reports/summary" replace />} />
         </Routes>
       </div>
@@ -297,6 +303,74 @@ function AnomaliesTab({ data }: { data: any }) {
                        <div className="flex justify-end pr-2">
                           <PlayCircle size={18} className="text-text-dim group-hover:text-green transition-colors" />
                        </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ViewAuditTab() {
+  const { data, isPending, isError } = useQuery({
+    queryKey: ['access-log'],
+    queryFn: fetchAccessLog,
+    refetchInterval: 30_000,
+  })
+
+  if (isPending) return <div className="p-8 text-text-dim font-mono text-[13px]">Loading access log…</div>
+  if (isError)   return <div className="p-8 text-red font-mono text-[13px]">Failed to load access log</div>
+
+  const entries = data ?? []
+
+  return (
+    <div className="p-8 animate-in fade-in duration-300 max-w-[1600px] mx-auto">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <h2 className="text-[16px] font-bold text-text uppercase tracking-widest flex items-center gap-2">
+            <Eye size={18} className="text-blue" /> Replay Access Log
+          </h2>
+          <span className="text-[11px] text-text-dim font-mono bg-card px-3 py-1 rounded-full border border-border">
+            {entries.length} entries
+          </span>
+        </div>
+
+        <div className="rounded-[8px] border border-border bg-card shadow-2xl overflow-hidden">
+          <Table className="text-[13px]">
+            <TableHeader className="bg-surface/80 backdrop-blur-sm">
+              <TableRow className="hover:bg-transparent border-border h-11">
+                <TableHead className="text-text-dim font-bold uppercase tracking-tighter text-[11px] w-44">Time</TableHead>
+                <TableHead className="text-text-dim font-bold uppercase tracking-tighter text-[11px] w-40">Viewer</TableHead>
+                <TableHead className="text-text-dim font-bold uppercase tracking-tighter text-[11px]">Session</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="h-32 text-center text-text-dim italic">
+                    No replay access events recorded yet.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                entries.map((e, i) => (
+                  <TableRow key={i} className="hover:bg-card-hover border-border h-12 transition-colors">
+                    <TableCell className="text-text-dim font-mono text-[12px] whitespace-nowrap">
+                      {fmtDate(e.time)}
+                    </TableCell>
+                    <TableCell className="font-mono font-bold text-blue text-[13px]">
+                      {e.viewer}
+                    </TableCell>
+                    <TableCell className="font-mono text-[12px]">
+                      <Link
+                        to={`/?tsid=${e.tsid}`}
+                        className="text-green hover:underline"
+                      >
+                        {e.tsid}
+                      </Link>
                     </TableCell>
                   </TableRow>
                 ))

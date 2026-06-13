@@ -1455,7 +1455,11 @@ func main() {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		idx, _ := staticFS.Open("index.html")
+		idx, err := staticFS.Open("index.html")
+		if err != nil {
+			http.Error(w, "index.html not found — rebuild the UI first", http.StatusInternalServerError)
+			return
+		}
 		defer idx.Close()
 		http.ServeContent(w, r, "index.html", time.Time{}, idx.(io.ReadSeeker))
 	})

@@ -809,7 +809,7 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 	}
 	// Expected path: /api/approvals/{id}/{action} or /api/approvals/{id} (with action in body)
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	var id, action string
+	var id, action, reason string
 
 	if len(parts) == 4 {
 		id, action = parts[2], parts[3]
@@ -824,6 +824,7 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		action = body.Action
+		reason = body.Reason
 	} else {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
@@ -852,14 +853,14 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	case "deny":
-		var body struct {
-			Reason string `json:"reason"`
-		}
-		// Body might have been read already if len(parts) == 3
 		if len(parts) == 4 {
+			var body struct {
+				Reason string `json:"reason"`
+			}
 			json.NewDecoder(r.Body).Decode(&body)
+			reason = body.Reason
 		}
-		if err := m.Deny(id, decidedBy, body.Reason); err != nil {
+		if err := m.Deny(id, decidedBy, reason); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}

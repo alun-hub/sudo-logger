@@ -71,7 +71,3 @@ export function setWhitelistedUsers(users: string[]): Promise<{ ok: boolean }> {
     body: JSON.stringify({ users }),
   })
 }
-
-export function fetchCompiledRego(): Promise<{ rego: string }> {
-  return apiFetch<{ rego: string }>('/api/policy/rego')
-}

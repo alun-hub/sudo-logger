@@ -45,11 +45,9 @@ export interface ReportData {
 
 export interface AccessLogEntry {
   time: number
-  user: string
-  path: string
-  method: string
-  status: number
-  remote_addr: string
+  viewer: string
+  tsid: string
+  replay_url?: string
 }
 
 export function fetchReport(params?: { from?: number; to?: number }): Promise<ReportData> {

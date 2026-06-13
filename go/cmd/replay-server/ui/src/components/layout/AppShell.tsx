@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchMe } from '@/api/config'
 import { fetchApprovals } from '@/api/approvals'
 import { cn } from '@/lib/utils'
+import { useCan } from '@/lib/perms'
 import { User, LogOut, Sun, Moon } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -22,11 +23,11 @@ function useTheme() {
 }
 
 const tabs = [
-  { to: '/',          label: 'Sessions'  },
-  { to: '/reports',   label: 'Reports'   },
-  { to: '/policy',    label: 'Policy'    },
-  { to: '/config',    label: 'Config'    },
-  { to: '/approvals', label: 'Approvals' },
+  { to: '/',          label: 'Sessions',  perm: null              },
+  { to: '/reports',   label: 'Reports',   perm: 'audit_log:read'  },
+  { to: '/policy',    label: 'Policy',    perm: 'policy:read'     },
+  { to: '/config',    label: 'Config',    perm: 'config:read'     },
+  { to: '/approvals', label: 'Approvals', perm: 'approvals:read'  },
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -36,10 +37,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     queryFn: fetchApprovals,
     refetchInterval: 5_000,
   })
+  const can = useCan()
   const location = useLocation()
   const { theme, toggle: toggleTheme } = useTheme()
 
   const pendingCount = (apprs || []).filter(r => !r.status || r.status === 'pending').length
+  const visibleTabs = tabs.filter(t => !t.perm || can(t.perm))
   const [showHelp, setShowHelp] = useState(false)
 
   useEffect(() => {
@@ -61,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="font-bold text-[16px] text-foreground tracking-tight uppercase">sudo-replay</span>
           </div>
           <nav className="flex gap-2">
-            {tabs.map(t => {
+            {visibleTabs.map(t => {
               const isActive = t.to === '/' ? location.pathname === '/' : location.pathname.startsWith(t.to)
               return (
                 <NavLink

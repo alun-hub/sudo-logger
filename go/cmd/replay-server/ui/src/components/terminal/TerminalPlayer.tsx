@@ -69,6 +69,7 @@ export function TerminalPlayer({ session }: Props) {
       .then(evs => {
         setEvents(evs)
         eventsRef.current = evs
+        fitRef.current?.fit()
         const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
         if (auto) setTimeout(() => play(), 100)
       })
@@ -95,8 +96,6 @@ export function TerminalPlayer({ session }: Props) {
           for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
           termRef.current?.write(bytes)
         } catch (e) { console.error('Failed to decode event data', e) }
-      } else if (ev.type === 'resize' && ev.cols && ev.rows) {
-        termRef.current?.resize(ev.cols, ev.rows)
       }
     }
 

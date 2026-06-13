@@ -56,8 +56,7 @@ export interface Role {
 
 export interface RetentionConfig {
   enabled?: boolean
-  delete_after_days?: number
-  archive_cron?: string
+  days?: number
 }
 
 export interface SandboxRaw {
@@ -90,4 +89,5 @@ export interface ApprovalConfig {
 export interface MeResponse {
   username: string
   role: string
+  permissions: string[]
 }

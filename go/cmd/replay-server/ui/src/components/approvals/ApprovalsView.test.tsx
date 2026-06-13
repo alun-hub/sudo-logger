@@ -29,7 +29,7 @@ describe('ApprovalsView', () => {
     render(<ApprovalsView />, { wrapper })
 
     expect(await screen.findByText('alice')).toBeInTheDocument()
-    expect(screen.getByText('host1')).toBeInTheDocument()
+    expect(screen.getByText(/host1/)).toBeInTheDocument()
     expect(screen.getByText('ls')).toBeInTheDocument()
   })
 })
