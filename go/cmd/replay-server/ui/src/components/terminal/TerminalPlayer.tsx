@@ -23,6 +23,16 @@ function detectActualRows(events: SessionEvent[], fallback: number): number {
   return fallback
 }
 
+// Calculate font size so that cols×rows fits within vpW×vpH.
+// Uses approximations: char width ≈ fontSize × 0.601, line height = 1.3 × fontSize.
+// Clamped to [9, 16] px.
+function calcFontSize(cols: number, rows: number, vpW: number, vpH: number): number {
+  if (vpW <= 0 || vpH <= 0) return 13
+  const fromW = Math.floor(vpW / (cols * 0.601))
+  const fromH = Math.floor(vpH / (rows * 1.3))
+  return Math.max(9, Math.min(16, Math.min(fromW, fromH)))
+}
+
 interface Props {
   session: SessionInfo
 }
@@ -141,9 +151,9 @@ export function TerminalPlayer({ session }: Props) {
   }, [pause])
 
   // Terminal lifecycle — recreated whenever session or detected dims change.
-  // CSS scale-to-fit: xterm.js logical grid stays at recorded dimensions;
-  // a CSS transform scales the rendered element to fill the viewport.
-  // This is the only approach that keeps all ANSI cursor positions correct.
+  // Font-size-to-fit: keep xterm.js logical grid at recorded dimensions and
+  // shrink/grow the font so the rendered terminal fills the viewport.
+  // This avoids CSS transform clipping issues and keeps ANSI positions correct.
   useEffect(() => {
     if (!containerRef.current || !viewportRef.current) return
 
@@ -152,6 +162,9 @@ export function TerminalPlayer({ session }: Props) {
     setPlaying(false)
 
     const [cols, rows] = actDims
+    const vpW = viewportRef.current.offsetWidth
+    const vpH = viewportRef.current.offsetHeight
+    const fontSize = calcFontSize(cols, rows, vpW, vpH)
 
     const term = new Terminal({
       cols,
@@ -171,7 +184,7 @@ export function TerminalPlayer({ session }: Props) {
         brightBlue:   '#80c4ff', brightMagenta:'#d9aaff',
         brightCyan:   '#80e8ff', brightWhite:  '#eef0ff',
       },
-      fontSize:    13,
+      fontSize,
       fontFamily:  "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       cursorBlink: true,
       convertEol:  true,
@@ -182,29 +195,23 @@ export function TerminalPlayer({ session }: Props) {
     term.open(containerRef.current)
     termRef.current = term
 
-    const scaleToFit = () => {
-      if (!viewportRef.current || !containerRef.current) return
-      const screen = containerRef.current.querySelector('.xterm-screen') as HTMLElement
-      if (!screen) return
-      const vpW = viewportRef.current.offsetWidth
-      const vpH = viewportRef.current.offsetHeight
-      const tW  = screen.offsetWidth
-      const tH  = screen.offsetHeight
-      if (tW <= 0 || tH <= 0 || vpW <= 0 || vpH <= 0) return
-      const scale   = Math.min(vpW / tW, vpH / tH)
-      const offsetX = (vpW - tW * scale) / 2
-      const offsetY = (vpH - tH * scale) / 2
-      containerRef.current!.style.transform      = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`
-      containerRef.current!.style.transformOrigin = 'top left'
+    // On viewport resize: recalculate font size and update in-place.
+    // Changing fontSize on an existing terminal avoids full re-init.
+    const adjustFont = () => {
+      if (!viewportRef.current || !termRef.current) return
+      const w = viewportRef.current.offsetWidth
+      const h = viewportRef.current.offsetHeight
+      const newSize = calcFontSize(cols, rows, w, h)
+      if (newSize !== termRef.current.options.fontSize) {
+        termRef.current.options.fontSize = newSize
+      }
     }
 
-    const timers  = [50, 250, 1000].map(d => setTimeout(scaleToFit, d))
-    const observer = new ResizeObserver(scaleToFit)
+    const observer = new ResizeObserver(adjustFont)
     observer.observe(viewportRef.current)
 
     return () => {
       observer.disconnect()
-      timers.forEach(clearTimeout)
       cancelAnimationFrame(rafRef.current)
       term.dispose()
       termRef.current = null
@@ -317,9 +324,9 @@ export function TerminalPlayer({ session }: Props) {
         </div>
       </div>
 
-      {/* Terminal Viewport — outer div clips; inner div is xterm's mount point */}
+      {/* Terminal Viewport — viewportRef measures available space; containerRef is xterm's mount */}
       <div ref={viewportRef} className="flex-1 overflow-hidden relative bg-black p-2.5">
-        <div ref={containerRef} className="absolute" style={{ top: 0, left: 0 }} />
+        <div ref={containerRef} />
       </div>
 
       {/* Controls Bar */}
