@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import { fetchSessionEvents } from '@/api/sessions'
 import { fmtDuration } from '@/lib/date'
 import { RiskBadge } from '../sessions/RiskBadge'
@@ -12,8 +13,8 @@ interface Props {
 
 export function TerminalPlayer({ session }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const wrapperRef   = useRef<HTMLDivElement>(null)
   const termRef      = useRef<Terminal | null>(null)
+  const fitRef       = useRef<FitAddon | null>(null)
   const rafRef       = useRef<number>(0)
 
   const [events, setEvents]   = useState<SessionEvent[]>([])
@@ -21,7 +22,6 @@ export function TerminalPlayer({ session }: Props) {
   const [playing, setPlaying] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [speed, setSpeed]     = useState(1)
-  const [scale, setScale]     = useState(1)
 
   const playingRef  = useRef(false)
   const elapsedRef  = useRef(0)
@@ -33,43 +33,44 @@ export function TerminalPlayer({ session }: Props) {
   useEffect(() => {
     if (!containerRef.current) return
     const term = new Terminal({
-      theme: { background: '#000000', foreground: '#d4daf0', cursor: '#d4daf0' },
-      fontSize: 14,
+      theme: {
+        background: '#09090f',
+        foreground: '#d4daf0',
+        cursor: '#00e87a',
+        cursorAccent: '#09090f',
+        selectionBackground: 'rgba(77,168,255,0.25)',
+        black:'#1e2230',red:'#ff5f6d',green:'#00e87a',yellow:'#ffd666',
+        blue:'#4da8ff',magenta:'#c984f8',cyan:'#4dd5f8',white:'#d4daf0',
+        brightBlack:'#4a5068',brightRed:'#ff8089',brightGreen:'#33ffaa',
+        brightYellow:'#ffe080',brightBlue:'#80c4ff',brightMagenta:'#d9aaff',
+        brightCyan:'#80e8ff',brightWhite:'#eef0ff',
+      },
+      fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       cursorBlink: true,
       convertEol: true,
-      lineHeight: 1.2,
-      cols: session.cols || 80,
-      rows: session.rows || 24,
+      lineHeight: 1.3,
     })
+    const fit = new FitAddon()
+    term.loadAddon(fit)
     term.open(containerRef.current)
+
+    // Initial fit after a short delay to ensure container is rendered
+    setTimeout(() => fit.fit(), 100)
+
     termRef.current = term
+    fitRef.current  = fit
 
-    const updateScale = () => {
-      if (!wrapperRef.current || !containerRef.current) return
-      const pad = 32 // matching p-4 * 2
-      const availW = wrapperRef.current.clientWidth - pad
-      const availH = wrapperRef.current.clientHeight - pad
-      const termW  = containerRef.current.offsetWidth
-      const termH  = containerRef.current.offsetHeight
-
-      if (termW > 0 && termH > 0) {
-        const s = Math.min(availW / termW, availH / termH, 1)
-        setScale(s)
-      }
-    }
-
-    const observer = new ResizeObserver(updateScale)
-    if (wrapperRef.current) observer.observe(wrapperRef.current)
-
-    // Initial scale check after xterm renders
-    setTimeout(updateScale, 50)
+    const observer = new ResizeObserver(() => {
+      try { fit.fit() } catch (e) {}
+    })
+    observer.observe(containerRef.current)
 
     return () => {
       observer.disconnect()
       term.dispose()
     }
-  }, [session.tsid, session.cols, session.rows])
+  }, [session.tsid]) // Re-create terminal on session change to ensure clean state
 
   useEffect(() => {
     setLoading(true)
@@ -78,12 +79,13 @@ export function TerminalPlayer({ session }: Props) {
     setElapsed(0)
     elapsedRef.current  = 0
     eventIdxRef.current = 0
-    termRef.current?.clear()
+    termRef.current?.reset()
 
     fetchSessionEvents(session.tsid)
       .then(evs => {
         setEvents(evs)
         eventsRef.current = evs
+        fitRef.current?.fit()
         const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
         if (auto) setTimeout(() => play(), 100)
       })
@@ -145,13 +147,13 @@ export function TerminalPlayer({ session }: Props) {
     elapsedRef.current  = 0
     eventIdxRef.current = 0
     setElapsed(0)
-    termRef.current?.clear()
+    termRef.current?.reset()
     play()
   }, [pause, play])
 
   const seek = useCallback((targetSecs: number) => {
     pause()
-    termRef.current?.clear()
+    termRef.current?.reset()
     elapsedRef.current  = targetSecs
     eventIdxRef.current = 0
     setElapsed(targetSecs)
@@ -250,12 +252,9 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div ref={wrapperRef} className="flex-1 overflow-hidden relative flex items-center justify-center bg-black p-4">
-         <div
-           className="transition-transform duration-200 ease-out origin-center"
-           style={{ transform: `scale(${scale})` }}
-         >
-            <div ref={containerRef} className="shadow-[0_0_60px_rgba(0,0,0,0.9)] border border-white/5" />
+      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center bg-black">
+         <div className="w-full h-full p-2.5">
+            <div ref={containerRef} className="w-full h-full" />
          </div>
       </div>
 
