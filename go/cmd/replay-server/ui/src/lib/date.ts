@@ -1,5 +1,6 @@
-export function fmtDate(unix: number): string {
-  const d = new Date(unix * 1000)
+export function fmtDate(value: number | string): string {
+  const d = typeof value === 'string' ? new Date(value) : new Date(value * 1000)
+  if (isNaN(d.getTime())) return '—'
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }

@@ -204,11 +204,20 @@ function SummaryTab({ data }: { data: any }) {
 
 function AnomaliesTab({ data }: { data: any }) {
   const navigate = useNavigate()
+  const [q, setQ] = useState('')
   const [sortCol, setSortCol] = useState('start_time')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   const sorted = useMemo(() => {
-    let list = [...data.anomalies]
+    const lq = q.toLowerCase()
+    let list = (data.anomalies as any[]).filter(a =>
+      !lq ||
+      (a.user   || '').toLowerCase().includes(lq) ||
+      (a.host   || '').toLowerCase().includes(lq) ||
+      (a.command|| '').toLowerCase().includes(lq) ||
+      (a.kind   || '').toLowerCase().includes(lq) ||
+      (a.detail || '').toLowerCase().includes(lq)
+    )
     list.sort((a: any, b: any) => {
       const vA = a[sortCol]
       const vB = b[sortCol]
@@ -217,7 +226,7 @@ function AnomaliesTab({ data }: { data: any }) {
       return 0
     })
     return list
-  }, [data.anomalies, sortCol, sortDir])
+  }, [data.anomalies, q, sortCol, sortDir])
 
   const toggleSort = (col: string) => {
     if (sortCol === col) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
@@ -241,9 +250,17 @@ function AnomaliesTab({ data }: { data: any }) {
        <div className="space-y-6">
         <div className="flex items-center justify-between border-b border-border pb-2">
            <h2 className="text-[16px] font-bold text-text uppercase tracking-widest">Security Anomalies Log</h2>
-           <span className="text-[11px] text-text-dim font-mono bg-card px-3 py-1 rounded-full border border-border">
-              {sorted.length} events detected
-           </span>
+           <div className="flex items-center gap-3">
+             <input
+               placeholder="Search user, host, command…"
+               value={q}
+               onChange={e => setQ(e.target.value)}
+               className="h-8 bg-card border border-border rounded-[6px] px-3 text-[12px] outline-none focus:border-green w-56 transition-all font-mono"
+             />
+             <span className="text-[11px] text-text-dim font-mono bg-card px-3 py-1 rounded-full border border-border">
+               {sorted.length} events
+             </span>
+           </div>
         </div>
 
         <div className="rounded-[8px] border border-border bg-card shadow-2xl overflow-hidden">
@@ -316,16 +333,34 @@ function AnomaliesTab({ data }: { data: any }) {
 }
 
 function ViewAuditTab() {
+  const [sortCol, setSortCol] = useState('time')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
   const { data, isPending, isError } = useQuery({
     queryKey: ['access-log'],
     queryFn: fetchAccessLog,
     refetchInterval: 30_000,
   })
 
+  const entries = useMemo(() => {
+    const list = [...(data ?? [])]
+    list.sort((a: any, b: any) => {
+      const vA = a[sortCol] ?? ''
+      const vB = b[sortCol] ?? ''
+      if (vA < vB) return sortDir === 'asc' ? -1 : 1
+      if (vA > vB) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+    return list
+  }, [data, sortCol, sortDir])
+
   if (isPending) return <div className="p-8 text-text-dim font-mono text-[13px]">Loading access log…</div>
   if (isError)   return <div className="p-8 text-red font-mono text-[13px]">Failed to load access log</div>
 
-  const entries = data ?? []
+  const toggleSort = (col: string) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
 
   return (
     <div className="p-8 animate-in fade-in duration-300 max-w-[1600px] mx-auto">
@@ -343,9 +378,9 @@ function ViewAuditTab() {
           <Table className="text-[13px]">
             <TableHeader className="bg-surface/80 backdrop-blur-sm">
               <TableRow className="hover:bg-transparent border-border h-11">
-                <TableHead className="text-text-dim font-bold uppercase tracking-tighter text-[11px] w-44">Time</TableHead>
-                <TableHead className="text-text-dim font-bold uppercase tracking-tighter text-[11px] w-40">Viewer</TableHead>
-                <TableHead className="text-text-dim font-bold uppercase tracking-tighter text-[11px]">Session</TableHead>
+                <SortHeader label="Time"    col="time"   current={sortCol} dir={sortDir} onSort={toggleSort} />
+                <SortHeader label="Viewer"  col="viewer" current={sortCol} dir={sortDir} onSort={toggleSort} />
+                <SortHeader label="Session" col="tsid"   current={sortCol} dir={sortDir} onSort={toggleSort} />
               </TableRow>
             </TableHeader>
             <TableBody>
