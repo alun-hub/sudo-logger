@@ -1771,16 +1771,23 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("\n"))
 	}
 
-	iToken := []byte(`,"i",`)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if bytes.Contains(line, iToken) {
-			continue
+		// Quickly skip "i" (input) events. The exact spacing might vary
+		// depending on how json.Marshal formats the array.
+		if bytes.Contains(line, []byte(`"i"`)) {
+			// Parse to be absolutely sure it's the event type
+			var raw []json.RawMessage
+			if json.Unmarshal(line, &raw) == nil && len(raw) >= 2 {
+				var kind string
+				if json.Unmarshal(raw[1], &kind) == nil && kind == "i" {
+					continue
+				}
+			}
 		}
 		w.Write(line)
 		w.Write([]byte("\n"))
 	}
-
 	if err := scanner.Err(); err != nil {
 		log.Printf("error streaming cast %s: %v", tsid, err)
 	}
