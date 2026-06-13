@@ -257,9 +257,15 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center bg-black">
-         <div className="w-full h-full p-2.5">
-            <div ref={containerRef} className="w-full h-full" />
+      <div className="flex-1 overflow-hidden relative flex items-center justify-center bg-black p-6">
+         <div
+           className="w-full h-full max-w-full max-h-full flex items-center justify-center"
+           style={{
+             aspectRatio: `${session.cols || 80} / ${session.rows || 24}`,
+             maxWidth: `calc(${(session.cols || 80) * 9.5}px)`, // approximate char width
+           }}
+         >
+            <div ref={containerRef} className="w-full h-full shadow-[0_0_60px_rgba(0,0,0,0.9)] border border-white/5" />
          </div>
       </div>
 
