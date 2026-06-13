@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import { fetchSessionEvents } from '@/api/sessions'
 import { fmtDuration } from '@/lib/date'
 import { RiskBadge } from '../sessions/RiskBadge'
@@ -14,7 +13,6 @@ interface Props {
 export function TerminalPlayer({ session }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef      = useRef<Terminal | null>(null)
-  const fitRef       = useRef<FitAddon | null>(null)
   const rafRef       = useRef<number>(0)
 
   const [events, setEvents]   = useState<SessionEvent[]>([])
@@ -33,28 +31,22 @@ export function TerminalPlayer({ session }: Props) {
   useEffect(() => {
     if (!containerRef.current) return
     const term = new Terminal({
-      theme: { background: '#09090f', foreground: '#d4daf0', cursor: '#d4daf0' },
-      fontSize: 13,
+      theme: { background: '#000000', foreground: '#d4daf0', cursor: '#d4daf0' },
+      fontSize: 14,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-      cursorBlink: false,
+      cursorBlink: true,
       convertEol: true,
-      lineHeight: 1.3,
+      lineHeight: 1.2,
+      cols: session.cols || 80,
+      rows: session.rows || 24,
     })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
     term.open(containerRef.current)
-    fit.fit()
     termRef.current = term
-    fitRef.current  = fit
-
-    const observer = new ResizeObserver(() => fit.fit())
-    observer.observe(containerRef.current)
 
     return () => {
-      observer.disconnect()
       term.dispose()
     }
-  }, [])
+  }, [session.tsid, session.cols, session.rows])
 
   useEffect(() => {
     setLoading(true)
@@ -69,7 +61,6 @@ export function TerminalPlayer({ session }: Props) {
       .then(evs => {
         setEvents(evs)
         eventsRef.current = evs
-        fitRef.current?.fit()
         const auto = localStorage.getItem('sudo-replay-autoplay') !== 'false'
         if (auto) setTimeout(() => play(), 100)
       })
@@ -236,14 +227,14 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative flex flex-col items-center justify-center bg-black">
-         <div className="w-full h-full p-2.5">
-            <div ref={containerRef} className="w-full h-full" />
+      <div className="flex-1 overflow-auto relative flex flex-col items-center justify-center bg-black">
+         <div className="p-4">
+            <div ref={containerRef} className="shadow-[0_0_50px_rgba(0,0,0,0.8)]" />
          </div>
       </div>
 
-      {/* Controls Bar - Fixed at bottom */}
-      <div className="absolute bottom-0 left-0 right-0 z-40 bg-surface/95 backdrop-blur-md border-t border-border px-6 py-3 flex items-center gap-4 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+      {/* Controls Bar */}
+      <div className="bg-surface/95 backdrop-blur-md border-t border-border px-6 py-3 flex items-center gap-4 shadow-md z-40 shrink-0">
         <button
           onClick={restart}
           disabled={loading || events.length === 0}
