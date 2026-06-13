@@ -221,6 +221,19 @@ td:first-child { white-space: nowrap; }
   </div>
 
   <div class="nav-group">
+    <div class="nav-group-label">UI Reference</div>
+    <a href="#ui-sessions">Sessions view</a>
+    <a href="#ui-player">Terminal player</a>
+    <a href="#ui-reports">Reports view</a>
+    <a href="#ui-policy">Policy view</a>
+    <a href="#ui-sudoers">Sudoers editor</a>
+    <a href="#ui-config-jit">Config — JIT settings</a>
+    <a href="#ui-config-auth">Config — Auth &amp; groups</a>
+    <a href="#ui-config-retention">Config — Retention</a>
+    <a href="#ui-approvals">Approvals view</a>
+  </div>
+
+  <div class="nav-group">
     <div class="nav-group-label">Access Control</div>
     <a href="#rbac-roles">Roles &amp; permissions</a>
     <a href="#rbac-auth">Authentication modes</a>
@@ -1168,6 +1181,421 @@ syslog:
   <div class="callout-title">Data sovereignty</div>
   All session events including sensitive terminal I/O are forwarded in real time. Ensure your SIEM endpoint is protected by high-entropy tokens and robust TLS. Events are buffered locally on the log server for up to 1 hour if the SIEM is unreachable.
 </div>
+
+<!-- ══════════════════════════════ UI REFERENCE ══════════════════════════════ -->
+
+<!-- ══ SESSIONS VIEW ══ -->
+<a class="section-anchor" id="ui-sessions"></a>
+<h2>Sessions View</h2>
+<p>The Sessions view is the default landing page. It shows a list of recorded sessions on the left and the terminal player on the right. All navigation happens here — click a session to load it into the player.</p>
+
+<h3>Session list — filters &amp; search</h3>
+<p>The toolbar above the session list has a search box and several filter controls:</p>
+<table>
+  <thead><tr><th>Control</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Search box</strong></td><td>Filters by user, host, or command substring. Keyboard shortcut <kbd>/</kbd> focuses the box from anywhere (not while typing in an input field).</td></tr>
+    <tr><td><strong>Risk filter</strong></td><td>Dropdown: All / Low / Medium / High / Critical. Hides sessions below the selected threshold.</td></tr>
+    <tr><td><strong>Source filter</strong></td><td>All / Plugin / eBPF / pkexec / polkit. Narrows to a specific capture source.</td></tr>
+    <tr><td><strong>Has I/O</strong></td><td>Toggle — show only sessions that have recorded terminal output available to replay.</td></tr>
+    <tr><td><strong>Live only</strong></td><td>Toggle — show only sessions that are currently in progress.</td></tr>
+  </tbody>
+</table>
+
+<h3>Session cards</h3>
+<p>Each card in the list shows a compact summary of one session. Click anywhere on a card to load it into the player.</p>
+<table>
+  <thead><tr><th>Element</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>user@host</strong></td>
+      <td>Sudo user and the originating hostname. Matching text is highlighted when search is active.</td>
+    </tr>
+    <tr>
+      <td><strong>→ root</strong> / <strong>→ username</strong></td>
+      <td>The <code>runas</code> target. Shown in red when it is root, gray for any other user. Hidden if runas equals the invoking user.</td>
+    </tr>
+    <tr>
+      <td><strong>Command</strong></td>
+      <td>The full sudo command line, truncated to one line. Hover to see the full string in a tooltip.</td>
+    </tr>
+    <tr>
+      <td><strong>Duration · Timestamp</strong></td>
+      <td>Session duration (formatted as <code>Xm Ys</code>) and start time in <code>yyyy-mm-dd HH:mm</code> format.</td>
+    </tr>
+    <tr>
+      <td><strong>Risk badge</strong></td>
+      <td>Color-coded score badge: gray (0–24 Low), yellow (25–49 Medium), orange (50–74 High), red (75–100 Critical). Click to filter the list to the same risk level.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Session status badges</h4>
+<table>
+  <thead><tr><th>Badge</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><span class="badge badge-purple">ebpf</span></td><td>Captured by the eBPF TTY recorder, not the sudo plugin. Appears for <code>su</code>, <code>screen</code>, <code>tmux</code>, or any privilege escalation that bypasses sudo. Fully recorded.</td></tr>
+    <tr><td><span class="badge badge-blue">pkexec</span></td><td>Privilege escalation via <code>pkexec</code>, captured by the eBPF <code>execve</code> tracepoint. No sudo plugin involvement. No terminal I/O recorded — metadata only.</td></tr>
+    <tr><td><span class="badge badge-gray">polkit</span></td><td>A D-Bus polkit authorization event (e.g. from a GUI app requesting elevated privileges). Captured via D-Bus monitoring. Shows as an event card — no terminal player available.</td></tr>
+    <tr><td><span class="badge badge-green">live</span></td><td>Session is currently running. The player shows whatever has been captured so far. The list auto-refreshes every 15 s.</td></tr>
+    <tr><td><span class="badge badge-gray">⚠ incomplete</span></td><td>Session ended without a clean <code>SESSION_END</code> event — the agent was killed or the host rebooted mid-session. Recording may be truncated.</td></tr>
+    <tr><td><span class="badge badge-amber">⏱ network outage</span></td><td>The agent lost contact with the log server. Sudo processes were frozen until connectivity was restored. Recording is complete but was delayed.</td></tr>
+    <tr><td><span class="badge badge-red">⚠ no plugin</span></td><td>The eBPF tracer detected sudo being invoked but the audit plugin never opened a session. Plugin may be missing, misconfigured, or was bypassed. No full audit trail exists — investigate immediately.</td></tr>
+  </tbody>
+</table>
+
+<h3>Session info bar</h3>
+<p>When a session is loaded into the player, a one-line info bar appears above the terminal showing the full metadata. Click any risk reason tag in the bar to open the corresponding rule in the Risk Rules editor. The <strong>Delete</strong> button (🗑) removes the session permanently from disk — requires the <code>sessions:delete</code> permission.</p>
+
+<div class="callout callout-info">
+  <div class="callout-title">dbus-polkit event cards</div>
+  Polkit events appear as "event cards" in the list — they have no terminal player because there is no PTY involved. The card shows the D-Bus method called, the application that requested it, the authorization result, and the full metadata. They are recorded regardless of whether the sudo plugin is installed.
+</div>
+
+<!-- ══ TERMINAL PLAYER ══ -->
+<a class="section-anchor" id="ui-player"></a>
+<h2>Terminal Player</h2>
+<p>The terminal player replays the recorded PTY output in an embedded xterm.js terminal. It faithfully reproduces ANSI colours, cursor movements, and screen-clearing — exactly what the operator saw during the session.</p>
+
+<h3>Controls</h3>
+<table>
+  <thead><tr><th>Control</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>▶ / ⏸ Play / Pause</strong></td><td>Start or pause playback. Keyboard: <kbd>Space</kbd>.</td></tr>
+    <tr><td><strong>↺ Restart</strong></td><td>Rewind to the beginning and replay from scratch. Keyboard: <kbd>R</kbd>. Disabled during live sessions.</td></tr>
+    <tr><td><strong>Scrubber</strong></td><td>Click or drag to jump to any point in the recording. Displays current position / total duration.</td></tr>
+    <tr><td><strong>Speed selector</strong></td><td>Playback speed: 0.25×, 0.5×, 1×, 2×, 4×, 8×, 16×. The selected speed is saved in <code>localStorage</code> and restored on the next visit. Changing speed mid-playback takes effect immediately.</td></tr>
+    <tr><td><strong>← / → seek</strong></td><td>Jump back or forward 5 seconds. Keyboard: <kbd>←</kbd> / <kbd>→</kbd>.</td></tr>
+  </tbody>
+</table>
+
+<h3>Keyboard shortcuts</h3>
+<table>
+  <thead><tr><th>Key</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Space</kbd></td><td>Play / pause</td></tr>
+    <tr><td><kbd>←</kbd></td><td>Seek back 5 seconds</td></tr>
+    <tr><td><kbd>→</kbd></td><td>Seek forward 5 seconds</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Restart from the beginning</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Focus the session search box</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Navigate to the previous / next session in the list</td></tr>
+    <tr><td><kbd>?</kbd></td><td>Open the help &amp; reference modal</td></tr>
+  </tbody>
+</table>
+
+<h3>Autoplay</h3>
+<p>The <strong>autoplay</strong> toggle in the header starts playback automatically whenever a session is selected from the list. State is persisted in <code>localStorage</code>. Disable it when reviewing many sessions quickly without watching each one in full.</p>
+
+<h3>Live sessions</h3>
+<p>When a live session (green <span class="badge badge-green">live</span> badge) is loaded, the player streams new terminal chunks as they arrive. The scrubber extends in real time. Playback runs at 1× and the restart button is disabled — you can still pause and seek within what has been captured so far.</p>
+
+<!-- ══ REPORTS VIEW ══ -->
+<a class="section-anchor" id="ui-reports"></a>
+<h2>Reports View</h2>
+<p>The Reports view provides aggregate visibility into sudo activity. It has three tabs: <strong>Summary</strong>, <strong>Anomalies</strong>, and <strong>Access Log</strong>.</p>
+
+<h3>Summary tab</h3>
+<p>An aggregated overview of all sessions in the selected time window.</p>
+
+<h4>Date range filter</h4>
+<p>Two date pickers (<em>From</em> / <em>To</em>) narrow all summary tables to sessions that started within that range. The "×" button clears the filter and shows all time. The selected range is shown as a subtitle above the stats cards.</p>
+
+<h4>Stats cards</h4>
+<table>
+  <thead><tr><th>Card</th><th>What it counts</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Total sessions</strong></td><td>All sessions in the selected period.</td></tr>
+    <tr><td><strong>Unique users</strong></td><td>Distinct sudo usernames.</td></tr>
+    <tr><td><strong>Unique hosts</strong></td><td>Distinct hostnames.</td></tr>
+    <tr><td><strong>Incomplete</strong></td><td>Sessions that ended without <code>SESSION_END</code>. High numbers may indicate agent stability issues.</td></tr>
+    <tr><td><strong>Long sessions</strong></td><td>Sessions exceeding 10 minutes. Configurable via risk rules (<code>min_duration_s</code>).</td></tr>
+    <tr><td><strong>High risk</strong></td><td>Sessions with risk score ≥ 50.</td></tr>
+    <tr><td><strong>Critical</strong></td><td>Sessions with risk score ≥ 75.</td></tr>
+  </tbody>
+</table>
+
+<h4>Per User table</h4>
+<p>One row per user. Sortable by clicking any column header. Columns: User, Sessions, Hosts, Avg Duration, Incomplete, High Risk, Critical. A search box above the table filters by username substring. Click a row to expand it and see a per-host breakdown for that user.</p>
+
+<h4>Per Host table</h4>
+<p>One row per host. Same columns as the user table. Useful for spotting a single machine with unusually high sudo activity.</p>
+
+<h3>Anomalies tab</h3>
+<p>A searchable list of every session that matched at least one risk rule. Columns: time, user, host, command, risk reason (the rule ID that fired), detail. Clicking a row opens that session directly in the terminal player.</p>
+<p>The search box filters across all visible columns simultaneously — type a username, hostname, command, or risk reason keyword. Results update in real time.</p>
+
+<h3>Access Log tab</h3>
+<p>An audit trail of <em>who has viewed sessions in the replay UI</em>. Each row records: timestamp, viewer (portal username), session ID, and the session's user@host. Sortable by Time, Viewer, or Session columns. The last 200 entries are shown.</p>
+<p>Use this tab to answer questions like "who accessed session X?" or "what has user Y been looking at?".</p>
+
+<!-- ══ POLICY VIEW ══ -->
+<a class="section-anchor" id="ui-policy"></a>
+<h2>Policy View</h2>
+<p>The Policy view is split into four sub-tabs, each managing a different aspect of access policy:</p>
+<table>
+  <thead><tr><th>Sub-tab</th><th>Path</th><th>What it manages</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Risk Rules</strong></td><td><code>/policy/risk</code></td><td>Risk scoring rules applied to all sessions. See <a href="#yaml-risk">Risk Rules YAML Reference</a>.</td></tr>
+    <tr><td><strong>Sudoers</strong></td><td><code>/policy/sudoers</code></td><td>Sudoers rule management across all monitored hosts. See <a href="#ui-sudoers">Sudoers Editor</a> below.</td></tr>
+    <tr><td><strong>JIT Policy</strong></td><td><code>/policy/jit</code></td><td>OPA-compiled approval policy. See <a href="#yaml-jit">OPA JIT Policy</a>.</td></tr>
+    <tr><td><strong>Access Control</strong></td><td><code>/policy/access</code></td><td>Blocked users (deny sudo) and whitelisted users (skip JIT). See <a href="#rbac-blocked">Blocked Users</a> and <a href="#rbac-whitelist">Whitelisted Users</a>.</td></tr>
+  </tbody>
+</table>
+
+<!-- ══ SUDOERS VIEW ══ -->
+<a class="section-anchor" id="ui-sudoers"></a>
+<h2>Sudoers Editor</h2>
+<p>The Sudoers editor (<strong>Policy → Sudoers</strong>) provides a central management console for <code>/etc/sudoers.d/</code> rules across all monitored hosts. It uses a two-pane layout: a host list on the left, and a rule editor on the right.</p>
+
+<div class="callout callout-warn">
+  <div class="callout-title">Direct filesystem writes</div>
+  Saving a sudoers rule writes directly to <code>/etc/sudoers.d/</code> on the <em>replay server host</em>. In a distributed setup where the replay server and the monitored hosts are different machines, you need a configuration management tool (Ansible, Puppet, Chef) to distribute the resulting files. The editor is designed for environments where the replay server also acts as a central sudoers distribution host.
+</div>
+
+<h3>Host list (left pane)</h3>
+<p>The host list shows all hostnames discovered from session metadata, plus the special <strong>_default</strong> entry at the top.</p>
+<table>
+  <thead><tr><th>Entry</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>_default</strong></td>
+      <td>The global template. Rules here are inherited by every host that does not have a per-host override. Edit this to manage rules that apply everywhere.</td>
+    </tr>
+    <tr>
+      <td><strong>hostname</strong> (no icon)</td>
+      <td>This host is currently inheriting rules from <code>_default</code>. No per-host file exists. Click to see the inherited rules (read-only preview).</td>
+    </tr>
+    <tr>
+      <td><strong>hostname ⚡</strong></td>
+      <td>This host has a per-host override — its own <code>/etc/sudoers.d/</code> file that takes precedence over <code>_default</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Editing modes</h3>
+<p>The right pane has two modes toggled by a button in the toolbar:</p>
+<table>
+  <thead><tr><th>Mode</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Visual Editor</strong></td>
+      <td>A form-based rule editor. Rules are shown in a list on the left sub-pane; clicking a rule opens its inspector form on the right sub-pane. Use this for guided editing without needing to know sudoers syntax.</td>
+    </tr>
+    <tr>
+      <td><strong>Raw</strong></td>
+      <td>A plain textarea showing the raw sudoers file content. Use for bulk edits, copy-paste, or when the visual editor's fields are insufficient. All changes are validated with <code>visudo -c</code> before saving.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Rule inspector (Visual Editor)</h3>
+<p>When a rule is selected in the visual editor, the inspector form shows all its fields:</p>
+<table>
+  <thead><tr><th>Field</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Principal type</strong></td><td><code>User</code> or <code>Group</code>. Group entries are prefixed with <code>%</code> in the generated sudoers file.</td></tr>
+    <tr><td><strong>Principal</strong></td><td>Username or group name. This is the entity being granted sudo access.</td></tr>
+    <tr><td><strong>Commands</strong></td><td>Tag input — list of allowed commands. Use <code>ALL</code> to allow all commands. Full paths are recommended (e.g. <code>/usr/bin/systemctl</code>).</td></tr>
+    <tr><td><strong>Runas</strong></td><td>Which user the command is allowed to run as. Defaults to <code>root</code>. Use <code>ALL</code> to allow any target user.</td></tr>
+    <tr><td><strong>NOPASSWD</strong></td><td>If checked, sudo does not prompt for a password for these commands. Use with care — this bypasses the primary sudo authentication check.</td></tr>
+    <tr><td><strong>NOEXEC</strong></td><td>Prevent the command from exec-ing further processes. Useful for restricting editors or shells that could be used to escape the allowed command.</td></tr>
+    <tr><td><strong>SETENV</strong></td><td>Allow the user to set or preserve environment variables when running the command.</td></tr>
+    <tr><td><strong>CWD</strong></td><td>Restrict the working directory from which the command may be run.</td></tr>
+    <tr><td><strong>Chroot</strong></td><td>Run the command inside a chroot jail at this path.</td></tr>
+    <tr><td><strong>Timeout</strong></td><td>Maximum wall-clock time the command is allowed to run (seconds). Sudo sends SIGTERM after this limit.</td></tr>
+  </tbody>
+</table>
+
+<h4>Generated sudoers syntax</h4>
+<p>The visual editor generates standard sudoers entries. For example:</p>
+<pre><code># User alice, allow systemctl with no password
+alice ALL=(root) NOPASSWD: /usr/bin/systemctl
+
+# Group wheel, allow all commands
+%wheel ALL=(ALL) ALL
+
+# User bob, allow specific commands with a timeout
+bob ALL=(root) TIMEOUT=300: /usr/bin/rsync, /usr/bin/tar</code></pre>
+
+<h3>Inheritance and per-host overrides</h3>
+<p>When you select a host that currently inherits from <code>_default</code>, the editor shows an information banner: <em>"Inheriting rules. Create custom rules for &lt;hostname&gt;"</em>. Clicking that button creates a copy of <code>_default</code> as the starting point for the host's custom file — the host then has the ⚡ indicator.</p>
+<p>To revert a host back to inheriting the default template, click <strong>Delete override</strong> in the host's editor panel. This removes the per-host file entirely.</p>
+
+<h3>Snapshot view</h3>
+<p>The <strong>View snapshot</strong> button (available in raw mode) opens a read-only window showing the <em>current effective sudoers</em> for the selected host — this is the file as it exists on disk right now, not the unsaved draft in the editor.</p>
+
+<!-- ══ CONFIG JIT ══ -->
+<a class="section-anchor" id="ui-config-jit"></a>
+<h2>Config — JIT / Approvals Settings</h2>
+<p>Navigate to <strong>Config → JIT / Approvals</strong>. This tab configures the <em>mechanics</em> of the approval workflow — timeouts, notifications. The policy logic (who needs approval and when) is in <a href="#yaml-jit">Policy → JIT</a>.</p>
+
+<table>
+  <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Enable JIT approvals</strong></td>
+      <td>off</td>
+      <td>Master switch. Disabling this stops all approval prompts — sudo proceeds without any JIT check, regardless of the policy file.</td>
+    </tr>
+    <tr>
+      <td><strong>Default window</strong></td>
+      <td><code>30m</code></td>
+      <td>How long the agent waits for a human decision before timing out. Format: Go duration (<code>5m</code>, <code>30m</code>, <code>1h</code>). After the window expires the agent falls back to the policy's <code>default_action</code>. Keep this short (5–15 min) for high-security environments.</td>
+    </tr>
+    <tr>
+      <td><strong>Pending request TTL</strong></td>
+      <td><code>24h</code></td>
+      <td>How long an unanswered request stays visible in the Approvals tab before it is automatically expired. Expired requests are never approved — the agent already timed out. This is a UI housekeeping setting, not a security control.</td>
+    </tr>
+    <tr>
+      <td><strong>Notification webhook URL</strong></td>
+      <td>empty</td>
+      <td>Mattermost or Slack incoming webhook URL. When set, the log server posts a notification for every new approval request. The message includes the user, host, command, and a direct link to the Approvals tab.</td>
+    </tr>
+    <tr>
+      <td><strong>Notification channel</strong></td>
+      <td>empty</td>
+      <td>Override the webhook's default channel (e.g. <code>#sudo-approvals</code>). Leave blank to use the webhook's configured default channel.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Approval config YAML</h3>
+<p>The approval configuration is stored in <code>/etc/sudo-logger/approval-policy.yaml</code> alongside the JIT rules, under the top-level <code>config</code> key:</p>
+<pre><code># /etc/sudo-logger/approval-policy.yaml
+
+# Approval workflow mechanics
+config:
+  enabled:        true
+  default_window: 30m
+  pending_ttl:    24h
+  notifications:
+    webhook_url: https://mattermost.example.com/hooks/abc123
+    channel:     sudo-approvals
+
+# OPA approval rules (managed by Policy → JIT)
+default_action: challenge
+rules:
+  - action: allow
+    comment: Service accounts
+    users:   [deploy-bot]
+</code></pre>
+
+<!-- ══ CONFIG AUTH ══ -->
+<a class="section-anchor" id="ui-config-auth"></a>
+<h2>Config — Authentication &amp; Group Mappings</h2>
+<p>Navigate to <strong>Config → Auth</strong>. This tab configures how users authenticate to the replay server and how their group memberships map to portal roles.</p>
+
+<h3>Authentication source</h3>
+<table>
+  <thead><tr><th>Mode</th><th>When to use</th><th>Configuration shown</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Basic Auth</strong></td>
+      <td>Small teams, no SSO. Users authenticate with username/password stored in the htpasswd file.</td>
+      <td>Path to the <code>.htpasswd</code> file (bcrypt hashes only). Reloaded without restart on SIGHUP.</td>
+    </tr>
+    <tr>
+      <td><strong>OIDC</strong></td>
+      <td>Production environments with a corporate identity provider (Google, Entra ID, Keycloak, Okta).</td>
+      <td>Issuer URL, Client ID, Client Secret, Redirect URL. The server performs the full OIDC code flow and stores a session cookie.</td>
+    </tr>
+    <tr>
+      <td><strong>Proxy / Trusted header</strong></td>
+      <td>Behind an authenticating reverse proxy such as oauth2-proxy or Authelia.</td>
+      <td>The header name carrying the pre-authenticated username (e.g. <code>X-Forwarded-User</code>). Only requests from <code>127.0.0.1</code> are trusted.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Group → Role mappings</h3>
+<p>Group mappings let you automatically assign portal roles based on IdP group membership, instead of managing role assignments per user in the Users &amp; Roles tab. This is available in both OIDC mode (from the <code>groups</code> claim in the ID token) and Proxy mode (from an <code>X-Groups</code> header set by the proxy).</p>
+
+<p>Each mapping row has two fields:</p>
+<ul>
+  <li><strong>Group</strong> — the exact group name as returned by your IdP or set in the proxy header.</li>
+  <li><strong>Role</strong> — a portal role name. Any custom role created in Users &amp; Roles can be used here, as well as the built-in <code>admin</code> and <code>viewer</code> roles.</li>
+</ul>
+
+<p>Mappings are evaluated at login time. If a user belongs to multiple mapped groups, they receive the <em>most permissive</em> role across all matching mappings. A user explicitly assigned a role in the Users &amp; Roles tab retains that role regardless of group mappings.</p>
+
+<h4>Example setup for Entra ID (Azure AD)</h4>
+<pre><code># Entra ID group object IDs mapped to portal roles
+# (or use display names if your IdP exposes them in the groups claim)
+Group mappings:
+  xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  →  admin   # Security team
+  yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy  →  viewer  # All engineers
+</code></pre>
+
+<div class="callout callout-info">
+  <div class="callout-title">OIDC groups claim</div>
+  Not all OIDC providers include group membership in the ID token by default. In Entra ID, add the <code>groups</code> optional claim in the App Registration manifest. In Keycloak, add a "Group Membership" mapper to your client. In Okta, add a "Groups" claim to the Authorization Server.
+</div>
+
+<!-- ══ CONFIG RETENTION ══ -->
+<a class="section-anchor" id="ui-config-retention"></a>
+<h2>Config — Data Retention</h2>
+<p>Navigate to <strong>Config → Data Retention</strong>. This tab controls how long session recordings are kept. Retention runs automatically on a schedule.</p>
+
+<table>
+  <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Enable automatic deletion</strong></td>
+      <td>off</td>
+      <td>Master switch. When off, sessions accumulate indefinitely. Enable this for regulatory compliance or disk management.</td>
+    </tr>
+    <tr>
+      <td><strong>Delete sessions older than</strong></td>
+      <td>90 days</td>
+      <td>Sessions whose start time predates <em>today − N days</em> are permanently deleted from disk (and from S3 in distributed mode). Applies to the full session directory including all chunk files.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout callout-danger">
+  <div class="callout-title">Deletion is irreversible</div>
+  Deleted sessions cannot be recovered. Set the retention period to satisfy your compliance requirements — common values are 90 days, 1 year, or 7 years depending on the regulatory framework. If in doubt, leave retention disabled and manage deletion manually or via the API (<code>DELETE /api/session?id=…</code>).
+</div>
+
+<div class="callout callout-info">
+  <div class="callout-title">GDPR right to erasure</div>
+  To delete all sessions for a specific user in response to a GDPR request: filter the Sessions view by username, then delete each session individually using the Delete button (🗑). For bulk deletion, use the API with a script:<br><br>
+  <code>curl -s 'https://replay.example.com/api/sessions?user=alice' | jq -r '.[].id' | xargs -I{} curl -s -X DELETE 'https://replay.example.com/api/session?id={}'</code>
+</div>
+
+<!-- ══ APPROVALS VIEW ══ -->
+<a class="section-anchor" id="ui-approvals"></a>
+<h2>Approvals View</h2>
+<p>The Approvals view is the real-time dashboard for the JIT approval workflow. It lists all pending requests and recent decisions. Navigate to <strong>Approvals</strong> in the top nav bar. The tab shows a red badge with the pending count when requests are waiting.</p>
+<p>The view auto-refreshes every 10 seconds. No manual reload is needed.</p>
+
+<h3>Pending requests</h3>
+<p>The top section shows all requests with status <code>pending</code>. Each row contains:</p>
+<table>
+  <thead><tr><th>Column</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><strong>User</strong></td><td>The user who ran sudo (the person waiting at their terminal).</td></tr>
+    <tr><td><strong>Host</strong></td><td>The machine where sudo was invoked.</td></tr>
+    <tr><td><strong>Command</strong></td><td>The full command line that was attempted.</td></tr>
+    <tr><td><strong>Justification</strong></td><td>The reason the user typed when prompted by the agent. Empty if the user pressed Enter without typing. Evaluate this when deciding whether to approve.</td></tr>
+    <tr><td><strong>Requested at</strong></td><td>When the request was created. The user has been blocked since this time.</td></tr>
+    <tr><td><strong>Approve</strong></td><td>Click to immediately unblock the user. They see "Approved — proceeding" on their terminal and sudo runs.</td></tr>
+    <tr><td><strong>Deny</strong></td><td>Click to reject the request. A dialog asks for a reason (optional). The user sees "Denied: &lt;reason&gt;" on their terminal and sudo exits with an error.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout callout-warn">
+  <div class="callout-title">The user is blocked until you decide</div>
+  While a request is pending, the user's terminal is frozen — they cannot run the sudo command or exit it cleanly. Respond promptly, especially to requests that arrived outside business hours. If a request times out (per the <code>default_window</code> setting), it is automatically resolved using the policy's <code>default_action</code>.
+</div>
+
+<h3>Decision history</h3>
+<p>The lower section shows the last 20 resolved requests (both approved and denied). Columns include: Time, User, Host, Command, Decision (Approved/Denied), Decided By (the portal user who acted), and the deny reason if applicable.</p>
+<p>This log is useful for accountability — you can see which approver made each decision and when.</p>
+
+<h3>Notification setup</h3>
+<p>Configure a Mattermost or Slack webhook in <strong>Config → JIT / Approvals</strong> to receive a notification whenever a new approval request arrives. The notification message contains a direct link to the Approvals tab so approvers can act immediately without checking the UI manually.</p>
 
 <!-- ══════════════════════════════ ACCESS CONTROL ══════════════════════════════ -->
 <a class="section-anchor" id="rbac-roles"></a>
