@@ -1759,7 +1759,31 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.cast", url.QueryEscape(tsid)))
-	io.Copy(w, rc)
+
+	// Filter out "i" (input) events. asciinema-player doesn't display them,
+	// and they can cause VT emulator corruption when the player seeks/fast-forwards
+	// if it accidentally feeds the input keystrokes into the screen buffer.
+	scanner := bufio.NewScanner(rc)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+
+	if scanner.Scan() {
+		w.Write(scanner.Bytes())
+		w.Write([]byte("\n"))
+	}
+
+	iToken := []byte(`,"i",`)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if bytes.Contains(line, iToken) {
+			continue
+		}
+		w.Write(line)
+		w.Write([]byte("\n"))
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("error streaming cast %s: %v", tsid, err)
+	}
 }
 
 // handleAccessLog returns the view audit log as JSON, newest entries first.
