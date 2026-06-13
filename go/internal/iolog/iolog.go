@@ -124,11 +124,11 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 
 	cols := meta.Cols
 	if cols <= 0 {
-		cols = 80
+		cols = 220
 	}
 	rows := meta.Rows
 	if rows <= 0 {
-		rows = 24
+		rows = 50
 	}
 
 	hdr := castHeader{
