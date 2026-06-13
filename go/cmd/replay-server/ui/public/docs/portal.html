@@ -212,6 +212,11 @@ td:first-child { white-space: nowrap; }
     <a href="#yaml-risk">Risk rules</a>
     <a href="#yaml-sandbox">Sandbox policy</a>
     <a href="#yaml-jit">JIT approval policy</a>
+    <a href="#jit-workflow">Approval workflow</a>
+    <a href="#jit-actions">Actions</a>
+    <a href="#jit-conditions">Conditions</a>
+    <a href="#jit-groups">Groups</a>
+    <a href="#jit-rego">Compiled Rego</a>
     <a href="#yaml-siem">SIEM forwarding</a>
   </div>
 
@@ -766,44 +771,276 @@ protect:
 
 <!-- ══════════════ JIT POLICY ══════════════ -->
 <a class="section-anchor" id="yaml-jit"></a>
-<h2>JIT Approval Policy YAML Reference</h2>
-<p>File: <code>/etc/sudo-logger/approval-policy.yaml</code> — controls the JIT (Just-In-Time) approval workflow. When a user runs sudo, the agent prompts for a justification. The OPA-compiled policy then decides whether the session is automatically allowed, requires synchronous approval, or is denied.</p>
+<h2>OPA JIT Policy</h2>
+<p>The OPA JIT (Just-In-Time) policy controls what happens when a user runs <code>sudo</code>. Depending on the matching rule, the session is either allowed through immediately, held for manual approval (challenge), or denied outright. The policy is authored as YAML in the UI and compiled to an OPA Rego module by the log server.</p>
+<p>Navigate to <strong>Policy → JIT</strong> in the replay server to manage this policy. The view has three tabs: <strong>Rules</strong>, <strong>Groups</strong>, and <strong>Compiled Rego</strong>.</p>
 
-<div class="callout callout-info">
-  <div class="callout-title">How the policy compiles</div>
-  The YAML policy is compiled to an OPA Rego module by the log server. You can see the compiled output in the replay UI under Policy → JIT → Compiled Rego. The policy is re-evaluated for every approval request in real time.
+<!-- ══ WORKFLOW ══ -->
+<a class="section-anchor" id="jit-workflow"></a>
+<h3>Approval Workflow</h3>
+<p>The full end-to-end flow when a user runs sudo:</p>
+<div class="ascii">
+User runs: sudo bash
+
+    agent (on monitored host)
+    │
+    ├─ 1. Prompts user: "Enter justification for this sudo session:"
+    │     (user types a reason, or presses Enter if optional)
+    │
+    ├─ 2. Sends approval request to log server:
+    │     { user, host, command, justification, timestamp }
+    │
+    ├─ 3. Log server evaluates OPA policy:
+    │     ┌─────────────────────────────────────┐
+    │     │  action = allow   → proceed now     │
+    │     │  action = deny    → reject now      │
+    │     │  action = challenge → wait for human│
+    │     └─────────────────────────────────────┘
+    │
+    ├─ 4a. ALLOW  → agent receives approval, sudo proceeds.
+    │
+    ├─ 4b. DENY   → agent receives rejection, sudo exits with error.
+    │              User sees the deny reason on their terminal.
+    │
+    └─ 4c. CHALLENGE → agent blocks sudo (terminal shows "Waiting for approval…")
+              │
+              ├─ Approver opens replay UI → Approvals tab
+              ├─ Sees pending request: user / host / command / justification
+              ├─ Clicks Approve or Deny (with optional reason)
+              │
+              └─ Agent receives decision → sudo proceeds or exits
 </div>
 
-<h3>Policy structure</h3>
+<div class="callout callout-info">
+  <div class="callout-title">Timeout behaviour</div>
+  If no approver responds within the configured timeout (default: 5 minutes), the agent falls back to the <code>default_action</code> set in the policy. Set a short timeout for high-security environments. Configure the timeout in Config → JIT or via <code>-approval-policy</code>.
+</div>
+
+<div class="callout callout-warn">
+  <div class="callout-title">Prerequisites</div>
+  JIT requires the log server to be started with <code>-approval-token</code> and <code>-approval-policy</code> flags. The replay server needs <code>-logserver-admin</code> and <code>-logserver-admin-token</code>. The Approvals tab only appears in the UI when these are configured. Users in the <strong>Whitelisted Users</strong> list (Policy → Access Control) skip the JIT prompt entirely.
+</div>
+
+<!-- ══ ACTIONS ══ -->
+<a class="section-anchor" id="jit-actions"></a>
+<h3>Actions</h3>
+<p>Each rule has an <strong>action</strong> — the outcome applied when the rule's conditions all match. There are three actions:</p>
+
+<table>
+  <thead><tr><th>Action</th><th>Badge colour</th><th>What happens</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="badge badge-blue">CHALLENGE</span></td>
+      <td>Blue</td>
+      <td>The session is held. An approver must explicitly approve it in the Approvals tab before sudo proceeds. The user sees "Waiting for approval…" on their terminal. Use for commands or users that require oversight but are not outright forbidden.</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-green">ALLOW</span></td>
+      <td>Green</td>
+      <td>The session is automatically approved. No human approval required. The user's justification is still recorded for audit purposes. Use for trusted users, service accounts, or during business hours for known-good users.</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-red">DENY</span></td>
+      <td>Red</td>
+      <td>The session is rejected immediately. The user sees the deny reason on their terminal and sudo exits with an error. No approval can override a deny. Use to absolutely block specific commands or users.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Default action</h4>
+<p>The <strong>"Default action if no rules match"</strong> dropdown at the top of the Rules tab controls what happens when no rule matches the incoming request. Options:</p>
+<ul>
+  <li><strong>Challenge (ask why)</strong> — holds every unmatched session for approval. Safest default: nothing slips through without oversight.</li>
+  <li><strong>Allow (no prompt)</strong> — automatically approves every unmatched session. Use only when you have explicit deny rules covering all dangerous operations.</li>
+</ul>
+
+<div class="callout callout-warn">
+  <div class="callout-title">Rule order matters for DENY</div>
+  Rules are evaluated top to bottom. The first matching <code>deny</code> rule wins immediately. For <code>allow</code> and <code>challenge</code>, all matching rules are collected and the most restrictive wins (deny &gt; challenge &gt; allow). Place broad allow rules below narrow deny rules.
+</div>
+
+<!-- ══ CONDITIONS ══ -->
+<a class="section-anchor" id="jit-conditions"></a>
+<h3>Conditions</h3>
+<p>A rule fires only when <strong>all its conditions are satisfied simultaneously</strong> (AND logic). An empty condition field is a wildcard — it matches everything. In the UI the Conditions column shows a compact summary: <code>users: * hosts: * commands: *</code> means "no restrictions on user, host, or command".</p>
+
+<table>
+  <thead><tr><th>Field</th><th>Type</th><th>Display in UI</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>users</code></td>
+      <td>[]string</td>
+      <td><code class="badge badge-blue">users: alice, @sre</code></td>
+      <td>Match if the sudo user equals one of these values. Supports glob patterns (<code>deploy-*</code>) and <code>@groupname</code> references. Empty = all users (<code>*</code>).</td>
+    </tr>
+    <tr>
+      <td><code>hosts</code></td>
+      <td>[]string</td>
+      <td><code class="badge badge-amber">hosts: prod-*</code></td>
+      <td>Match if the session host equals one of these values. Supports globs. Empty = all hosts (<code>*</code>).</td>
+    </tr>
+    <tr>
+      <td><code>commands</code></td>
+      <td>[]string</td>
+      <td><code class="badge badge-green">commands: bash, sh</code></td>
+      <td>Match if the command basename (argv[0]) is one of these. Globs supported. Empty = all commands (<code>*</code>).</td>
+    </tr>
+    <tr>
+      <td><code>runas</code></td>
+      <td>[]string</td>
+      <td><code>runas: root</code></td>
+      <td>Match if <code>sudo -u &lt;user&gt;</code> targets one of these users. Empty = any runas user.</td>
+    </tr>
+    <tr>
+      <td><code>sys_groups</code></td>
+      <td>[]string</td>
+      <td><code>groups: wheel</code></td>
+      <td>Match if the user belongs to one of these system groups (resolved live via NSS/LDAP). Useful when your user directory is the source of truth for role membership.</td>
+    </tr>
+    <tr>
+      <td><code>weekdays</code></td>
+      <td>[]int</td>
+      <td><code>weekdays: 1-5</code></td>
+      <td>Match if today is one of these weekdays. 0 = Sunday, 1 = Monday … 6 = Saturday. Empty = any day.</td>
+    </tr>
+    <tr>
+      <td><code>hour_from</code> / <code>hour_to</code></td>
+      <td>int (0–23)</td>
+      <td><code class="badge badge-red">time: 20:00–6:00</code></td>
+      <td>Match if the current hour is within this window. The UI shows it as <code>time: HH:00–HH:00</code>. Wrap-around is supported — <code>hour_from: 20, hour_to: 6</code> matches 20:00–05:59. Both must be set to activate the time filter; -1 means "no restriction".</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Time-window example</h4>
+<p>The screenshot shows a rule with <code>time: 20:00–6:00</code>. This is an ALLOW rule that fires for "SRE on-call" during night hours — everyone else (or daytime sessions) falls through to the default CHALLENGE action. In YAML this looks like:</p>
+<pre><code>rules:
+  # Night-time on-call: allow without approval (20:00 to 06:00)
+  - id:      oncall_night
+    comment: If SRE oncall
+    action:  allow
+    hour_from: 20
+    hour_to:   6
+
+  # Default catch-all: challenge everything else
+  - id:      default_challenge
+    comment: Default
+    action:  challenge
+    # (no other conditions = matches all users, hosts, commands)
+</code></pre>
+
+<div class="callout callout-info">
+  <div class="callout-title">Tip — using the default action instead of an explicit catch-all rule</div>
+  The two rules above can be simplified: just set the <strong>Default action</strong> dropdown to <em>Challenge</em> and keep only the oncall rule. An explicit catch-all is only needed when you want a different comment to appear in the approvals log.
+</div>
+
+<!-- ══ GROUPS ══ -->
+<a class="section-anchor" id="jit-groups"></a>
+<h3>Groups Tab</h3>
+<p>The <strong>Groups</strong> tab lets you define named sets of users, hosts, or any other string values. Once defined, reference a group anywhere in a rule's condition fields by prefixing the name with <code>@</code>.</p>
+
+<pre><code>groups:
+  sre:
+    - alice
+    - bob
+    - carol
+  prod-hosts:
+    - prod-web-*
+    - prod-db-*
+    - prod-cache-*
+  dangerous-commands:
+    - bash
+    - sh
+    - python3
+    - perl
+</code></pre>
+
+<p>Use these groups in rules:</p>
+<pre><code>rules:
+  # SRE can run dangerous commands on prod — but must give a reason
+  - id:      sre_prod_shell
+    comment: SRE shell on production
+    action:  challenge
+    users:   [@sre]
+    hosts:   [@prod-hosts]
+    commands: [@dangerous-commands]
+
+  # Non-SRE users running a shell on prod: deny
+  - id:      block_prod_shell
+    comment: Non-SRE shell on production is blocked
+    action:  deny
+    hosts:   [@prod-hosts]
+    commands: [@dangerous-commands]
+</code></pre>
+
+<div class="callout callout-info">
+  <div class="callout-title">System groups vs. JIT groups</div>
+  <strong>JIT groups</strong> (defined here in the Groups tab) are maintained in the policy YAML. Use them when you need an exact list independent of your directory service.<br><br>
+  <strong>System groups</strong> (<code>sys_groups</code> condition field) are resolved live from the OS (<code>/etc/group</code>, LDAP, or AD). Use them when your user directory is already the authoritative source of role membership. System groups do not need to be defined in the Groups tab.
+</div>
+
+<!-- ══ COMPILED REGO ══ -->
+<a class="section-anchor" id="jit-rego"></a>
+<h3>Compiled Rego Tab</h3>
+<p>The <strong>Compiled Rego</strong> tab shows the full OPA Rego module that the log server evaluates for every approval request. The left panel is an optional text area for hand-written Rego additions; the right panel (read-only) shows the complete compiled module.</p>
+
+<h4>When to use custom Rego</h4>
+<p>The YAML rule builder covers most use cases. Write custom Rego when you need logic that the YAML schema cannot express:</p>
+<ul>
+  <li>Cross-field conditions (e.g. "only if user AND runas AND command all match AND it's not a Friday")</li>
+  <li>Calls to external data sources via OPA's <code>http.send</code></li>
+  <li>Complex string operations (regex, substring checks on justification text)</li>
+  <li>Overriding the final <code>decision</code> variable directly</li>
+</ul>
+
+<h4>Rego extension points</h4>
+<p>The compiled module exposes two set rules you can extend from the custom Rego panel:</p>
+<pre><code># Append to the allow set — these sessions bypass challenge
+_any_allow if {
+    input.user == "emergency-break-glass"
+}
+
+# Append to the deny set — these sessions are blocked regardless
+_any_deny if {
+    input.command == "visudo"
+    not input.user == "root"
+}
+</code></pre>
+<p>Custom Rego is appended <em>after</em> the compiled rules, so it can reference compiled rule sets and override the final <code>decision</code> output variable.</p>
+
+<!-- ══ FULL YAML REFERENCE ══ -->
+<h3>Full YAML Reference</h3>
+
+<h4>Top-level fields</h4>
 <table>
   <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
   <tbody>
     <tr><td><code>default_action</code></td><td>string</td><td><code>allow</code> or <code>challenge</code>. Applied when no rules match. Default: <code>challenge</code>.</td></tr>
-    <tr><td><code>groups</code></td><td>map[string][]string</td><td>Named groups of users, hosts, or roles. Reference as <code>@groupname</code> in rule fields.</td></tr>
-    <tr><td><code>rules</code></td><td>[]Rule</td><td>Ordered list of policy rules. Evaluated in order; first match wins for <code>deny</code>.</td></tr>
-    <tr><td><code>raw_rego</code></td><td>string</td><td>Optional hand-written Rego appended after the compiled rules. Can override <code>decision</code>.</td></tr>
+    <tr><td><code>groups</code></td><td>map[string][]string</td><td>Named groups. Reference as <code>@name</code> in rule condition fields.</td></tr>
+    <tr><td><code>rules</code></td><td>[]Rule</td><td>Ordered list of policy rules. All matching rules are collected; deny beats challenge beats allow.</td></tr>
+    <tr><td><code>raw_rego</code></td><td>string</td><td>Optional hand-written Rego appended to the compiled module.</td></tr>
   </tbody>
 </table>
 
-<h3>Rule fields</h3>
+<h4>Rule fields</h4>
 <table>
-  <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+  <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>id</code></td><td>string</td><td>Optional unique identifier shown in decision logs.</td></tr>
-    <tr><td><code>comment</code></td><td>string</td><td>Human-readable description, visible in the UI rules table.</td></tr>
-    <tr><td><code>action</code></td><td>string</td><td><code>allow</code>, <code>challenge</code>, or <code>deny</code>. Required.</td></tr>
-    <tr><td><code>users</code></td><td>[]string</td><td>Match if the sudo user is in this list. Supports <code>@groupname</code> references and glob patterns.</td></tr>
-    <tr><td><code>hosts</code></td><td>[]string</td><td>Match if the session host is in this list. Globs supported.</td></tr>
-    <tr><td><code>commands</code></td><td>[]string</td><td>Match if the command (argv[0] basename) is in this list. Globs supported.</td></tr>
-    <tr><td><code>runas</code></td><td>[]string</td><td>Match if sudo runs as one of these users.</td></tr>
-    <tr><td><code>sys_groups</code></td><td>[]string</td><td>Match if the user belongs to one of these system groups (resolved live via NSS).</td></tr>
-    <tr><td><code>weekdays</code></td><td>[]int</td><td>Match if today is one of these weekdays (0=Sunday, 1=Monday … 6=Saturday).</td></tr>
-    <tr><td><code>hour_from</code></td><td>int</td><td>Match if current hour ≥ this value (0–23). Use with <code>hour_to</code>.</td></tr>
-    <tr><td><code>hour_to</code></td><td>int</td><td>Match if current hour &lt; this value (0–23). Use with <code>hour_from</code>.</td></tr>
+    <tr><td><code>action</code></td><td>string</td><td>Yes</td><td><code>allow</code>, <code>challenge</code>, or <code>deny</code>.</td></tr>
+    <tr><td><code>id</code></td><td>string</td><td>No</td><td>Unique identifier, shown in decision logs and the UI. Use snake_case.</td></tr>
+    <tr><td><code>comment</code></td><td>string</td><td>No</td><td>Human-readable note visible in the UI Comment column.</td></tr>
+    <tr><td><code>users</code></td><td>[]string</td><td>No</td><td>Match on sudo user. Globs and <code>@group</code> allowed. Empty = all.</td></tr>
+    <tr><td><code>hosts</code></td><td>[]string</td><td>No</td><td>Match on hostname. Globs and <code>@group</code> allowed. Empty = all.</td></tr>
+    <tr><td><code>commands</code></td><td>[]string</td><td>No</td><td>Match on command basename. Globs and <code>@group</code> allowed. Empty = all.</td></tr>
+    <tr><td><code>runas</code></td><td>[]string</td><td>No</td><td>Match on the target user (<code>sudo -u</code>). Empty = all.</td></tr>
+    <tr><td><code>sys_groups</code></td><td>[]string</td><td>No</td><td>Match if the user is a member of any of these OS groups (live NSS lookup).</td></tr>
+    <tr><td><code>weekdays</code></td><td>[]int</td><td>No</td><td>0=Sun … 6=Sat. Empty = all days.</td></tr>
+    <tr><td><code>hour_from</code></td><td>int</td><td>No</td><td>Start of time window (inclusive, 0–23). Use -1 to disable. Shown in UI as <code>time: HH:00–…</code></td></tr>
+    <tr><td><code>hour_to</code></td><td>int</td><td>No</td><td>End of time window (exclusive, 0–23). Wrap-around supported (e.g. 20→6 = night). Use -1 to disable.</td></tr>
   </tbody>
 </table>
 
-<h3>Complete example</h3>
+<h3>Complete production example</h3>
 <pre><code># /etc/sudo-logger/approval-policy.yaml
 default_action: challenge
 
@@ -815,11 +1052,22 @@ groups:
   infra-hosts:
     - prod-web-*
     - prod-db-*
+  dangerous:
+    - bash
+    - sh
+    - zsh
+    - python3
 
 rules:
-  # SRE team can run sudo freely on production during business hours
+  # Hard deny: nobody may change audit configuration
+  - id:      no_audit_changes
+    comment: Audit configuration changes are blocked
+    action:  deny
+    commands: [auditctl, ausearch, aureport, setenforce]
+
+  # SRE on production: allow without approval during business hours
   - id:      sre_business_hours
-    comment: SRE unrestricted during 08:00-18:00 weekdays
+    comment: SRE on prod 08:00-18:00 weekdays
     action:  allow
     users:   [@sre]
     hosts:   [@infra-hosts]
@@ -827,24 +1075,22 @@ rules:
     hour_from: 8
     hour_to:   18
 
-  # On-call SRE can always run sudo on production hosts
+  # SRE on-call: allow at night (20:00–06:00)
   - id:      sre_oncall
-    comment: On-call SRE anytime
+    comment: If SRE oncall
     action:  allow
-    users:   [alice]
-    hosts:   [@infra-hosts]
+    users:   [@sre]
+    hour_from: 20
+    hour_to:   6
 
-  # Database admin commands always require approval
-  - id:      db_commands
-    comment: Database commands require approval
-    action:  challenge
-    commands: [psql, mysqldump, pg_dump, redis-cli]
+  # Service accounts: always allow (CI/CD, monitoring)
+  - id:      service_accounts
+    comment: Service account — no approval needed
+    action:  allow
+    users:   [deploy-bot, prometheus, nagios]
 
-  # Deny any attempt to change audit configuration
-  - id:      no_audit_changes
-    comment: Audit configuration changes are blocked
-    action:  deny
-    commands: [auditctl, ausearch, aureport]
+  # Everyone else: challenge (requires human approval + justification)
+  # (handled by default_action: challenge above — no rule needed)
 </code></pre>
 
 <!-- ══════════════ SIEM ══════════════ -->
