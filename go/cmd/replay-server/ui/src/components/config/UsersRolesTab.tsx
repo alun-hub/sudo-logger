@@ -13,6 +13,7 @@ import { UserModal } from './UserModal'
 import { RoleModal } from './RoleModal'
 import type { UserInfo, Role } from '@/types/config'
 import { fmtDate } from '@/lib/date'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 export function UsersRolesTab() {
   const qc = useQueryClient()
@@ -24,6 +25,9 @@ export function UsersRolesTab() {
 
   const [editRole, setEditRole] = useState<Role | null>(null)
   const [isAddRoleOpen, setIsAddRoleOpen] = useState(false)
+
+  const [pendingDelUser, setPendingDelUser] = useState<string | null>(null)
+  const [pendingDelRole, setPendingDelRole] = useState<string | null>(null)
 
   const mutUser = useMutation({
     mutationFn: upsertUser,
@@ -113,7 +117,7 @@ export function UsersRolesTab() {
                         className="p-1.5 text-text-dim hover:text-white"
                       ><Edit2 size={14} /></button>
                       <button
-                        onClick={() => confirm(`Delete user ${u.username}?`) && delUser.mutate(u.username)}
+                        onClick={() => setPendingDelUser(u.username)}
                         className="p-1.5 text-text-dim hover:text-red"
                       ><Trash2 size={14} /></button>
                     </div>
@@ -171,7 +175,7 @@ export function UsersRolesTab() {
                          className="p-1.5 text-text-dim hover:text-white"
                       ><Edit2 size={14} /></button>
                       <button
-                        onClick={() => confirm(`Delete role ${r.name}?`) && mutDelRole.mutate(r.name)}
+                        onClick={() => setPendingDelRole(r.name)}
                         className="p-1.5 text-text-dim hover:text-red"
                       ><Trash2 size={14} /></button>
                     </div>
@@ -209,6 +213,24 @@ export function UsersRolesTab() {
         open={isAddRoleOpen}
         onClose={() => setIsAddRoleOpen(false)}
         onSave={mutRole.mutate}
+      />
+      <ConfirmDialog
+        open={pendingDelUser !== null}
+        title="Delete User"
+        message={`Delete user "${pendingDelUser}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => { if (pendingDelUser) delUser.mutate(pendingDelUser); setPendingDelUser(null) }}
+        onCancel={() => setPendingDelUser(null)}
+      />
+      <ConfirmDialog
+        open={pendingDelRole !== null}
+        title="Delete Role"
+        message={`Delete role "${pendingDelRole}"?`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => { if (pendingDelRole) mutDelRole.mutate(pendingDelRole); setPendingDelRole(null) }}
+        onCancel={() => setPendingDelRole(null)}
       />
     </div>
   )

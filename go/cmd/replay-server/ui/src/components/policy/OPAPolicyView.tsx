@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Plus, Edit2, Trash2, ShieldCheck, Save, RotateCcw, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { OPARuleModal } from './OPARuleModal'
+import { ConfirmDialog, InputDialog } from '@/components/ui/confirm-dialog'
 
 export function OPAPolicyView() {
   const qc = useQueryClient()
@@ -22,6 +23,9 @@ export function OPAPolicyView() {
   const [isAddOpen, setIsAddOpen] = useState(false)
 
   const [editGroup, setEditGroup] = useState<{ name: string, members: string[] } | null>(null)
+  const [pendingDelRule,  setPendingDelRule]  = useState<number | null>(null)
+  const [pendingDelGroup, setPendingDelGroup] = useState<string | null>(null)
+  const [addGroupOpen,    setAddGroupOpen]    = useState(false)
 
   const mut = useMutation({
     mutationFn: saveOPAPolicy,
@@ -50,11 +54,7 @@ export function OPAPolicyView() {
     setIsAddOpen(false)
   }
 
-  const deleteRule = (idx: number) => {
-    if (!confirm('Delete this policy rule?')) return
-    const nextRules = current.rules.filter((_, i) => i !== idx)
-    set({ rules: nextRules })
-  }
+  const deleteRule = (idx: number) => setPendingDelRule(idx)
 
   const onSaveGroup = (name: string, members: string[]) => {
     const nextGroups = { ...current.groups, [name]: members }
@@ -62,12 +62,7 @@ export function OPAPolicyView() {
     setEditGroup(null)
   }
 
-  const deleteGroup = (name: string) => {
-    if (!confirm(`Delete group @${name}?`)) return
-    const nextGroups = { ...current.groups }
-    delete nextGroups[name]
-    set({ groups: nextGroups })
-  }
+  const deleteGroup = (name: string) => setPendingDelGroup(name)
 
   return (
     <div className="flex flex-col h-full bg-bg text-text-sub overflow-hidden animate-in fade-in duration-200">
@@ -201,10 +196,7 @@ export function OPAPolicyView() {
                 </Table>
              </div>
              <Button
-                onClick={() => {
-                   const name = prompt('Group name (without @):')
-                   if (name) onSaveGroup(name.toLowerCase(), [])
-                }}
+                onClick={() => setAddGroupOpen(true)}
                 size="sm" variant="outline" className="h-9 border-border text-text-sub"
              >
                 <Plus size={16} className="mr-1" /> Add Named Group
@@ -251,6 +243,44 @@ export function OPAPolicyView() {
             onSave={(members) => onSaveGroup(editGroup.name, members)}
          />
       )}
+
+      <ConfirmDialog
+        open={pendingDelRule !== null}
+        title="Delete Rule"
+        message="Delete this policy rule?"
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          if (pendingDelRule !== null) set({ rules: current.rules.filter((_, i) => i !== pendingDelRule) })
+          setPendingDelRule(null)
+        }}
+        onCancel={() => setPendingDelRule(null)}
+      />
+      <ConfirmDialog
+        open={pendingDelGroup !== null}
+        title="Delete Group"
+        message={`Delete group "@${pendingDelGroup}"?`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          if (pendingDelGroup) {
+            const nextGroups = { ...current.groups }
+            delete nextGroups[pendingDelGroup]
+            set({ groups: nextGroups })
+          }
+          setPendingDelGroup(null)
+        }}
+        onCancel={() => setPendingDelGroup(null)}
+      />
+      <InputDialog
+        open={addGroupOpen}
+        title="Add Named Group"
+        message="Group name (without @):"
+        placeholder="my-group"
+        confirmLabel="Create"
+        onConfirm={name => { if (name) onSaveGroup(name.toLowerCase(), []); setAddGroupOpen(false) }}
+        onCancel={() => setAddGroupOpen(false)}
+      />
     </div>
   )
 }

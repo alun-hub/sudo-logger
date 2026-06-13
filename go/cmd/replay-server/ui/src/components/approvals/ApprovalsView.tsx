@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchApprovals, approveRequest, denyRequest } from '@/api/approvals'
 import {
@@ -6,6 +7,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { fmtDate } from '@/lib/date'
 import { ShieldCheck, Clock, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
+import { InputDialog } from '@/components/ui/confirm-dialog'
 
 function parseSubmittedAt(r: any): number {
   // API returns submitted_at as ISO string (Go time.Time)
@@ -22,6 +24,7 @@ function isPending(r: any): boolean {
 
 export function ApprovalsView() {
   const qc = useQueryClient()
+  const [denyTarget, setDenyTarget] = useState<string | null>(null)
   const { data, isPending: loading, isError, refetch, isFetching } = useQuery({
     queryKey: ['approvals'],
     queryFn: fetchApprovals,
@@ -39,11 +42,7 @@ export function ApprovalsView() {
     onError: (e: any) => alert(`Deny failed: ${e.message || e}`),
   })
 
-  const handleDeny = (id: string) => {
-    const reason = prompt('Reason for denial (optional):') ?? null
-    if (reason === null) return  // user cancelled
-    deny.mutate({ id, reason })
-  }
+  const handleDeny = (id: string) => setDenyTarget(id)
 
   if (loading) return <div className="p-8 text-text-dim font-mono text-[13px]">Loading requests…</div>
   if (isError)  return <div className="p-8 text-red font-mono text-[13px]">Failed to load approvals — check server connectivity.</div>
@@ -191,6 +190,17 @@ export function ApprovalsView() {
           </div>
         </section>
       )}
+
+      <InputDialog
+        open={denyTarget !== null}
+        title="Deny Request"
+        message="Reason for denial (leave empty to deny without reason):"
+        placeholder="Policy violation, ticket SEC-123…"
+        optional
+        confirmLabel="Deny"
+        onConfirm={reason => { if (denyTarget) deny.mutate({ id: denyTarget, reason }); setDenyTarget(null) }}
+        onCancel={() => setDenyTarget(null)}
+      />
     </div>
   )
 }

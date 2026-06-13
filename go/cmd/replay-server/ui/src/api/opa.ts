@@ -63,14 +63,23 @@ export function saveBlockedPolicy(p: BlockedPolicy): Promise<{ ok: boolean }> {
   })
 }
 
+export interface WhitelistedUser {
+  username: string
+  hosts: string[]
+  reason: string
+  whitelisted_at?: number
+}
+
 export interface WhitelistPolicy {
-  users: string[]
+  users: WhitelistedUser[]
 }
 
 export function fetchWhitelistPolicy(): Promise<WhitelistPolicy> {
   return apiFetch<any>('/api/whitelisted-users').then((r: any) => ({
     users: ((r.config?.users ?? []) as any[]).map((u: any) =>
-      typeof u === 'string' ? u : u.username
+      typeof u === 'string'
+        ? { username: u, hosts: [], reason: '' }
+        : { username: u.username ?? '', hosts: u.hosts ?? [], reason: u.reason ?? '', whitelisted_at: u.whitelisted_at }
     ),
   }))
 }
@@ -78,8 +87,6 @@ export function fetchWhitelistPolicy(): Promise<WhitelistPolicy> {
 export function saveWhitelistPolicy(p: WhitelistPolicy): Promise<{ ok: boolean }> {
   return apiFetch('/api/whitelisted-users', {
     method: 'PUT',
-    body: JSON.stringify({
-      config: { users: p.users.map(u => ({ username: u, hosts: [], reason: '' })) },
-    }),
+    body: JSON.stringify({ config: { users: p.users } }),
   })
 }

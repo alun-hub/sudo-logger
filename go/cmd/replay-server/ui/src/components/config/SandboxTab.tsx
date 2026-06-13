@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { InputDialog } from '@/components/ui/confirm-dialog'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchSandbox, saveSandbox, fetchSandboxTemplates, saveSandboxTemplates } from '@/api/config'
 import { cn } from '@/lib/utils'
@@ -204,6 +205,7 @@ export function SandboxTab() {
   const [state, setState] = useState<SandboxState | null>(null)
   const [status, setStatus] = useState<{ msg: string; err: boolean } | null>(null)
   const [templateSel, setTemplateSel] = useState('')
+  const [tmplNameOpen, setTmplNameOpen] = useState(false)
 
   const current: SandboxState = state ?? (raw ? parseYaml(raw.content) : defaultState())
 
@@ -219,15 +221,13 @@ export function SandboxTab() {
   })
 
   const saveTmpl = useMutation({
-    mutationFn: async () => {
-      const name = window.prompt('Enter a name for this template:')
-      if (!name) throw new Error('cancelled')
+    mutationFn: async (name: string) => {
       const next = { ...templates, [name]: buildYaml(current) }
       await saveSandboxTemplates(next)
       return name
     },
     onSuccess: (name: string) => { qc.invalidateQueries({ queryKey: ['sandbox-templates'] }); showStatus(`Template "${name}" saved`) },
-    onError: (e: any) => { if (e.message !== 'cancelled') showStatus('Save template failed: ' + e.message, true) },
+    onError: (e: any) => showStatus('Save template failed: ' + e.message, true),
   })
 
   const loadTemplate = () => {
@@ -266,7 +266,7 @@ export function SandboxTab() {
             </span>
           )}
           <button
-            onClick={() => saveTmpl.mutate()}
+            onClick={() => setTmplNameOpen(true)}
             className="h-8 px-3 bg-card border border-border rounded-[4px] text-[12px] text-text-dim hover:border-border-mid hover:text-text transition-colors"
           >Save as template</button>
           <button
@@ -350,6 +350,15 @@ export function SandboxTab() {
           </p>
         </div>
       </div>
+      <InputDialog
+        open={tmplNameOpen}
+        title="Save as Template"
+        message="Enter a name for this template:"
+        placeholder="my-hardened-config"
+        confirmLabel="Save"
+        onConfirm={name => { saveTmpl.mutate(name); setTmplNameOpen(false) }}
+        onCancel={() => setTmplNameOpen(false)}
+      />
     </div>
   )
 }

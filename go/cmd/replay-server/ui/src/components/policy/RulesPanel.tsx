@@ -8,6 +8,7 @@ import { Plus, Edit2, Trash2, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fetchRules, saveRules, type Rule } from '@/api/policy'
 import { RuleModal } from './RuleModal'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 export function RulesPanel() {
   const qc = useQueryClient()
@@ -17,6 +18,7 @@ export function RulesPanel() {
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [sortCol, setSortCol] = useState('score')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [pendingDel, setPendingDel] = useState<string | null>(null)
 
   const mutation = useMutation({
     mutationFn: saveRules,
@@ -58,10 +60,7 @@ export function RulesPanel() {
     mutation.mutate(next)
   }
 
-  const onDelete = (id: string) => {
-    if (!confirm(`Delete rule ${id}?`)) return
-    mutation.mutate(data.rules.filter(r => r.id !== id))
-  }
+  const onDelete = (id: string) => setPendingDel(id)
 
   return (
     <div className="space-y-6">
@@ -162,6 +161,18 @@ export function RulesPanel() {
         open={isAddOpen}
         onClose={() => setIsAddOpen(false)}
         onSave={onSave}
+      />
+      <ConfirmDialog
+        open={pendingDel !== null}
+        title="Delete Rule"
+        message={`Delete rule "${pendingDel}"?`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          if (pendingDel) mutation.mutate(data.rules.filter(r => r.id !== pendingDel))
+          setPendingDel(null)
+        }}
+        onCancel={() => setPendingDel(null)}
       />
     </div>
   )

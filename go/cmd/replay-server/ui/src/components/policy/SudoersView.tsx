@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Shield, Clock, AlertTriangle, CheckCircle2, Save, Trash2, RotateCcw, Plus, X } from 'lucide-react'
 import { fmtDate } from '@/lib/date'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 type Mode = 'visual' | 'raw'
 
@@ -106,6 +107,7 @@ function EditorPanel({ host }: { host: string }) {
   const [ruleFilter, setRuleFilter] = useState('')
   const [cmdInput, setCmdInput] = useState('')
   const cmdInputRef = useRef<HTMLInputElement>(null)
+  const [revertConfirm, setRevertConfirm] = useState(false)
 
   const save = useMutation({
     mutationFn: (c: string) => saveSudoersConfig(host, c),
@@ -232,7 +234,7 @@ function EditorPanel({ host }: { host: string }) {
           )}
           {!isGlobal && config?.is_override && (
             <Button variant="ghost" size="sm"
-              onClick={() => confirm(`Revert ${host} to global default?`) && remove.mutate()}
+              onClick={() => setRevertConfirm(true)}
               className="h-7 text-text-dim hover:text-red text-[12px]"
             >
               <Trash2 size={13} className="mr-1" /> Revert
@@ -397,6 +399,15 @@ function EditorPanel({ host }: { host: string }) {
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={revertConfirm}
+        title="Revert Override"
+        message={`Revert "${host}" to global default? This will delete the host-specific override.`}
+        confirmLabel="Revert"
+        danger
+        onConfirm={() => { remove.mutate(); setRevertConfirm(false) }}
+        onCancel={() => setRevertConfirm(false)}
+      />
     </div>
   )
 }
@@ -412,6 +423,7 @@ interface RuleInspectorProps {
 }
 
 function RuleInspector({ rule, cmdInput, cmdInputRef, onUpdate, onDelete, onCmdInput }: RuleInspectorProps) {
+  const [delConfirm, setDelConfirm] = useState(false)
   const addCmd = () => {
     const val = cmdInput.trim()
     if (!val) return
@@ -436,7 +448,7 @@ function RuleInspector({ rule, cmdInput, cmdInputRef, onUpdate, onDelete, onCmdI
           )}
         </div>
         <button
-          onClick={() => confirm('Delete this rule?') && onDelete()}
+          onClick={() => setDelConfirm(true)}
           className="text-[12px] border border-red/30 text-red/80 hover:border-red hover:text-red px-3 py-1 rounded-[4px] transition-colors"
         >
           Delete Rule
@@ -570,6 +582,15 @@ function RuleInspector({ rule, cmdInput, cmdInputRef, onUpdate, onDelete, onCmdI
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={delConfirm}
+        title="Delete Rule"
+        message="Delete this sudoers rule?"
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => { onDelete(); setDelConfirm(false) }}
+        onCancel={() => setDelConfirm(false)}
+      />
     </div>
   )
 }
