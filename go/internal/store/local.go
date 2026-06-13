@@ -1389,6 +1389,42 @@ func localReadEvents(sessDir string) ([]RawEvent, error) {
 	return parseRawEvents(f)
 }
 
+// unescapeJSONString recovers raw bytes from a JSON string literal.
+func unescapeJSONString(raw []byte) []byte {
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return raw
+	}
+	s := raw[1 : len(raw)-1]
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"':  out = append(out, '"'); i++
+			case '\\': out = append(out, '\\'); i++
+			case 'b':  out = append(out, '\b'); i++
+			case 'f':  out = append(out, '\f'); i++
+			case 'n':  out = append(out, '\n'); i++
+			case 'r':  out = append(out, '\r'); i++
+			case 't':  out = append(out, '\t'); i++
+			case 'u':
+				if i+5 < len(s) {
+					var u uint16
+					fmt.Sscanf(string(s[i+2:i+6]), "%04x", &u)
+					out = append(out, byte(u))
+					i += 5
+					continue
+				}
+				out = append(out, '\\')
+			default:
+				out = append(out, '\\')
+			}
+		} else {
+			out = append(out, s[i])
+		}
+	}
+	return out
+}
+
 // parseRawEvents reads asciinema v2 events from r, skipping the header line.
 func parseRawEvents(r io.Reader) ([]RawEvent, error) {
 	scanner := bufio.NewScanner(r)
@@ -1405,22 +1441,21 @@ func parseRawEvents(r io.Reader) ([]RawEvent, error) {
 		if len(line) == 0 || line[0] != '[' {
 			continue
 		}
-		var raw [3]json.RawMessage
-		if json.Unmarshal(line, &raw) != nil {
+		var raw []json.RawMessage
+		if json.Unmarshal(line, &raw) != nil || len(raw) < 3 {
 			continue
 		}
 		var t float64
-		var kind, data string
+		var kind string
 		if json.Unmarshal(raw[0], &t) != nil {
 			continue
 		}
 		if json.Unmarshal(raw[1], &kind) != nil {
 			continue
 		}
-		if json.Unmarshal(raw[2], &data) != nil {
-			continue
-		}
-		events = append(events, RawEvent{T: t, Kind: kind, Data: []byte(data)})
+
+		data := unescapeJSONString(raw[2])
+		events = append(events, RawEvent{T: t, Kind: kind, Data: data})
 	}
 	return events, scanner.Err()
 }

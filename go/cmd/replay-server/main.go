@@ -1053,6 +1053,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
+	mux.HandleFunc("/api/session/cast", handleSessionCast)
 	mux.HandleFunc("/api/access-log", handleAccessLog)
 	mux.HandleFunc("/metrics", handleMetrics)
 	mux.HandleFunc("/api/report", handleReport)
@@ -1586,6 +1587,42 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// unescapeJSONString recovers raw bytes from a JSON string literal.
+func unescapeJSONString(raw []byte) []byte {
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return raw
+	}
+	s := raw[1 : len(raw)-1]
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			switch s[i+1] {
+			case '"':  out = append(out, '"'); i++
+			case '\\': out = append(out, '\\'); i++
+			case 'b':  out = append(out, '\b'); i++
+			case 'f':  out = append(out, '\f'); i++
+			case 'n':  out = append(out, '\n'); i++
+			case 'r':  out = append(out, '\r'); i++
+			case 't':  out = append(out, '\t'); i++
+			case 'u':
+				if i+5 < len(s) {
+					var u uint16
+					fmt.Sscanf(string(s[i+2:i+6]), "%04x", &u)
+					out = append(out, byte(u))
+					i += 5
+					continue
+				}
+				out = append(out, '\\')
+			default:
+				out = append(out, '\\')
+			}
+		} else {
+			out = append(out, s[i])
+		}
+	}
+	return out
+}
+
 func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1677,10 +1714,11 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 
 		var relTime float64
 		var kind string
-		var dataStr string
 		_ = json.Unmarshal(raw[0], &relTime)
 		_ = json.Unmarshal(raw[1], &kind)
-		_ = json.Unmarshal(raw[2], &dataStr)
+
+		// Recover raw bytes from \u00XX escapes without UTF-8 coercion
+		dataBytes := unescapeJSONString(raw[2])
 
 		evType := 4 // TtyOut
 		if kind == "i" {
@@ -1690,7 +1728,7 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		event := PlaybackEvent{
 			T:    relTime,
 			Type: evType,
-			Data: base64.StdEncoding.EncodeToString([]byte(dataStr)),
+			Data: base64.StdEncoding.EncodeToString(dataBytes),
 		}
 
 		if err := enc.Encode(event); err != nil {
@@ -1710,6 +1748,55 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if err := scanner.Err(); err != nil {
 		log.Printf("[%s] scan error during streaming: %v", tsid, err)
 	}
+}
+
+func handleSessionCast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tsid := r.URL.Query().Get("tsid")
+	if tsid == "" {
+		http.Error(w, "missing tsid", http.StatusBadRequest)
+		return
+	}
+	if err := validateTSID(tsid); err != nil {
+		http.Error(w, "invalid tsid", http.StatusBadRequest)
+		return
+	}
+
+	// Enforce viewer-role ownership
+	viewer := viewerFromContext(r)
+	if !can(r, store.PermSessionsReplayAll) && viewer != "-" {
+		all := cachedListSessions(r.Context())
+		found := false
+		for _, s := range all {
+			if s.TSID == tsid {
+				found = true
+				if s.User != viewer {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	rc, err := sessionStore.OpenCast(r.Context(), tsid)
+	if err != nil {
+		log.Printf("open cast %s: %v", tsid, err)
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	defer rc.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.cast", url.QueryEscape(tsid)))
+	io.Copy(w, rc)
 }
 
 // handleAccessLog returns the view audit log as JSON, newest entries first.
