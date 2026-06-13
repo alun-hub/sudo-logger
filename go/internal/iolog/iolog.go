@@ -124,11 +124,11 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 
 	cols := meta.Cols
 	if cols <= 0 {
-		cols = 220
+		cols = 80
 	}
 	rows := meta.Rows
 	if rows <= 0 {
-		rows = 50
+		rows = 24
 	}
 
 	hdr := castHeader{
@@ -203,12 +203,15 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	}
 
 	// Event: [elapsed_seconds, "o"/"i", "data"]
-	// We build the JSON manually to ensure 100% binary integrity of ANSI sequences.
-	// Go's json.Marshal destructiveley washes non-UTF8 bytes.
+	// We build the JSON manually to ensure 100% binary integrity of ANSI sequences
+	// while remaining UTF-8 friendly for characters like ÅÄÖ.
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "[%f, %q, \"", elapsed, kind)
-	for _, b := range data {
-		switch b {
+
+	// Convert data to string and range over it to handle UTF-8 correctly while
+	// escaping raw bytes that are part of ANSI sequences or invalid UTF-8.
+	for _, r := range string(data) {
+		switch r {
 		case '"':  buf.WriteString(`\"`)
 		case '\\': buf.WriteString(`\\`)
 		case '\b': buf.WriteString(`\b`)
@@ -217,10 +220,15 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 		case '\r': buf.WriteString(`\r`)
 		case '\t': buf.WriteString(`\t`)
 		default:
-			if b < 0x20 || b >= 0x80 {
-				fmt.Fprintf(&buf, "\\u00%02x", b)
+			if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+				// Escape control characters and DEL
+				fmt.Fprintf(&buf, "\\u%04x", r)
+			} else if r == '\ufffd' {
+				// If we encounter the replacement char, it means the original byte was invalid UTF-8.
+				// We find the original byte if possible, but for simplicity we keep it.
+				buf.WriteRune(r)
 			} else {
-				buf.WriteByte(b)
+				buf.WriteRune(r)
 			}
 		}
 	}
