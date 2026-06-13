@@ -50,22 +50,32 @@ export function TerminalPlayer({ session }: Props) {
       cursorBlink: true,
       convertEol: true,
       lineHeight: 1.3,
+      cols: session.cols || 80,
+      rows: session.rows || 24,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(containerRef.current)
 
-    // Initial fit after a short delay to ensure container is rendered
-    setTimeout(() => fit.fit(), 100)
+    const syncSize = () => {
+      try {
+        fit.fit()
+        // If the session has specific dimensions, we MUST respect them to avoid vi corruption.
+        // We set the terminal to those dimensions. FitAddon is still used to calculate
+        // the initial font/container fit, but the grid must be absolute.
+        if (session.cols && session.rows) {
+          term.resize(session.cols, session.rows)
+        }
+      } catch (e) {}
+    }
+
+    setTimeout(syncSize, 100)
 
     termRef.current = term
     fitRef.current  = fit
 
-    const observer = new ResizeObserver(() => {
-      try { fit.fit() } catch (e) {}
-    })
+    const observer = new ResizeObserver(syncSize)
     observer.observe(containerRef.current)
-
     return () => {
       observer.disconnect()
       term.dispose()
