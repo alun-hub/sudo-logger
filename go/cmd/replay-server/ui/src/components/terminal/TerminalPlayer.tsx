@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import { fetchSessionEvents } from '@/api/sessions'
 import { fmtDuration } from '@/lib/date'
 import { RiskBadge } from '../sessions/RiskBadge'
@@ -11,9 +12,9 @@ interface Props {
 }
 
 export function TerminalPlayer({ session }: Props) {
-  const viewportRef   = useRef<HTMLDivElement>(null)  // outer overflow-hidden div
-  const containerRef  = useRef<HTMLDivElement>(null)  // inner xterm mount point (scaled)
+  const containerRef  = useRef<HTMLDivElement>(null)
   const termRef       = useRef<Terminal | null>(null)
+  const fitRef        = useRef<FitAddon | null>(null)
   const rafRef        = useRef<number>(0)
 
   const [events, setEvents]   = useState<SessionEvent[]>([])
@@ -29,23 +30,18 @@ export function TerminalPlayer({ session }: Props) {
   const eventIdxRef = useRef(0)
   const lastRafTs   = useRef(0)
 
-  // Terminal initialization with CSS scale-to-fit at recorded dimensions.
-  // We do NOT use FitAddon — it changes the logical terminal grid (cols/rows)
-  // which breaks ANSI cursor-addressing used by vi, ncurses, etc.
-  // Instead we init at the exact recorded size and scale the DOM element to fit
-  // the viewport, mirroring what asciinema does.
   useEffect(() => {
-    if (!containerRef.current || !viewportRef.current) return
+    if (!containerRef.current) return
 
-    // Use recorded dimensions verbatim. iolog.go defaults to 220×50 when the
-    // plugin doesn't capture terminal size, so 220/50 is both a valid real size
-    // and the correct fallback for sessions with unknown dimensions.
-    const cols = session.cols || 220
-    const rows = session.rows || 50
+    // Recorded terminal dimensions. iolog.go defaults to 220×50 when the
+    // plugin doesn't capture terminal size, so these are always non-zero.
+    const recCols = session.cols || 220
+    const recRows = session.rows || 50
 
     const term = new Terminal({
-      cols,
-      rows,
+      // Initial cols/rows; FitAddon will resize to viewport below.
+      cols: recCols,
+      rows: recRows,
       theme: {
         background: '#09090f',
         foreground: '#d4daf0',
@@ -66,31 +62,34 @@ export function TerminalPlayer({ session }: Props) {
       scrollback: 5000,
     })
 
+    const fit = new FitAddon()
+    term.loadAddon(fit)
     term.open(containerRef.current)
     termRef.current = term
+    fitRef.current  = fit
 
-    // Scale the terminal to fill the viewport without changing its logical
-    // cols×rows. This keeps ANSI cursor positions correct while adapting to
-    // any browser window size.
-    const scaleToFit = () => {
-      if (!viewportRef.current || !containerRef.current) return
-      const screen = containerRef.current.querySelector('.xterm-screen') as HTMLElement
-      if (!screen) return
-      const vpW = viewportRef.current.offsetWidth
-      const vpH = viewportRef.current.offsetHeight
-      const tW  = screen.offsetWidth
-      const tH  = screen.offsetHeight
-      if (tW <= 0 || tH <= 0 || vpW <= 0 || vpH <= 0) return
-      const scale   = Math.min(vpW / tW, vpH / tH)
-      const offsetX = (vpW - tW * scale) / 2
-      const offsetY = (vpH - tH * scale) / 2
-      containerRef.current.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`
-      containerRef.current.style.transformOrigin = 'top left'
+    // Sizing strategy: fill the viewport (FitAddon), then cap at the recorded
+    // dimensions so we never give the terminal MORE columns/rows than what was
+    // recorded. This ensures ANSI cursor positions always stay within the
+    // recorded grid. When the viewport is smaller than the recording (common
+    // for wide sessions), vi's status bar is clamped to the last visible row —
+    // which looks correct. When the viewport is larger, we lock to the
+    // recording size for exact fidelity.
+    const syncSize = () => {
+      if (!containerRef.current || !termRef.current || !fitRef.current) return
+      try {
+        fitRef.current.fit()
+        const c = Math.min(termRef.current.cols, recCols)
+        const r = Math.min(termRef.current.rows, recRows)
+        if (c !== termRef.current.cols || r !== termRef.current.rows) {
+          termRef.current.resize(c, r)
+        }
+      } catch (e) {}
     }
 
-    const timers = [50, 250, 1000].map(d => setTimeout(scaleToFit, d))
-    const observer = new ResizeObserver(scaleToFit)
-    observer.observe(viewportRef.current)
+    const timers = [50, 250, 1000].map(d => setTimeout(syncSize, d))
+    const observer = new ResizeObserver(syncSize)
+    observer.observe(containerRef.current)
 
     return () => {
       observer.disconnect()
@@ -100,7 +99,6 @@ export function TerminalPlayer({ session }: Props) {
     }
   }, [session.tsid, session.cols, session.rows])
 
-  // Event loading and autoplay
   useEffect(() => {
     setLoading(true)
     setPlaying(false)
@@ -277,9 +275,9 @@ export function TerminalPlayer({ session }: Props) {
         </div>
       </div>
 
-      {/* Terminal Viewport — outer div clips overflow, inner div is scaled */}
-      <div ref={viewportRef} className="flex-1 overflow-hidden relative bg-black">
-        <div ref={containerRef} className="absolute" style={{ top: 0, left: 0 }} />
+      {/* Terminal Viewport */}
+      <div className="flex-1 overflow-hidden relative bg-black p-2.5">
+        <div ref={containerRef} className="w-full h-full" />
       </div>
 
       {/* Controls Bar */}
