@@ -29,7 +29,7 @@ export function TerminalPlayer({ session }: Props) {
       theme: 'asciinema',
       terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       terminalLineHeight: 1.3,
-      fit: 'width', // Use width fit as recommended by best practices
+      fit: 'both', // Scale perfectly within both width and height constraints
     })
 
     return () => {
@@ -86,11 +86,9 @@ export function TerminalPlayer({ session }: Props) {
       </div>
 
       {/* Terminal Viewport */}
-      <div className="flex-1 overflow-hidden relative bg-black p-4 flex items-center justify-center">
-         {/* Container strictly styled for asciinema fit="width" */}
-         <div style={{ maxWidth: '100%', overflow: 'hidden', width: '100%' }}>
-           <div ref={containerRef} />
-         </div>
+      <div className="flex-1 overflow-hidden relative bg-black p-4">
+         {/* Container strictly styled for asciinema fit="both" by expanding to full absolute dimensions */}
+         <div ref={containerRef} className="absolute inset-4 flex items-center justify-center" />
       </div>
     </div>
   )
