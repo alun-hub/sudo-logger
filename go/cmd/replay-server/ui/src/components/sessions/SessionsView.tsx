@@ -52,11 +52,17 @@ export function SessionsView() {
                  <span>sudo-replay — select a session from the sidebar to begin auditing</span>
               </div>
               <div className="mb-4 text-text font-bold uppercase tracking-widest text-[11px] border-b border-border pb-1">Keyboard shortcuts</div>
-              <div className="grid grid-cols-[120px_1fr] gap-y-3">
+              <div className="grid grid-cols-[140px_1fr] gap-y-3">
+                <div className="text-green/60 uppercase text-[10px] tracking-widest col-span-2 mt-1">Player</div>
                 <div className="text-green font-bold">Space</div><div className="text-text-sub">play / pause</div>
-                <div className="text-green font-bold">→ / ←</div><div className="text-text-sub">seek ±5 seconds</div>
-                <div className="text-green font-bold">R</div><div className="text-text-sub">restart session</div>
-                <div className="text-green font-bold">/</div><div className="text-text-sub">focus search</div>
+                <div className="text-green font-bold">← / →</div><div className="text-text-sub">seek backward / forward</div>
+                <div className="text-green font-bold">Shift+← / →</div><div className="text-text-sub">seek (longer step)</div>
+                <div className="text-green font-bold">0 – 9</div><div className="text-text-sub">jump to 0–90% of session</div>
+                <div className="text-green font-bold">f</div><div className="text-text-sub">fullscreen</div>
+                <div className="text-green font-bold">m</div><div className="text-text-sub">mute / unmute</div>
+                <div className="text-green font-bold">? </div><div className="text-text-sub">show player shortcuts</div>
+                <div className="text-green/60 uppercase text-[10px] tracking-widest col-span-2 mt-2">Navigation</div>
+                <div className="text-green font-bold">/</div><div className="text-text-sub">focus session search</div>
                 <div className="text-green font-bold">↑ / ↓</div><div className="text-text-sub">navigate sessions</div>
               </div>
             </div>
