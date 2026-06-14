@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #09090f;
+  --color-surface: #0f1117;
+  --color-card: #161921;
+  --color-card-hover: #1c1f2e;
+  --color-card-active: #1a2035;
+  --color-border: #1e2230;
+  --color-border-mid: #2a2f42;
+  --color-text: #d4daf0;
+  --color-text-sub: #a1a9c3;
+  --color-text-dim: #8b94ab;
+  --color-green: #00e87a;
+  --color-green-dim: #003d20;
+  --color-green-glow: rgba(0, 232, 122, 0.12);
+  --color-blue: #4da8ff;
+  --color-red: #ff5f6d;
+  --color-amber: #e8a44d;
+  --color-amber-dim: rgba(232, 164, 77, 0.15);
+
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+
+  /* Shadcn overrides */
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text);
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-text);
+  --color-primary: var(--color-green);
+  --color-primary-foreground: #000;
+  --color-secondary: var(--color-card-hover);
+  --color-secondary-foreground: var(--color-text);
+  --color-muted: var(--color-surface);
+  --color-muted-foreground: var(--color-text-sub);
+  --color-accent: var(--color-card-hover);
+  --color-accent-foreground: var(--color-text);
+  --color-destructive: var(--color-red);
+  --color-destructive-foreground: #000;
+  --color-input: var(--color-border);
+  --color-ring: var(--color-green);
+  --radius: 5px;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  /* Light theme: override CSS custom properties used by @theme utilities */
+  [data-theme="light"] {
+    color-scheme: light;
+    --color-bg:          #f0f2f6;
+    --color-surface:     #eef0f6;
+    --color-card:        #ffffff;
+    --color-card-hover:  #e8eaf2;
+    --color-card-active: #dde3f5;
+    --color-border:      rgba(0,0,0,0.1);
+    --color-border-mid:  rgba(0,0,0,0.18);
+    --color-text:        #1a1a2e;
+    --color-text-sub:    #2d3748;
+    --color-text-dim:    #4a5568;
+    --color-green:       #007a40;
+    --color-green-dim:   rgba(0,122,64,0.12);
+    --color-green-glow:  rgba(0,122,64,0.08);
+    --color-blue:        #0969da;
+    --color-red:         #c0001a;
+    --color-amber:       #8a6500;
+    --color-amber-dim:   rgba(138,101,0,0.12);
+    --color-background:  #f0f2f6;
+    --color-foreground:  #1a1a2e;
+    --color-popover:     #ffffff;
+    --color-popover-foreground: #1a1a2e;
+    --color-primary:     #007a40;
+    --color-primary-foreground: #ffffff;
+    --color-secondary:   #e8eaf2;
+    --color-secondary-foreground: #1a1a2e;
+    --color-muted:       #eef0f6;
+    --color-muted-foreground: #6b7280;
+    --color-accent:      #e8eaf2;
+    --color-accent-foreground: #1a1a2e;
+    --color-input:       rgba(0,0,0,0.1);
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+}
+
+/* Custom Scrollbar to match old UI */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--color-border-mid); border-radius: 2px; }
+* { scrollbar-width: thin; scrollbar-color: var(--color-border-mid) transparent; }
+
+/* asciinema-player: fill container and center player vertically (letterbox) */
+.ap-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+}

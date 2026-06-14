@@ -160,6 +160,26 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
+// securityHeadersMiddleware adds standard security headers to all responses.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		// CSP: allow local scripts, inline styles, data images, and WASM for terminal player
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';")
+
+		// Add HSTS if TLS is enabled or we are behind a proxy that terminated TLS
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // accessLogMiddleware logs every request with the authenticated username,
 // resolved from the dynamic AuthConfig (proxy mode, OIDC, or Basic Auth).
 func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
@@ -1053,6 +1073,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/sessions", handleListSessions)
 	mux.HandleFunc("/api/session/events", handleSessionEvents)
+	mux.HandleFunc("/api/session/cast", handleSessionCast)
 	mux.HandleFunc("/api/access-log", handleAccessLog)
 	mux.HandleFunc("/metrics", handleMetrics)
 	mux.HandleFunc("/api/report", handleReport)
@@ -1447,15 +1468,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("embed static: %v", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
-	mux.HandleFunc("/approvals/", func(w http.ResponseWriter, r *http.Request) {
-		index, err := staticFiles.ReadFile("static/index.html")
-		if err != nil {
-			http.Error(w, err.Error(), 500)
+	fileServer := http.FileServer(http.FS(staticFS))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Let the file server handle real static assets (JS, CSS, images).
+		// For all other non-API paths, serve index.html so React Router works.
+		if _, statErr := fs.Stat(staticFS, strings.TrimPrefix(r.URL.Path, "/")); statErr == nil {
+			fileServer.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(index)
+		idx, err := staticFS.Open("index.html")
+		if err != nil {
+			http.Error(w, "index.html not found — rebuild the UI first", http.StatusInternalServerError)
+			return
+		}
+		defer idx.Close()
+		http.ServeContent(w, r, "index.html", time.Time{}, idx.(io.ReadSeeker))
 	})
 
 	// Pre-warm the session cache so the first request is served from cache.
@@ -1485,10 +1512,11 @@ func main() {
 	}
 
 	// Build middleware chain (innermost first):
-	//   basicAuth → accessLog → handler
+	//   security → basicAuth → accessLog → handler
 	var handler http.Handler = mux
 	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
 	handler = basicAuthMiddleware(handler)
+	handler = securityHeadersMiddleware(handler)
 
 	// Build the HTTP server so we can call Shutdown() on SIGTERM.
 	var httpSrv *http.Server
@@ -1706,6 +1734,138 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleSessionCast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tsid := r.URL.Query().Get("tsid")
+	if tsid == "" {
+		http.Error(w, "missing tsid", http.StatusBadRequest)
+		return
+	}
+	if err := validateTSID(tsid); err != nil {
+		http.Error(w, "invalid tsid", http.StatusBadRequest)
+		return
+	}
+
+	// Enforce viewer-role ownership
+	viewer := viewerFromContext(r)
+	if !can(r, store.PermSessionsReplayAll) && viewer != "-" {
+		all := cachedListSessions(r.Context())
+		found := false
+		for _, s := range all {
+			if s.TSID == tsid {
+				found = true
+				if s.User != viewer {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+				break
+			}
+		}
+		if !found {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	rc, err := sessionStore.OpenCast(r.Context(), tsid)
+	if err != nil {
+		log.Printf("open cast %s: %v", tsid, err)
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	defer rc.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.cast", url.QueryEscape(tsid)))
+
+	// Filter out "i" (input) events and patch the header height.
+	// asciinema-player doesn't display input events, and they can cause VT emulator
+	// corruption when the player seeks/fast-forwards.
+	//
+	// The header height patch corrects a known issue where iolog.go defaults to
+	// height=50 when the plugin sends 0 rows. vi/ncurses detect the actual PTY
+	// size via TIOCGWINSZ and may use a different row count. We detect the actual
+	// row count from the first few output events: vi always emits ESC[1;Nr
+	// (set-scroll-region) as its first action, where N is the actual row count.
+	// In the cast file, ESC is JSON-encoded as .
+	scanner := bufio.NewScanner(rc)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+
+	scrollRegionRE := regexp.MustCompile(`\\u001b\[1;(\d+)r`)
+
+	if !scanner.Scan() {
+		return
+	}
+	headerBytes := append([]byte(nil), scanner.Bytes()...)
+
+	// Buffer the first 5 output events to detect actual terminal rows before
+	// writing the (possibly patched) header.
+	type bufferedLine struct{ data []byte }
+	var buffered []bufferedLine
+	detectedRows := 0
+	for len(buffered) < 5 && detectedRows == 0 && scanner.Scan() {
+		line := scanner.Bytes()
+		cp := make([]byte, len(line))
+		copy(cp, line)
+		buffered = append(buffered, bufferedLine{cp})
+		if m := scrollRegionRE.FindSubmatch(line); m != nil {
+			if n, err2 := strconv.Atoi(string(m[1])); err2 == nil && n > 0 {
+				detectedRows = n
+			}
+		}
+	}
+
+	if detectedRows > 0 {
+		var hdr map[string]json.RawMessage
+		if json.Unmarshal(headerBytes, &hdr) == nil {
+			var currentHeight int
+			if json.Unmarshal(hdr["height"], &currentHeight) == nil && currentHeight != detectedRows {
+				hdr["height"], _ = json.Marshal(detectedRows)
+				if patched, perr := json.Marshal(hdr); perr == nil {
+					headerBytes = patched
+				}
+			}
+		}
+	}
+
+	w.Write(headerBytes)
+	w.Write([]byte("\n"))
+
+	isInputEvent := func(line []byte) bool {
+		if !bytes.Contains(line, []byte(`"i"`)) {
+			return false
+		}
+		var raw []json.RawMessage
+		if json.Unmarshal(line, &raw) != nil || len(raw) < 2 {
+			return false
+		}
+		var kind string
+		return json.Unmarshal(raw[1], &kind) == nil && kind == "i"
+	}
+
+	for _, bl := range buffered {
+		if !isInputEvent(bl.data) {
+			w.Write(bl.data)
+			w.Write([]byte("\n"))
+		}
+	}
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if isInputEvent(line) {
+			continue
+		}
+		w.Write(line)
+		w.Write([]byte("\n"))
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("error streaming cast %s: %v", tsid, err)
+	}
+}
+
 // handleAccessLog returns the view audit log as JSON, newest entries first.
 // Optional query params:
 //
@@ -1820,6 +1980,12 @@ func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, 
 		if s.Source == "ebpf-tty" && s.MatchedSessionID != "" {
 			continue
 		}
+		// Hide divergence alerts where no I/O was ever captured — these are
+		// spurious entries from flag-only sudo invocations (sudo -v, sudo -l)
+		// that eBPF sees but the I/O plugin never handles.
+		if s.DivergenceStatus == "missing_plugin" && !s.HasIO {
+			continue
+		}
 		if ownerFilter != "" && s.User != ownerFilter {
 			continue
 		}
@@ -1885,10 +2051,12 @@ func matchesAll(s SessionInfo, q string) bool {
 	user := strings.ToLower(s.User)
 	host := strings.ToLower(s.Host)
 	cmd  := strings.ToLower(s.Command)
+	tsid := strings.ToLower(s.TSID)
 	for _, term := range strings.Fields(q) {
 		if !strings.Contains(user, term) &&
 			!strings.Contains(host, term) &&
-			!strings.Contains(cmd, term) {
+			!strings.Contains(cmd, term) &&
+			!strings.Contains(tsid, term) {
 			return false
 		}
 	}

@@ -784,8 +784,22 @@ func (m *ApprovalManager) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pending := m.ListPending()
+
+	// Wrap in a struct that includes status: pending for the UI
+	type pendingWithStatus struct {
+		store.ApprovalRequest
+		Status string `json:"status"`
+	}
+	out := make([]pendingWithStatus, len(pending))
+	for i, p := range pending {
+		out[i] = pendingWithStatus{
+			ApprovalRequest: p,
+			Status:          "pending",
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pending)
+	json.NewEncoder(w).Encode(out)
 }
 
 func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request) {
@@ -793,12 +807,29 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	// Expected path: /api/approvals/{id}/{action} or /api/approvals/{id} (with action in body)
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) != 4 {
+	var id, action, reason string
+
+	if len(parts) == 4 {
+		id, action = parts[2], parts[3]
+	} else if len(parts) == 3 {
+		id = parts[2]
+		var body struct {
+			Action string `json:"action"`
+			Reason string `json:"reason"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		action = body.Action
+		reason = body.Reason
+	} else {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
-	id, action := parts[2], parts[3]
+
 	// X-Sudo-Logger-Decided-By is set by the replay-server from its authenticated
 	// session identity — never forwarded from the browser request.
 	decidedBy := r.Header.Get("X-Sudo-Logger-Decided-By")
@@ -822,11 +853,14 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	case "deny":
-		var body struct {
-			Reason string `json:"reason"`
+		if len(parts) == 4 {
+			var body struct {
+				Reason string `json:"reason"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			reason = body.Reason
 		}
-		json.NewDecoder(r.Body).Decode(&body)
-		if err := m.Deny(id, decidedBy, body.Reason); err != nil {
+		if err := m.Deny(id, decidedBy, reason); err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}

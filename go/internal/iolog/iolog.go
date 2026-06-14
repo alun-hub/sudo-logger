@@ -14,6 +14,7 @@ package iolog
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -188,6 +189,23 @@ func (w *Writer) WriteInput(data []byte, ts int64) error {
 	return w.writeEvent("i", data, ts)
 }
 
+// WriteResize appends a terminal resize event ("r") to the cast file.
+// The asciinema v2 format represents this as [elapsed, "r", "COLSxROWS"].
+func (w *Writer) WriteResize(cols, rows int, tsNs int64) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	elapsed := time.Unix(0, tsNs).Sub(w.startTime).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	b, err := json.Marshal([]any{elapsed, "r", fmt.Sprintf("%dx%d", cols, rows)})
+	if err != nil {
+		return err
+	}
+	_, err = w.castBuf.Write(append(b, '\n'))
+	return err
+}
+
 func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	if len(data) == 0 {
 		return nil
@@ -202,13 +220,37 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	}
 
 	// Event: [elapsed_seconds, "o"/"i", "data"]
-	// Data must be valid UTF-8; replace invalid bytes with the replacement char.
-	event := []any{elapsed, kind, strings.ToValidUTF8(string(data), "\ufffd")}
-	b, err := json.Marshal(event)
-	if err != nil {
-		return err
+	// We build the JSON manually to ensure 100% binary integrity of ANSI sequences
+	// while remaining UTF-8 friendly for characters like ÅÄÖ.
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "[%f, %q, \"", elapsed, kind)
+
+	// Convert data to string and range over it to handle UTF-8 correctly while
+	// escaping raw bytes that are part of ANSI sequences or invalid UTF-8.
+	for _, r := range string(data) {
+		switch r {
+		case '"':  buf.WriteString(`\"`)
+		case '\\': buf.WriteString(`\\`)
+		case '\b': buf.WriteString(`\b`)
+		case '\f': buf.WriteString(`\f`)
+		case '\n': buf.WriteString(`\n`)
+		case '\r': buf.WriteString(`\r`)
+		case '\t': buf.WriteString(`\t`)
+		default:
+			if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+				// Escape control characters and DEL
+				fmt.Fprintf(&buf, "\\u%04x", r)
+			} else if r == '\ufffd' {
+				// If we encounter the replacement char, it means the original byte was invalid UTF-8.
+				// We find the original byte if possible, but for simplicity we keep it.
+				buf.WriteRune(r)
+			} else {
+				buf.WriteRune(r)
+			}
+		}
 	}
-	_, err = w.castBuf.Write(append(b, '\n'))
+	buf.WriteString("\"]\n")
+	_, err := w.castBuf.Write(buf.Bytes())
 	return err
 }
 

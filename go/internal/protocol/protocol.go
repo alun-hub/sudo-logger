@@ -23,6 +23,7 @@
 //	0x12  FETCH_CONFIG    agent→server          UTF-8 config key (e.g. "sandbox.yaml")
 //	0x13  CONFIG_DATA     server→agent          UTF-8 YAML content (empty = not found)
 //	0x18  SUDOERS_SNAPSHOT agent→server         JSON payload (SudoersSnapshot)
+//	0x1b  RESIZE          plugin→agent→server  binary: ts_ns(8BE)+cols(2BE)+rows(2BE); writes asciinema "r" event
 //
 // CHUNK stream types map to sudo's iolog event types (see iolog/iolog.go):
 //
@@ -69,6 +70,7 @@ const (
 	MsgSudoersSnapshot          = uint8(0x18) // agent→server: sudoers state snapshot; payload = JSON (SudoersSnapshot)
 	MsgSudoersError             = uint8(0x19) // agent→server: failed to apply config; payload = JSON (SudoersError)
 	MsgHeartbeatAgent           = uint8(0x1a) // agent→server: periodic liveness signal; payload = UTF-8 host
+	MsgResize                   = uint8(0x1b) // plugin→agent→server: terminal resize; payload = ts_ns(8BE)+cols(2BE)+rows(2BE)
 
 	StreamStdin   = uint8(0x00)
 
@@ -395,6 +397,25 @@ func EncodeAckResponse(lastTs int64, lastSeq uint64) []byte {
 	binary.BigEndian.PutUint64(buf[0:], uint64(lastTs))
 	binary.BigEndian.PutUint64(buf[8:], lastSeq)
 	return buf
+}
+
+// Resize carries the dimensions from a MsgResize event.
+type Resize struct {
+	Timestamp int64 // nanoseconds since epoch
+	Cols      int
+	Rows      int
+}
+
+// ParseResize decodes a MsgResize payload: ts_ns(8BE)+cols(2BE)+rows(2BE).
+func ParseResize(payload []byte) (*Resize, error) {
+	if len(payload) < 12 {
+		return nil, fmt.Errorf("resize payload too short: %d bytes", len(payload))
+	}
+	return &Resize{
+		Timestamp: int64(binary.BigEndian.Uint64(payload[0:8])),
+		Cols:      int(binary.BigEndian.Uint16(payload[8:10])),
+		Rows:      int(binary.BigEndian.Uint16(payload[10:12])),
+	}, nil
 }
 
 // Writer provides synchronized access to a server connection.

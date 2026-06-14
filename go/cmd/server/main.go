@@ -376,6 +376,20 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 			var lastSeq uint64
 			for _, t := range batch {
+				if t.msgType == protocol.MsgResize {
+					if sess != nil {
+						resize, err := protocol.ParseResize(t.payload)
+						if err != nil {
+							log.Printf("[%s] disk-writer parse resize: %v", sessionID, err)
+							continue
+						}
+						if err := sess.writer.WriteResize(resize.Cols, resize.Rows, resize.Timestamp); err != nil {
+							log.Printf("[%s] write resize: %v", sessionID, err)
+						}
+					}
+					continue
+				}
+
 				chunk, err := protocol.ParseChunk(t.payload)
 				if err != nil {
 					log.Printf("[%s] disk-writer parse chunk: %v", sessionID, err)
@@ -732,6 +746,13 @@ func (srv *server) handleConn(conn *tls.Conn) {
 					diskQueue <- task
 				}
 			}
+
+		case protocol.MsgResize:
+			if sess == nil {
+				log.Printf("resize before session_start from %s", remote)
+				continue
+			}
+			diskQueue <- diskTask{msgType, payload}
 
 		case protocol.MsgHeartbeat:
 			sendMu.Lock()

@@ -1,10 +1,23 @@
-# ---- Build stage ----
+# ---- UI Build stage ----
+FROM node:22-alpine AS ui-builder
+WORKDIR /src/ui
+# Copy UI package files and install dependencies
+COPY go/cmd/replay-server/ui/package*.json ./
+RUN npm ci --prefer-offline
+# Copy UI source and build
+COPY go/cmd/replay-server/ui/ ./
+RUN npm run build
+
+# ---- Go Build stage ----
 # Go 1.25+ required by go.mod.
 FROM golang:1.25-alpine AS builder
 WORKDIR /src
 
 # Copy the Go source tree (includes go/vendor — no network access needed).
 COPY go/ .
+
+# Copy the built UI assets from the ui-builder stage
+COPY --from=ui-builder /src/static ./cmd/replay-server/static
 
 # GOPROXY=off ensures the build fails immediately if anything tries to fetch
 # a module from the internet. -mod=vendor uses the vendored dependencies.

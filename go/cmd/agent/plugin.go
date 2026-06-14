@@ -752,6 +752,8 @@ loop:
 				lastInputNs.Store(time.Now().UnixNano())
 			}
 			forward(protocol.MsgChunk, payload)
+		case protocol.MsgResize:
+			forward(protocol.MsgResize, payload)
 		case protocol.MsgSessionEnd:
 			savedSessionEnd = payload
 			break loop

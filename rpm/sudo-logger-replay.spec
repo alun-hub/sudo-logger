@@ -1,5 +1,5 @@
 Name:           sudo-logger-replay
-Version:        1.20.19
+Version:        1.20.20
 Release:        1%{?dist}
 Summary:        Web interface for replaying sudo session logs
 
@@ -7,6 +7,8 @@ License:        MIT
 Source0:        sudo-logger-%{version}.tar.gz
 
 BuildRequires:  golang
+BuildRequires:  nodejs
+BuildRequires:  npm
 
 %global debug_package %{nil}
 
@@ -27,6 +29,7 @@ Access on http://localhost:8080 — restrict to management network.
 
 %build
 cd go
+cd cmd/replay-server/ui && npm ci --prefer-offline && npm run build && cd ../../../
 /usr/lib/golang/bin/go build -mod=vendor -o sudo-replay-server ./cmd/replay-server
 
 %install
