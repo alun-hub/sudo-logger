@@ -64,7 +64,7 @@ export function RedactionTab() {
           <button
             onClick={() => mutation.mutate(localCustom)}
             disabled={!isDirty || mutation.isPending}
-            className="flex items-center gap-2 h-9 px-4 bg-green text-bg-dark rounded-[4px] text-[13px] font-bold hover:bg-green-mid transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 h-9 px-4 bg-green text-black rounded-[4px] text-[13px] font-bold hover:bg-green/90 transition-colors disabled:opacity-50"
           >
             <Save size={14} /> {mutation.isPending ? 'Saving...' : 'Save Changes'}
           </button>
