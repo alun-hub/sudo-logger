@@ -29,7 +29,7 @@ export function TerminalPlayer({ session }: Props) {
       theme: 'asciinema',
       terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       terminalLineHeight: 1.1,
-      fit: 'width', // Scale to fill width; controls sit immediately below terminal
+      fit: 'both', // Scale to fill entire container; player reserves space for controls
     })
 
     return () => {
@@ -77,8 +77,8 @@ export function TerminalPlayer({ session }: Props) {
         </div>
       </div>
 
-      {/* Terminal — scrollable so controls stay visible for tall sessions */}
-      <div className="flex-1 overflow-y-auto bg-black" ref={containerRef} />
+      {/* Terminal — fit:both scales to fill all available space */}
+      <div className="flex-1 overflow-hidden bg-black" ref={containerRef} />
     </div>
   )
 }
