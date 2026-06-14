@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { SessionsView } from '@/components/sessions/SessionsView'
+import { SessionStatsProvider } from '@/lib/sessionStats'
 
 const ReportsView   = lazy(() => import('@/components/reports/ReportsView').then(m => ({ default: m.ReportsView })))
 const PolicyEditor  = lazy(() => import('@/components/policy/PolicyEditor').then(m => ({ default: m.PolicyEditor })))
@@ -10,6 +11,7 @@ const ApprovalsView = lazy(() => import('@/components/approvals/ApprovalsView').
 
 export default function App() {
   return (
+    <SessionStatsProvider>
     <AppShell>
       <Suspense fallback={<div className="p-8 text-text-dim font-mono text-[13px]">Loading…</div>}>
         <Routes>
@@ -27,5 +29,6 @@ export default function App() {
         </Routes>
       </Suspense>
     </AppShell>
+    </SessionStatsProvider>
   )
 }

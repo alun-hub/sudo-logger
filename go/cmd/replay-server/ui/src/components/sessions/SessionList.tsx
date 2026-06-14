@@ -4,6 +4,7 @@ import { fetchSessions } from '@/api/sessions'
 import { SessionRow } from './SessionRow'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { useSessionStats } from '@/lib/sessionStats'
 import type { SessionInfo } from '@/types/session'
 
 interface Props {
@@ -45,6 +46,8 @@ export function SessionList({ selectedTsid, onSelect }: Props) {
   const sessions = data?.pages.flatMap(p => p.sessions) ?? []
   const total    = data?.pages[0]?.total ?? 0
   const listRef  = useRef<HTMLDivElement>(null)
+  const { setStats } = useSessionStats()
+  useEffect(() => { setStats(sessions.length, total) }, [sessions.length, total, setStats])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

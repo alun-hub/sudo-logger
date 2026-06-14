@@ -5,6 +5,7 @@ import { fetchMe } from '@/api/config'
 import { fetchApprovals } from '@/api/approvals'
 import { cn } from '@/lib/utils'
 import { useCan } from '@/lib/perms'
+import { useSessionStats } from '@/lib/sessionStats'
 import { User, LogOut, Sun, Moon, BookOpen } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -42,6 +43,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, toggle: toggleTheme } = useTheme()
 
   const pendingCount = (apprs || []).filter(r => !r.status || r.status === 'pending').length
+  const { shown, total } = useSessionStats()
   const visibleTabs = tabs.filter(t => !t.perm || can(t.perm))
   const [showHelp, setShowHelp] = useState(false)
 
@@ -60,8 +62,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="border-b border-border bg-surface flex items-center justify-between px-4 h-[48px] shrink-0 z-50 shadow-sm">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-2.5">
-            <img src="/logo-icon-72.svg" alt="sudo-logger" className="h-6 w-6" />
-            <span className="font-bold text-[16px] text-foreground tracking-tight uppercase">sudo-replay</span>
+            <img
+              src="/logo-icon-72.svg"
+              alt="sudo-logger"
+              className="h-6 w-6"
+              style={{ filter: 'drop-shadow(0 0 6px #00e87a99)' }}
+            />
+            <span className="font-bold text-[16px] text-foreground tracking-tight uppercase">SUDO-REPLAY</span>
+            {total > 0 && (
+              <span className="ml-1 px-2 py-0.5 rounded text-[11px] font-mono text-text-dim bg-card border border-border">
+                {shown} / {total} sessions
+              </span>
+            )}
           </div>
           <nav className="flex gap-2">
             {visibleTabs.map(t => {
