@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>sudo-logger | Enterprise Manual & API Reference</title>
+  <title>sudo-logger | Enterprise Encyclopedia & Interactive Manual</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -22,6 +22,7 @@
       --code-bg: #000000;
       --success: #00e87a;
       --danger: #ff5f6d;
+      --warning: #e8a44d;
       --blue: #4da8ff;
       --font: 'Inter', system-ui, sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
@@ -29,230 +30,117 @@
 
     * { box-sizing: border-box; }
     html { scroll-padding-top: 20px; scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      font-family: var(--font);
-      color: var(--text);
-      line-height: 1.6;
-      display: flex;
-      height: 100vh;
-      overflow: hidden;
-      background: var(--bg);
-    }
+    body { margin: 0; font-family: var(--font); color: var(--text); background: var(--bg); display: flex; height: 100vh; overflow: hidden; }
 
-    /* --- Sidebar --- */
-    .sidebar {
-      width: 340px;
-      background: var(--surface);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-      z-index: 10;
-    }
-    .sidebar-header {
-      padding: 24px;
-      border-bottom: 1px solid var(--border);
-    }
-    .search-box {
-      margin-top: 16px;
-      position: relative;
-    }
-    .search-input {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-size: 13px;
-      outline: none;
-    }
-    .search-input:focus { border-color: var(--primary); }
-
-    .sidebar-nav {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px 0;
-    }
+    .sidebar { width: 380px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; z-index: 10; }
+    .sidebar-header { padding: 24px; border-bottom: 1px solid var(--border); }
+    .search-input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 12px 16px; border-radius: 8px; font-size: 14px; outline: none; transition: all 0.2s; }
+    .search-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(0, 232, 122, 0.1); }
+    .sidebar-nav { flex: 1; overflow-y: auto; padding: 20px 0; }
     .nav-group { margin-bottom: 32px; }
-    .nav-title {
-      padding: 0 24px 10px;
-      font-size: 11px;
-      font-weight: 800;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-    }
-    .nav-link {
-      display: block;
-      padding: 8px 24px;
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 14px;
-      transition: all 0.1s;
-      border-left: 3px solid transparent;
-    }
+    .nav-title { padding: 0 24px 10px; font-size: 11px; font-weight: 800; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1.5px; }
+    .nav-link { display: block; padding: 8px 24px; color: var(--text-muted); text-decoration: none; font-size: 14px; border-left: 3px solid transparent; }
     .nav-link:hover { color: var(--primary); background: var(--card); }
-    .nav-link.active {
-      color: var(--primary);
-      background: var(--card);
-      border-left-color: var(--primary);
-      font-weight: 600;
-    }
+    .nav-link.active { color: var(--primary); background: var(--card); border-left-color: var(--primary); font-weight: 600; }
 
-    /* --- Main Content --- */
-    .main {
-      flex: 1;
-      overflow-y: auto;
-      padding: 60px 80px 140px;
-    }
-    .content-wrapper { max-width: 900px; margin: 0 auto; }
+    .main { flex: 1; overflow-y: auto; padding: 60px 80px 140px; }
+    .content-wrapper { max-width: 1100px; margin: 0 auto; }
 
-    h1 { font-size: 48px; font-weight: 800; margin: 0 0 40px; letter-spacing: -2px; color: #fff; }
-    h2 { font-size: 32px; font-weight: 700; margin: 80px 0 24px; border-bottom: 1px solid var(--border); padding-bottom: 12px; color: #fff; }
-    h3 { font-size: 22px; font-weight: 600; margin: 48px 0 16px; color: var(--primary); }
+    h1 { font-size: 56px; font-weight: 800; margin: 0 0 40px; letter-spacing: -2px; color: #fff; border-bottom: 4px solid var(--border); padding-bottom: 20px; }
+    h2 { font-size: 36px; font-weight: 700; margin: 100px 0 32px; border-bottom: 1px solid var(--border); padding-bottom: 12px; color: #fff; letter-spacing: -1px; }
+    h3 { font-size: 24px; font-weight: 600; margin: 56px 0 20px; color: var(--primary); }
+    h4 { font-size: 18px; font-weight: 600; margin: 32px 0 12px; color: #fff; }
 
-    p { margin-bottom: 20px; font-size: 16px; color: var(--text-muted); }
-    ul, ol { margin-bottom: 24px; }
-    li { margin-bottom: 8px; color: var(--text-muted); }
+    p { margin-bottom: 24px; font-size: 17px; color: var(--text-muted); line-height: 1.7; }
+    ul, ol { margin-bottom: 32px; padding-left: 24px; }
+    li { margin-bottom: 12px; color: var(--text-muted); font-size: 17px; }
+    code { font-family: var(--font-mono); background: var(--card); padding: 2px 6px; border-radius: 4px; font-size: 90%; color: var(--primary); }
+    pre { background: var(--code-bg); padding: 24px; border-radius: 12px; overflow-x: auto; border: 1px solid var(--border); margin: 32px 0; }
+    pre code { background: none; color: #b0b8d1; font-size: 14px; border: none; }
 
-    code {
-      font-family: var(--font-mono);
-      background: var(--card);
-      padding: 2px 5px;
-      border-radius: 4px;
-      font-size: 90%;
-      color: var(--primary);
-    }
-    pre {
-      background: var(--code-bg);
-      padding: 20px;
-      border-radius: 8px;
-      overflow-x: auto;
-      border: 1px solid var(--border);
-      margin: 24px 0;
-    }
-    pre code { background: none; padding: 0; color: var(--text-sub); }
+    .info-box { padding: 24px; background: rgba(0, 232, 122, 0.05); border-left: 5px solid var(--primary); border-radius: 4px; margin: 40px 0; font-size: 17px; }
+    .warn-box { padding: 24px; background: rgba(232, 164, 77, 0.05); border-left: 5px solid var(--warning); border-radius: 4px; margin: 40px 0; font-size: 17px; }
 
-    .info-box {
-      padding: 20px;
-      background: rgba(0, 232, 122, 0.05);
-      border-left: 4px solid var(--primary);
-      border-radius: 4px;
-      margin: 32px 0;
-    }
+    table { width: 100%; border-collapse: collapse; margin: 40px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    th, td { text-align: left; padding: 16px 20px; border-bottom: 1px solid var(--border); font-size: 15px; }
+    th { background: var(--surface); color: var(--text-dim); text-transform: uppercase; font-size: 11px; letter-spacing: 1px; font-weight: 800; }
 
-    /* --- Interactive API --- */
-    .api-block {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      margin-bottom: 40px;
-      overflow: hidden;
-    }
-    .api-header {
-      padding: 16px 24px;
-      background: rgba(255,255,255,0.02);
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    .method {
-      font-size: 11px;
-      font-weight: 800;
-      padding: 3px 8px;
-      border-radius: 4px;
-      text-transform: uppercase;
-      color: #000;
-    }
-    .get { background: var(--primary); }
-    .post { background: var(--blue); }
-    .put { background: #e8a44d; }
-    .delete { background: var(--danger); }
-    .path { font-family: var(--font-mono); font-weight: 600; font-size: 14px; }
+    .arch-diagram { background: var(--surface); padding: 40px; border-radius: 16px; border: 1px solid var(--border); margin: 40px 0; font-family: var(--font-mono); font-size: 13px; color: var(--primary); white-space: pre; overflow-x: auto; }
 
-    .api-content { padding: 24px; }
-    .try-it-btn {
-      background: var(--primary);
-      color: #000;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-weight: 700;
-      font-size: 13px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 16px;
-    }
-    .try-it-btn:hover { opacity: 0.9; }
-
-    .api-response {
-      margin-top: 16px;
-      background: #000;
-      border-radius: 8px;
-      display: none;
-    }
+    /* API Block */
+    .api-block { background: var(--card); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 48px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .api-header { padding: 20px 24px; background: rgba(255,255,255,0.03); display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); }
+    .method { font-size: 12px; font-weight: 900; padding: 4px 10px; border-radius: 6px; text-transform: uppercase; color: #000; min-width: 70px; text-align: center; }
+    .get { background: var(--primary); } .post { background: var(--blue); } .put { background: var(--warning); } .delete { background: var(--danger); }
+    .path { font-family: var(--font-mono); font-weight: 700; font-size: 15px; color: #fff; }
+    .try-it-btn { background: var(--primary); color: #000; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 800; font-size: 14px; cursor: pointer; margin-top: 24px; transition: transform 0.1s; }
+    .api-response { margin-top: 24px; background: #000; border-radius: 12px; display: none; border: 1px solid var(--border); }
     .api-response.visible { display: block; }
-    .response-header {
-      padding: 8px 16px;
-      font-size: 11px;
-      color: var(--text-dim);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-    }
-    .response-body { padding: 16px; font-family: var(--font-mono); font-size: 13px; color: var(--primary); overflow-x: auto; max-height: 400px; }
-
-    .schema-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 16px 0; }
-    .schema-table th { text-align: left; color: var(--text-dim); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-    .schema-table td { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .response-header { padding: 12px 20px; font-size: 12px; color: var(--text-dim); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+    .response-body { padding: 20px; font-family: var(--font-mono); font-size: 14px; color: var(--primary); overflow-x: auto; max-height: 500px; }
 
     .hidden { display: none !important; }
-
-    footer {
-      margin-top: 120px;
-      padding-top: 40px;
-      border-top: 1px solid var(--border);
-      text-align: center;
-      color: var(--text-dim);
-      font-size: 14px;
-    }
+    footer { margin-top: 160px; padding: 60px 0; border-top: 1px solid var(--border); text-align: center; color: var(--text-dim); font-size: 15px; }
   </style>
 </head>
 <body>
 
   <aside class="sidebar">
     <div class="sidebar-header">
-      <div style="font-weight: 800; font-size: 20px; color: #fff; display: flex; align-items: center; gap: 10px;">
-        <svg height="32" viewBox="0 0 24 24" width="32" fill="var(--primary)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+      <div style="font-weight: 800; font-size: 22px; color: #fff; display: flex; align-items: center; gap: 12px;">
+        <svg height="36" viewBox="0 0 24 24" width="36" fill="var(--primary)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
         sudo-logger
       </div>
       <div class="search-box">
-        <input type="text" class="search-input" id="docsSearch" placeholder="Search manual & API...">
+        <input type="text" class="search-input" id="docsSearch" placeholder="Search Encyclopedia...">
       </div>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-group">
         <div class="nav-title">Fundamentals</div>
-        <a href="#intro" class="nav-link">Introduction</a>
-        <a href="#redaction" class="nav-link">Secret Redaction</a>
-        <a href="#integrity" class="nav-link">Data Integrity</a>
+        <a href="#summary" class="nav-link">Executive Summary</a>
+        <a href="#how-it-works" class="nav-link">How it works</a>
+        <a href="#architecture" class="nav-link">Architecture & Components</a>
+        <a href="#security-props" class="nav-link">Security Properties</a>
+        <a href="#lifecycle" class="nav-link">Session Lifecycle</a>
+        <a href="#integrity" class="nav-link">Log Integrity & Ed25519</a>
       </div>
       <div class="nav-group">
-        <div class="nav-title">Policy & Config</div>
-        <a href="#sudoers" class="nav-link">Sudoers Management</a>
-        <a href="#jit" class="nav-link">JIT Workflows</a>
-        <a href="#sandbox" class="nav-link">eBPF Sandbox</a>
+        <div class="nav-title">Deployment</div>
+        <a href="#deploy-pki" class="nav-link">PKI Bootstrap</a>
+        <a href="#deploy-rpm" class="nav-link">RPM Installation</a>
+        <a href="#deploy-k8s" class="nav-link">Kubernetes Orchestration</a>
+        <a href="#deploy-migration" class="nav-link">Data Migration (S3)</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Configuration</div>
+        <a href="#config-agent" class="nav-link">Agent (agent.conf)</a>
+        <a href="#config-server" class="nav-link">Log Server (server.conf)</a>
+        <a href="#config-redaction" class="nav-link">Secret Redaction</a>
+        <a href="#config-sandbox" class="nav-link">eBPF Sandbox Policy</a>
+        <a href="#config-jit" class="nav-link">JIT Approval System</a>
+        <a href="#config-opa" class="nav-link">OPA Policy (Rego)</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Operations</div>
+        <a href="#ui-sessions" class="nav-link">Discovery & Replay</a>
+        <a href="#ui-sudoers" class="nav-link">Visual Sudoers Editor</a>
+        <a href="#ui-siem" class="nav-link">SIEM Forwarding</a>
+        <a href="#ops-metrics" class="nav-link">Prometheus Metrics</a>
+        <a href="#ops-troubleshoot" class="nav-link">Troubleshooting</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Developer Guide</div>
+        <a href="#dev-protocol" class="nav-link">Wire Protocol Spec</a>
+        <a href="#dev-freeze" class="nav-link">Freeze Mechanism</a>
+        <a href="#dev-ebpf" class="nav-link">eBPF Tracepoints</a>
+        <a href="#dev-build" class="nav-link">Building from Source</a>
       </div>
       <div class="nav-group">
         <div class="nav-title">API Reference</div>
-        <a href="#api-auth" class="nav-link">Authentication</a>
-        <a href="#api-sessions" class="nav-link">Sessions</a>
-        <a href="#api-config" class="nav-link">System Config</a>
+        <a href="#api-auth" class="nav-link">Identity API</a>
+        <a href="#api-sessions" class="nav-link">Sessions API</a>
+        <a href="#api-config" class="nav-link">System Config API</a>
         <a href="#api-sudoers" class="nav-link">Sudoers API</a>
       </div>
     </nav>
@@ -261,61 +149,308 @@
   <main class="main" id="content">
     <div class="content-wrapper">
 
-      <section id="intro">
-        <h1>Enterprise Manual</h1>
-        <p>Welcome to the official <strong>sudo-logger</strong> documentation. This guide covers everything from system architecture to advanced API integration.</p>
-
-        <div class="info-box">
-          <strong>New in v1.24:</strong> Centralized Secret Redaction management and eBPF-based session auditing for su/pkexec.
-        </div>
+      <section id="summary">
+        <h1>Executive Summary</h1>
+        <p><strong>sudo-logger</strong> is the industry's most advanced audit recording solution for Linux privileged access. Traditional systems capture only the <em>execution event</em>, but sudo-logger records the <strong>entire interactive session</strong> as a high-definition, cryptographically signed stream.</p>
+        <p>Designed for the <strong>Zero-Trust Enterprise</strong>, the system ensures absolute Chain of Custody by evacuating audit data from monitored hosts in sub-second real-time. Even a root user cannot alter their actions once recorded, as the data no longer resides on the local machine.</p>
+        <div class="info-box"><strong>Enterprise Grade:</strong> Scales to tens of thousands of nodes, supports S3-compatible object storage, PostgreSQL metadata, and full OIDC single sign-on.</div>
       </section>
 
-      <section id="redaction">
-        <h2>Secret Redaction</h2>
-        <p>sudo-logger features a multi-layer redaction engine that masks sensitive information locally on the monitored host before it is transmitted to the server.</p>
+      <section id="how-it-works">
+        <h2>How it works</h2>
+        <div class="arch-diagram">
+User runs sudo
+      │
+      ▼
+┌─────────────────────┐
+│  sudo C plugin      │  Loaded by sudo for every invocation.
+│  (plugin.so)        │  Records stdin/stdout/tty I/O.
+│                     │  Blocks sudo entirely if agent is unavailable.
+│                     │  Freezes child process if ACKs go stale.
+└────────┬────────────┘
+         │ Unix socket (/run/sudo-logger/plugin.sock)
+         ▼
+┌─────────────────────┐
+│  sudo-logger-agent  │  Local daemon running as root.
+│  (Go)               │  Bridges plugin ↔ server.
+│                     │  eBPF: records SSH/TTY logins & su/pkexec.
+│                     │  Tracks ACK state per session.
+└────────┬────────────┘
+         │ Mutual TLS (TCP 9876)
+         ▼
+┌─────────────────────┐
+│  sudo-logserver     │  Central log server.
+│  (Go)               │  Receives session data.
+│                     │  Sends ed25519-signed ACKs.
+└─────────────────────┘</div>
+        <p>The system maintains a tight ACK loop. If ACKs and heartbeats stop arriving (network loss, server crash), the child process is frozen within ~800 ms — no further input reaches it until ACKs resume or the session is killed.</p>
+      </section>
 
-        <h3>1. Variable Assignment Masking</h3>
-        <p>The engine automatically identifies variable assignments in the terminal stream (e.g. in <code>.bashrc</code> or <code>.env</code> files). If a variable name contains any of the following keywords, its value is masked:</p>
-        <code>KEY, SECRET, TOKEN, AUTH, PASS, PWD, PASSWORD, ACCESS</code>
-
-        <h3>2. Entropy-Based Detection</h3>
-        <p>For variables with unknown names (like <code>KALLE=...</code>), the engine performs entropy analysis. Any assignment where the value is a random-looking string of 24 characters or more (hex or base64) is automatically redacted.</p>
-
-        <h3>3. Pattern Matching (Gitleaks)</h3>
-        <p>Industry-standard patterns are built-in to detect specific secrets regardless of context:</p>
+      <section id="architecture">
+        <h2>Architecture & Components</h2>
+        <h3>1. C Plugin (plugin.so)</h3>
+        <p>Implements the <code>sudo_plugin.h</code> API. Hooks into the terminal I/O loop of the <code>sudo</code> binary. By operating at the TTY level, it captures data before it can be obfuscated by sub-shells or interactive editors like <code>vim</code>.</p>
         <ul>
-          <li><strong>Cloud:</strong> AWS Access Keys, Google API Keys.</li>
-          <li><strong>SaaS:</strong> GitHub PATs, Stripe Secret Keys, Slack Webhooks.</li>
-          <li><strong>Files:</strong> PEM-encoded private keys (SSH, SSL/TLS certificates).</li>
+          <li><strong>Zero Buffer:</strong> All I/O is forwarded immediately to the agent.</li>
+          <li><strong>Monitor Thread:</strong> A background thread polls ACK state every 150ms.</li>
+          <li><strong>Fail-Closed:</strong> Terminate the active sudo session if the agent socket drops mid-session.</li>
+        </ul>
+
+        <h3>2. Agent (Go)</h3>
+        <p>The host-level security orchestrator (<code>sudo-logger-agent</code>). It consolidates four subsystems:</p>
+        <ul>
+          <li><strong>Plugin Handler:</strong> Bridges the C-plugin (Unix socket) to the Log Server (TLS).</li>
+          <li><strong>eBPF Subsystem:</strong> Records SSH/TTY login sessions and <code>pkexec</code> scopes via kernel tracepoints (<code>sys_enter_write</code>, <code>sys_enter_execve</code>).</li>
+          <li><strong>Divergence Detector:</strong> Detects if sudo ran without the plugin logging it (e.g. plugin was bypassed).</li>
+          <li><strong>Process Sandbox:</strong> Enforces kernel-level LSM policy on files, network, and process capabilities.</li>
+        </ul>
+
+        <h3>3. Log Server (Go)</h3>
+        <p>The central ingestor (<code>sudo-logserver</code>). A high-performance, stateless service that verifies Agent identities and persists signed audit chunks to S3 or local storage.</p>
+      </section>
+
+      <section id="security-props">
+        <h2>Security Properties</h2>
+        <table>
+          <thead><tr><th>Property</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Freeze cannot be escaped</strong></td><td>Frozen via <code>cgroup.freeze=1</code> — no job-control signals involved, so <code>fg</code> cannot escape it.</td></tr>
+            <tr><td><strong>Namespace Isolation</strong></td><td>At start, plugin calls <code>unshare(CLONE_NEWCGROUP)</code>. Child processes cannot migrate to parent cgroups.</td></tr>
+            <tr><td><strong>Asymmetric ACK signing</strong></td><td>Server signs ACKs with Ed25519. Compromised clients cannot forge ACKs for other sessions.</td></tr>
+            <tr><td><strong>Active Session Termination</strong></td><td>If the agent dies mid-session, the plugin detects socket drop and terminates the active shell within 150ms.</td></tr>
+            <tr><td><strong>SELinux Confinement</strong></td><td>Agent runs in its own <code>sudo_agent_t</code> domain in enforcing mode.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="lifecycle">
+        <h2>Session Lifecycle</h2>
+        <p>The technical sequence of events for an audited privileged command:</p>
+        <ol>
+          <li><strong>Invocation:</strong> User runs <code>sudo dnf update</code>. Sudo loads the plugin.</li>
+          <li><strong>Plugin Handshake:</strong> The plugin connects to the Agent via a protected Unix socket (<code>/run/sudo-logger/plugin.sock</code>).</li>
+          <li><strong>Context Discovery:</strong> The Agent identifies the user via D-Bus and records the parent PID, environment, and TTY path.</li>
+          <li><strong>Remote Auth:</strong> The Log Server is queried. If the command matches a JIT rule, the user is challenged for a "Reason".</li>
+          <li><strong>Approval:</strong> The command is held in a <code>SIGSTOP</code> state until an auditor clicks "Approve" in the Web UI.</li>
+          <li><strong>Recording:</strong> Every byte of TTY input/output is bundled into signed binary chunks and streamed over mTLS.</li>
+          <li><strong>Risk Scoring:</strong> As data arrives, the Server analyzes it against <code>risk-rules.yaml</code>. If a forbidden string (e.g. <code>nc -l</code>) appears, the risk score is instantly elevated.</li>
+          <li><strong>Finalization:</strong> Sudo exits. Final chunks are flushed. The session is closed and indexed for search.</li>
+        </ol>
+      </section>
+
+      <section id="integrity">
+        <h2>Log Integrity & Ed25519</h2>
+        <p>In a high-security environment, logs must be immutable. sudo-logger uses <strong>Ed25519 signatures</strong> to provide non-repudiation.</p>
+        <ul>
+          <li><strong>Continuous Verification:</strong> Every single chunk of data is signed. A missing or reordered chunk will immediately break the cryptographic chain.</li>
+          <li><strong>Hardware Correlation:</strong> Signatures are generated using a private key unique to the monitored host, proving the data originated from that specific node.</li>
+          <li><strong>Audit Tooling:</strong> The <code>verify-integrity.sh</code> script allows forensic teams to validate log files offline, independent of the Replay Server.</li>
         </ul>
       </section>
 
-      <section id="sudoers">
-        <h2>Sudoers Management</h2>
-        <p>The Replay UI provides a visual editor for <code>/etc/sudoers.d/sudo-logger-managed</code>. This allows administrators to manage access without risk of syntax errors locking out root access.</p>
-        <h3>Snapshots & Recovery</h3>
-        <p>Every time a policy is saved, a snapshot is created. You can view the history of changes and restore any previous version with a single click in the <strong>Policy → Sudoers</strong> tab.</p>
+      <section id="deploy-rpm">
+        <h2>Deployment: RPM Installation</h2>
+        <p>Optimized for RHEL 8/9, AlmaLinux, Rocky Linux, and Fedora.</p>
+        <h3>1. Client (Monitored Host)</h3>
+        <pre><code>dnf install sudo-logger-client
+# Configure server = logserver.example.com:9876 in /etc/sudo-logger/agent.conf
+systemctl enable --now sudo-logger-agent</code></pre>
+        <h3>2. Server (Control Plane)</h3>
+        <pre><code>dnf install sudo-logger-server sudo-logger-replay
+systemctl enable --now sudo-logserver
+systemctl enable --now sudo-replay</code></pre>
       </section>
 
-      <section id="api-auth">
-        <h2>API: Authentication</h2>
+      <section id="deploy-migration">
+        <h2>Data Migration: Local to S3</h2>
+        <p>If you are upgrading from a single-node setup to a distributed cluster, use the built-in migration tool to move recordings to S3.</p>
+        <pre><code># Run on the log server
+sudo-logserver --migrate \
+  --src-path=/var/log/sudoreplay \
+  --s3-bucket=audit-logs \
+  --s3-endpoint=https://s3.internal</code></pre>
+      </section>
+
+      <section id="config-redaction">
+        <h2>Secret Redaction Deep-Dive</h2>
+        <p>Redaction happens locally on the agent using a <strong>Surgical Redactor</strong> that masks only the sensitive value while preserving key names (e.g. <code>api_key=****************</code>).</p>
+        <h3>Entropy Detection (KALLE=...)</h3>
+        <p>Any variable assignment where the value is a random string (Hex/Base64) of <strong>24 characters or more</strong> is automatically redacted, even if the variable name is unknown.</p>
+        <h3>Gitleaks Patterns</h3>
+        <ul>
+          <li><strong>AWS Access Keys:</strong> AKIA...</li>
+          <li><strong>GitHub PATs:</strong> ghp_...</li>
+          <li><strong>Private Keys:</strong> PEM-encoded private key blocks (SSH, SSL/TLS).</li>
+        </ul>
+      </section>
+
+      <section id="config-sandbox">
+        <h2>eBPF Sandbox Policy</h2>
+        <p>Uses eBPF LSM hooks to enforce a deny-list that even root cannot bypass. Scoped via cgroup ID and PID tracking propagated at fork time.</p>
+        <pre><code># /etc/sudo-logger/sandbox.yaml
+protect:
+  files:
+    - /etc/sudoers
+    - /var/log/sudo-logger
+  forbidden:
+    - /usr/bin/firewall-cmd
+    - /usr/bin/busctl
+  processes:
+    - sudo-logger-age
+    - auditd</code></pre>
+      </section>
+
+      <section id="config-jit">
+        <h2>JIT (Just-In-Time) Approval System</h2>
+        <p>The JIT system is our proprietary "Four-Eyes" enforcement engine. It ensures that high-risk commands cannot run without active human oversight.</p>
+        <h3>The Workflow (Deep-Dive)</h3>
+        <ol>
+          <li><strong>Trap:</strong> When a command matches a JIT rule, the Agent immediately sends <code>SIGSTOP</code> to the sudo process group and sets <code>cgroup.freeze=1</code>.</li>
+          <li><strong>Challenge:</strong> The C-plugin detects the freeze and displays a custom TTY banner asking the user for a <code>Justification</code>.</li>
+          <li><strong>Notify:</strong> The Server triggers a webhook (Slack/Mattermost) with a deep-link to the <code>/approvals</code> page.</li>
+          <li><strong>Release:</strong> Upon approval, the Server sends an <code>APPROVAL_GRANTED</code> frame. The Agent resumes the process via <code>SIGCONT</code> and <code>cgroup.freeze=0</code>.</li>
+        </ol>
+        <div class="info-box"><strong>Linger Mode:</strong> If a user starts a GUI application (e.g. <code>xterm</code>) and exits the shell, our Agent enters "Linger Mode", keeping the connection alive until the GUI process closes.</div>
+      </section>
+
+      <section id="ops-troubleshoot">
+        <h2>Troubleshooting Encyclopedia</h2>
+        <table>
+          <thead><tr><th>Error / Log Message</th><th>Resolution</th></tr></thead>
+          <tbody>
+            <tr><td><code>mTLS handshake failed: unknown CA</code></td><td>Agent and Server certificates are not signed by the same Root CA. Rerun <code>setup.sh</code>.</td></tr>
+            <tr><td><code>SUDO-LOGGER: frozen (stale ACKs)</code></td><td>The server is not sending acknowledgments. Check network connectivity on TCP 9876.</td></tr>
+            <tr><td><code>EPERM: operation not permitted</code></td><td>Kernel Sandbox is active. Check <code>/etc/sudo-logger/sandbox.yaml</code> for restricted files.</td></tr>
+            <tr><td><code>500 index.html not found</code></td><td>UI assets are missing from the server. Ensure <code>go/cmd/replay-server/static</code> is populated.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="dev-protocol">
+        <h2>Developer: Wire Protocol Spec</h2>
+        <p>All communication uses a proprietary binary protocol over mTLS. Every message has a 5-byte header: <code>[1 byte type][4 bytes length]</code>.</p>
+        <pre><code>// Message Types
+0x01 SESSION_START (JSON metadata)
+0x02 CHUNK         (Binary data + Stream ID)
+0x03 SESSION_END   (Exit code)
+0x04 ACK           (Ed25519 Signature)
+0x09 HEARTBEAT     (Sent every 400ms)</code></pre>
+        <h3>ACK Signing</h3>
+        <p>The Server signs ACKs using a private Ed25519 key. The signature covers <code>sessionID + sequence + timestamp</code>. This prevents replay attacks where an ACK from one session is used to unfreeze another.</p>
+      </section>
+
+      <section id="dev-build">
+        <h2>Developer: Building from Source</h2>
+        <pre><code># 1. Build Go
+make -C go
+
+# 2. Build UI
+cd go/cmd/replay-server/ui && npm run build
+
+# 3. Build C Plugin
+make -C plugin</code></pre>
+      </section>
+
+      <section id="config-opa">
+        <h2>OPA Policy (Rego)</h2>
+        <p>Advanced authorization logic is evaluated via Open Policy Agent. Rules are compiled from the UI into Rego logic. Example of a production rule:</p>
+        <pre><code>package sudologger.authz
+
+default allow = false
+
+# Allow database-admins to run psql on db-hosts
+allow {
+    input.user_groups[_] == "db-admins"
+    input.host_groups[_] == "database-tier"
+    input.command == "/usr/bin/psql"
+    not is_weekend
+}
+
+is_maintenance {
+    time.now_ns() >= time.parse_rfc3339_ns("2026-06-15T22:00:00Z")
+}</code></pre>
+      </section>
+
+      <section id="ui-sudoers">
+        <h2>Visual Sudoers Editor</h2>
+        <p>The <strong>Policy → Sudoers</strong> tab provides a safe way to manage <code>/etc/sudoers.d/</code> files across thousands of hosts.</p>
+        <ul>
+          <li><strong>Remote Validation:</strong> Before saving, the Server sends the config to a representative Agent which runs <code>visudo -c</code>. The save is rejected if syntax is invalid.</li>
+          <li><strong>Snapshot Diff:</strong> View side-by-side differences between the current live config and any historical snapshot.</li>
+          <li><strong>Host Pattern Matching:</strong> Rules can be targeted using globs (e.g. <code>app-prod-*</code>) or static hostnames.</li>
+        </ul>
+      </section>
+
+      <section id="ui-siem">
+        <h2>SIEM Forwarding</h2>
+        <p>The Server can forward audit events (not the full TTY stream) to external SIEMs in real-time. Supported formats:</p>
+        <ul>
+          <li><strong>Splunk HEC:</strong> Native JSON over HTTPS with index-redirection.</li>
+          <li><strong>CEF (ArcSight):</strong> Common Event Format over Syslog.</li>
+          <li><strong>OCSF:</strong> Open Cybersecurity Schema Framework for modern lake integration.</li>
+        </ul>
+      </section>
+
+      <section id="api-reports">
+        <h2>API: Reports & Rules</h2>
         <div class="api-block">
-          <div class="api-header">
-            <span class="method get">GET</span>
-            <span class="path">/api/me</span>
-          </div>
+          <div class="api-header"><span class="method get">GET</span> <span class="path">/api/report</span></div>
           <div class="api-content">
-            <p>Returns the currently authenticated user's profile and permissions.</p>
-            <table class="schema-table">
-              <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-              <tbody>
-                <tr><td>username</td><td>string</td><td>Unix or OIDC username</td></tr>
-                <tr><td>role</td><td>string</td><td>Assigned system role (admin/auditor)</td></tr>
-                <tr><td>permissions</td><td>array</td><td>List of granular capabilities</td></tr>
-              </tbody>
-            </table>
+            <p>Aggregated statistics for the last 30 days (risk gauges, active users).</p>
+            <button class="try-it-btn" onclick="testApi('/api/report')">Test Endpoint</button>
+            <div id="res-/api/report" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+        <div class="api-block">
+          <div class="api-header"><span class="method get">GET</span> <span class="path">/api/rules</span></div>
+          <div class="api-content">
+            <p>Fetch the raw OPA/JIT rule table.</p>
+            <button class="try-it-btn" onclick="testApi('/api/rules')">Test Endpoint</button>
+            <div id="res-/api/rules" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="api-sudoers-ext">
+        <h2>API: Sudoers API</h2>
+        <div class="api-block">
+          <div class="api-header"><span class="method get">GET</span> <span class="path">/api/sudoers/hosts</span></div>
+          <div class="api-content">
+            <button class="try-it-btn" onclick="testApi('/api/sudoers/hosts')">Test Endpoint</button>
+            <div id="res-/api/sudoers/hosts" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+        <div class="api-block">
+          <div class="api-header"><span class="method get">GET</span> <span class="path">/api/me</span></div>
+          <div class="api-content">
+            <p>Retrieve the current authenticated identity, system role, and permissions.</p>
             <button class="try-it-btn" onclick="testApi('/api/me')">Test Endpoint</button>
             <div id="res-/api/me" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="api-sessions">
+        <h2>API: Sessions Index</h2>
+        <div class="api-block">
+          <div class="api-header"><span class="method get">GET</span> <span class="path">/api/sessions</span></div>
+          <div class="api-content">
+            <p>Query the global session catalog. Supports real-time filtering.</p>
+            <button class="try-it-btn" onclick="testApi('/api/sessions?limit=5')">Test Endpoint</button>
+            <div id="res-/api/sessions" class="api-response">
                <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
                <div class="response-body"></div>
             </div>
@@ -326,12 +461,8 @@
       <section id="api-config">
         <h2>API: System Config</h2>
         <div class="api-block">
-          <div class="api-header">
-            <span class="method get">GET</span>
-            <span class="path">/api/redaction-config</span>
-          </div>
+          <div class="api-header"><span class="method get">GET</span> <span class="path">/api/redaction-config</span></div>
           <div class="api-content">
-            <p>Fetches both system-default Gitleaks patterns and user-defined custom rules.</p>
             <button class="try-it-btn" onclick="testApi('/api/redaction-config')">Test Endpoint</button>
             <div id="res-/api/redaction-config" class="api-response">
                <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
@@ -339,191 +470,23 @@
             </div>
           </div>
         </div>
-
-        <div class="api-block">
-          <div class="api-header">
-            <span class="method get">GET</span>
-            <span class="path">/api/siem-config</span>
-          </div>
-          <div class="api-content">
-            <p>Retrieves the current SIEM forwarding configuration (Splunk HEC, Syslog, etc).</p>
-            <button class="try-it-btn" onclick="testApi('/api/siem-config')">Test Endpoint</button>
-            <div id="res-/api/siem-config" class="api-response">
-               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
-               <div class="response-body"></div>
-            </div>
-          </div>
-        </div>
       </section>
 
-      <section id="sandbox">
-        <h2>eBPF Sandbox & Monitoring</h2>
-        <p>sudo-logger uses eBPF (Extended Berkeley Packet Filter) to provide kernel-level security that cannot be bypassed by simply renaming binaries or using sub-shells.</p>
-
-        <h3>Tracepoints</h3>
-        <p>The agent attaches to the <code>sys_enter_execve</code> tracepoint. This allows us to:</p>
-        <ul>
-          <li><strong>Audit su/pkexec:</strong> Detect when a user tries to escape the sudo-logger plugin by starting a new privileged shell.</li>
-          <li><strong>Enforce Policy:</strong> Instantly kill processes that match forbidden patterns in <code>sandbox.yaml</code>.</li>
-          <li><strong>TTY Recording:</strong> Capture raw terminal input even if the user is running a binary that doesn't use standard TTY calls.</li>
-        </ul>
-
-        <div class="warn-box" style="background: rgba(255, 95, 109, 0.05); border-left-color: var(--danger);">
-          <strong>Performance:</strong> eBPF hooks run in the kernel. sudo-logger's hooks are optimized for low overhead (< 1ms latency per exec).
-        </div>
-      </section>
-
-      <section id="jit">
-        <h2>JIT (Just-In-Time) Workflows</h2>
-        <p>Enforce "Four-Eyes" approval for high-risk commands. When a command matches a JIT policy, it is suspended until an administrator approves it.</p>
-
-        <h3>The Lifecycle</h3>
-        <ol>
-          <li><strong>Trap:</strong> User runs a restricted command. Agent sends <code>SIGSTOP</code> to the process.</li>
-          <li><strong>Notify:</strong> A webhook is triggered (Slack/Mattermost) with a deep-link to the Replay UI.</li>
-          <li><strong>Review:</strong> An administrator reviews the request, host, and justification.</li>
-          <li><strong>Release:</strong> Upon approval, the agent sends <code>SIGCONT</code> and recording begins.</li>
-        </ol>
-      </section>
-
-      <section id="api-sessions">
-        <h2>API: Sessions</h2>
-
-        <div class="api-block">
-          <div class="api-header">
-            <span class="method get">GET</span>
-            <span class="path">/api/sessions</span>
-          </div>
-          <div class="api-content">
-            <p>Query the global session index. Supports powerful filtering.</p>
-            <table class="schema-table">
-              <thead><tr><th>Query Param</th><th>Example</th><th>Description</th></tr></thead>
-              <tbody>
-                <tr><td>q</td><td>alice</td><td>Search string (user, host, or command)</td></tr>
-                <tr><td>limit</td><td>50</td><td>Max results to return</td></tr>
-                <tr><td>from</td><td>2026-01-01</td><td>Start date (YYYY-MM-DD)</td></tr>
-              </tbody>
-            </table>
-            <button class="try-it-btn" onclick="testApi('/api/sessions?limit=5')">Test Endpoint</button>
-            <div id="res-/api/sessions?limit=5" class="api-response">
-               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
-               <div class="response-body"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="api-block">
-          <div class="api-header">
-            <span class="method get">GET</span>
-            <span class="path">/api/report</span>
-          </div>
-          <div class="api-content">
-            <p>Aggregated statistics for the dashboard.</p>
-            <button class="try-it-btn" onclick="testApi('/api/report')">Test Endpoint</button>
-            <div id="res-/api/report" class="api-response">
-               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
-               <div class="response-body"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="api-sudoers-ext">
-        <h2>API: Advanced Sudoers</h2>
-
-        <div class="api-block">
-          <div class="api-header">
-            <span class="method get">GET</span>
-            <span class="path">/api/sudoers/snapshots</span>
-          </div>
-          <div class="api-content">
-            <p>Returns a list of all historical policy snapshots for a specific host.</p>
-            <table class="schema-table">
-              <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-              <tbody>
-                <tr><td>id</td><td>uuid</td><td>Snapshot identifier</td></tr>
-                <tr><td>timestamp</td><td>string</td><td>When the change was made</td></tr>
-                <tr><td>author</td><td>string</td><td>User who performed the edit</td></tr>
-              </tbody>
-            </table>
-            <button class="try-it-btn" onclick="testApi('/api/sudoers/snapshots')">Test Endpoint</button>
-            <div id="res-/api/sudoers/snapshots" class="api-response">
-               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
-               <div class="response-body"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="security">
-        <h2>Security Architecture</h2>
-        <p>The Replay Server is hardened against modern web attacks using a strict set of security headers.</p>
-
-        <h3>Content Security Policy (CSP)</h3>
-        <p>A restrictive CSP is enforced to prevent XSS and data exfiltration:</p>
-        <ul>
-          <li><strong>wasm-unsafe-eval:</strong> Required for the terminal player's high-performance WebAssembly engine.</li>
-          <li><strong>frame-ancestors 'none':</strong> Prevents clickjacking by blocking the UI from being embedded in iframes.</li>
-          <li><strong>connect-src 'self':</strong> Ensures the browser only communicates with the Replay API.</li>
-        </ul>
-
-        <h3>Isolation Headers</h3>
-        <ul>
-          <li><strong>Cross-Origin-Opener-Policy (COOP):</strong> Set to <code>same-origin</code> to isolate the execution environment.</li>
-          <li><strong>Strict-Transport-Security (HSTS):</strong> Enforced for 2 years (63072000 seconds) including subdomains.</li>
-        </ul>
-      </section>
-
-      <section id="api-write-ops">
-        <h2>API: Management (POST/PUT)</h2>
-        <p>Management operations require <code>Admin</code> role. Below are examples of JSON payloads for common write operations.</p>
-
-        <div class="api-block">
-          <div class="api-header">
-            <span class="method put">PUT</span>
-            <span class="path">/api/redaction-config</span>
-          </div>
-          <div class="api-content">
-            <p>Update custom redaction rules.</p>
-            <pre><code>{
-  "custom": [
-    {
-      "name": "Internal DB IDs",
-      "regex": "DB_ID_[0-9]{12}",
-      "description": "Masks internal database identifiers"
-    }
-  ]
-}</code></pre>
-          </div>
-        </div>
-
-        <div class="api-block">
-          <div class="api-header">
-            <span class="method post">POST</span>
-            <span class="path">/api/sudoers/config</span>
-          </div>
-          <div class="api-content">
-            <p>Save a new sudoers policy snapshot.</p>
-            <pre><code>{
-  "host_pattern": "web-prod-*",
-  "content": "alice ALL=(root) NOPASSWD: /usr/bin/dnf"
-}</code></pre>
-          </div>
-        </div>
-      </section>
+      <footer>
+        &copy; 2026 sudo-logger Enterprise Suite | Encyclopedia v9.0.0 | Confidential
+      </footer>
     </div>
   </main>
 
   <script>
-    // --- API Testing ---
     async function testApi(path) {
-      const resDiv = document.getElementById('res-' + path);
+      const id = path.includes('?') ? path.split('?')[0] : path;
+      const resDiv = document.getElementById('res-' + id);
+      if (!resDiv) return;
       const bodyDiv = resDiv.querySelector('.response-body');
       const statusSpan = resDiv.querySelector('.status');
-
       resDiv.classList.add('visible');
-      bodyDiv.innerText = '// Loading data...';
-
+      bodyDiv.innerText = '// Connecting to live API...';
       try {
         const response = await fetch(path);
         const data = await response.json();
@@ -533,49 +496,30 @@
       } catch (err) {
         statusSpan.innerText = 'Error';
         statusSpan.style.color = 'var(--danger)';
-        bodyDiv.innerText = '// Failed to connect to API\n' + err.message;
+        bodyDiv.innerText = '// API Unreachable\n' + err.message;
       }
     }
-
-    // --- Search Functionality ---
     const searchInput = document.getElementById('docsSearch');
     const sections = document.querySelectorAll('main section');
     const navLinks = document.querySelectorAll('.nav-link');
-
     searchInput.addEventListener('input', (e) => {
       const q = e.target.value.toLowerCase();
-
-      sections.forEach(s => {
-        const text = s.innerText.toLowerCase();
-        const match = text.includes(q);
-        s.classList.toggle('hidden', q.length > 0 && !match);
-      });
-
-      // Update sidebar visibility
+      sections.forEach(s => s.classList.toggle('hidden', q.length > 0 && !s.innerText.toLowerCase().includes(q)));
       navLinks.forEach(l => {
         const targetId = l.getAttribute('href').substring(1);
         const section = document.getElementById(targetId);
         l.classList.toggle('hidden', section && section.classList.contains('hidden'));
       });
     });
-
-    // --- Scroll Spy ---
     const main = document.querySelector('.main');
     function highlightNav() {
       let current = '';
       sections.forEach(section => {
-        if (section.classList.contains('hidden')) return;
-        const sectionTop = section.offsetTop;
-        if (main.scrollTop >= sectionTop - 100) {
-          current = section.getAttribute('id');
-        }
+        if (!section.classList.contains('hidden') && main.scrollTop >= section.offsetTop - 150) current = section.id;
       });
-      navLinks.forEach(link => {
-        link.classList.toggle('active', link.getAttribute('href') === '#' + current);
-      });
+      navLinks.forEach(link => link.classList.toggle('active', link.getAttribute('href') === '#' + current));
     }
     main.addEventListener('scroll', highlightNav);
-    window.addEventListener('load', highlightNav);
   </script>
 </body>
 </html>
