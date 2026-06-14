@@ -131,7 +131,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="h-4 w-px bg-border-mid" />
 
           <a
-            href="/docs/portal.html"
+            href="/docs/manual.html"
             target="_blank"
             rel="noopener noreferrer"
             title="Documentation"
@@ -315,7 +315,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="border-t border-border pt-4 flex justify-end">
             <a
-              href="/docs/portal.html"
+              href="/docs/manual.html"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-[12px] text-text-dim hover:text-green transition-colors"

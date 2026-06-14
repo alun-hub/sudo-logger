@@ -77,7 +77,7 @@ export function OPAPolicyView() {
         </div>
         <div className="flex items-center gap-2">
            <a
-             href="/docs/portal.html#yaml-jit"
+             href="/docs/manual.html#yaml-jit"
              target="_blank"
              rel="noopener noreferrer"
              className="flex items-center gap-1.5 text-[12px] text-text-dim hover:text-green transition-colors mr-1"
