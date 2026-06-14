@@ -33,6 +33,9 @@ type SessionWriter interface {
 	// WriteInput appends a terminal input ("i") event.
 	WriteInput(data []byte, ts int64) error
 
+	// WriteResize appends a terminal resize ("r") event.
+	WriteResize(cols, rows int, ts int64) error
+
 	// MarkActive writes the ACTIVE marker (session is in progress).
 	// Called immediately after the session directory / DB row is created.
 	MarkActive() error

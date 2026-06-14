@@ -189,6 +189,23 @@ func (w *Writer) WriteInput(data []byte, ts int64) error {
 	return w.writeEvent("i", data, ts)
 }
 
+// WriteResize appends a terminal resize event ("r") to the cast file.
+// The asciinema v2 format represents this as [elapsed, "r", "COLSxROWS"].
+func (w *Writer) WriteResize(cols, rows int, tsNs int64) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	elapsed := time.Unix(0, tsNs).Sub(w.startTime).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	b, err := json.Marshal([]any{elapsed, "r", fmt.Sprintf("%dx%d", cols, rows)})
+	if err != nil {
+		return err
+	}
+	_, err = w.castBuf.Write(append(b, '\n'))
+	return err
+}
+
 func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	if len(data) == 0 {
 		return nil

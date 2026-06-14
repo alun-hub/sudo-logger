@@ -1474,6 +1474,10 @@ func (dw *distributedWriter) WriteInput(data []byte, ts int64) error {
 	return dw.w.WriteInput(data, ts)
 }
 
+func (dw *distributedWriter) WriteResize(cols, rows int, ts int64) error {
+	return dw.w.WriteResize(cols, rows, ts)
+}
+
 // MarkActive is a no-op for distributed: the DB row is created with
 // in_progress=TRUE in CreateSession.
 func (dw *distributedWriter) MarkActive() error { return nil }

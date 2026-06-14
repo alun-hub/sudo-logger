@@ -22,11 +22,6 @@ export function TerminalPlayer({ session }: Props) {
       playerRef.current.dispose()
     }
 
-    // Fallback to 80x24 if dimensions are unknown or the legacy 220x50 default
-    const hasRealDims = session.cols && session.rows && session.cols !== 220 && session.rows !== 50
-    const cols = hasRealDims ? session.cols : 80
-    const rows = hasRealDims ? session.rows : 24
-
     playerRef.current = AsciinemaPlayer.create(castUrl, containerRef.current, {
       autoPlay: localStorage.getItem('sudo-replay-autoplay') !== 'false',
       speed: 1.0,
@@ -34,9 +29,7 @@ export function TerminalPlayer({ session }: Props) {
       theme: 'asciinema',
       terminalFontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
       terminalLineHeight: 1.3,
-      fit: 'both', // Scale perfectly within both width and height constraints
-      cols: cols,  // Explicitly set cols to override broken .cast headers
-      rows: rows,  // Explicitly set rows to override broken .cast headers
+      fit: 'both', // Scale to fill viewport; server patches cast header for correct dims
     })
 
     return () => {

@@ -33,6 +33,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -67,6 +68,7 @@
 #define MSG_SESSION_CHALLENGE_RESPONSE 0x15
 #define MSG_SESSION_EXPIRED 0x16
 #define MSG_SESSION_WARNING 0x17
+#define MSG_RESIZE         0x1b /* plugin→agent→server: terminal resize; payload = ts_ns(8BE)+cols(2BE)+rows(2BE) */
 
 #define STREAM_STDIN   0x00
 #define STREAM_STDOUT  0x01
@@ -110,6 +112,10 @@ static uint64_t      g_seq        = 0;
 /* ACK cache */
 static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
 static time_t g_last_ack_query = 0;  /* when we last queried the agent */
+
+/* Terminal dimensions — updated by TIOCGWINSZ polling in the monitor thread */
+static int g_term_cols = 0;
+static int g_term_rows = 0;
 
 /* Background monitor thread */
 static _Atomic int    g_monitor_stop   = 0;
@@ -521,6 +527,31 @@ static void *monitor_thread_fn(void *arg)
             was_frozen = 0;
         }
 
+        /* Detect terminal resize (SIGWINCH) by polling TIOCGWINSZ every tick.
+         * When dimensions change, send MSG_RESIZE so the server writes an
+         * asciinema "r" event into the cast file. */
+        if (g_tty_fd >= 0 && g_agent_fd >= 0) {
+            struct winsize ws;
+            if (ioctl(g_tty_fd, TIOCGWINSZ, &ws) == 0 &&
+                ws.ws_row > 0 && ws.ws_col > 0 &&
+                (ws.ws_row != (unsigned short)g_term_rows ||
+                 ws.ws_col != (unsigned short)g_term_cols)) {
+                g_term_rows = (int)ws.ws_row;
+                g_term_cols = (int)ws.ws_col;
+                /* Payload: ts_ns(8BE) + cols(2BE) + rows(2BE) */
+                uint8_t rbuf[12];
+                int64_t ts_be  = (int64_t)htobe64((uint64_t)now_ns());
+                uint16_t c_be  = htobe16((uint16_t)ws.ws_col);
+                uint16_t r_be  = htobe16((uint16_t)ws.ws_row);
+                memcpy(rbuf,     &ts_be, 8);
+                memcpy(rbuf + 8, &c_be,  2);
+                memcpy(rbuf + 10, &r_be, 2);
+                pthread_mutex_lock(&g_send_mu);
+                send_msg(g_agent_fd, MSG_RESIZE, rbuf, sizeof(rbuf));
+                pthread_mutex_unlock(&g_send_mu);
+            }
+        }
+
         /*
          * Terminal-reclaim: while the session is frozen, sudo may hand the
          * terminal foreground to the child (bash) via tcsetpgrp() — e.g. when
@@ -799,6 +830,18 @@ static int plugin_open(unsigned int        version,
         else if (strncmp(command_info[i], "lines=",     6) == 0)
             term_rows = (int)strtol(command_info[i] + 6,  NULL, 10);
     }
+
+    /* If sudo didn't provide terminal dimensions (non-interactive or older sudo),
+     * fall back to querying the PTY directly via TIOCGWINSZ. */
+    if (g_tty_fd >= 0 && (term_rows <= 0 || term_cols <= 0)) {
+        struct winsize ws;
+        if (ioctl(g_tty_fd, TIOCGWINSZ, &ws) == 0) {
+            if (term_rows <= 0 && ws.ws_row > 0) term_rows = (int)ws.ws_row;
+            if (term_cols <= 0 && ws.ws_col > 0) term_cols = (int)ws.ws_col;
+        }
+    }
+    g_term_rows = term_rows;
+    g_term_cols = term_cols;
 
     /* ── Extract metadata from settings[] ───────────────────────────────
      * runas_user is only present when -u was given; defaults to "root".

@@ -1160,6 +1160,10 @@ func (lw *localWriter) WriteInput(data []byte, ts int64) error {
 	return lw.w.WriteInput(data, ts)
 }
 
+func (lw *localWriter) WriteResize(cols, rows int, ts int64) error {
+	return lw.w.WriteResize(cols, rows, ts)
+}
+
 func (lw *localWriter) MarkActive() error {
 	return os.WriteFile(filepath.Join(lw.w.Dir(), "ACTIVE"),
 		[]byte("session in progress\n"), 0o640)

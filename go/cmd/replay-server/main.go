@@ -1760,30 +1760,82 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.cast", url.QueryEscape(tsid)))
 
-	// Filter out "i" (input) events. asciinema-player doesn't display them,
-	// and they can cause VT emulator corruption when the player seeks/fast-forwards
-	// if it accidentally feeds the input keystrokes into the screen buffer.
+	// Filter out "i" (input) events and patch the header height.
+	// asciinema-player doesn't display input events, and they can cause VT emulator
+	// corruption when the player seeks/fast-forwards.
+	//
+	// The header height patch corrects a known issue where iolog.go defaults to
+	// height=50 when the plugin sends 0 rows. vi/ncurses detect the actual PTY
+	// size via TIOCGWINSZ and may use a different row count. We detect the actual
+	// row count from the first few output events: vi always emits ESC[1;Nr
+	// (set-scroll-region) as its first action, where N is the actual row count.
+	// In the cast file, ESC is JSON-encoded as .
 	scanner := bufio.NewScanner(rc)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 
-	if scanner.Scan() {
-		w.Write(scanner.Bytes())
-		w.Write([]byte("\n"))
+	scrollRegionRE := regexp.MustCompile(`\\u001b\[1;(\d+)r`)
+
+	if !scanner.Scan() {
+		return
+	}
+	headerBytes := append([]byte(nil), scanner.Bytes()...)
+
+	// Buffer the first 5 output events to detect actual terminal rows before
+	// writing the (possibly patched) header.
+	type bufferedLine struct{ data []byte }
+	var buffered []bufferedLine
+	detectedRows := 0
+	for len(buffered) < 5 && detectedRows == 0 && scanner.Scan() {
+		line := scanner.Bytes()
+		cp := make([]byte, len(line))
+		copy(cp, line)
+		buffered = append(buffered, bufferedLine{cp})
+		if m := scrollRegionRE.FindSubmatch(line); m != nil {
+			if n, err2 := strconv.Atoi(string(m[1])); err2 == nil && n > 0 {
+				detectedRows = n
+			}
+		}
+	}
+
+	if detectedRows > 0 {
+		var hdr map[string]json.RawMessage
+		if json.Unmarshal(headerBytes, &hdr) == nil {
+			var currentHeight int
+			if json.Unmarshal(hdr["height"], &currentHeight) == nil && currentHeight != detectedRows {
+				hdr["height"], _ = json.Marshal(detectedRows)
+				if patched, perr := json.Marshal(hdr); perr == nil {
+					headerBytes = patched
+				}
+			}
+		}
+	}
+
+	w.Write(headerBytes)
+	w.Write([]byte("\n"))
+
+	isInputEvent := func(line []byte) bool {
+		if !bytes.Contains(line, []byte(`"i"`)) {
+			return false
+		}
+		var raw []json.RawMessage
+		if json.Unmarshal(line, &raw) != nil || len(raw) < 2 {
+			return false
+		}
+		var kind string
+		return json.Unmarshal(raw[1], &kind) == nil && kind == "i"
+	}
+
+	for _, bl := range buffered {
+		if !isInputEvent(bl.data) {
+			w.Write(bl.data)
+			w.Write([]byte("\n"))
+		}
 	}
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		// Quickly skip "i" (input) events. The exact spacing might vary
-		// depending on how json.Marshal formats the array.
-		if bytes.Contains(line, []byte(`"i"`)) {
-			// Parse to be absolutely sure it's the event type
-			var raw []json.RawMessage
-			if json.Unmarshal(line, &raw) == nil && len(raw) >= 2 {
-				var kind string
-				if json.Unmarshal(raw[1], &kind) == nil && kind == "i" {
-					continue
-				}
-			}
+		if isInputEvent(line) {
+			continue
 		}
 		w.Write(line)
 		w.Write([]byte("\n"))
