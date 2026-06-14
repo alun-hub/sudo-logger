@@ -5,7 +5,8 @@ import { UsersRolesTab } from './UsersRolesTab'
 import { RetentionTab }  from './RetentionTab'
 import { SandboxTab }    from './SandboxTab'
 import { JitTab }        from './JitTab'
-import { Settings, Shield, Users, Database, Box, Mail } from 'lucide-react'
+import { RedactionTab }  from './RedactionTab'
+import { Settings, Shield, Users, Database, Box, Mail, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export function ConfigPanel() {
@@ -16,6 +17,7 @@ export function ConfigPanel() {
           <SubTab to="/config/jit"       label="JIT / Approvals" icon={<Shield size={14} />} />
           <SubTab to="/config/users"     label="Users & Roles"   icon={<Users size={14} />} />
           <SubTab to="/config/siem"      label="SIEM Forwarding" icon={<Mail size={14} />} />
+          <SubTab to="/config/redaction" label="Redaction"      icon={<EyeOff size={14} />} />
           <SubTab to="/config/retention" label="Data Retention"  icon={<Database size={14} />} />
           <SubTab to="/config/sandbox"   label="Process Sandbox" icon={<Box size={14} />} />
           <SubTab to="/config/auth"      label="System Auth"     icon={<Settings size={14} />} />
@@ -27,6 +29,7 @@ export function ConfigPanel() {
           <Route path="jit"       element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><JitTab /></div>} />
           <Route path="users"     element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><UsersRolesTab /></div>} />
           <Route path="siem"      element={<div className="max-w-5xl p-6 mx-auto animate-in fade-in duration-200"><SiemTab /></div>} />
+          <Route path="redaction" element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><RedactionTab /></div>} />
           <Route path="retention" element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><RetentionTab /></div>} />
           <Route path="sandbox"   element={<SandboxTab />} />
           <Route path="auth"      element={<div className="max-w-4xl p-6 mx-auto animate-in fade-in duration-200"><AuthTab /></div>} />

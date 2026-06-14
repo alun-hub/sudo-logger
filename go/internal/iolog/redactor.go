@@ -19,6 +19,78 @@ type Redactor struct {
 	triggerRegex  *regexp.Regexp // Fast-path: checks if ANY pattern might match
 }
 
+// RedactionRule describes a system-default masking pattern.
+type RedactionRule struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Regex       string `json:"regex"`
+	Group       int    `json:"group"`
+}
+
+// SystemRedactionRules is the list of built-in patterns.
+var SystemRedactionRules = []RedactionRule{
+	{
+		Name:        "AWS Access Key",
+		Description: "Identifies AWS Access Key IDs (AKIA...).",
+		Regex:       `\b(AKIA[0-9A-Z]{16})\b`,
+		Group:       1,
+	},
+	{
+		Name:        "GitHub Personal Access Token",
+		Description: "Matches GitHub PATs starting with ghp_.",
+		Regex:       `\b(ghp_[a-zA-Z0-9]{36,})\b`,
+		Group:       1,
+	},
+	{
+		Name:        "Authorization Bearer Token",
+		Description: "Matches Bearer tokens in HTTP headers or CLI flags.",
+		Regex:       `(?i)(Authorization:\s*Bearer\s+|Bearer\s+)([a-zA-Z0-9\-\._~+/]+=*)`,
+		Group:       2,
+	},
+	{
+		Name:        "Slack Webhook",
+		Description: "Matches Slack incoming webhook URLs.",
+		Regex:       `\b(https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/)([a-zA-Z0-9]{12,})\b`,
+		Group:       2,
+	},
+	{
+		Name:        "Google API Key",
+		Description: "Matches Google Cloud Platform API keys.",
+		Regex:       `\b(AIza[0-9A-Za-z\-_]{35})\b`,
+		Group:       1,
+	},
+	{
+		Name:        "Stripe Live Secret",
+		Description: "Matches Stripe live secret keys.",
+		Regex:       `\b(sk_live_[0-9a-zA-Z]{24,})\b`,
+		Group:       1,
+	},
+	{
+		Name:        "Private Key Block",
+		Description: "Masks entire PEM-encoded private key blocks.",
+		Regex:       `(?s)(-----BEGIN [A-Z ]+-----)(.+?)(-----END [A-Z ]+-----)`,
+		Group:       2,
+	},
+	{
+		Name:        "URL Credentials",
+		Description: "Matches credentials in connection strings (e.g. postgres://user:pass@host).", // pragma: allowlist secret
+		Regex:       `(?i)([a-z0-9+]+://[^:\s]+:)(.+)(@[^@\s/]+)`, // pragma: allowlist secret
+		Group:       2,
+	},
+	{
+		Name:        "High Entropy Token (Assignment)",
+		Description: "Matches any assignment where the value is a 32+ char hex/base64 string.",
+		Regex:       `\b([A-Z0-9_]+)\s*[:=]\s*(['"]?)([a-f0-9]{32,}|[a-zA-Z0-9+/=]{40,})\b`,
+		Group:       3,
+	},
+	{
+		Name:        "Generic Variable Assignment",
+		Description: "Matches variables containing KEY, SECRET, TOKEN, AUTH, PASS, PWD, or ACCESS.",
+		Regex:       `(?i)(export\s+)?([A-Z0-9_]*(KEY|SECRET|TOKEN|AUTH|PASS|PWD|PASSWORD|ACCESS)[A-Z0-9_]*)\s*[:=]\s*(['"]?)([^\s'"]+)(['"]?)`,
+		Group:       5,
+	},
+}
+
 func NewRedactor(patterns []string) *Redactor {
 	r := &Redactor{
 		promptRegex: regexp.MustCompile(`(?i)\b(password|passphrase|secret|token|key|cvv|pin|pass)[:=]\s*$`),
@@ -31,40 +103,16 @@ func NewRedactor(patterns []string) *Redactor {
 		}
 	}
 
-	// Define keys for assignments and trigger check
-	keys := `db_password|api_key|api_token|secret|token|auth|key|pass|AccountKey|client_secret|X-Api-Key|X-Auth-Token|AWS_SECRET_ACCESS_KEY|STRIPE_LIVE_SECRET|GCP_JSON_KEY|AWS_ACCESS_KEY_ID|backup_vault_token|github_pat|session_token`
+	// Add system default patterns
+	for _, rule := range SystemRedactionRules {
+		r.addPattern(rule.Regex, rule.Group)
+	}
 
-	// 1. Assignments
-	r.addPattern(`(?i)\b(`+keys+`)(["']?\s*[=:\*]\s*["']?)([^\s"';,]+)`, 3)
-
-	// 2. Bearer Tokens & Docker Auth
-	r.addPattern(`(?i)(Authorization:\s*Bearer\s+)([a-zA-Z0-9\-\._~+/]+=*)`, 2)
-	r.addPattern(`(?i)\b(Bearer\s+)([a-zA-Z0-9\-\._~+/]{12,})`, 2)
-	r.addPattern(`(?i)("auth"\s*:\s*")([a-zA-Z0-9+/=]{12,})(")`, 2)
-
-	// 3. URL Auth
-	r.addPattern(`(?i)([a-z0-9+]+://[^:\s]+:)(.+)(@[^@\s/]+)`, 2)
-	r.addPattern(`(?i)(-u\s+[^:\s]+:)([^\s]+)`, 2)
-
-	// 4. Standalone Tokens
-	r.addPattern(`\b(AKIA[0-9A-Z]{16})\b`, 1)
-	r.addPattern(`\b((ghp|gho|ghs|ghr|ght)_[a-zA-Z0-9]{30,})\b`, 1)
-	r.addPattern(`\b(sk_live_[0-9a-zA-Z]{20,})\b`, 1)
-	r.addPattern(`\b(hvs\.[a-zA-Z0-9]{20,})\b`, 1)
-	r.addPattern(`\b(AIza[0-9A-Za-z\-_]{30,})\b`, 1)
-	r.addPattern(`\b(eyJhbGciOi[a-zA-Z0-9\-_]+\.[a-zA-Z0-9\-_]+\.[a-zA-Z0-9\-_]+)\b`, 1)
-
-	// 5. Large Blocks & URLs
-	r.addPattern(`(?s)(-----BEGIN [A-Z ]+-----)(.+?)(-----END [A-Z ]+-----)`, 2)
-	r.addPattern(`\b(https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/)([a-zA-Z0-9]{12,})\b`, 2)
-
-	// 6. Financial
-	r.addPattern(`\b([A-Z]{2}[0-9]{2}(?:\s?[0-9A-Z]{4}){3,})\b`, 1)
-	r.addPattern(`(?i)\b(BIC|SWIFT|HANDELS)[:=]\s*\b([A-Z0-9]{8,11})\b`, 2)
-
-	// Compile a combined trigger regex for fast path
-	// This matches any of our known keywords or token prefixes
-	triggerPatterns := `(?i)\b(` + keys + `|Bearer|Authorization|ghp_|sk_live_|hvs\.|AIza|eyJhbGciOi|-----BEGIN|IBAN|BIC|SWIFT)\b|\bAKIA[0-9A-Z]{16}\b`
+	// Define keywords for the fast-path trigger check.
+	// This ensures we don't run expensive regex on every chunk.
+	// Note: No word boundaries (\b) here to catch keywords inside larger strings (e.g. db_password).
+	// We also include common token prefixes and URL indicators.
+	triggerPatterns := `(?i)KEY|SECRET|TOKEN|AUTH|PASS|PWD|ACCESS|Bearer|Authorization|ghp_|sk_live_|AIza|-----BEGIN|AKIA|hooks|http|[:=]\s*[a-f0-9]{32}`
 	r.triggerRegex = regexp.MustCompile(triggerPatterns)
 
 	return r

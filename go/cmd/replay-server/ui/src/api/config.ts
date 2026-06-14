@@ -8,6 +8,7 @@ import type {
   SandboxRaw,
   ApprovalConfig,
   MeResponse,
+  RedactionConfig,
 } from '@/types/config'
 
 export const fetchMe = (): Promise<MeResponse> => apiFetch('/api/me')
@@ -59,3 +60,7 @@ export const fetchApprovalConfig = (): Promise<ApprovalConfig> =>
   apiFetch('/api/approval-config').then((r: any) => r.config)
 export const saveApprovalConfig = (c: ApprovalConfig): Promise<void> =>
   apiFetch('/api/approval-config', { method: 'PUT', body: JSON.stringify({ config: c }) })
+
+export const fetchRedactionConfig = (): Promise<RedactionConfig> => apiFetch('/api/redaction-config')
+export const saveRedactionConfig = (custom: string[]): Promise<void> =>
+  apiFetch('/api/redaction-config', { method: 'PUT', body: JSON.stringify({ custom_patterns: custom }) })

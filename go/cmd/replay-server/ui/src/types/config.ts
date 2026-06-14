@@ -86,6 +86,18 @@ export interface ApprovalConfig {
   notifications: ApprovalNotifyCfg
 }
 
+export interface RedactionRule {
+  name: string
+  description: string
+  regex: string
+  group: number
+}
+
+export interface RedactionConfig {
+  system_rules: RedactionRule[]
+  custom_patterns: string[]
+}
+
 export interface MeResponse {
   username: string
   role: string

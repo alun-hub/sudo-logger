@@ -219,6 +219,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </HelpSection>
 
+            {/* Data Redaction */}
+            <HelpSection title="Data Redaction">
+              <p className="text-text-dim mb-3">Secrets are masked by the local agent before being sent to the server. This protects sensitive credentials from appearing in recordings.</p>
+              <HelpTable cols={['Protection', 'Description']}>
+                <HelpRow label="Variable Masking"  desc="Automatically masks VAR=secret for common names like KEY, TOKEN, SECRET, PASSWORD." />
+                <HelpRow label="Pattern Matching"  desc="Detects AWS keys, GitHub tokens, Slack webhooks, and private key blocks." />
+                <HelpRow label="Custom Rules"     desc="Global regex patterns can be added via Config → Redaction to protect organization-specific data." />
+              </HelpTable>
+            </HelpSection>
+
             {/* Rule fields */}
             <HelpSection title="Rule Fields">
               <HelpTable cols={['Field', 'Description']}>

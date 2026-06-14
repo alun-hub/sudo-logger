@@ -23,6 +23,7 @@ import (
 
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
+	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/protocol"
 )
 
@@ -553,6 +554,7 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		parentID: parentSessID,
 		hasIO:    hasIO,
 		ts:       time.Now(),
+		redactor: iolog.NewRedactor(getEffectiveMaskPatterns()),
 	}
 
 	if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {
@@ -820,6 +822,7 @@ func (s *ebpfSubsystem) sessionStarted(scopePath, scopeName string) {
 		remote:   meta.remote,
 		command:  meta.shell,
 		cgroupID: cgroupID,
+		redactor: iolog.NewRedactor(getEffectiveMaskPatterns()),
 	}
 
 	if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {
@@ -941,6 +944,7 @@ type ebpfSession struct {
 	mu     sync.Mutex
 	conn   net.Conn
 	bw     *bufio.Writer
+	redactor *iolog.Redactor
 	seq    uint64
 	done   bool
 	cancel context.CancelFunc
@@ -1006,6 +1010,9 @@ func (s *ebpfSession) sendChunk(tsNS int64, stream uint8, data []byte) {
 	defer s.mu.Unlock()
 	if s.done || s.conn == nil {
 		return
+	}
+	if s.redactor != nil {
+		data = s.redactor.Redact(data, stream)
 	}
 	s.seq++
 	payload := encodeEBPFChunk(s.seq, tsNS, stream, data)

@@ -523,6 +523,10 @@ type Config struct {
 	// Default: /etc/sudo-logger/approval-policy.yaml
 	ApprovalPolicyPath string
 
+	// RedactionConfigPath is the path to redaction-config.json (LocalStore only).
+	// Default: /etc/sudo-logger/redaction-config.json
+	RedactionConfigPath string
+
 	// ── DistributedStore fields ──────────────────────────────────────────────
 
 	// S3Bucket is the bucket used for storing cast files.

@@ -155,6 +155,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.ApprovalStorePath == "" {
 		cfg.ApprovalStorePath = "/etc/sudo-logger/approval-store.yaml"
 	}
+	if cfg.RedactionConfigPath == "" {
+		cfg.RedactionConfigPath = "/etc/sudo-logger/redaction-config.json"
+	}
 
 	ls := &LocalStore{
 		cfg:             cfg,
@@ -843,6 +846,8 @@ func (ls *LocalStore) configFilePath(key string) string {
 		return ls.cfg.SandboxTemplatesPath
 	case "approval-policy.yaml":
 		return ls.cfg.ApprovalPolicyPath
+	case "redaction_config":
+		return ls.cfg.RedactionConfigPath
 	default:
 		return ""
 	}

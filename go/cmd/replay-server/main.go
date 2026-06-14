@@ -50,6 +50,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"sudo-logger/internal/config"
+	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 )
@@ -1208,6 +1209,16 @@ func main() {
 			handleGetSandbox(w, r)
 		case http.MethodPut:
 			handlePutSandbox(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/redaction-config", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			handleGetRedactionConfig(w, r)
+		case http.MethodPut:
+			handlePutRedactionConfig(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -2424,6 +2435,57 @@ func handlePutRetention(w http.ResponseWriter, r *http.Request) {
 	}
 	data, _ := json.Marshal(policy)
 	if err := sessionStore.SetConfig(r.Context(), "retention_policy", string(data)); err != nil {
+		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ── Redaction config API ──────────────────────────────────────────────────────
+
+func handleGetRedactionConfig(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
+	cfgStr, err := sessionStore.GetConfig(r.Context(), "redaction_config")
+	if err != nil {
+		http.Error(w, "read failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	custom := []string{}
+	if cfgStr != "" {
+		_ = json.Unmarshal([]byte(cfgStr), &custom)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"system_rules":    iolog.SystemRedactionRules,
+		"custom_patterns": custom,
+	})
+}
+
+func handlePutRedactionConfig(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
+	var body struct {
+		CustomPatterns []string `json:"custom_patterns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	// Sanity check: compile each regex
+	for _, p := range body.CustomPatterns {
+		if _, err := regexp.Compile(p); err != nil {
+			http.Error(w, fmt.Sprintf("invalid regex %q: %v", p, err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	data, _ := json.Marshal(body.CustomPatterns)
+	if err := sessionStore.SetConfig(r.Context(), "redaction_config", string(data)); err != nil {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

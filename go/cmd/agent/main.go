@@ -121,6 +121,7 @@ func main() {
 	// Snapshot sudoers state and watch for changes; also poll for desired config.
 	go startSudoersWatcher(ctx, hostname)
 	startSudoersPoller(hostname)
+	startRedactionPoller()
 	startHeartbeatLoop(hostname)
 
 	// Remove stale socket from previous run.

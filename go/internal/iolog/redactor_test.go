@@ -77,7 +77,12 @@ func TestRedactorSurgicalRedaction(t *testing.T) {
 		mustMask string
 	}{
 		{"db_password=s3cr3t123", "s3cr3t123"},           // pragma: allowlist secret
-		{"api_key=ABCDEFGHIJKLMNOP", "ABCDEFGHIJKLMNOP"}, // pragma: allowlist secret
+		{"export GITHUB_PERSONAL_ACCESS_TOKEN=foo", "foo"},
+		{"GEMINI_API_KEY=bar", "bar"},                    // pragma: allowlist secret
+		{"export HOSTUP_API_KEY=\"baz\"", "baz"},
+		{"UNIFI=0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef"}, // pragma: allowlist secret
+		{"Authorization: Bearer my-secret-token", "my-secret-token"},
+		{"https://hooks.slack.com/services/T12345678/B12345678/token12345678", "token12345678"},
 	}
 	for _, tc := range cases {
 		out := string(r.Redact([]byte(tc.input), protocol.StreamTtyOut))
