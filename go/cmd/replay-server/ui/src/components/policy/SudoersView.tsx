@@ -248,6 +248,21 @@ function EditorPanel({ host }: { host: string }) {
         </div>
       </div>
 
+      {/* Requirement Info Box */}
+      <div className="bg-blue/5 border-b border-border/40 p-4 flex gap-4 items-start shrink-0">
+        <BookOpen className="text-blue shrink-0 mt-0.5" size={18} />
+        <div className="space-y-1.5 text-[12px] leading-relaxed">
+          <p className="text-text font-bold">How sudoers management works</p>
+          <p className="text-text-sub">
+            Changes are written to <code className="bg-card px-1 py-0.5 rounded border border-border">/etc/sudoers.d/sudo-logger-managed</code>.
+            The main <code className="bg-card px-1 py-0.5 rounded border border-border">/etc/sudoers</code> is <span className="text-blue font-bold">never</span> modified.
+          </p>
+          <p className="text-amber font-medium">
+            ⚠️ Requirement: Your main <code className="bg-card px-1 py-0.5 rounded border border-border">/etc/sudoers</code> must contain <code className="bg-card px-1 py-0.5 rounded border border-border">#includedir /etc/sudoers.d</code> to enable these rules.
+          </p>
+        </div>
+      </div>
+
       {/* Mode toggle toolbar */}
       <div className="h-[36px] border-b border-border bg-surface/60 px-4 flex items-center gap-3 shrink-0">
         <div className="flex rounded-[4px] border border-border overflow-hidden text-[12px]">
@@ -382,7 +397,7 @@ function EditorPanel({ host }: { host: string }) {
                   title="Click to restore this snapshot"
                   className="w-full text-left p-2.5 rounded-[4px] border border-border bg-card hover:border-green hover:bg-green/5 transition-colors group"
                 >
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-4">
                     <span className="text-[12px] font-bold text-text-sub group-hover:text-green">{fmtDate(s.uploaded_at)}</span>
                     <span className="text-[9px] font-mono text-text-dim">{s.sha256.substring(0, 8)}</span>
                   </div>
