@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sudo-logger | Enterprise Audit & Security Encyclopedia</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #0969da;
+      --primary-hover: #085cc5;
+      --bg: #ffffff;
+      --sidebar-bg: #f6f8fa;
+      --text: #1f2328;
+      --text-muted: #636c76;
+      --border: #d0d7de;
+      --code-bg: #f6f8fa;
+      --accent: #0969da;
+      --success: #1a7f37;
+      --warning: #9a6700;
+      --danger: #cf222e;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-padding-top: 80px; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      line-height: 1.6;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    /* --- Sidebar --- */
+    .sidebar {
+      width: 360px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .sidebar-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+      background: #fff;
+    }
+    .logo-text {
+      font-weight: 800;
+      font-size: 22px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .sidebar-nav {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 0;
+    }
+    .nav-group {
+      margin-bottom: 32px;
+    }
+    .nav-title {
+      padding: 0 24px 10px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+    .nav-link {
+      display: block;
+      padding: 8px 24px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      transition: all 0.1s;
+      border-left: 4px solid transparent;
+    }
+    .nav-link:hover { background: rgba(0,0,0,0.04); color: var(--primary); }
+    .nav-link.active {
+      font-weight: 600;
+      color: var(--primary);
+      background: #fff;
+      border-left-color: var(--primary);
+      padding-left: 20px;
+    }
+
+    /* --- Main Content --- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      background: var(--bg);
+      padding: 60px 100px 140px;
+    }
+    .content-wrapper {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    h1 { font-size: 52px; font-weight: 800; margin-top: 0; margin-bottom: 24px; border-bottom: 4px solid var(--border); padding-bottom: 20px; letter-spacing: -2px; }
+    h2 { font-size: 38px; font-weight: 700; margin-top: 100px; margin-bottom: 24px; border-bottom: 2px solid var(--border); padding-bottom: 12px; letter-spacing: -1px; }
+    h3 { font-size: 28px; font-weight: 600; margin-top: 64px; margin-bottom: 20px; color: var(--primary); }
+    h4 { font-size: 20px; font-weight: 600; margin-top: 40px; margin-bottom: 12px; color: #1f2328; }
+
+    p { margin-bottom: 24px; color: #1f2328; font-size: 18px; line-height: 1.7; }
+    ul, ol { margin-bottom: 32px; padding-left: 40px; }
+    li { margin-bottom: 14px; font-size: 18px; }
+
+    code {
+      font-family: var(--font-mono);
+      background: var(--code-bg);
+      padding: 0.2em 0.5em;
+      border-radius: 6px;
+      font-size: 88%;
+      border: 1px solid rgba(0,0,0,0.06);
+      color: #cf222e;
+    }
+    pre {
+      background: var(--code-bg);
+      padding: 32px;
+      border-radius: 12px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      margin-bottom: 48px;
+      position: relative;
+      box-shadow: inset 0 2px 8px rgba(0,0,0,0.04);
+    }
+    pre code { background: none; padding: 0; font-size: 15px; color: #1f2328; border: none; }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 20px;
+      background: #dafbe1;
+      color: #1a7f37;
+      margin-left: 14px;
+      vertical-align: middle;
+    }
+    .badge-blue { background: #ddf4ff; color: #0969da; }
+    .badge-amber { background: #fff8c5; color: #9a6700; }
+    .badge-red { background: #ffebe9; color: #cf222e; }
+
+    .info-box {
+      padding: 32px;
+      background: #f0f7ff;
+      border-left: 8px solid #0969da;
+      border-radius: 12px;
+      margin: 48px 0;
+      font-size: 18px;
+    }
+    .warn-box {
+      padding: 32px;
+      background: #fff8c5;
+      border-left: 8px solid #9a6700;
+      border-radius: 12px;
+      margin: 48px 0;
+      font-size: 18px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 48px 0;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      text-align: left;
+      padding: 24px;
+      border: 1px solid var(--border);
+      font-size: 17px;
+    }
+    th { background: var(--sidebar-bg); font-weight: 800; color: var(--text-muted); text-transform: uppercase; font-size: 13px; letter-spacing: 1px; }
+
+    .api-endpoint {
+      background: #fdfdfd;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      margin-bottom: 48px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+    }
+    .endpoint-header { display: flex; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+    .method-badge {
+      display: inline-block;
+      width: 90px;
+      text-align: center;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 800;
+      margin-right: 20px;
+      color: #fff;
+    }
+    .m-get { background: #2da44e; }
+    .m-put { background: #9a6700; }
+    .m-post { background: #0969da; }
+    .m-delete { background: #cf222e; }
+    .endpoint-path { font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--text); }
+
+    footer {
+      margin-top: 160px;
+      padding: 80px 0;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 16px;
+      text-align: center;
+    }
+
+    ::-webkit-scrollbar { width: 12px; height: 12px; }
+    ::-webkit-scrollbar-track { background: var(--sidebar-bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; border: 3px solid var(--sidebar-bg); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    @media (max-width: 1400px) {
+      .sidebar { width: 300px; }
+      .main { padding: 40px 60px; }
+    }
+    @media (max-width: 1100px) {
+      .sidebar { display: none; }
+      .main { padding: 40px; }
+    }
+
+    section:target h2 { color: var(--primary); }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-text">
+        <svg height="36" viewBox="0 0 24 24" width="36" fill="var(--primary)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+        sudo-logger <span style="font-size:12px; color:var(--text-muted); font-weight:400; margin-left: 8px">Enterprise Portal</span>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <div class="nav-title">Fundamentals</div>
+        <a href="#summary" class="nav-link">Executive Summary</a>
+        <a href="#architecture" class="nav-link">System Architecture</a>
+        <a href="#lifecycle" class="nav-link">Session Lifecycle</a>
+        <a href="#integrity" class="nav-link">Log Integrity & Signing</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Deployment</div>
+        <a href="#deploy-rpm" class="nav-link">RPM Installation Guide</a>
+        <a href="#deploy-k8s" class="nav-link">Kubernetes Orchestration</a>
+        <a href="#deploy-docker" class="nav-link">Docker Compose Setup</a>
+        <a href="#deploy-migration" class="nav-link">Legacy Data Migration</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">System Configuration</div>
+        <a href="#config-plugin" class="nav-link">Sudo Plugin Reference</a>
+        <a href="#config-agent" class="nav-link">Agent (agent.conf) Reference</a>
+        <a href="#config-logserver" class="nav-link">Log Server (Ingestor) Flags</a>
+        <a href="#config-replay" class="nav-link">Replay Server (Web UI) Flags</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Web Management UI</div>
+        <a href="#ui-dashboard" class="nav-link">Global Dashboard & Analytics</a>
+        <a href="#ui-sessions" class="nav-link">Session Discovery & Replay</a>
+        <a href="#ui-sudoers" class="nav-link">Sudoers Visual Policy Editor</a>
+        <a href="#ui-jit" class="nav-link">JIT Approval Workflows</a>
+        <a href="#ui-iam" class="nav-link">Identity, Groups & RBAC</a>
+        <a href="#ui-settings" class="nav-link">Central Policy Settings</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Policy Definition (YAML)</div>
+        <a href="#yaml-risk" class="nav-link">Risk Rules Engine</a>
+        <a href="#yaml-sandbox" class="nav-link">eBPF Sandbox Policy</a>
+        <a href="#yaml-siem" class="nav-link">SIEM Integration (siem.yaml)</a>
+        <a href="#yaml-jit" class="nav-link">JIT Approval Policy</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Security Enforcement</div>
+        <a href="#sec-ebpf" class="nav-link">eBPF Syscall Interception</a>
+        <a href="#sec-dbus" class="nav-link">D-Bus & Polkit Auditing</a>
+        <a href="#sec-auditd" class="nav-link">Immutable Auditd Rules</a>
+        <a href="#sec-hardening" class="nav-link">System-Level Hardening</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Operations & Maintenance</div>
+        <a href="#ops-monitoring" class="nav-link">Monitoring, Metrics & Health</a>
+        <a href="#ops-maintenance" class="nav-link">Rotation, Backups & S3</a>
+        <a href="#ops-troubleshooting" class="nav-link">The Troubleshooting Encyclopedia</a>
+        <a href="#ops-diagnostics" class="nav-link">CLI Diagnostic Tools</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">API Reference</div>
+        <a href="#api-auth" class="nav-link">Identity & Auth API</a>
+        <a href="#api-sessions" class="nav-link">Session Management API</a>
+        <a href="#api-approvals" class="nav-link">JIT Approval API</a>
+        <a href="#api-policy" class="nav-link">Policy & Config API</a>
+        <a href="#api-user-mgmt" class="nav-link">User Management API</a>
+        <a href="#api-system" class="nav-link">System & Health API</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="content-wrapper">
+
+      <section id="summary">
+        <h1>Executive Summary</h1>
+        <p>
+          <strong>sudo-logger</strong> is the industry's most advanced audit recording solution for Linux privileged access.
+          While traditional auditing systems capture only the <em>execution event</em>, sudo-logger
+          records the <strong>entire interactive session</strong> as a high-definition, cryptographically signed stream.
+        </p>
+        <p>
+          Designed for the <strong>Zero-Trust Enterprise</strong>, the system ensures absolute Chain of Custody by
+          evacuating audit data from monitored hosts in sub-second real-time. This prevents even a root user from
+          altering or concealing their actions.
+        </p>
+
+        <div class="info-box">
+          <strong>Enterprise Grade:</strong> sudo-logger is built to scale to tens of thousands of nodes,
+          supporting S3-compatible object storage, PostgreSQL metadata backends, and full OpenID Connect (OIDC)
+          single sign-on.
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2>System Architecture</h2>
+        <p>
+          The suite follows a micro-services architecture to isolate security boundaries and maximize ingestion
+          availability.
+        </p>
+
+        <h3>1. Sudo Plugin (C)</h3>
+        <p>
+          A native <code>sudo_plugin</code> implemented in C. It hooks into the terminal I/O loop of the <code>sudo</code>
+          binary. By operating at the TTY level, it captures data before it can be obfuscated by sub-shells or
+          interactive editors.
+        </p>
+
+        <h3>2. Agent (Go)</h3>
+        <p>
+          The host-level security orchestrator (<code>sudo-logger-agent</code>). It is responsible for:
+        </p>
+        <ul>
+          <li><strong>Local Identity Proof:</strong> Correlating TTY activity with D-Bus/Polkit session tokens.</li>
+          <li><strong>eBPF Enforcement:</strong> Attaching syscall hooks to detect and block <code>pkexec</code> or <code>su</code> bypasses.</li>
+          <li><strong>Secure Streaming:</strong> Encrypting and signing data for transmission over mutual TLS (mTLS).</li>
+          <li><strong>cgroup v2 Control:</strong> Freezing session execution if the central audit server is unreachable.</li>
+        </ul>
+
+        <h3>3. Log Server (Go)</h3>
+        <p>
+          The central ingestor (<code>sudo-logserver</code>). A high-performance, stateless service that validates
+          Agent identities and persists signed audit chunks to S3 or local storage.
+        </p>
+
+        <h3>4. Replay Server (Go)</h3>
+        <p>
+          The administrative control plane. It hosts the Web UI, manages the JIT approval lifecycle, and provides
+          an API-first interface for SIEM integration.
+        </p>
+
+        <div class="warn-box">
+          <strong>Fail-Secure Mechanism:</strong> The system maintains a tight ACK loop between the Plugin and Ingestor.
+          If ACKs are missing for more than 2 seconds, the Plugin <strong>locks the terminal</strong> using cgroup
+          freezing, preventing unlogged activity during network outages.
+        </div>
+      </section>
+
+      <section id="lifecycle">
+        <h2>Session Lifecycle</h2>
+        <p>The technical sequence of events for an audited privileged command.</p>
+
+        <ol>
+          <li><strong>Invocation:</strong> User runs <code>sudo dnf update</code>. Sudo loads the plugin.</li>
+          <li><strong>Plugin Handshake:</strong> The plugin connects to the Agent via a protected Unix socket.</li>
+          <li><strong>Context Discovery:</strong> The Agent identifies the user via D-Bus and records the parent PID, environment, and TTY path.</li>
+          <li><strong>Remote Auth:</strong> The Log Server is queried. If the command matches a JIT rule, the user is challenged for a "Reason".</li>
+          <li><strong>Approval:</strong> The command is held in a <code>SIGSTOP</code> state until an auditor clicks "Approve" in the Web UI.</li>
+          <li><strong>Recording:</strong> Every byte of TTY input/output is bundled into signed binary chunks.</li>
+          <li><strong>Risk Scoring:</strong> As data arrives, the Server analyzes it against <code>risk-rules.yaml</code>. If a forbidden string (e.g. <code>nc -l</code>) appears, the risk score is instantly elevated.</li>
+          <li><strong>Finalization:</strong> Sudo exits. Final chunks are flushed. The session is closed and indexed for search.</li>
+        </ol>
+      </section>
+
+      <section id="integrity">
+        <h2>Log Integrity & Ed25519</h2>
+        <p>
+          In a high-security environment, logs must be immutable. sudo-logger uses <strong>Ed25519 signatures</strong>
+          to provide non-repudiation.
+        </p>
+        <ul>
+          <li><strong>Continuous Verification:</strong> Every single chunk of data is signed. A missing or reordered chunk will immediately break the cryptographic chain.</li>
+          <li><strong>Hardware Correlation:</strong> Signatures are generated using a private key unique to the monitored host, proving the data originated from that specific node.</li>
+          <li><strong>Audit Tooling:</strong> The <code>verify-integrity.sh</code> script allows forensic teams to validate log files offline, independent of the Replay Server.</li>
+        </ul>
+      </section>
+
+      <section id="deploy-rpm">
+        <h2>Deployment: RPM Installation Guide</h2>
+        <p>Optimized for RHEL 8/9, AlmaLinux, Rocky Linux, and CentOS Stream.</p>
+
+        <h3>1. Repository Configuration</h3>
+        <pre><code># /etc/yum.repos.d/sudo-logger.repo
+[sudo-logger]
+name=sudo-logger Enterprise
+baseurl=https://packages.company.com/rpm/rhel/\$releasever/\$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.company.com/RPM-GPG-KEY-sudologger</code></pre>
+
+        <h3>2. Client (Monitored Host)</h3>
+        <pre><code># Install agent and plugin
+dnf install sudo-logger-client
+
+# Configure server endpoint in /etc/sudo-logger/agent.conf
+# server = ingestor.audit.internal:9876
+
+# Enable services
+systemctl enable --now sudo-logger-agent</code></pre>
+
+        <h3>3. Server (Control Plane)</h3>
+        <pre><code># Install ingestor and UI
+dnf install sudo-logger-server sudo-logger-replay
+
+# Configure /etc/sysconfig/sudo-logserver
+# systemctl enable --now sudo-logserver
+# systemctl enable --now sudo-replay-server</code></pre>
+      </section>
+
+      <section id="deploy-k8s">
+        <h2>Deployment: Kubernetes Orchestration</h2>
+        <p>
+          Kubernetes is the recommended architecture for <strong>Distributed Storage Mode</strong>, enabling
+          horizontal scaling to thousands of agents.
+        </p>
+
+        <h3>Architecture Components</h3>
+        <ul>
+          <li><strong>Log Ingestors (Deployment):</strong> Stateless pods running <code>sudo-logserver</code>.</li>
+          <li><strong>Replay Portal (Deployment):</strong> Pods running <code>sudo-replay-server</code>.</li>
+          <li><strong>Storage:</strong> PostgreSQL for metadata; S3-Compatible bucket for binary logs.</li>
+        </ul>
+
+        <h3>Configuration Strategy</h3>
+        <p>Use Kustomize to inject production secrets and storage URLs.</p>
+        <pre><code># k8s/overlays/prod/kustomization.yaml
+resources:
+  - ../../base
+configMapGenerator:
+  - name: server-config
+    literals:
+      - DB_URL=postgres://user:pass@pg-prod:5432/audit
+      - S3_BUCKET=audit-recordings</code></pre>
+      </section>
+
+      <section id="deploy-docker">
+        <h2>Deployment: Docker Compose Setup</h2>
+        <p>Quick-start for lab environments.</p>
+        <pre><code># docker-compose.yaml
+services:
+  logserver:
+    image: localhost/sudo-logger:latest
+    command: ["-storage=local", "-listen=:9876"]
+    ports: ["9876:9876"]</code></pre>
+      </section>
+
+      <section id="deploy-migration">
+        <h2>Legacy Data Migration</h2>
+        <p>
+          Move your existing recordings from local disk (v1) to a Distributed Cloud (v2) architecture.
+        </p>
+        <pre><code>sudo-logger-migrate \
+  -logdir /var/log/sudoreplay \
+  -storage distributed \
+  -db-url "postgres://..." \
+  -s3-bucket "audit-v2" \
+  -s3-endpoint "https://minio.internal:9000"</code></pre>
+        <p>
+          The tool iterates over all <code>.cast</code> files, re-calculates risk scores, uploads the binary
+          blobs to S3, and populates the PostgreSQL database.
+        </p>
+      </section>
+
+      <section id="config-plugin">
+        <h2>Sudo Plugin (/etc/sudo.conf)</h2>
+        <p>The plugin is enabled by adding a <code>Plugin</code> line to <code>/etc/sudo.conf</code>.</p>
+
+        <h3>Registration Syntax</h3>
+        <pre><code>Plugin sudo_logger_plugin /usr/libexec/sudo/sudo_logger_plugin.so [options]</code></pre>
+
+        <h3>Complete Options Reference</h3>
+        <table>
+          <thead><tr><th>Option</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>require_justification=1</code></td><td>0</td><td>Always force the user to enter a reason.</td></tr>
+            <tr><td><code>socket=/path/to/sock</code></td><td>(auto)</td><td>Override the path to the Agent's Unix socket.</td></tr>
+            <tr><td><code>ack_timeout=N</code></td><td>2</td><td>Seconds to wait for Server ACK before freezing terminal.</td></tr>
+            <tr><td><code>rcv_timeout=N</code></td><td>30</td><td>Handshake timeout for initial Agent connection.</td></tr>
+            <tr><td><code>max_chunk_size=N</code></td><td>4096</td><td>Maximum bytes per signed packet.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="config-agent">
+        <h2>Agent (agent.conf) Reference</h2>
+        <p>Configured via <code>/etc/sudo-logger/agent.conf</code>. Key-value format.</p>
+
+        <h3>Parameters</h3>
+        <table>
+          <thead><tr><th>Key</th><th>Example</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>server</code></td><td><code>logs:9876</code></td><td>Target Log Server address. HA LBs recommended.</td></tr>
+            <tr><td><code>ca</code></td><td><code>ca.crt</code></td><td>CA used to verify Log Server TLS identity.</td></tr>
+            <tr><td><code>cert</code> / <code>key</code></td><td><code>c.crt</code></td><td>Mutual TLS client credentials.</td></tr>
+            <tr><td><code>hostname</code></td><td><code>db-01</code></td><td>Manual hostname override.</td></tr>
+            <tr><td><code>mask_pattern</code></td><td><code>(?i)pass.*</code></td><td>Regex to mask data from logs. Repeatable.</td></tr>
+            <tr><td><code>ebpf</code></td><td><code>true</code></td><td>Enable syscall monitoring (requires kernel 5.4+).</td></tr>
+            <tr><td><code>dbus</code></td><td><code>true</code></td><td>Enable D-Bus/Polkit auditing.</td></tr>
+            <tr><td><code>freeze_timeout</code></td><td><code>5m</code></td><td>Max freeze duration before session termination.</td></tr>
+            <tr><td><code>idle_timeout</code></td><td><code>1h</code></td><td>Auto-close session if no user input.</td></tr>
+            <tr><td><code>disclaimer</code></td><td><code>"ALERT"</code></td><td>Message shown to user at sudo start.</td></tr>
+            <tr><td><code>disclaimer_color</code></td><td><code>bold_red</code></td><td>ANSI color for the disclaimer.</td></tr>
+            <tr><td><code>debug</code></td><td><code>false</code></td><td>Enable verbose diagnostic logging.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="config-logserver">
+        <h2>Log Server (Ingestor) Flags</h2>
+        <p>CLI flags usually managed in <code>/etc/sysconfig/sudo-logserver</code>.</p>
+
+        <h3>Core Configuration</h3>
+        <ul>
+          <li><code>-listen</code>: TLS address for Agent streams (default <code>:9876</code>).</li>
+          <li><code>-health-listen</code>: HTTP port for <code>/healthz</code> and <code>/metrics</code>.</li>
+          <li><code>-signkey</code>: Path to Ed25519 PEM private key for ACK signing.</li>
+          <li><code>-ca</code>: CA used to verify Agent certificates.</li>
+          <li><code>-strict-cert-host</code>: If true, Agent hostname must match Cert CN.</li>
+        </ul>
+
+        <h3>Storage Backend</h3>
+        <ul>
+          <li><code>-storage</code>: <code>local</code> (flat files) or <code>distributed</code> (S3+Postgres).</li>
+          <li><code>-db-url</code>: PostgreSQL DSN.</li>
+          <li><code>-s3-bucket</code> / <code>-s3-endpoint</code> / <code>-s3-region</code>: S3 settings.</li>
+          <li><code>-s3-path-style</code>: Use path-style URLs (required for MinIO).</li>
+          <li><code>-buffer-dir</code>: Disk buffer for S3 uploads.</li>
+        </ul>
+      </section>
+
+      <section id="config-replay">
+        <h2>Replay Server (Web UI) Flags</h2>
+        <p>CLI flags managed in <code>/etc/sysconfig/sudo-replay-server</code>.</p>
+
+        <h3>UI & Security</h3>
+        <ul>
+          <li><code>-listen</code>: Address for the web portal (default <code>:8080</code>).</li>
+          <li><code>-tls-cert</code> / <code>-tls-key</code>: Enable HTTPS for the UI.</li>
+          <li><code>-admin-users</code>: Comma-separated list of local/OIDC administrators.</li>
+          <li><code>-trusted-user-header</code>: Trust identity from upstream proxy (e.g. <code>X-Forwarded-User</code>).</li>
+          <li><code>-rules</code>: Path to <code>risk-rules.yaml</code>.</li>
+          <li><code>-siem-config</code>: Path to <code>siem.yaml</code>.</li>
+        </ul>
+
+        <h3>SSO Integration</h3>
+        <ul>
+          <li><code>-oidc-issuer</code>: OIDC provider URL (e.g. <code>https://accounts.google.com</code>).</li>
+          <li><code>-oidc-client-id</code> / <code>-oidc-client-secret</code>: Provider credentials.</li>
+          <li><code>-oidc-redirect-url</code>: Public callback URL.</li>
+        </ul>
+      </section>
+
+      <section id="ui-dashboard">
+        <h2>Web UI: Global Dashboard & Analytics</h2>
+        <p>The <strong>Reports</strong> tab provides a high-level summary of your security estate.</p>
+
+        <h3>1. Summary View</h3>
+        <ul>
+          <li><strong>Global Counters:</strong> Total recordings, currently active streams, and incomplete sessions.</li>
+          <li><strong>User Distribution:</strong> Interactive charts showing the most active privileged users.</li>
+          <li><strong>Host Distribution:</strong> Identify "hot" nodes with high sudo activity.</li>
+        </ul>
+
+        <h3>2. Anomaly Discovery</h3>
+        <p>Automated flagging of suspicious patterns:</p>
+        <table>
+          <thead><tr><th>Badge</th><th>Detection Logic</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge badge-red">Incomplete</span></td><td>Sudden stream termination (SIGKILL or crash).</td></tr>
+            <tr><td><span class="badge badge-amber">After Hours</span></td><td>Invocation between 23:00 and 06:00.</td></tr>
+            <tr><td><span class="badge badge-blue">Long Session</span></td><td>Session duration exceeds 2 hours.</td></tr>
+            <tr><td><span class="badge" style="background:#c984f8;color:#fff">Root Shell</span></td><td>Direct execution of <code>bash</code>, <code>sh</code>, or <code>su -</code>.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="ui-sessions">
+        <h2>Web UI: Session Discovery & Replay</h2>
+        <p>The <strong>Sessions</strong> tab is the auditor's primary tool for forensic discovery.</p>
+
+        <h3>Advanced Filtering</h3>
+        <ul>
+          <li><strong>Instant Search:</strong> AND-logic search bar (e.g., <code>alice prod /etc/shadow</code>).</li>
+          <li><strong>Date Range:</strong> Scoped investigation windows.</li>
+          <li><strong>Sort Modes:</strong> Order by Date, User, Host, Duration, or Risk Score.</li>
+        </ul>
+
+        <h3>Visual Indicators</h3>
+        <ul>
+          <li><span style="color:#4caf50">● Live</span>: Session currently in progress.</li>
+          <li><strong>Source Badges:</strong> Identifies if session came from <code>plugin</code>, <code>ebpf-tty</code>, or <code>dbus-polkit</code>.</li>
+          <li><strong>Risk Colors:</strong> Red (Critical > 90), Orange (High > 70), Yellow (Medium > 40).</li>
+        </ul>
+      </section>
+
+      <section id="ui-player">
+        <h2>Web UI: The Forensic Player</h2>
+        <p>A sub-second accurate terminal playback engine.</p>
+
+        <h3>Playback Controls</h3>
+        <ul>
+          <li><strong>Precision Scrubber:</strong> Jump to any millisecond in the recording.</li>
+          <li><strong>Variable Speed:</strong> 0.25x (frame-by-frame) to 16x (fast scan).</li>
+          <li><strong>Interactive Search:</strong> Use <code>Ctrl+F</code> to find text within the terminal's historical buffer.</li>
+          <li><strong>Live Follow:</strong> Auto-scrolls and updates in real-time for active sessions.</li>
+        </ul>
+      </section>
+
+      <section id="ui-sudoers">
+        <h2>Web UI: Visual Sudoers Policy Editor</h2>
+        <p>Centrally manage host-level <code>/etc/sudoers</code> without touching a text editor.</p>
+
+        <h3>The Visual Builder</h3>
+        <p>Instead of cryptic syntax, use the grid-based editor:</p>
+        <ul>
+          <li><strong>Identify:</strong> Users or Groups (e.g. <code>%wheel</code>).</li>
+          <li><strong>Scope:</strong> Host patterns (e.g. <code>web-prod-*</code>).</li>
+          <li><strong>Assume:</strong> RunAs identity (e.g. <code>root</code>, <code>postgres</code>).</li>
+          <li><strong>Options:</strong> Toggle <code>NOPASSWD</code>, <code>SETENV</code>, or <code>EXEC</code>.</li>
+        </ul>
+
+        <h3>Safety & Compliance</h3>
+        <ul>
+          <li><strong>Dry-Run Validation:</strong> Checks syntax before pushing to agents.</li>
+          <li><strong>Version History:</strong> Side-by-side diffs of every policy iteration.</li>
+          <li><strong>Author Attribution:</strong> Every policy change is tagged with the administrator's ID.</li>
+        </ul>
+      </section>
+
+      <section id="ui-jit">
+        <h2>Web UI: JIT Approval Workflows</h2>
+        <p>Enforce the "Four-Eyes" rule for high-risk infrastructure changes.</p>
+
+        <h3>Approval Lifecycle</h3>
+        <ol>
+          <li><strong>User Challenge:</strong> User runs <code>sudo rm -rf /data</code>. Terminal is held.</li>
+          <li><strong>Justification:</strong> User enters a reason (e.g. "Ticket #123").</li>
+          <li><strong>Notification:</strong> Alerts sent to Slack/Mattermost.</li>
+          <li><strong>Review:</strong> Approver views the <strong>Approvals</strong> tab in the UI.</li>
+          <li><strong>Decision:</strong> One-click Approve or Deny. Denials can include feedback to the user.</li>
+        </ol>
+      </section>
+
+      <section id="ui-iam">
+        <h2>Web UI: Identity, Groups & RBAC</h2>
+        <p>Configure granular access to the sudo-logger platform.</p>
+
+        <h3>Identity Sources</h3>
+        <ul>
+          <li><strong>Local Database:</strong> Standalone users with Bcrypt-hashed passwords.</li>
+          <li><strong>Enterprise SSO:</strong> OpenID Connect (OIDC) integration.</li>
+          <li><strong>Identity Proxy:</strong> Trust headers from Ingress controllers (e.g. <code>X-Forwarded-User</code>).</li>
+        </ul>
+
+        <h3>Role Mapping</h3>
+        <p>Map corporate groups (e.g. <code>Security-Ops</code>) to sudo-logger roles (<code>GlobalAdmin</code>, <code>Auditor</code>, <code>Approver</code>).</p>
+      </section>
+
+      <section id="ui-settings">
+        <h2>Web UI: Central Policy Settings</h2>
+        <p>The <strong>Config</strong> tab handles global system behavior in real-time.</p>
+
+        <h3>Settings Sub-Tabs</h3>
+        <ul>
+          <li><strong>SIEM Forwarding:</strong> Manage HTTPS/Syslog destinations and mTLS certificates.</li>
+          <li><strong>Sandbox Management:</strong> Update the global eBPF deny-list across the fleet.</li>
+          <li><strong>Data Retention:</strong> Set cleanup periods (e.g. "Auto-purge sessions older than 180 days").</li>
+          <li><strong>Auth Strategy:</strong> Switch between Local, OIDC, and Proxy-based authentication.</li>
+        </ul>
+      </section>
+
+      <section id="yaml-risk">
+        <h2>YAML Reference: Risk Rules Engine</h2>
+        <p>Located at <code>/etc/sudo-logger/risk-rules.yaml</code>. Defines the scoring logic.</p>
+
+        <h3>Rule Fields</h3>
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td>string</td><td>Unique rule identifier.</td></tr>
+            <tr><td><code>score</code></td><td>int</td><td>Risk points to add (0-100).</td></tr>
+            <tr><td><code>reason</code></td><td>string</td><td>Description shown in UI.</td></tr>
+            <tr><td><code>command</code></td><td>MatchPattern</td><td>Matches the sudo command line.</td></tr>
+            <tr><td><code>content</code></td><td>MatchPattern</td><td>Matches interactive terminal output.</td></tr>
+            <tr><td><code>command_base_any</code></td><td>[]string</td><td>Basename matches (e.g. <code>nc</code>).</td></tr>
+            <tr><td><code>runas</code></td><td>string</td><td>Match target user identity.</td></tr>
+            <tr><td><code>after_hours</code></td><td>bool</td><td>Match if started 23:00-06:00.</td></tr>
+            <tr><td><code>incomplete</code></td><td>bool</td><td>Match crash events.</td></tr>
+            <tr><td><code>min_duration</code></td><td>float</td><td>Min seconds to match.</td></tr>
+          </tbody>
+        </table>
+
+        <h4>MatchPattern Syntax</h4>
+        <pre><code># Rule within risk-rules.yaml
+- id: secret_access
+  score: 95
+  reason: Attempt to read system secrets
+  content:
+    contains_any: ["/etc/shadow", "/etc/gshadow"]
+    also_any: ["cat", "grep", "vi"] # AND cat/grep/vi was used</code></pre>
+      </section>
+
+      <section id="yaml-sandbox">
+        <h2>YAML Reference: eBPF Sandbox Policy</h2>
+        <p>Located at <code>/etc/sudo-logger/sandbox.yaml</code>. Enforces host-level blocking.</p>
+
+        <h3>Policy Deny-List</h3>
+        <pre><code>deny:
+  - pattern: "/usr/bin/nc*"
+    message: "Network exfiltration tools are forbidden."
+  - pattern: "/usr/bin/python*"
+    message: "Scripting interpreters are blocked during audit."
+  - pattern: "/usr/bin/gdb"
+    message: "Debuggers are prohibited in this session."</code></pre>
+        <div class="info-box">
+          <strong>Kernel Enforcement:</strong> Unlike shell aliases, eBPF sandbox policy is enforced
+          by the kernel. Renaming or symlinking a binary will NOT bypass the policy.
+        </div>
+      </section>
+
+      <section id="yaml-siem">
+        <h2>YAML Reference: SIEM Integration</h2>
+        <p>Located at <code>/etc/sudo-logger/siem.yaml</code>. Managed via the Web UI.</p>
+
+        <h3>Schema</h3>
+        <ul>
+          <li><code>transport</code>: <code>https</code>, <code>syslog</code>, or <code>stdout</code>.</li>
+          <li><code>format</code>: <code>json</code>, <code>cef</code>, or <code>ocsf</code>.</li>
+          <li><code>replay_url_base</code>: Deep-link prefix for SIEM alerts.</li>
+        </ul>
+      </section>
+
+      <section id="yaml-jit">
+        <h2>YAML Reference: JIT Approval Policy</h2>
+        <p>Located at <code>/etc/sudo-logger/approval-policy.yaml</code>.</p>
+
+        <h3>Rule Fields</h3>
+        <ul>
+          <li><code>users</code> / <code>hosts</code> / <code>commands</code>: Glob patterns.</li>
+          <li><code>sys_groups</code>: Required OS group memberships.</li>
+          <li><code>weekdays</code>: 0 (Sun) - 6 (Sat).</li>
+          <li><code>action</code>: <code>allow</code>, <code>challenge</code>, or <code>deny</code>.</li>
+        </ul>
+      </section>
+
+      <section id="sec-ebpf">
+        <h2>Security: eBPF Syscall Interception</h2>
+        <p>
+          Bypassing a sudo plugin is trivial for a root user (e.g., using <code>pkexec</code>). sudo-logger
+          prevents this using <strong>eBPF Tracepoints</strong>.
+        </p>
+        <p>
+          The Agent attaches to the <code>sys_enter_execve</code> kernel hook. Every process started
+          on the system is analyzed. If the process is a child of an active sudo-logger session,
+          its execution is intercepted, logged, and checked against the sandbox policy.
+        </p>
+      </section>
+
+      <section id="sec-dbus">
+        <h2>Security: D-Bus & Polkit Auditing</h2>
+        <p>
+          Privilege escalation via D-Bus (<code>pkexec</code>, <code>systemctl</code>) is fully audited.
+          The Agent monitors the system bus and captures the caller's identity, the requested action,
+          and the authorization decision.
+        </p>
+      </section>
+
+      <section id="sec-auditd">
+        <h2>Security: Immutable Auditd Rules</h2>
+        <p>
+          The <code>audit/99-immutable.rules</code> file locks the Linux audit configuration. Once loaded,
+          even a root user cannot disable auditing or delete rules until the next reboot.
+        </p>
+      </section>
+
+      <section id="sec-hardening">
+        <h2>Security: System Hardening</h2>
+        <ul>
+          <li><strong>RefuseManualStop:</strong> The Agent service cannot be stopped via systemd by default.</li>
+          <li><strong>Capabilities:</strong> Components drop all unnecessary privileges after startup.</li>
+          <li><strong>Memory Safety:</strong> All high-level logic is implemented in memory-safe Go.</li>
+        </ul>
+      </section>
+
+      <section id="ops-monitoring">
+        <h2>Operations: Monitoring, Metrics & Health</h2>
+        <ul>
+          <li><code>/healthz</code>: Liveness and Readiness probe target.</li>
+          <li><code>/metrics</code>: Prometheus exporter (Ingest rates, error counts, active sessions).</li>
+        </ul>
+      </section>
+
+      <section id="ops-maintenance">
+        <h2>Operations: Rotation, Backups & S3</h2>
+        <ul>
+          <li><strong>Log Rotation:</strong> Automated via <code>sudo-logserver.logrotate</code> for Local Mode.</li>
+          <li><strong>S3 Retention:</strong> Use S3 Lifecycle policies for automated tiered storage.</li>
+          <li><strong>SQL Backups:</strong> Metadata should be backed up using standard PG tools.</li>
+        </ul>
+      </section>
+
+      <section id="ops-troubleshooting">
+        <h2>The Troubleshooting Encyclopedia</h2>
+        <table>
+          <thead><tr><th>Error / Symptom</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>Red freeze banner</td><td>Check Log Server network. Sudo freezes if audit cannot be offloaded.</td></tr>
+            <tr><td>"No response from agent"</td><td><code>systemctl restart sudo-logger-agent</code>. Check socket path.</td></tr>
+            <tr><td>Signature Mismatch</td><td>Sync <code>-signkey</code> between server instances.</td></tr>
+            <tr><td>Empty UI sessions</td><td>Ensure <code>-storage=distributed</code> flag is set correctly.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="ops-diagnostics">
+        <h2>Operations: CLI Diagnostic Tools</h2>
+        <ul>
+          <li><code>verify-integrity.sh</code>: Proves a log file has not been edited.</li>
+          <li><code>verify-sandbox.sh</code>: Confirms eBPF blocking is operational.</li>
+          <li><code>agent --debug</code>: Starts agent in foreground with full protocol trace.</li>
+        </ul>
+      </section>
+
+      <section id="api-reference">
+        <h1>Enterprise API v1 Reference</h1>
+
+        <div class="api-endpoint" id="api-auth">
+          <div class="endpoint-header"><span class="method-badge m-get">GET</span> <span class="endpoint-path">/api/me</span></div>
+          <p>Retrieve the current authenticated identity, role, and corporate groups.</p>
+        </div>
+
+        <div class="api-endpoint" id="api-sessions">
+          <div class="endpoint-header"><span class="method-badge m-get">GET</span> <span class="endpoint-path">/api/sessions</span></div>
+          <p>Search and filter the audit estate. Params: <code>q</code>, <code>from</code>, <code>to</code>, <code>limit</code>.</p>
+        </div>
+
+        <div class="api-endpoint" id="api-approvals">
+          <div class="endpoint-header"><span class="method-badge m-put">PUT</span> <span class="endpoint-path">/api/approvals/{id}</span></div>
+          <p>Authorize or Deny a JIT request. Body: <code>{"decision": "approved|denied"}</code>.</p>
+        </div>
+
+        <div class="api-endpoint" id="api-policy">
+          <div class="endpoint-header"><span class="method-badge m-get">GET</span> <span class="endpoint-path">/api/rules</span></div>
+          <p>Retrieve current risk scoring engine rules.</p>
+        </div>
+
+        <div class="api-endpoint" id="api-user-mgmt">
+          <div class="endpoint-header"><span class="method-badge m-post">POST</span> <span class="endpoint-path">/api/users</span></div>
+          <p>Provision a new local auditor account.</p>
+        </div>
+
+        <div class="api-endpoint" id="api-system">
+          <div class="endpoint-header"><span class="method-badge m-get">GET</span> <span class="endpoint-path">/healthz</span></div>
+          <p>Kubernetes readiness check.</p>
+        </div>
+      </section>
+
+      <footer>
+        &copy; 2026 sudo-logger Enterprise Suite | Confidential
+        <br>
+        Documentation Portal v5.5.0 - Finalized June 10, 2026.
+      </footer>
+    </div>
+  </main>
+
+  <script>
+    const links = document.querySelectorAll('.nav-link');
+    const sections = document.querySelectorAll('section');
+    const main = document.querySelector('.main');
+
+    function highlightNav() {
+      let current = '';
+      sections.forEach(section => {
+        const sectionTop = section.offsetTop;
+        if (main.scrollTop >= sectionTop - 150) {
+          current = section.getAttribute('id');
+        }
+      });
+
+      links.forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href') === '#' + current) {
+          link.classList.add('active');
+        }
+      });
+    }
+
+    main.addEventListener('scroll', highlightNav);
+    window.addEventListener('load', highlightNav);
+
+    links.forEach(link => {
+      link.addEventListener('click', e => {
+        e.preventDefault();
+        const id = link.getAttribute('href').substring(1);
+        const target = document.getElementById(id);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth' });
+          history.pushState(null, null, '#' + id);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

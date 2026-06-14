@@ -554,7 +554,7 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		parentID: parentSessID,
 		hasIO:    hasIO,
 		ts:       time.Now(),
-		redactor: iolog.NewRedactor(getEffectiveMaskPatterns()),
+		redactor: iolog.MustNewRedactor(getEffectiveMaskPatterns()),
 	}
 
 	if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {
@@ -822,7 +822,7 @@ func (s *ebpfSubsystem) sessionStarted(scopePath, scopeName string) {
 		remote:   meta.remote,
 		command:  meta.shell,
 		cgroupID: cgroupID,
-		redactor: iolog.NewRedactor(getEffectiveMaskPatterns()),
+		redactor: iolog.MustNewRedactor(getEffectiveMaskPatterns()),
 	}
 
 	if err := sess.connect(s.cfg.Server, s.tlsCfg, verifyKey); err != nil {

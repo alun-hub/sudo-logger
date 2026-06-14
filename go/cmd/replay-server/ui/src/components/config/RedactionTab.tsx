@@ -94,9 +94,9 @@ export function RedactionTab() {
 
       {activeTab === 'system' ? (
         <div className="space-y-4">
-          <div className="p-4 bg-blue/5 border border-blue-dim/20 rounded-md flex gap-3">
-            <Info size={18} className="text-blue shrink-0 mt-0.5" />
-            <div className="text-[13px] text-text-sub">
+          <div className="p-4 bg-surface border border-border rounded-md flex gap-3">
+            <Info size={18} className="text-green shrink-0 mt-0.5" />
+            <div className="text-[13px] text-text-sub leading-relaxed">
               These rules are built-in and active on all agents. They use high-performance regex patterns
               to identify common secrets like AWS keys, GitHub tokens, and Bearer headers.
             </div>
@@ -114,7 +114,7 @@ export function RedactionTab() {
                     Group {rule.group}
                   </div>
                 </div>
-                <div className="bg-bg-dark/50 p-2 rounded font-mono text-[11px] text-green-dim break-all border border-border/50">
+                <div className="bg-bg-dark/50 p-2.5 rounded font-mono text-[12px] text-green border border-border/50 break-all">
                   {rule.regex}
                 </div>
               </div>
@@ -123,14 +123,13 @@ export function RedactionTab() {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="p-4 bg-amber/5 border border-amber-dim/20 rounded-md flex gap-3">
-            <Shield size={18} className="text-amber shrink-0 mt-0.5" />
-            <div className="text-[13px] text-text-sub">
+          <div className="p-4 bg-surface border border-border rounded-md flex gap-3">
+            <Shield size={18} className="text-green shrink-0 mt-0.5" />
+            <div className="text-[13px] text-text-sub leading-relaxed">
               Custom patterns defined here are pushed to all agents. Local patterns in
-              <code className="text-amber mx-1 font-mono">agent.conf</code> are still respected and merged with these.
+              <code className="text-green mx-1 font-mono">agent.conf</code> are still respected and merged with these.
             </div>
           </div>
-
           <div className="space-y-2">
             {localCustom.map((pattern, i) => (
               <div key={i} className="flex gap-2 group">

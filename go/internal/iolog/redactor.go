@@ -1,8 +1,10 @@
 package iolog
 
 import (
-	"regexp"
 	"bytes"
+	"fmt"
+	"regexp"
+
 	"sudo-logger/internal/protocol"
 )
 
@@ -91,16 +93,17 @@ var SystemRedactionRules = []RedactionRule{
 	},
 }
 
-func NewRedactor(patterns []string) *Redactor {
+func NewRedactor(patterns []string) (*Redactor, error) {
 	r := &Redactor{
 		promptRegex: regexp.MustCompile(`(?i)\b(password|passphrase|secret|token|key|cvv|pin|pass)[:=]\s*$`),
 	}
 
 	for _, p := range patterns {
 		re, err := regexp.Compile(p)
-		if err == nil {
-			r.custom = append(r.custom, re)
+		if err != nil {
+			return nil, fmt.Errorf("invalid mask_pattern %q: %w", p, err)
 		}
+		r.custom = append(r.custom, re)
 	}
 
 	// Add system default patterns
@@ -115,8 +118,19 @@ func NewRedactor(patterns []string) *Redactor {
 	triggerPatterns := `(?i)KEY|SECRET|TOKEN|AUTH|PASS|PWD|ACCESS|Bearer|Authorization|ghp_|sk_live_|AIza|-----BEGIN|AKIA|hooks|http|[:=]\s*[a-f0-9]{32}`
 	r.triggerRegex = regexp.MustCompile(triggerPatterns)
 
+	return r, nil
+}
+
+// MustNewRedactor is like NewRedactor but panics if the patterns are invalid.
+// Use only when patterns are already validated.
+func MustNewRedactor(patterns []string) *Redactor {
+	r, err := NewRedactor(patterns)
+	if err != nil {
+		panic(err)
+	}
 	return r
 }
+
 
 func (r *Redactor) addPattern(p string, group int) {
 	re, err := regexp.Compile(p)

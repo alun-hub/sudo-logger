@@ -1,0 +1,89 @@
+<h2>AD/LDAP Integration & Advanced Sudoers Settings</h2>
+<p class="subtitle">Mockup showing AD/LDAP group handling, custom directory configurations (CWD, CHROOT), and execution timeouts in the rule inspector.</p>
+
+<div class="mockup" style="margin-bottom: 24px;">
+  <div class="mockup-header" style="background: var(--card-hover); display: flex; justify-content: space-between; align-items: center;">
+    <span>Rule Inspector — Advanced Features Mockup</span>
+    <span style="font-size: 11px; color: var(--blue); border: 1px solid rgba(77, 168, 255, 0.3); padding: 2px 6px; border-radius: 4px;">Editing %"Domain Admins"</span>
+  </div>
+
+  <div class="mockup-body" style="padding: 16px; background: #0c0d14; display: flex; gap: 20px; font-size: 13px; color: var(--text-sub);">
+    <!-- Inspector panel mockup -->
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 16px; background: #0e1017; padding: 16px; border-radius: 8px; border: 1px solid var(--border);">
+
+      <!-- Principal Selection -->
+      <div>
+        <label style="display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Principal Type</label>
+        <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+          <button style="flex: 1; padding: 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); border-radius: 4px; color: var(--text-dim); cursor: pointer;">👤 User</button>
+          <button style="flex: 1; padding: 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); border-radius: 4px; color: var(--text-dim); cursor: pointer;">👥 Local Group</button>
+          <button style="flex: 1; padding: 6px; font-size: 12px; background: rgba(77, 168, 255, 0.1); border: 1px solid var(--blue); border-radius: 4px; color: var(--blue); font-weight: bold; cursor: pointer;">🌐 AD / LDAP Group</button>
+        </div>
+
+        <div>
+          <label style="display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Group Name</label>
+          <input type="text" value="Domain Admins" style="width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px;">
+          <!-- Informative helper for AD groups -->
+          <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 4px; background: rgba(255,255,255,0.02); padding: 6px; border-radius: 4px; display: flex; align-items: start; gap: 6px;">
+            <span>ℹ️</span>
+            <span>Active Directory groups are resolved via NSS (e.g. SSSD). Because the name contains spaces, it will be automatically quoted in the raw sudoers file as: <code>%"Domain Admins"</code>.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Execution Context (CWD, CHROOT, TIMEOUT) -->
+      <div>
+        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; font-weight: bold;">Execution Context & Sandboxing</div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div>
+            <label style="display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Working Directory (CWD)</label>
+            <input type="text" placeholder="e.g. /var/www" style="width: 100%; box-sizing: border-box; padding: 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; font-family: monospace;">
+            <span style="font-size: 10px; color: var(--text-dim);">Forces command execution in this path.</span>
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Chroot Jail (CHROOT)</label>
+            <input type="text" placeholder="e.g. /var/chroot" style="width: 100%; box-sizing: border-box; padding: 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; font-family: monospace;">
+            <span style="font-size: 10px; color: var(--text-dim);">Chroots the command before run.</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div>
+            <label style="display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Timeout Limit (Seconds)</label>
+            <input type="number" placeholder="No limit" style="width: 100%; box-sizing: border-box; padding: 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; font-family: monospace;">
+            <span style="font-size: 10px; color: var(--text-dim);">Automatically kills process if exceeded.</span>
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 4px;">Allowed Environment variables (Keep)</label>
+            <input type="text" placeholder="e.g. PATH, LANG" style="width: 100%; box-sizing: border-box; padding: 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; font-family: monospace;">
+            <span style="font-size: 10px; color: var(--text-dim);">Specific env vars to preserve.</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons" style="margin-bottom: 20px;">
+  <div class="pros">
+    <h4>Sudoers Parameters We Will Map in UI</h4>
+    <ul>
+      <li><strong>NOPASSWD</strong> — Execute commands without password prompts.</li>
+      <li><strong>NOEXEC</strong> — Prevent executing subprocesses (essential for security).</li>
+      <li><strong>SETENV</strong> — Let user specify environment variables.</li>
+      <li><strong>CWD</strong> — Force the command to execute from a specific folder.</li>
+      <li><strong>CHROOT</strong> — Sandbox the command in a chroot directory.</li>
+      <li><strong>TIMEOUT</strong> — Avoid dangling sudo commands by setting a max runtime.</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>Kept in "Raw Advanced Rules" Textarea</h4>
+    <ul>
+      <li><strong>Global Defaults</strong> (e.g. <code>Defaults secure_path="..."</code>, <code>Defaults mail_badpass</code>).</li>
+      <li><strong>Complex Aliases</strong> that aren't mapped to user cards (e.g. custom host groups, command groups).</li>
+      <li><strong>Negated Rules</strong> (e.g. `!/bin/su`) which are fragile in UI and better written in raw syntax.</li>
+    </ul>
+  </div>
+</div>

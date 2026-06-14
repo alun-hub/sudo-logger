@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf/rlimit"
+	"sudo-logger/internal/iolog"
 )
 
 const defaultConfigPath = "/etc/sudo-logger/agent.conf"
@@ -70,6 +71,11 @@ func main() {
 	}
 	if cfg.Debug {
 		debugLog = log.Printf
+	}
+
+	// Validate local mask_patterns from agent.conf.
+	if _, err := iolog.NewRedactor(cfg.MaskPatterns); err != nil {
+		log.Fatalf("config: mask_pattern: %v", err)
 	}
 
 	verifyKey, err = loadEd25519PubKey(cfg.VerifyKey)

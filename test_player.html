@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.css" />
+</head>
+<body>
+  <div id="player"></div>
+  <script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
+  <script>
+    const castData = `{"version": 2, "width": 80, "height": 24}
+[0.1, "o", "Output 1\\n"]
+[0.5, "i", "@k"]
+[1.0, "o", "Output 2\\n"]`;
+    const blob = new Blob([castData], { type: 'application/x-ndjson' });
+    const url = URL.createObjectURL(blob);
+    AsciinemaPlayer.create(url, document.getElementById('player'));
+  </script>
+</body>
+</html>

@@ -8,7 +8,7 @@ import (
 )
 
 func TestRedactorPromptMaskingLegitimate(t *testing.T) {
-	r := NewRedactor(nil)
+	r := MustNewRedactor(nil)
 
 	// A real password prompt arrives on ttyout WITHOUT a trailing newline.
 	// The redactor should activate masking.
@@ -31,7 +31,7 @@ func TestRedactorPromptMaskingLegitimate(t *testing.T) {
 }
 
 func TestRedactorEchoBypassPrevented(t *testing.T) {
-	r := NewRedactor(nil)
+	r := MustNewRedactor(nil)
 
 	// An attacker runs: echo "password: "
 	// The echo output contains a trailing \n — masking must NOT activate.
@@ -49,7 +49,7 @@ func TestRedactorEchoBypassPrevented(t *testing.T) {
 }
 
 func TestRedactorEchoBypassWithCR(t *testing.T) {
-	r := NewRedactor(nil)
+	r := MustNewRedactor(nil)
 
 	// Same bypass attempt using \r instead of \n.
 	r.Redact([]byte("password: \r"), protocol.StreamTtyOut)
@@ -59,7 +59,7 @@ func TestRedactorEchoBypassWithCR(t *testing.T) {
 }
 
 func TestRedactorNoFalsePositiveOnNonPromptOutput(t *testing.T) {
-	r := NewRedactor(nil)
+	r := MustNewRedactor(nil)
 
 	// Normal output that doesn't match prompt regex must not affect masking.
 	r.Redact([]byte("Hello, world!\n"), protocol.StreamTtyOut)
@@ -69,7 +69,7 @@ func TestRedactorNoFalsePositiveOnNonPromptOutput(t *testing.T) {
 }
 
 func TestRedactorSurgicalRedaction(t *testing.T) {
-	r := NewRedactor(nil)
+	r := MustNewRedactor(nil)
 
 	// Surgical redaction of inline secrets must still work.
 	cases := []struct {

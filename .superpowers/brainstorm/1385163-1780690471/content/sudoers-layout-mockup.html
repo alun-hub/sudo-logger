@@ -1,0 +1,136 @@
+<h2>Option B: Master-Detail Split Panel Mockup</h2>
+<p class="subtitle">This mockup demonstrates how the main editor area will be split into a compact rule list (left) and an inspector panel (right).</p>
+
+<div class="mockup" style="margin-bottom: 24px;">
+  <div class="mockup-header" style="background: var(--card-hover); display: flex; justify-content: space-between; align-items: center;">
+    <span>Sudoers Editor: host-prod-app-01</span>
+    <span style="font-size: 11px; color: var(--green); background: rgba(0, 232, 122, 0.1); padding: 2px 6px; border-radius: 4px;">✓ In sync</span>
+  </div>
+
+  <div class="mockup-body" style="padding: 0; display: flex; height: 450px; background: #0c0d14;">
+
+    <!-- Rule List Panel (Left) -->
+    <div style="width: 250px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: #0e1017;">
+      <div style="padding: 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px;">
+        <input type="text" placeholder="Filter rules..." style="flex: 1; padding: 4px 8px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px;">
+        <button style="background: var(--green); border: none; color: #000; padding: 4px 8px; font-size: 11px; font-weight: bold; border-radius: 4px; cursor: pointer;">+ Add</button>
+      </div>
+
+      <div style="flex: 1; overflow-y: auto;">
+        <!-- Active Rule Item -->
+        <div style="padding: 10px; background: rgba(77, 168, 255, 0.08); border-left: 3px solid var(--blue); cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03);">
+          <div>
+            <span style="font-size: 14px;">👥 %wheel</span>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">ALL Commands</div>
+          </div>
+          <span style="font-size: 10px; color: var(--green); background: rgba(0,232,122,0.1); padding: 1px 4px; border-radius: 3px;">NOPASSWD</span>
+        </div>
+
+        <!-- Rule Item 2 -->
+        <div style="padding: 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03);">
+          <div>
+            <span style="font-size: 14px;">👤 deployer</span>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">/usr/bin/git pull, /bin/systemctl...</div>
+          </div>
+          <span style="font-size: 10px; color: var(--text-dim); background: rgba(255,255,255,0.05); padding: 1px 4px; border-radius: 3px;">PASSWD</span>
+        </div>
+
+        <!-- Rule Item 3 -->
+        <div style="padding: 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03);">
+          <div>
+            <span style="font-size: 14px;">👥 %db-admins</span>
+            <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">/usr/bin/pg_dump, /usr/bin/psql</div>
+          </div>
+          <span style="font-size: 10px; color: var(--green); background: rgba(0,232,122,0.1); padding: 1px 4px; border-radius: 3px;">NOPASSWD</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rule Inspector Panel (Right) -->
+    <div style="flex: 1; display: flex; flex-direction: column; background: #0c0d14;">
+      <!-- Inspector Header -->
+      <div style="padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: bold; font-size: 14px; color: var(--text);">Edit Access Rule: %wheel</span>
+        <button style="background: none; border: 1px solid var(--red); color: var(--red); padding: 2px 8px; font-size: 11px; border-radius: 4px; cursor: pointer;">Delete Rule</button>
+      </div>
+
+      <!-- Inspector Body -->
+      <div style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px;">
+
+        <!-- Principal Definition -->
+        <div style="display: flex; gap: 12px;">
+          <div style="flex: 1;">
+            <label style="display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Principal Type</label>
+            <div style="display: flex; gap: 4px;">
+              <button style="flex: 1; padding: 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); border-radius: 4px; color: var(--text-dim); cursor: pointer;">👤 User</button>
+              <button style="flex: 1; padding: 6px; font-size: 12px; background: rgba(0, 232, 122, 0.1); border: 1px solid var(--green); border-radius: 4px; color: var(--green); font-weight: bold; cursor: pointer;">👥 Group</button>
+            </div>
+          </div>
+          <div style="flex: 2;">
+            <label style="display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Name</label>
+            <input type="text" value="wheel" style="width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 12px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px;">
+          </div>
+        </div>
+
+        <!-- Allowed Commands (Tag Input) -->
+        <div>
+          <label style="display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Allowed Commands</label>
+          <div style="border: 1px solid var(--border-mid); padding: 6px; border-radius: 4px; display: flex; flex-wrap: wrap; gap: 6px; background: var(--card);">
+            <!-- Command Chip -->
+            <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-mid); padding: 2px 6px; border-radius: 3px; font-size: 11px; display: flex; align-items: center; gap: 4px; font-family: monospace;">
+              <span>ALL</span>
+              <span style="cursor: pointer; color: var(--text-dim);">×</span>
+            </div>
+            <!-- Inline Input (no browser prompts!) -->
+            <input type="text" placeholder="+ Add command..." style="border: none; background: none; color: var(--text); font-size: 11px; font-family: monospace; outline: none; flex: 1; min-width: 100px;">
+          </div>
+          <p style="font-size: 10px; color: var(--text-dim); margin: 4px 0 0;">Type command path and press Enter or comma. Suggestions: ALL, /usr/bin/apt, /bin/systemctl</p>
+        </div>
+
+        <!-- Configuration & Flags -->
+        <div style="display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 6px; border: 1px solid var(--border);">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
+            <input type="checkbox" checked style="accent-color: var(--green);">
+            <span>No password required (NOPASSWD)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
+            <input type="checkbox" style="accent-color: var(--amber);">
+            <span>Disable shell escape (NOEXEC)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
+            <input type="checkbox" style="accent-color: var(--blue);">
+            <span>Allow environment variables (SETENV)</span>
+          </label>
+        </div>
+
+        <!-- Advanced Execution Settings -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+          <div>
+            <label style="display: block; font-size: 10px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 2px;">Run As User</label>
+            <input type="text" value="ALL" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 11px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; font-family: monospace;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 10px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 2px;">Run As Group</label>
+            <input type="text" value="ALL" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 11px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; font-family: monospace;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 10px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 2px;">Hosts</label>
+            <input type="text" value="ALL" style="width: 100%; box-sizing: border-box; padding: 4px 8px; font-size: 11px; background: var(--card); border: 1px solid var(--border-mid); color: var(--text); border-radius: 4px; font-family: monospace;">
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="options" data-multiselect data-choice-name="design-approval">
+  <div class="option" data-choice="proceed" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Design Looks Great</h3>
+      <p>I approve this layout and interactions. Let's document the technical specifications.</p>
+    </div>
+  </div>
+</div>

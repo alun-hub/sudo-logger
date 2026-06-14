@@ -227,7 +227,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	}()
 
 	const ackLagLimit = int64(5 * time.Second)
-	redactor := iolog.NewRedactor(getEffectiveMaskPatterns())
+	redactor := iolog.MustNewRedactor(getEffectiveMaskPatterns())
 
 	const maxDeadBuf = 500 // max chunks buffered while server unreachable
 
