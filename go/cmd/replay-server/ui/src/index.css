@@ -103,8 +103,12 @@
 ::-webkit-scrollbar-thumb { background: var(--color-border-mid); border-radius: 2px; }
 * { scrollbar-width: thin; scrollbar-color: var(--color-border-mid) transparent; }
 
-/* asciinema-player: fill container width and remove default margin */
+/* asciinema-player: fill container and center player vertically (letterbox) */
 .ap-wrapper {
   width: 100% !important;
   height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
