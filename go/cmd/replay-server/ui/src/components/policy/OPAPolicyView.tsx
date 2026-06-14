@@ -69,9 +69,11 @@ export function OPAPolicyView() {
       <div className="px-6 py-4 border-b border-border bg-surface/50 flex items-center justify-between shrink-0">
         <div className="space-y-1">
           <h2 className="text-[16px] font-bold text-text flex items-center gap-2">
-            <ShieldCheck size={18} className="text-green" /> OPA JIT Policy
+            <ShieldCheck size={18} className="text-green" /> Access Rules (OPA)
           </h2>
-          <p className="text-[12px] text-text-dim">Define who can run sudo without a justification (allow), who must provide one (challenge), and who is blocked (deny).</p>
+          <p className="text-[12px] text-text-dim">
+            Define real-time access rules. <span className="text-amber/80 font-medium">Note: These rules are only evaluated if "Enable JIT Workflow Engine" is ON in Global Config.</span>
+          </p>
         </div>
         <div className="flex items-center gap-2">
            <a

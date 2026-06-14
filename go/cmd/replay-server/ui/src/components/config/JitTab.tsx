@@ -61,8 +61,8 @@ export function JitTab() {
           <div className="space-y-6">
             <div className="flex items-center justify-between p-4 rounded-[5px] bg-card border border-border">
               <div className="space-y-0.5">
-                <div className="text-[14px] font-medium text-text">Enable JIT Approvals</div>
-                <div className="text-[12px] text-text-dim">Require approval for sessions matching OPA policy rules.</div>
+                <div className="text-[14px] font-medium text-text">Enable JIT Workflow Engine</div>
+                <div className="text-[12px] text-text-dim">Globally enables the JIT infrastructure, webhooks, and the approvals queue.</div>
               </div>
               <Switch checked={cfg.enabled} onCheckedChange={v => set({ enabled: v })} />
             </div>
