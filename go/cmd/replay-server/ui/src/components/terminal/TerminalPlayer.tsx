@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as AsciinemaPlayer from 'asciinema-player'
 import 'asciinema-player/dist/bundle/asciinema-player.css'
 import { RiskBadge } from '../sessions/RiskBadge'
+import { fmtDate, fmtDuration } from '@/lib/date'
 import type { SessionInfo } from '@/types/session'
 
 interface Props {
@@ -11,6 +12,14 @@ interface Props {
 export function TerminalPlayer({ session }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<any>(null)
+  const [copied, setCopied] = useState(false)
+
+  function copyTsid() {
+    navigator.clipboard.writeText(session.tsid).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -79,6 +88,36 @@ export function TerminalPlayer({ session }: Props) {
 
       {/* Terminal — fit:both scales to fill all available space */}
       <div className="flex-1 overflow-hidden bg-black" ref={containerRef} />
+
+      {/* Bottom info bar */}
+      <div className="bg-surface border-t border-border px-4 py-1.5 shrink-0 flex items-center gap-4 font-mono text-[11px] text-text-sub min-w-0">
+        <span className="shrink-0">{fmtDate(session.start_time)}</span>
+        <span className="text-border-mid">│</span>
+        <span className="shrink-0">{fmtDuration(session.duration)}</span>
+        {session.cwd && (
+          <>
+            <span className="text-border-mid">│</span>
+            <span className="truncate text-text-dim min-w-0">{session.cwd}</span>
+          </>
+        )}
+        <span className="flex-1" />
+        <button
+          onClick={copyTsid}
+          title="Kopiera session-ID"
+          className="shrink-0 text-text-dim hover:text-foreground transition-colors cursor-pointer"
+        >
+          {copied ? 'kopierat ✓' : `id: ${session.tsid.split('/').pop()}`}
+        </button>
+        <span className="text-border-mid">│</span>
+        <a
+          href={`/api/session/cast?tsid=${encodeURIComponent(session.tsid)}`}
+          download
+          title="Ladda ner .cast-fil"
+          className="shrink-0 text-text-dim hover:text-foreground transition-colors"
+        >
+          ↓ .cast
+        </a>
+      </div>
     </div>
   )
 }
