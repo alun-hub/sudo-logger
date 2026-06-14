@@ -5,7 +5,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { X } from 'lucide-react'
-import type { BlockedUser } from '@/api/policy'
+import type { BlockedUser } from '@/api/opa'
 
 interface Props {
   user: BlockedUser | null
