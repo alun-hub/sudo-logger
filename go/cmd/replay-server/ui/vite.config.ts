@@ -11,6 +11,7 @@ export default defineConfig({
   build: {
     outDir: '../static',
     emptyOutDir: true,
+    sourcemap: true,
   },
   server: {
     proxy: {

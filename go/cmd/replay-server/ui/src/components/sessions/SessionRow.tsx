@@ -51,7 +51,7 @@ export function SessionRow({ session: s, selected, onClick }: Props) {
         {s.command}
       </div>
 
-      <div className="text-[10.5px] text-text-dim font-mono truncate mt-0.5 w-full text-left opacity-70">
+      <div className="text-[10.5px] text-text-dim font-mono truncate mt-0.5 w-full text-left">
         {isDbusPolkit ? `caller: ${s.caller_process}` : (s.cwd || s.tty || 'no tty')}
       </div>
 

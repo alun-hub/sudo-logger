@@ -160,6 +160,25 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.ResponseWriter.WriteHeader(code)
 }
 
+// securityHeadersMiddleware adds standard security headers to all responses.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// CSP: allow local scripts, inline styles (for Tailwind/React), and data images (for icons)
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';")
+
+		// Add HSTS if TLS is enabled or we are behind a proxy that terminated TLS
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // accessLogMiddleware logs every request with the authenticated username,
 // resolved from the dynamic AuthConfig (proxy mode, OIDC, or Basic Auth).
 func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
@@ -1492,10 +1511,11 @@ func main() {
 	}
 
 	// Build middleware chain (innermost first):
-	//   basicAuth → accessLog → handler
+	//   security → basicAuth → accessLog → handler
 	var handler http.Handler = mux
 	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
 	handler = basicAuthMiddleware(handler)
+	handler = securityHeadersMiddleware(handler)
 
 	// Build the HTTP server so we can call Shutdown() on SIGTERM.
 	var httpSrv *http.Server
