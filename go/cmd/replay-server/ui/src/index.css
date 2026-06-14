@@ -9,8 +9,8 @@
   --color-border: #1e2230;
   --color-border-mid: #2a2f42;
   --color-text: #d4daf0;
-  --color-text-sub: #8890a8;
-  --color-text-dim: #4a5068;
+  --color-text-sub: #a1a9c3;
+  --color-text-dim: #7b849b;
   --color-green: #00e87a;
   --color-green-dim: #003d20;
   --color-green-glow: rgba(0, 232, 122, 0.12);
@@ -62,8 +62,8 @@
     --color-border:      rgba(0,0,0,0.1);
     --color-border-mid:  rgba(0,0,0,0.18);
     --color-text:        #1a1a2e;
-    --color-text-sub:    #374151;
-    --color-text-dim:    #6b7280;
+    --color-text-sub:    #2d3748;
+    --color-text-dim:    #4a5568;
     --color-green:       #007a40;
     --color-green-dim:   rgba(0,122,64,0.12);
     --color-green-glow:  rgba(0,122,64,0.08);
