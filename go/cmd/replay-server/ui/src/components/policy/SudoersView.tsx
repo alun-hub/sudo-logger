@@ -66,10 +66,19 @@ export function SudoersView() {
                         )}>
                           {h?.isOverride ? 'Modified' : 'Default'}
                         </span>
-                        {h?.inSync
-                          ? <CheckCircle2 size={10} className="text-green" />
-                          : <Clock size={10} className="text-amber" />
-                        }
+                        <div className="flex items-center gap-1">
+                          {h?.inSync ? (
+                            <>
+                              <CheckCircle2 size={13} className="text-green" />
+                              <span className="text-[10px] text-green font-medium uppercase tracking-tight">In sync</span>
+                            </>
+                          ) : (
+                            <>
+                              <Clock size={13} className="text-amber" />
+                              <span className="text-[10px] text-amber font-medium uppercase tracking-tight">Pending</span>
+                            </>
+                          )}
+                        </div>
                       </>
                     )}
                   </div>
