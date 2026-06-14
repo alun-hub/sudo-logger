@@ -80,6 +80,7 @@ func TestRedactorSurgicalRedaction(t *testing.T) {
 		{"export GITHUB_PERSONAL_ACCESS_TOKEN=foo", "foo"},
 		{"GEMINI_API_KEY=bar", "bar"},                    // pragma: allowlist secret
 		{"export HOSTUP_API_KEY=\"baz\"", "baz"},
+		{"KALLE=L-WO6jacYd5wucJu2u9PKEnB5SFt30yX", "L-WO6jacYd5wucJu2u9PKEnB5SFt30yX"}, // pragma: allowlist secret
 		{"UNIFI=0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef"}, // pragma: allowlist secret
 		{"Authorization: Bearer my-secret-token", "my-secret-token"},
 		{"https://hooks.slack.com/services/T12345678/B12345678/token12345678", "token12345678"},

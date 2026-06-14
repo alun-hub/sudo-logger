@@ -81,8 +81,8 @@ var SystemRedactionRules = []RedactionRule{
 	},
 	{
 		Name:        "High Entropy Token (Assignment)",
-		Description: "Matches any assignment where the value is a 32+ char hex/base64 string.",
-		Regex:       `\b([A-Z0-9_]+)\s*[:=]\s*(['"]?)([a-f0-9]{32,}|[a-zA-Z0-9+/=]{40,})\b`,
+		Description: "Matches any assignment where the value is a 24+ char hex/base64 string, regardless of variable name.",
+		Regex:       `\b([A-Z0-9_]+)\s*[:=]\s*(['"]?)([a-f0-9]{24,}|[a-zA-Z0-9\-_+/=]{24,})\b`,
 		Group:       3,
 	},
 	{
@@ -115,7 +115,7 @@ func NewRedactor(patterns []string) (*Redactor, error) {
 	// This ensures we don't run expensive regex on every chunk.
 	// Note: No word boundaries (\b) here to catch keywords inside larger strings (e.g. db_password).
 	// We also include common token prefixes and URL indicators.
-	triggerPatterns := `(?i)KEY|SECRET|TOKEN|AUTH|PASS|PWD|ACCESS|Bearer|Authorization|ghp_|sk_live_|AIza|-----BEGIN|AKIA|hooks|http|[:=]\s*[a-f0-9]{32}`
+	triggerPatterns := `(?i)KEY|SECRET|TOKEN|AUTH|PASS|PWD|ACCESS|Bearer|Authorization|ghp_|sk_live_|AIza|-----BEGIN|AKIA|hooks|http|[:=]\s*[a-zA-Z0-9\-_]{24}`
 	r.triggerRegex = regexp.MustCompile(triggerPatterns)
 
 	return r, nil

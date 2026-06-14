@@ -224,7 +224,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <p className="text-text-dim mb-3">Secrets are masked by the local agent before being sent to the server. This protects sensitive credentials from appearing in recordings.</p>
               <HelpTable cols={['Protection', 'Description']}>
                 <HelpRow label="Variable Masking"  desc="Automatically masks VAR=secret for common names like KEY, TOKEN, SECRET, PASSWORD." />
-                <HelpRow label="Pattern Matching"  desc="Detects AWS keys, GitHub tokens, Slack webhooks, and private key blocks." />
+                <HelpRow label="Entropy Detection" desc="Catches assignments with long random values (24+ chars) even if the variable name is unknown (e.g. KALLE=...)." />
+                <HelpRow label="SSH & Certificates" desc="Identifies and masks PEM-encoded private keys (SSH, SSL/TLS) and AWS/GitHub/Stripe tokens." />
                 <HelpRow label="Custom Rules"     desc="Global regex patterns can be added via Config → Redaction to protect organization-specific data." />
               </HelpTable>
             </HelpSection>
