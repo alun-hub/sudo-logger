@@ -10,7 +10,7 @@ import {
 import { parseSudoers, serializeSudoers, type SudoersRule } from '@/lib/sudoers'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { Shield, Clock, AlertTriangle, CheckCircle2, Save, Trash2, RotateCcw, Plus, X } from 'lucide-react'
+import { Shield, Clock, AlertTriangle, CheckCircle2, Save, Trash2, RotateCcw, Plus, X, BookOpen } from 'lucide-react'
 import { fmtDate } from '@/lib/date'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
