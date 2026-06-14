@@ -1959,6 +1959,12 @@ func listSessions(ctx context.Context, q, sortBy, order string, from, to int64, 
 		if s.Source == "ebpf-tty" && s.MatchedSessionID != "" {
 			continue
 		}
+		// Hide divergence alerts where no I/O was ever captured — these are
+		// spurious entries from flag-only sudo invocations (sudo -v, sudo -l)
+		// that eBPF sees but the I/O plugin never handles.
+		if s.DivergenceStatus == "missing_plugin" && !s.HasIO {
+			continue
+		}
 		if ownerFilter != "" && s.User != ownerFilter {
 			continue
 		}
