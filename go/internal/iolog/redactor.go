@@ -144,8 +144,8 @@ func (r *Redactor) Redact(data []byte, stream uint8) []byte {
 			var masked []byte
 
 			if bytes.HasPrefix(match, []byte("-----BEGIN")) && p.group == 2 {
-				masked = bytes.Repeat([]byte("\n****************"), 3)
-				masked = append(masked, '\n')
+				masked = bytes.Repeat([]byte("\r\n****************"), 3)
+				masked = append(masked, "\r\n"...)
 			} else if p.group == 1 && secretLen > 16 {
 				masked = make([]byte, secretLen)
 				copy(masked, match[startIdx:startIdx+4])
