@@ -167,8 +167,9 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		// CSP: allow local scripts, inline styles (for Tailwind/React), and data images (for icons)
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		// CSP: allow local scripts, inline styles, data images, and WASM for terminal player
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';")
 
 		// Add HSTS if TLS is enabled or we are behind a proxy that terminated TLS
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
