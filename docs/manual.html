@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>sudo-logger | Enterprise Manual & API Reference</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #00e87a;
+      --primary-dark: #007a40;
+      --bg: #09090f;
+      --surface: #0f1117;
+      --card: #161921;
+      --card-hover: #1c1f2e;
+      --border: #1e2230;
+      --text: #d4daf0;
+      --text-muted: #a1a9c3;
+      --text-dim: #8b94ab;
+      --code-bg: #000000;
+      --success: #00e87a;
+      --danger: #ff5f6d;
+      --blue: #4da8ff;
+      --font: 'Inter', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-padding-top: 20px; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      line-height: 1.6;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    /* --- Sidebar --- */
+    .sidebar {
+      width: 340px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .sidebar-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .search-box {
+      margin-top: 16px;
+      position: relative;
+    }
+    .search-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+    }
+    .search-input:focus { border-color: var(--primary); }
+
+    .sidebar-nav {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 0;
+    }
+    .nav-group { margin-bottom: 32px; }
+    .nav-title {
+      padding: 0 24px 10px;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+    .nav-link {
+      display: block;
+      padding: 8px 24px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      transition: all 0.1s;
+      border-left: 3px solid transparent;
+    }
+    .nav-link:hover { color: var(--primary); background: var(--card); }
+    .nav-link.active {
+      color: var(--primary);
+      background: var(--card);
+      border-left-color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* --- Main Content --- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 60px 80px 140px;
+    }
+    .content-wrapper { max-width: 900px; margin: 0 auto; }
+
+    h1 { font-size: 48px; font-weight: 800; margin: 0 0 40px; letter-spacing: -2px; color: #fff; }
+    h2 { font-size: 32px; font-weight: 700; margin: 80px 0 24px; border-bottom: 1px solid var(--border); padding-bottom: 12px; color: #fff; }
+    h3 { font-size: 22px; font-weight: 600; margin: 48px 0 16px; color: var(--primary); }
+
+    p { margin-bottom: 20px; font-size: 16px; color: var(--text-muted); }
+    ul, ol { margin-bottom: 24px; }
+    li { margin-bottom: 8px; color: var(--text-muted); }
+
+    code {
+      font-family: var(--font-mono);
+      background: var(--card);
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-size: 90%;
+      color: var(--primary);
+    }
+    pre {
+      background: var(--code-bg);
+      padding: 20px;
+      border-radius: 8px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      margin: 24px 0;
+    }
+    pre code { background: none; padding: 0; color: var(--text-sub); }
+
+    .info-box {
+      padding: 20px;
+      background: rgba(0, 232, 122, 0.05);
+      border-left: 4px solid var(--primary);
+      border-radius: 4px;
+      margin: 32px 0;
+    }
+
+    /* --- Interactive API --- */
+    .api-block {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 40px;
+      overflow: hidden;
+    }
+    .api-header {
+      padding: 16px 24px;
+      background: rgba(255,255,255,0.02);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .method {
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      color: #000;
+    }
+    .get { background: var(--primary); }
+    .post { background: var(--blue); }
+    .put { background: #e8a44d; }
+    .delete { background: var(--danger); }
+    .path { font-family: var(--font-mono); font-weight: 600; font-size: 14px; }
+
+    .api-content { padding: 24px; }
+    .try-it-btn {
+      background: var(--primary);
+      color: #000;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .try-it-btn:hover { opacity: 0.9; }
+
+    .api-response {
+      margin-top: 16px;
+      background: #000;
+      border-radius: 8px;
+      display: none;
+    }
+    .api-response.visible { display: block; }
+    .response-header {
+      padding: 8px 16px;
+      font-size: 11px;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+    }
+    .response-body { padding: 16px; font-family: var(--font-mono); font-size: 13px; color: var(--primary); overflow-x: auto; max-height: 400px; }
+
+    .schema-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 16px 0; }
+    .schema-table th { text-align: left; color: var(--text-dim); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .schema-table td { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
+    .hidden { display: none !important; }
+
+    footer {
+      margin-top: 120px;
+      padding-top: 40px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div style="font-weight: 800; font-size: 20px; color: #fff; display: flex; align-items: center; gap: 10px;">
+        <svg height="32" viewBox="0 0 24 24" width="32" fill="var(--primary)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+        sudo-logger
+      </div>
+      <div class="search-box">
+        <input type="text" class="search-input" id="docsSearch" placeholder="Search manual & API...">
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <div class="nav-title">Fundamentals</div>
+        <a href="#intro" class="nav-link">Introduction</a>
+        <a href="#redaction" class="nav-link">Secret Redaction</a>
+        <a href="#integrity" class="nav-link">Data Integrity</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">Policy & Config</div>
+        <a href="#sudoers" class="nav-link">Sudoers Management</a>
+        <a href="#jit" class="nav-link">JIT Workflows</a>
+        <a href="#sandbox" class="nav-link">eBPF Sandbox</a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-title">API Reference</div>
+        <a href="#api-auth" class="nav-link">Authentication</a>
+        <a href="#api-sessions" class="nav-link">Sessions</a>
+        <a href="#api-config" class="nav-link">System Config</a>
+        <a href="#api-sudoers" class="nav-link">Sudoers API</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main class="main" id="content">
+    <div class="content-wrapper">
+
+      <section id="intro">
+        <h1>Enterprise Manual</h1>
+        <p>Welcome to the official <strong>sudo-logger</strong> documentation. This guide covers everything from system architecture to advanced API integration.</p>
+
+        <div class="info-box">
+          <strong>New in v1.24:</strong> Centralized Secret Redaction management and eBPF-based session auditing for su/pkexec.
+        </div>
+      </section>
+
+      <section id="redaction">
+        <h2>Secret Redaction</h2>
+        <p>sudo-logger features a multi-layer redaction engine that masks sensitive information locally on the monitored host before it is transmitted to the server.</p>
+
+        <h3>1. Variable Assignment Masking</h3>
+        <p>The engine automatically identifies variable assignments in the terminal stream (e.g. in <code>.bashrc</code> or <code>.env</code> files). If a variable name contains any of the following keywords, its value is masked:</p>
+        <code>KEY, SECRET, TOKEN, AUTH, PASS, PWD, PASSWORD, ACCESS</code>
+
+        <h3>2. Entropy-Based Detection</h3>
+        <p>For variables with unknown names (like <code>KALLE=...</code>), the engine performs entropy analysis. Any assignment where the value is a random-looking string of 24 characters or more (hex or base64) is automatically redacted.</p>
+
+        <h3>3. Pattern Matching (Gitleaks)</h3>
+        <p>Industry-standard patterns are built-in to detect specific secrets regardless of context:</p>
+        <ul>
+          <li><strong>Cloud:</strong> AWS Access Keys, Google API Keys.</li>
+          <li><strong>SaaS:</strong> GitHub PATs, Stripe Secret Keys, Slack Webhooks.</li>
+          <li><strong>Files:</strong> PEM-encoded private keys (SSH, SSL/TLS certificates).</li>
+        </ul>
+      </section>
+
+      <section id="sudoers">
+        <h2>Sudoers Management</h2>
+        <p>The Replay UI provides a visual editor for <code>/etc/sudoers.d/sudo-logger-managed</code>. This allows administrators to manage access without risk of syntax errors locking out root access.</p>
+        <h3>Snapshots & Recovery</h3>
+        <p>Every time a policy is saved, a snapshot is created. You can view the history of changes and restore any previous version with a single click in the <strong>Policy → Sudoers</strong> tab.</p>
+      </section>
+
+      <section id="api-auth">
+        <h2>API: Authentication</h2>
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method get">GET</span>
+            <span class="path">/api/me</span>
+          </div>
+          <div class="api-content">
+            <p>Returns the currently authenticated user's profile and permissions.</p>
+            <table class="schema-table">
+              <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td>username</td><td>string</td><td>Unix or OIDC username</td></tr>
+                <tr><td>role</td><td>string</td><td>Assigned system role (admin/auditor)</td></tr>
+                <tr><td>permissions</td><td>array</td><td>List of granular capabilities</td></tr>
+              </tbody>
+            </table>
+            <button class="try-it-btn" onclick="testApi('/api/me')">Test Endpoint</button>
+            <div id="res-/api/me" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="api-config">
+        <h2>API: System Config</h2>
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method get">GET</span>
+            <span class="path">/api/redaction-config</span>
+          </div>
+          <div class="api-content">
+            <p>Fetches both system-default Gitleaks patterns and user-defined custom rules.</p>
+            <button class="try-it-btn" onclick="testApi('/api/redaction-config')">Test Endpoint</button>
+            <div id="res-/api/redaction-config" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method get">GET</span>
+            <span class="path">/api/siem-config</span>
+          </div>
+          <div class="api-content">
+            <p>Retrieves the current SIEM forwarding configuration (Splunk HEC, Syslog, etc).</p>
+            <button class="try-it-btn" onclick="testApi('/api/siem-config')">Test Endpoint</button>
+            <div id="res-/api/siem-config" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="sandbox">
+        <h2>eBPF Sandbox & Monitoring</h2>
+        <p>sudo-logger uses eBPF (Extended Berkeley Packet Filter) to provide kernel-level security that cannot be bypassed by simply renaming binaries or using sub-shells.</p>
+
+        <h3>Tracepoints</h3>
+        <p>The agent attaches to the <code>sys_enter_execve</code> tracepoint. This allows us to:</p>
+        <ul>
+          <li><strong>Audit su/pkexec:</strong> Detect when a user tries to escape the sudo-logger plugin by starting a new privileged shell.</li>
+          <li><strong>Enforce Policy:</strong> Instantly kill processes that match forbidden patterns in <code>sandbox.yaml</code>.</li>
+          <li><strong>TTY Recording:</strong> Capture raw terminal input even if the user is running a binary that doesn't use standard TTY calls.</li>
+        </ul>
+
+        <div class="warn-box" style="background: rgba(255, 95, 109, 0.05); border-left-color: var(--danger);">
+          <strong>Performance:</strong> eBPF hooks run in the kernel. sudo-logger's hooks are optimized for low overhead (< 1ms latency per exec).
+        </div>
+      </section>
+
+      <section id="jit">
+        <h2>JIT (Just-In-Time) Workflows</h2>
+        <p>Enforce "Four-Eyes" approval for high-risk commands. When a command matches a JIT policy, it is suspended until an administrator approves it.</p>
+
+        <h3>The Lifecycle</h3>
+        <ol>
+          <li><strong>Trap:</strong> User runs a restricted command. Agent sends <code>SIGSTOP</code> to the process.</li>
+          <li><strong>Notify:</strong> A webhook is triggered (Slack/Mattermost) with a deep-link to the Replay UI.</li>
+          <li><strong>Review:</strong> An administrator reviews the request, host, and justification.</li>
+          <li><strong>Release:</strong> Upon approval, the agent sends <code>SIGCONT</code> and recording begins.</li>
+        </ol>
+      </section>
+
+      <section id="api-sessions">
+        <h2>API: Sessions</h2>
+
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method get">GET</span>
+            <span class="path">/api/sessions</span>
+          </div>
+          <div class="api-content">
+            <p>Query the global session index. Supports powerful filtering.</p>
+            <table class="schema-table">
+              <thead><tr><th>Query Param</th><th>Example</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td>q</td><td>alice</td><td>Search string (user, host, or command)</td></tr>
+                <tr><td>limit</td><td>50</td><td>Max results to return</td></tr>
+                <tr><td>from</td><td>2026-01-01</td><td>Start date (YYYY-MM-DD)</td></tr>
+              </tbody>
+            </table>
+            <button class="try-it-btn" onclick="testApi('/api/sessions?limit=5')">Test Endpoint</button>
+            <div id="res-/api/sessions?limit=5" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method get">GET</span>
+            <span class="path">/api/report</span>
+          </div>
+          <div class="api-content">
+            <p>Aggregated statistics for the dashboard.</p>
+            <button class="try-it-btn" onclick="testApi('/api/report')">Test Endpoint</button>
+            <div id="res-/api/report" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="api-sudoers-ext">
+        <h2>API: Advanced Sudoers</h2>
+
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method get">GET</span>
+            <span class="path">/api/sudoers/snapshots</span>
+          </div>
+          <div class="api-content">
+            <p>Returns a list of all historical policy snapshots for a specific host.</p>
+            <table class="schema-table">
+              <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td>id</td><td>uuid</td><td>Snapshot identifier</td></tr>
+                <tr><td>timestamp</td><td>string</td><td>When the change was made</td></tr>
+                <tr><td>author</td><td>string</td><td>User who performed the edit</td></tr>
+              </tbody>
+            </table>
+            <button class="try-it-btn" onclick="testApi('/api/sudoers/snapshots')">Test Endpoint</button>
+            <div id="res-/api/sudoers/snapshots" class="api-response">
+               <div class="response-header"><span>Response</span><span class="status">200 OK</span></div>
+               <div class="response-body"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="security">
+        <h2>Security Architecture</h2>
+        <p>The Replay Server is hardened against modern web attacks using a strict set of security headers.</p>
+
+        <h3>Content Security Policy (CSP)</h3>
+        <p>A restrictive CSP is enforced to prevent XSS and data exfiltration:</p>
+        <ul>
+          <li><strong>wasm-unsafe-eval:</strong> Required for the terminal player's high-performance WebAssembly engine.</li>
+          <li><strong>frame-ancestors 'none':</strong> Prevents clickjacking by blocking the UI from being embedded in iframes.</li>
+          <li><strong>connect-src 'self':</strong> Ensures the browser only communicates with the Replay API.</li>
+        </ul>
+
+        <h3>Isolation Headers</h3>
+        <ul>
+          <li><strong>Cross-Origin-Opener-Policy (COOP):</strong> Set to <code>same-origin</code> to isolate the execution environment.</li>
+          <li><strong>Strict-Transport-Security (HSTS):</strong> Enforced for 2 years (63072000 seconds) including subdomains.</li>
+        </ul>
+      </section>
+
+      <section id="api-write-ops">
+        <h2>API: Management (POST/PUT)</h2>
+        <p>Management operations require <code>Admin</code> role. Below are examples of JSON payloads for common write operations.</p>
+
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method put">PUT</span>
+            <span class="path">/api/redaction-config</span>
+          </div>
+          <div class="api-content">
+            <p>Update custom redaction rules.</p>
+            <pre><code>{
+  "custom": [
+    {
+      "name": "Internal DB IDs",
+      "regex": "DB_ID_[0-9]{12}",
+      "description": "Masks internal database identifiers"
+    }
+  ]
+}</code></pre>
+          </div>
+        </div>
+
+        <div class="api-block">
+          <div class="api-header">
+            <span class="method post">POST</span>
+            <span class="path">/api/sudoers/config</span>
+          </div>
+          <div class="api-content">
+            <p>Save a new sudoers policy snapshot.</p>
+            <pre><code>{
+  "host_pattern": "web-prod-*",
+  "content": "alice ALL=(root) NOPASSWD: /usr/bin/dnf"
+}</code></pre>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    // --- API Testing ---
+    async function testApi(path) {
+      const resDiv = document.getElementById('res-' + path);
+      const bodyDiv = resDiv.querySelector('.response-body');
+      const statusSpan = resDiv.querySelector('.status');
+
+      resDiv.classList.add('visible');
+      bodyDiv.innerText = '// Loading data...';
+
+      try {
+        const response = await fetch(path);
+        const data = await response.json();
+        statusSpan.innerText = response.status + ' ' + response.statusText;
+        statusSpan.style.color = response.ok ? 'var(--primary)' : 'var(--danger)';
+        bodyDiv.innerText = JSON.stringify(data, null, 2);
+      } catch (err) {
+        statusSpan.innerText = 'Error';
+        statusSpan.style.color = 'var(--danger)';
+        bodyDiv.innerText = '// Failed to connect to API\n' + err.message;
+      }
+    }
+
+    // --- Search Functionality ---
+    const searchInput = document.getElementById('docsSearch');
+    const sections = document.querySelectorAll('main section');
+    const navLinks = document.querySelectorAll('.nav-link');
+
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+
+      sections.forEach(s => {
+        const text = s.innerText.toLowerCase();
+        const match = text.includes(q);
+        s.classList.toggle('hidden', q.length > 0 && !match);
+      });
+
+      // Update sidebar visibility
+      navLinks.forEach(l => {
+        const targetId = l.getAttribute('href').substring(1);
+        const section = document.getElementById(targetId);
+        l.classList.toggle('hidden', section && section.classList.contains('hidden'));
+      });
+    });
+
+    // --- Scroll Spy ---
+    const main = document.querySelector('.main');
+    function highlightNav() {
+      let current = '';
+      sections.forEach(section => {
+        if (section.classList.contains('hidden')) return;
+        const sectionTop = section.offsetTop;
+        if (main.scrollTop >= sectionTop - 100) {
+          current = section.getAttribute('id');
+        }
+      });
+      navLinks.forEach(link => {
+        link.classList.toggle('active', link.getAttribute('href') === '#' + current);
+      });
+    }
+    main.addEventListener('scroll', highlightNav);
+    window.addEventListener('load', highlightNav);
+  </script>
+</body>
+</html>
