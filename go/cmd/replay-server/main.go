@@ -342,6 +342,11 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			// For API requests, return 401 instead of redirecting to login page
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 			// Redirect unauthenticated OIDC users to login instead of showing Basic Auth prompt
 			http.Redirect(w, r, "/api/oidc/login", http.StatusFound)
 			return
