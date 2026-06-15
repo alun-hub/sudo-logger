@@ -882,11 +882,15 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var u store.User
-	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+	var input struct {
+		store.User
+		Password string `json:"password_hash"` // We use password_hash field name from UI
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
+	u := input.User
 
 	if u.Username == "" {
 		http.Error(w, "username required", http.StatusBadRequest)
@@ -894,13 +898,12 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Hash password if provided
-	var password string
-	if err := json.Unmarshal([]byte(`"`+u.PasswordHash+`"`), &password); err == nil && password != "" {
-		if err := validatePassword(password); err != nil {
+	if input.Password != "" {
+		if err := validatePassword(input.Password); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
 		if err != nil {
 			http.Error(w, "hash failed", http.StatusInternalServerError)
 			return
