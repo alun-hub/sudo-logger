@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchAuthConfig, saveAuthConfig, fetchRoles } from '@/api/config'
+import { fetchAuthConfig, saveAuthConfig, fetchRoles, fetchUsers } from '@/api/config'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import type { AuthConfig, GroupRoleMapping } from '@/types/config'
+import type { AuthConfig, GroupRoleMapping, UserInfo } from '@/types/config'
 import { Key, Globe, ShieldCheck, Plus, Trash2 } from 'lucide-react'
 
 const MODES = ['local', 'oidc', 'proxy'] as const
@@ -20,8 +20,11 @@ export function AuthTab() {
   const qc = useQueryClient()
   const { data, isPending } = useQuery({ queryKey: ['auth-config'], queryFn: fetchAuthConfig })
   const { data: roles } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles })
+  const { data: users } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
   const [cfg, setCfg] = useState<AuthConfig | null>(null)
   const current: AuthConfig = cfg ?? data ?? EMPTY_AUTH
+
+  const hasLocalUsers = (users as UserInfo[] ?? []).some(u => u.source === 'local')
 
   const save = useMutation({
     mutationFn: saveAuthConfig,
@@ -47,6 +50,11 @@ export function AuthTab() {
     set({ group_mappings: (current.group_mappings ?? []).filter((_, i) => i !== idx) })
 
   const handleSave = () => {
+    if (current.source === 'local' && !hasLocalUsers && data?.source !== 'local') {
+      if (!confirm('Warning: You are switching to LOCAL authentication but you have no local users defined. You will be locked out unless you are in bootstrap mode (empty database). Continue?')) {
+        return
+      }
+    }
     // Derive admin_groups from group_mappings for backward compat
     const adminGroups = (current.group_mappings ?? [])
       .filter(m => m.role === 'admin' && m.group)

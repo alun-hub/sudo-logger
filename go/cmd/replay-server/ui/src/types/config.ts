@@ -44,6 +44,7 @@ export interface AuthConfig {
 export interface UserInfo {
   username: string
   role: string
+  source: 'local' | 'oidc' | 'proxy'
   full_name?: string
   email?: string
   created_at?: string
