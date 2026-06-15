@@ -32,10 +32,12 @@ export function UsersRolesTab() {
   const mutUser = useMutation({
     mutationFn: upsertUser,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onError: (err: any) => alert(err.message || 'Failed to save user'),
   })
   const delUser = useMutation({
     mutationFn: deleteUser,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onError: (err: any) => alert(err.message || 'Failed to delete user'),
   })
 
   const mutRole = useMutation({
@@ -44,10 +46,12 @@ export function UsersRolesTab() {
       return existing ? updateRole(r.name, r) : createRole(r)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['roles'] }),
+    onError: (err: any) => alert(err.message || 'Failed to save role'),
   })
   const mutDelRole = useMutation({
     mutationFn: deleteRole,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['roles'] }),
+    onError: (err: any) => alert(err.message || 'Failed to delete role'),
   })
 
   if (p1 || p2) return <div className="text-text-dim font-mono text-[13px]">Loading users & roles…</div>
@@ -192,27 +196,27 @@ export function UsersRolesTab() {
         roles={roles ?? []}
         open={!!editUser}
         onClose={() => setEditUser(null)}
-        onSave={mutUser.mutate}
+        onSave={(u) => mutUser.mutateAsync(u).then(() => setEditUser(null))}
       />
       <UserModal
         user={null}
         roles={roles ?? []}
         open={isAddUserOpen}
         onClose={() => setIsAddUserOpen(false)}
-        onSave={mutUser.mutate}
+        onSave={(u) => mutUser.mutateAsync(u).then(() => setIsAddUserOpen(false))}
       />
 
       <RoleModal
         role={editRole}
         open={!!editRole}
         onClose={() => setEditRole(null)}
-        onSave={mutRole.mutate}
+        onSave={(r) => mutRole.mutateAsync(r).then(() => setEditRole(null))}
       />
       <RoleModal
         role={null}
         open={isAddRoleOpen}
         onClose={() => setIsAddRoleOpen(false)}
-        onSave={mutRole.mutate}
+        onSave={(r) => mutRole.mutateAsync(r).then(() => setIsAddRoleOpen(false))}
       />
       <ConfirmDialog
         open={pendingDelUser !== null}

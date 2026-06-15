@@ -45,7 +45,6 @@ export function UserModal({ user, roles, open, onClose, onSave }: Props) {
       role,
       source: 'local'
     })
-    onClose()
   }
 
   return (

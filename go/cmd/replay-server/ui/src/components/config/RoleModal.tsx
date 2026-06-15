@@ -44,7 +44,6 @@ export function RoleModal({ role, open, onClose, onSave }: Props) {
 
   const save = () => {
     onSave({ name, permissions })
-    onClose()
   }
 
   const togglePerm = (p: string) => {
