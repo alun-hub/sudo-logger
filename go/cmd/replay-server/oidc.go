@@ -25,7 +25,7 @@ var (
 
 // getOIDCConfig fetches the dynamic auth configuration and initializes the OIDC
 // provider if it hasn't been initialized or if the issuer has changed.
-func getOIDCConfig(ctx context.Context, reqHost string) (store.AuthConfig, *oidc.Provider, *oidc.IDTokenVerifier, *oauth2.Config, error) {
+func getOIDCConfig(ctx context.Context, r *http.Request) (store.AuthConfig, *oidc.Provider, *oidc.IDTokenVerifier, *oauth2.Config, error) {
 	cfg, err := sessionStore.GetAuthConfig(ctx)
 	if err != nil {
 		return cfg, nil, nil, nil, fmt.Errorf("failed to get auth config: %w", err)
@@ -35,7 +35,11 @@ func getOIDCConfig(ctx context.Context, reqHost string) (store.AuthConfig, *oidc
 		return cfg, nil, nil, nil, fmt.Errorf("OIDC is not fully configured (missing issuer or client ID)")
 	}
 
-	redirectURL := "https://" + reqHost + "/api/oidc/callback"
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	redirectURL := scheme + "://" + r.Host + "/api/oidc/callback"
 
 	oidcMu.RLock()
 	iss := cachedIssuer
@@ -95,7 +99,7 @@ func generateState() string {
 
 // handleOIDCLogin redirects the user to the OIDC provider's login page.
 func handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
-	_, _, _, oauthConf, err := getOIDCConfig(r.Context(), r.Host)
+	_, _, _, oauthConf, err := getOIDCConfig(r.Context(), r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -119,7 +123,7 @@ func handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 
 // handleOIDCCallback processes the response from the OIDC provider.
 func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
-	cfg, _, verifier, oauthConf, err := getOIDCConfig(r.Context(), r.Host)
+	cfg, _, verifier, oauthConf, err := getOIDCConfig(r.Context(), r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -190,7 +194,7 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 // handleOIDCLogout clears the local session and redirects to the OIDC end_session_endpoint
 func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
-	_, provider, _, oauthConf, err := getOIDCConfig(r.Context(), r.Host)
+	_, provider, _, oauthConf, err := getOIDCConfig(r.Context(), r)
 	if err != nil {
 		// Just clear cookie and go home if provider is gone
 		http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/"})
