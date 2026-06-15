@@ -131,8 +131,12 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Verify state
 	stateCookie, err := r.Cookie("oidc_state")
-	if err != nil || r.URL.Query().Get("state") != stateCookie.Value {
-		http.Error(w, "invalid or missing state", http.StatusBadRequest)
+	if err != nil {
+		http.Error(w, "invalid or missing state (cookie not found)", http.StatusBadRequest)
+		return
+	}
+	if r.URL.Query().Get("state") != stateCookie.Value {
+		http.Error(w, fmt.Sprintf("invalid or missing state (mismatch: got %q, expected %q)", r.URL.Query().Get("state"), stateCookie.Value), http.StatusBadRequest)
 		return
 	}
 
