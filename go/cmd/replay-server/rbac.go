@@ -67,9 +67,13 @@ func isAdmin(r *http.Request) bool {
 	return can(r, store.PermConfigWrite)
 }
 
-// isBootstrapMode returns true if no users exist in the store, allowing the
-// creation of the first admin account via the UI.
+// isBootstrapMode returns true if no users exist in the store and local auth is used,
+// allowing the creation of the first admin account via the UI.
 func isBootstrapMode(r *http.Request) bool {
+	cfg, _ := sessionStore.GetAuthConfig(r.Context())
+	if cfg.Source != "local" && cfg.Source != "" {
+		return false
+	}
 	users, err := sessionStore.ListUsers(r.Context())
 	return err == nil && len(users) == 0
 }
