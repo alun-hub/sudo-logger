@@ -322,9 +322,14 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Allow OIDC endpoints, health checks, and login pages to bypass Basic Auth
+		// Allow OIDC endpoints, health checks, login pages, and static assets to bypass Basic Auth.
+		// Static assets must be allowed so the /login page can load its JS/CSS.
 		if strings.HasPrefix(r.URL.Path, "/api/oidc/") || r.URL.Path == "/api/login" ||
-		   r.URL.Path == "/login" || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" {
+		   r.URL.Path == "/login" || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" ||
+		   strings.HasPrefix(r.URL.Path, "/assets/") ||
+		   strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") ||
+		   strings.HasSuffix(r.URL.Path, ".svg") || strings.HasSuffix(r.URL.Path, ".ico") ||
+		   strings.HasSuffix(r.URL.Path, ".png") || strings.HasSuffix(r.URL.Path, ".jpg") {
 			next.ServeHTTP(w, r)
 			return
 		}
