@@ -44,9 +44,7 @@ nav#TOC::before {
   letter-spacing: .12em;
   text-transform: uppercase;
   color: var(--text-sub);
-  padding: 0 20px 16px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
+  padding: 0 20px 10px;
 }
 
 nav#TOC ul { list-style: none; padding: 0; }

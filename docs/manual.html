@@ -88,6 +88,249 @@
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
   </style>
   <link rel="stylesheet" href="manual.css" />
+  <style>
+  /* ── Light mode variables ── */
+  :root.light {
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --card: #f1f5fd;
+    --border: #dde3f0;
+    --text: #1a1d2e;
+    --text-sub: #5a6184;
+    --accent: #3b5bdb;
+    --accent2: #7048e8;
+    --code-bg: #f0f3fb;
+  }
+
+  /* ── Nav header toolbar ── */
+  #doc-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px 14px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 10px;
+  }
+
+  #doc-search {
+    flex: 1;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-size: 12px;
+    padding: 5px 9px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  #doc-search:focus { border-color: var(--accent); }
+  #doc-search::placeholder { color: var(--text-sub); }
+
+  #theme-toggle {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-sub);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 4px 7px;
+    transition: color .15s, border-color .15s;
+  }
+  #theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+
+  /* ── Search match count badge ── */
+  #search-count {
+    display: block;
+    font-size: 10px;
+    color: var(--text-sub);
+    padding: 0 20px 6px;
+    height: 16px;
+  }
+
+  /* ── Highlight ── */
+  mark.doc-hl {
+    background: #fbbf24;
+    color: #111;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  mark.doc-hl.first { outline: 2px solid #f59e0b; }
+
+  /* ── Nav code: no horizontal overflow ── */
+  nav#TOC code {
+    white-space: normal;
+    word-break: break-all;
+    font-size: 11px;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent2);
+  }
+
+  /* nav entries that don't match search: hide */
+  nav#TOC li.search-hidden { display: none; }
+  /* parent ul that has all children hidden: keep header visible */
+  nav#TOC li.search-partial > a { opacity: .4; }
+  </style>
+
+  <script>
+  /* Apply saved theme before first paint to avoid flash */
+  (function () {
+    if (localStorage.getItem('sudo-logger-docs-theme') === 'light') {
+      document.documentElement.classList.add('light');
+    }
+  })();
+  </script>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const nav = document.getElementById('TOC');
+    if (!nav) return;
+
+    /* ── Inject toolbar above the existing nav content ── */
+    const toolbar = document.createElement('div');
+    toolbar.id = 'doc-toolbar';
+    toolbar.innerHTML =
+      '<input id="doc-search" type="search" placeholder="Search…" autocomplete="off">' +
+      '<button id="theme-toggle" title="Toggle dark/light mode">☀</button>';
+    nav.insertBefore(toolbar, nav.firstChild);
+
+    const countBadge = document.createElement('span');
+    countBadge.id = 'search-count';
+    nav.insertBefore(countBadge, toolbar.nextSibling);
+
+    /* ── Theme toggle ── */
+    const toggleBtn = document.getElementById('theme-toggle');
+    function applyTheme() {
+      const isLight = document.documentElement.classList.contains('light');
+      toggleBtn.textContent = isLight ? '☽' : '☀';
+    }
+    applyTheme();
+    toggleBtn.addEventListener('click', function () {
+      document.documentElement.classList.toggle('light');
+      const isLight = document.documentElement.classList.contains('light');
+      localStorage.setItem('sudo-logger-docs-theme', isLight ? 'light' : 'dark');
+      applyTheme();
+    });
+
+    /* ── Search ── */
+    const searchInput = document.getElementById('doc-search');
+    let hlTimer = null;
+
+    searchInput.addEventListener('input', function () {
+      clearTimeout(hlTimer);
+      hlTimer = setTimeout(function () { runSearch(searchInput.value); }, 200);
+    });
+
+    searchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { searchInput.value = ''; runSearch(''); }
+    });
+
+    function escapeRe(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    /* Remove all existing highlights (safe: replaces marks with their text) */
+    function clearHighlights() {
+      document.querySelectorAll('mark.doc-hl').forEach(function (m) {
+        m.parentNode.replaceChild(document.createTextNode(m.textContent), m);
+      });
+      /* Normalise text nodes split by previous highlight */
+      document.body.normalize();
+    }
+
+    /* Walk text nodes outside of <nav> and apply highlights */
+    function highlightContent(re) {
+      var count = 0;
+      var walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: function (n) {
+            if (n.parentNode.closest('nav, script, style, mark')) {
+              return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        }
+      );
+      var nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+
+      nodes.forEach(function (node) {
+        var text = node.textContent;
+        if (!re.test(text)) return;
+        re.lastIndex = 0;
+
+        var frag = document.createDocumentFragment();
+        var last = 0, m;
+        re.lastIndex = 0;
+        while ((m = re.exec(text)) !== null) {
+          frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+          var mark = document.createElement('mark');
+          mark.className = 'doc-hl';
+          mark.textContent = m[0];
+          frag.appendChild(mark);
+          last = m.index + m[0].length;
+          count++;
+        }
+        frag.appendChild(document.createTextNode(text.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+      });
+      return count;
+    }
+
+    /* Filter TOC links: hide entries whose text doesn't match */
+    function filterTOC(q) {
+      document.querySelectorAll('nav#TOC li').forEach(function (li) {
+        li.classList.remove('search-hidden', 'search-partial');
+      });
+      if (!q) return;
+
+      document.querySelectorAll('nav#TOC li').forEach(function (li) {
+        var text = li.querySelector('a') ? li.querySelector('a').textContent.toLowerCase() : '';
+        if (!text.includes(q)) {
+          li.classList.add('search-hidden');
+        }
+      });
+
+      /* If a parent li is hidden but has visible children, un-hide it partially */
+      document.querySelectorAll('nav#TOC li.search-hidden').forEach(function (li) {
+        var visibleChild = li.querySelector('li:not(.search-hidden)');
+        if (visibleChild) {
+          li.classList.remove('search-hidden');
+          li.classList.add('search-partial');
+        }
+      });
+    }
+
+    function runSearch(raw) {
+      clearHighlights();
+
+      var q = raw.trim();
+      filterTOC(q.toLowerCase());
+
+      if (q.length < 2) {
+        countBadge.textContent = '';
+        return;
+      }
+
+      var re = new RegExp(escapeRe(q), 'gi');
+      var count = highlightContent(re);
+
+      /* Scroll to first highlight */
+      var first = document.querySelector('mark.doc-hl');
+      if (first) {
+        first.classList.add('first');
+        first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      countBadge.textContent = count > 0 ? count + ' match' + (count > 1 ? 'es' : '') : 'no matches';
+    }
+  });
+  </script>
 </head>
 <body>
 <header id="title-block-header">

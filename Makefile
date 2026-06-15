@@ -61,6 +61,7 @@ docs-manual:
 	  --toc-depth=3 \
 	  --metadata title="sudo-logger Documentation" \
 	  --css=manual.css \
+	  --include-in-header=docs/manual-extras.html \
 	  -o docs/manual.html
 	cp docs/manual.html go/cmd/replay-server/ui/public/docs/manual.html
 	cp docs/manual.html go/cmd/replay-server/static/docs/manual.html
