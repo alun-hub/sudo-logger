@@ -903,16 +903,21 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 
 	// Hash password if provided
 	if input.Password != "" {
+		log.Printf("PUT /api/users: validating password for %q", u.Username)
 		if err := validatePassword(input.Password); err != nil {
+			log.Printf("PUT /api/users: password validation failed for %q: %v", u.Username, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		log.Printf("PUT /api/users: hashing password for %q", u.Username)
 		hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
 		if err != nil {
+			log.Printf("PUT /api/users: bcrypt failed for %q: %v", u.Username, err)
 			http.Error(w, "hash failed", http.StatusInternalServerError)
 			return
 		}
 		u.PasswordHash = string(hash) // pragma: allowlist secret
+		log.Printf("PUT /api/users: password hashed successfully for %q", u.Username)
 	} else if u.Source == "local" {
 		// Keep existing hash if not changing password
 		if existing, _ := sessionStore.GetUser(r.Context(), u.Username); existing != nil {
