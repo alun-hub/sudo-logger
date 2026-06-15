@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -169,6 +170,8 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to parse claims", http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("OIDC Claims: email=%q, username=%q, groups=%v", claims.Email, claims.PreferredUsername, claims.Groups)
 
 	username := claims.PreferredUsername
 	if username == "" {
