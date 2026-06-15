@@ -1242,6 +1242,42 @@ sed -i '/^alice:/d' /etc/sudo-logger/replay.htpasswd
 systemctl kill --signal=HUP sudo-replay
 ```
 
+#### OIDC (Enterprise SSO) with Keycloak
+
+Sudo Logger supports native OpenID Connect (OIDC) for authentication and role mapping. This allows you to integrate with identity providers like Keycloak, Okta, or Azure AD.
+
+##### Keycloak Client Configuration
+
+1.  **Create Client**: Create a new OpenID Connect client named `sudo-replay`.
+2.  **Capability Config**:
+    *   **Client authentication**: Set to **On** (Confidential access type).
+    *   **Authorization**: **Off**.
+    *   **Authentication flow**: Enable **Standard flow** (Authorization Code Flow).
+3.  **Login settings**:
+    *   **Valid redirect URIs**: Add both `http://<domain>/api/oidc/callback` and `https://<domain>/api/oidc/callback`. Use a wildcard if needed: `https://replay.example.com/*`.
+    *   **Web origins**: Set to `+` or your specific domain.
+4.  **Group Mapping**:
+    *   To map Keycloak groups to Sudo Logger roles, create a **Client Scope** named `groups` with a **Group Membership** mapper.
+    *   **Note**: Keycloak typically sends group names with a leading slash (e.g., `/admins`). Ensure your RBAC mapping in Sudo Logger matches this exact string.
+
+##### Keycloak Kubernetes Deployment (Tips)
+
+If deploying Keycloak v24+ in the same cluster:
+*   **Health Checks**: Set `KC_HEALTH_ENABLED=true` in environment variables; otherwise, Kubernetes readiness probes will fail with 404.
+*   **Proxy Headers**: Set `KC_PROXY=edge` to correctly handle `X-Forwarded-For` and `X-Forwarded-Proto` headers from Traefik/Ingress-Nginx.
+*   **Database**: Keycloak can share the existing PostgreSQL instance by creating a dedicated `keycloak` database.
+
+##### Sudo Logger Configuration
+
+Navigate to **Config -> System Auth** in the Replay UI:
+1.  **Auth Source**: Select `OIDC`.
+2.  **Issuer URL**: The full path to the realm (e.g., `https://keycloak.example.com/realms/myrealm`).
+3.  **Client ID**: `sudo-replay`.
+4.  **Client Secret**: Copy from Keycloak Client -> Credentials tab.
+5.  **RBAC Mapping**: Add a rule (e.g., `/admins` -> `admin`).
+
+Once saved, the system will bypass the "Bootstrap Mode" and redirect all unauthenticated users to the identity provider.
+
 #### Mode 3: Trusted header only (logging, no enforcement)
 
 When a proxy handles authentication and you only want the replay server to
