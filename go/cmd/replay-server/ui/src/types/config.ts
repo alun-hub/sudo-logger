@@ -99,7 +99,8 @@ export interface RedactionConfig {
 }
 
 export interface MeResponse {
-  username: string
+  user: string
+  logoutUrl?: string
   role: string
   permissions: string[]
 }

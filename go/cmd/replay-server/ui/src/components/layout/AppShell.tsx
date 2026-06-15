@@ -151,12 +151,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {me && (
             <div className="flex items-center gap-2 text-text-sub font-mono">
               <User size={14} className="text-text-dim" />
-              <span>{me.username}</span>
+              <span>{me.user}</span>
               <span className="text-[10px] bg-card border border-border px-1 rounded text-text-dim uppercase">{me.role}</span>
             </div>
           )}
 
-          <a href="/oauth2/sign_out" className="flex items-center gap-1.5 hover:text-red transition-colors group">
+          <a href={me?.logoutUrl || "/oauth2/sign_out"} className="flex items-center gap-1.5 hover:text-red transition-colors group">
             <LogOut size={14} className="text-text-dim group-hover:text-red" />
             Sign out
           </a>
