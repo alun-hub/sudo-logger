@@ -187,3 +187,37 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// Redirect back to main page
 	http.Redirect(w, r, "/", http.StatusFound)
 }
+
+// handleOIDCLogout clears the local session and redirects to the OIDC end_session_endpoint
+func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
+	_, provider, _, oauthConf, err := getOIDCConfig(r.Context(), r.Host)
+	if err != nil {
+		// Just clear cookie and go home if provider is gone
+		http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/"})
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	// Clear local session cookie
+	http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/"})
+
+	// Try to get end_session_endpoint from provider discovery claims
+	var claims struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	if err := provider.Claims(&claims); err != nil || claims.EndSessionEndpoint == "" {
+		// Fallback to local redirect if provider doesn't support RP-Initiated Logout
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+
+	// Construct logout URL
+	logoutURL := claims.EndSessionEndpoint
+	redirectURI := "http://" + r.Host + "/"
+	if strings.HasPrefix(oauthConf.RedirectURL, "https://") {
+		redirectURI = "https://" + r.Host + "/"
+	}
+	logoutURL += "?post_logout_redirect_uri=" + redirectURI
+
+	http.Redirect(w, r, logoutURL, http.StatusFound)
+}

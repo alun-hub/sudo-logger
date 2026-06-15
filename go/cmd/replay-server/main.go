@@ -1422,6 +1422,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/oidc/login", handleOIDCLogin)
 	mux.HandleFunc("/api/oidc/callback", handleOIDCCallback)
+	mux.HandleFunc("/api/oidc/logout", handleOIDCLogout)
 	mux.HandleFunc("/api/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1433,10 +1434,15 @@ func main() {
 		} else if u, _, ok := r.BasicAuth(); ok {
 			user = u
 		}
+
+		cfg, _ := sessionStore.GetAuthConfig(r.Context())
 		logoutURL := ""
-		if *flagTrustedUserHeader != "" {
+		if cfg.Source == "oidc" {
+			logoutURL = "/api/oidc/logout"
+		} else if *flagTrustedUserHeader != "" || cfg.Source == "proxy" {
 			logoutURL = "/oauth2/sign_out"
 		}
+
 		perms := permsFromContext(r)
 		permList := make([]string, 0, len(perms))
 		for p := range perms {
