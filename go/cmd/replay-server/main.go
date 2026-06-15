@@ -243,7 +243,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 			}
 		}
 
-		if isBootstrapMode(r) {
+		if isBootstrapMode(r) && (cfg.Source == "local" || cfg.Source == "") {
 			role = RoleAdmin
 		}
 

@@ -231,8 +231,6 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 
 	if idToken != "" {
 		logoutURL += "?id_token_hint=" + idToken + "&post_logout_redirect_uri=" + redirectURI
-	} else {
-		logoutURL += "?post_logout_redirect_uri=" + redirectURI
 	}
 
 	http.Redirect(w, r, logoutURL, http.StatusFound)
