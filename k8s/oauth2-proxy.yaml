@@ -153,9 +153,9 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: oauth2-proxy
+                name: sudo-replay-server
                 port:
-                  number: 4180
+                  number: 8080
     - host: replay.192.168.2.163.nip.io
       http:
         paths:
@@ -163,6 +163,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: oauth2-proxy
+                name: sudo-replay-server
                 port:
-                  number: 4180
+                  number: 8080
