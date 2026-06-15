@@ -1433,11 +1433,10 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		user := ""
-		if *flagTrustedUserHeader != "" {
-			user = r.Header.Get(*flagTrustedUserHeader)
-		} else if u, _, ok := r.BasicAuth(); ok {
-			user = u
+
+		user := viewerFromContext(r)
+		if user == "-" {
+			user = ""
 		}
 
 		cfg, _ := sessionStore.GetAuthConfig(r.Context())
