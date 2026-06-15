@@ -158,15 +158,26 @@
   }
   mark.doc-hl.first { outline: 2px solid #f59e0b; }
 
-  /* ── Nav code: no horizontal overflow ── */
+  /* ── Nav: kill all horizontal overflow ── */
+  nav#TOC * {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  nav#TOC a {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
   nav#TOC code {
     white-space: normal;
     word-break: break-all;
+    overflow-wrap: anywhere;
     font-size: 11px;
     background: none;
     border: none;
     padding: 0;
     color: var(--accent2);
+    display: inline;
   }
 
   /* nav entries that don't match search: hide */
