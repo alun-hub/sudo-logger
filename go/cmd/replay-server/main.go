@@ -322,14 +322,16 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Allow OIDC endpoints, health checks, login pages, and static assets to bypass Basic Auth.
-		// Static assets must be allowed so the /login page can load its JS/CSS.
+		// Allow OIDC endpoints, health checks, login pages, and static assets to bypass auth.
+		// Use anchored prefix/exact checks only — never suffix checks, which can be smuggled
+		// past API routes (e.g. /api/admin/export.js would bypass auth with a suffix allowlist).
+		// JS/CSS are all under /assets/; root-level SVGs are listed explicitly.
 		if strings.HasPrefix(r.URL.Path, "/api/oidc/") || r.URL.Path == "/api/login" ||
-		   r.URL.Path == "/login" || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" ||
-		   strings.HasPrefix(r.URL.Path, "/assets/") ||
-		   strings.HasSuffix(r.URL.Path, ".js") || strings.HasSuffix(r.URL.Path, ".css") ||
-		   strings.HasSuffix(r.URL.Path, ".svg") || strings.HasSuffix(r.URL.Path, ".ico") ||
-		   strings.HasSuffix(r.URL.Path, ".png") || strings.HasSuffix(r.URL.Path, ".jpg") {
+			r.URL.Path == "/login" || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" ||
+			strings.HasPrefix(r.URL.Path, "/assets/") ||
+			strings.HasPrefix(r.URL.Path, "/docs/") ||
+			r.URL.Path == "/favicon.svg" || r.URL.Path == "/icons.svg" ||
+			r.URL.Path == "/logo.svg" || r.URL.Path == "/logo-icon-72.svg" {
 			next.ServeHTTP(w, r)
 			return
 		}
