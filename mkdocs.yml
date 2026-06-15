@@ -1,0 +1,62 @@
+site_name: sudo-logger Documentation
+site_description: Complete reference for sudo-logger — session recording, audit, and replay
+site_url: https://sudo-logger.unixkonsult.se/docs
+docs_dir: docs/chapters
+site_dir: docs/site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - toc.follow
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - fenced_code
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+
+nav:
+  - Introduction: 01-introduction.md
+  - Architecture: 02-architecture.md
+  - Installation: 03-installation.md
+  - Configuration Reference: 04-configuration.md
+  - YAML Reference: 05-yaml-reference.md
+  - API Reference: 06-api-reference.md
+  - Features in Detail: 07-features.md
+  - Network & Security: 08-network-security.md
+  - Metrics: 09-metrics.md
+  - Operations: 10-operations.md
+  - Troubleshooting: 11-troubleshooting.md
+  - Developer Guide: 12-developer-guide.md

@@ -60,3 +60,6 @@ GUIRECORD-TODO.md
 go/sudo-replay-server-vps
 scripts/deploy-demo.sh
 go/cmd/replay-server/static/
+
+# MkDocs generated site (run: make docs-site)
+docs/site/
