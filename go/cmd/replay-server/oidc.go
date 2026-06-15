@@ -170,8 +170,8 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// 1. Resolve role from group claims using GroupMappings then AdminGroups fallback.
 	role := resolveRoleFromGroups(claims.Groups, cfg)
 
-	// 2. Set session cookie
-	sessionData := fmt.Sprintf("%s:%s", username, role)
+	// 2. Set session cookie, now containing the id_token for logout
+	sessionData := fmt.Sprintf("%s:%s:%s", username, role, rawIDToken)
 	encodedSession := base64.URLEncoding.EncodeToString([]byte(sessionData))
 
 	http.SetCookie(w, &http.Cookie{
@@ -198,6 +198,17 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract id_token from current session if available
+	var idToken string
+	if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
+		if dec, err := base64.URLEncoding.DecodeString(c.Value); err == nil {
+			parts := strings.SplitN(string(dec), ":", 3)
+			if len(parts) == 3 {
+				idToken = parts[2]
+			}
+		}
+	}
+
 	// Clear local session cookie
 	http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/"})
 
@@ -217,7 +228,12 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(oauthConf.RedirectURL, "https://") {
 		redirectURI = "https://" + r.Host + "/"
 	}
-	logoutURL += "?post_logout_redirect_uri=" + redirectURI
+
+	if idToken != "" {
+		logoutURL += "?id_token_hint=" + idToken + "&post_logout_redirect_uri=" + redirectURI
+	} else {
+		logoutURL += "?post_logout_redirect_uri=" + redirectURI
+	}
 
 	http.Redirect(w, r, logoutURL, http.StatusFound)
 }

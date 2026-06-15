@@ -215,8 +215,8 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		if user == "-" && cfg.Source == "oidc" {
 			if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
 				if dec, err := base64.URLEncoding.DecodeString(c.Value); err == nil {
-					parts := strings.SplitN(string(dec), ":", 2)
-					if len(parts) == 2 {
+					parts := strings.SplitN(string(dec), ":", 3)
+					if len(parts) >= 2 {
 						user = parts[0]
 						role = parts[1]
 					}
