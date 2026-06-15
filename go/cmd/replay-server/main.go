@@ -212,7 +212,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 			}
 		}
 
-		if user == "-" && cfg.Source == "oidc" {
+		if user == "-" && (cfg.Source == "oidc" || cfg.Source == "local" || cfg.Source == "") {
 			if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
 				if dec, err := base64.URLEncoding.DecodeString(c.Value); err == nil {
 					parts := strings.SplitN(string(dec), ":", 3)
@@ -322,8 +322,9 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Allow OIDC endpoints and health checks to bypass Basic Auth
-		if strings.HasPrefix(r.URL.Path, "/api/oidc/") || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" {
+		// Allow OIDC endpoints, health checks, and login pages to bypass Basic Auth
+		if strings.HasPrefix(r.URL.Path, "/api/oidc/") || r.URL.Path == "/api/login" ||
+		   r.URL.Path == "/login" || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -367,7 +368,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Local mode: only enforce Basic Auth if there is actually a user with a password,
+		// Local mode: only enforce Auth if there is actually a user with a password,
 		// OR if the legacy htpasswd flag was provided.
 		// If no one has a password, we treat it as an open deployment.
 		hasLocalPasswords := *flagHTPasswd != ""
@@ -386,13 +387,29 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Check for session cookie first (for local users logged in via /login page)
+		if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Fallback to Basic Auth (for API clients/legacy)
 		u, p, ok := r.BasicAuth()
-		if !ok || !authenticate(r.Context(), u, p) {
+		if ok && authenticate(r.Context(), u, p) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// If we reach here, the user is unauthenticated.
+		// For API requests, return 401.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("WWW-Authenticate", `Basic realm="sudo-replay"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+
+		// For UI requests, redirect to the new custom login page
+		http.Redirect(w, r, "/login", http.StatusFound)
 	})
 }
 
@@ -861,6 +878,70 @@ func validatePassword(password string) error {
 		return fmt.Errorf("password must contain at least one special character")
 	}
 	return nil
+}
+
+func handleLocalLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if !authenticate(r.Context(), req.Username, req.Password) {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	u, _ := sessionStore.GetUser(r.Context(), req.Username)
+	if u == nil {
+		http.Error(w, "user not found in store", http.StatusInternalServerError)
+		return
+	}
+
+	// Create session cookie: username:role:idToken (empty idToken for local)
+	sessionData := fmt.Sprintf("%s:%s:%s", u.Username, u.Role, "")
+	encodedSession := base64.URLEncoding.EncodeToString([]byte(sessionData))
+
+	secure := r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sudo_session",
+		Value:    encodedSession,
+		MaxAge:   3600 * 24, // 24 hours
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		Path:     "/",
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	cfg, _ := sessionStore.GetAuthConfig(r.Context())
+
+	// If OIDC, use the specific OIDC logout handler
+	if cfg.Source == "oidc" {
+		handleOIDCLogout(w, r)
+		return
+	}
+
+	// Local/Proxy logout: just clear cookie and redirect to login
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sudo_session",
+		Value:    "",
+		MaxAge:   -1,
+		Path:     "/",
+	})
+	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 func handleGetUsers(w http.ResponseWriter, r *http.Request) {
@@ -1439,7 +1520,9 @@ func main() {
 	})
 	mux.HandleFunc("/api/oidc/login", handleOIDCLogin)
 	mux.HandleFunc("/api/oidc/callback", handleOIDCCallback)
-	mux.HandleFunc("/api/oidc/logout", handleOIDCLogout)
+	mux.HandleFunc("/api/oidc/logout", handleLogout) // Redirect to unified logout
+	mux.HandleFunc("/api/login", handleLocalLogin)
+	mux.HandleFunc("/logout", handleLogout)
 	mux.HandleFunc("/api/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

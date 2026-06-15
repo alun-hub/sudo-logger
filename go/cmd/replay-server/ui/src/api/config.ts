@@ -13,6 +13,9 @@ import type {
 
 export const fetchMe = (): Promise<MeResponse> => apiFetch('/api/me')
 
+export const login = (username: string, password: string): Promise<void> =>
+  apiFetch('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+
 export const fetchSiemConfig = (): Promise<SiemConfig> =>
   apiFetch('/api/siem-config').then((r: any) => r.config)
 export const saveSiemConfig = (c: SiemConfig): Promise<void> =>

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { fetchMe } from '@/api/config'
+import { ApiError } from '@/api/client'
 import { fetchApprovals } from '@/api/approvals'
 import { cn } from '@/lib/utils'
 import { useCan } from '@/lib/perms'
@@ -32,7 +33,8 @@ const tabs = [
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe })
+  const navigate = useNavigate()
+  const { data: me, error: meError } = useQuery({ queryKey: ['me'], queryFn: fetchMe, retry: false })
   const { data: apprs } = useQuery({
     queryKey: ['approvals'],
     queryFn: fetchApprovals,
@@ -46,6 +48,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { shown, total } = useSessionStats()
   const visibleTabs = tabs.filter(t => !t.perm || can(t.perm))
   const [showHelp, setShowHelp] = useState(false)
+
+  useEffect(() => {
+    if (meError instanceof ApiError && meError.status === 401) {
+      navigate('/login')
+    }
+  }, [meError, navigate])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -156,7 +164,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          <a href={me?.logoutUrl || "/oauth2/sign_out"} className="flex items-center gap-1.5 hover:text-red transition-colors group">
+          <a href="/logout" className="flex items-center gap-1.5 hover:text-red transition-colors group">
             <LogOut size={14} className="text-text-dim group-hover:text-red" />
             Sign out
           </a>
