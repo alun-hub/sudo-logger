@@ -877,8 +877,10 @@ func handleGetUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePutUser(w http.ResponseWriter, r *http.Request) {
+	log.Printf("PUT /api/users called")
 	// Bootstrap exception: allow creating the first user without admin role.
 	if !isBootstrapMode(r) && !require(w, r, store.PermUsersWrite) {
+		log.Printf("PUT /api/users: require failed (bootstrap=%v)", isBootstrapMode(r))
 		return
 	}
 
@@ -887,10 +889,12 @@ func handlePutUser(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password_hash"` // We use password_hash field name from UI
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		log.Printf("PUT /api/users: decode failed: %v", err)
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 	u := input.User
+	log.Printf("PUT /api/users: user=%q, role=%s, source=%s, has_pass=%v", u.Username, u.Role, u.Source, input.Password != "")
 
 	if u.Username == "" {
 		http.Error(w, "username required", http.StatusBadRequest)
