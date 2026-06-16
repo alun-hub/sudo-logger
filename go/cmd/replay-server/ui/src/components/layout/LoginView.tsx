@@ -4,7 +4,7 @@ import { login } from '@/api/config'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Key, User, ShieldCheck, AlertCircle } from 'lucide-react'
-import logo from '@/assets/logo-badge.svg'
+import logo from '@/assets/logo-icon-72.svg'
 
 export function LoginView() {
   const navigate = useNavigate()
@@ -92,12 +92,6 @@ export function LoginView() {
               {isPending ? 'Authenticating...' : 'Sign In'}
             </Button>
           </form>
-        </div>
-
-        <div className="text-center">
-          <p className="text-[11px] text-text-dim/60 font-mono">
-            SUDO-LOGGER V3.0 • ISO-27001 COMPLIANT
-          </p>
         </div>
       </div>
     </div>
