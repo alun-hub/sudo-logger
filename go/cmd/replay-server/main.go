@@ -297,8 +297,8 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 			}
 		}
 
-		// Fallback for legacy trusted header if source is not explicitly set
-		if user == "-" && trustedHeader != "" {
+		// Fallback for legacy trusted header if source is explicitly set to proxy
+		if user == "-" && cfg.Source == "proxy" && trustedHeader != "" {
 			if v := r.Header.Get(trustedHeader); v != "" {
 				user = v
 			}
@@ -327,7 +327,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		ctx = context.WithValue(ctx, ctxPermissions, perms)
 		next.ServeHTTP(lrw, r.WithContext(ctx))
 		log.Printf("access identity=%s role=%s addr=%s method=%s path=%s status=%d",
-			sanitizeForLog(user), role, r.RemoteAddr, r.Method, sanitizeForLog(r.URL.Path), lrw.status)
+			"***", role, r.RemoteAddr, r.Method, sanitizeForLog(r.URL.Path), lrw.status)
 	})
 }
 

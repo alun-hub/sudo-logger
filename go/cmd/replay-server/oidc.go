@@ -5,8 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -171,8 +171,6 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("OIDC Claims: email=%q, username=%q, groups=%v", claims.Email, claims.PreferredUsername, claims.Groups)
-
 	username := claims.PreferredUsername
 	if username == "" {
 		username = claims.Email
@@ -233,9 +231,11 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 
 	// Construct logout URL
 	logoutURL := claims.EndSessionEndpoint
-	redirectURI := "http://" + r.Host + "/"
-	if strings.HasPrefix(oauthConf.RedirectURL, "https://") {
-		redirectURI = "https://" + r.Host + "/"
+	// Use the pre-configured RedirectURL to derive the base URL for the redirect
+	// instead of trusting the Host header.
+	redirectURI := "/"
+	if u, err := url.Parse(oauthConf.RedirectURL); err == nil {
+		redirectURI = u.Scheme + "://" + u.Host + "/"
 	}
 
 	if idToken != "" {
