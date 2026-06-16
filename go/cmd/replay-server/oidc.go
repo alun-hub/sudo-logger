@@ -13,6 +13,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
+	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 )
 
@@ -183,6 +184,13 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// The id_token is kept server-side for RP-Initiated Logout and never sent to the client.
 	sid := loginSessions.create(username, role, rawIDToken)
 
+	go siem.SendAudit("user_login", map[string]any{
+		"user":   username,
+		"role":   role,
+		"source": "oidc",
+		"addr":   r.RemoteAddr,
+	})
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sudo_session",
 		Value:    sid,
@@ -209,11 +217,20 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 
 	// Retrieve id_token from the server-side session, then invalidate it.
 	var idToken string
+	user := "-"
 	if c, err := r.Cookie("sudo_session"); err == nil {
 		if sess := loginSessions.lookup(c.Value); sess != nil {
 			idToken = sess.idToken
+			user = sess.username
 		}
 		loginSessions.delete(c.Value)
+	}
+
+	if user != "-" {
+		go siem.SendAudit("user_logout", map[string]any{
+			"user": user,
+			"addr": r.RemoteAddr,
+		})
 	}
 
 	// Clear local session cookie

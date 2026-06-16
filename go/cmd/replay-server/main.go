@@ -981,6 +981,12 @@ func handleLocalLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sid := loginSessions.create(u.Username, u.Role, "")
+	go siem.SendAudit("user_login", map[string]any{
+		"user":   u.Username,
+		"role":   u.Role,
+		"source": "local",
+		"addr":   r.RemoteAddr,
+	})
 	secure := r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil
 
 	http.SetCookie(w, &http.Cookie{
@@ -1006,8 +1012,18 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Local/Proxy logout: invalidate server-side session and clear cookie.
+	user := "-"
 	if c, err := r.Cookie("sudo_session"); err == nil {
+		if sess := loginSessions.lookup(c.Value); sess != nil {
+			user = sess.username
+		}
 		loginSessions.delete(c.Value)
+	}
+	if user != "-" {
+		go siem.SendAudit("user_logout", map[string]any{
+			"user": user,
+			"addr": r.RemoteAddr,
+		})
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:   "sudo_session",
