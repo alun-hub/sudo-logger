@@ -50,6 +50,7 @@ entities.json
 
 # Superpowers and AI security tools
 docs/superpowers/
+.superpowers/
 .gemini_security/
 .gemini_reliability.md
 
@@ -60,6 +61,25 @@ GUIRECORD-TODO.md
 go/sudo-replay-server-vps
 scripts/deploy-demo.sh
 go/cmd/replay-server/static/
+
+# Gemini CLI local config and skills
+.gemini/
+
+# Local AI skills
+skills/
+
+# Test/scratch files
+test.cast
+test_dbus.py
+test_encoder.go
+test_i_token.go
+test_mount.go
+test_player.html
+test_regex.js
+parse_dim.go
+parse_test.js
+new_audit.json
+demo_audit.json
 
 # MkDocs generated site (run: make docs-site)
 docs/site/
