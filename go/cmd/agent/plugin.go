@@ -745,7 +745,11 @@ loop:
 		case protocol.MsgChunk:
 			chunk, err := protocol.ParseChunk(payload)
 			if err == nil && chunk.Stream <= protocol.StreamTtyOut {
-				chunk.Data = redactor.Redact(chunk.Data, chunk.Stream)
+				data, buffering := redactor.Redact(chunk.Data, chunk.Stream)
+				if buffering {
+					continue loop
+				}
+				chunk.Data = data
 				payload = protocol.EncodeChunk(chunk.Seq, chunk.Timestamp, chunk.Stream, chunk.Data)
 			}
 			if err == nil && (chunk.Stream == protocol.StreamStdin || chunk.Stream == protocol.StreamTtyIn) {
@@ -773,6 +777,15 @@ loop:
 			time.Sleep(1 * time.Second)
 		}
 		log.Printf("[%s] all GUI processes exited; finishing session", start.SessionID)
+	}
+
+	// Flush any PEM blocks still open when the session ended (e.g. -----END
+	// never arrived due to kill/truncation). Best-effort redaction on partial data.
+	for _, stream := range []uint8{protocol.StreamStdout, protocol.StreamTtyOut, protocol.StreamStderr} {
+		if flushed := redactor.FlushPEM(stream); flushed != nil {
+			p := protocol.EncodeChunk(0, time.Now().UnixNano(), stream, flushed)
+			forward(protocol.MsgChunk, p)
+		}
 	}
 
 	if savedSessionEnd != nil {

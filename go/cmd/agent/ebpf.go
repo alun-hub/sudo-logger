@@ -1012,7 +1012,11 @@ func (s *ebpfSession) sendChunk(tsNS int64, stream uint8, data []byte) {
 		return
 	}
 	if s.redactor != nil {
-		data = s.redactor.Redact(data, stream)
+		var buffering bool
+		data, buffering = s.redactor.Redact(data, stream)
+		if buffering {
+			return
+		}
 	}
 	s.seq++
 	payload := encodeEBPFChunk(s.seq, tsNS, stream, data)

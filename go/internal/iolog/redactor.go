@@ -19,6 +19,10 @@ type Redactor struct {
 	maskingActive bool
 	promptRegex   *regexp.Regexp
 	triggerRegex  *regexp.Regexp // Fast-path: checks if ANY pattern might match
+	// pemBufs accumulates cross-chunk PEM blocks per stream until -----END
+	// arrives. Not safe for concurrent use; callers must ensure single-goroutine
+	// access or hold an external mutex (the eBPF path does this via s.mu).
+	pemBufs map[uint8][]byte
 }
 
 // RedactionRule describes a system-default masking pattern.
@@ -143,12 +147,26 @@ func (r *Redactor) RedactString(s string) string {
 	if s == "" {
 		return ""
 	}
-	return string(r.Redact([]byte(s), 0xFF))
+	data, _ := r.Redact([]byte(s), 0xFF) // 0xFF never triggers PEM buffering
+	return string(data)
 }
 
-func (r *Redactor) Redact(data []byte, stream uint8) []byte {
+var (
+	pemBeginMarker = []byte("-----BEGIN ")
+	pemEndMarker   = []byte("-----END ")
+	// pemMaxBuf is the upper bound on buffered PEM data. If exceeded we flush
+	// immediately so a pathological session cannot exhaust agent memory.
+	pemMaxBuf = 64 * 1024
+)
+
+// Redact returns (data, buffering). When buffering is true the chunk has been
+// absorbed into an internal per-stream PEM accumulation buffer; the caller
+// must not forward it. The combined, redacted block is returned on the chunk
+// that completes the -----END line (buffering=false). Call FlushPEM at
+// session end to drain any incomplete buffer.
+func (r *Redactor) Redact(data []byte, stream uint8) ([]byte, bool) {
 	if len(data) == 0 {
-		return data
+		return data, false
 	}
 
 	// ── 1. Interactive prompt masking (Stateful) ───────────────────────────
@@ -163,7 +181,7 @@ func (r *Redactor) Redact(data []byte, stream uint8) []byte {
 			}
 			res[i] = '*'
 		}
-		return res
+		return res, false
 	}
 
 	// ── 2. Prompt detection in Output ──────────────────────────────────────
@@ -176,15 +194,67 @@ func (r *Redactor) Redact(data []byte, stream uint8) []byte {
 		}
 	}
 
+	// ── 2.5 PEM block buffering ────────────────────────────────────────────
+	// PTY output splits -----BEGIN / body / -----END across separate chunks,
+	// which prevents the multi-line regex from matching. Accumulate per stream
+	// until the END marker arrives, then redact the combined block at once.
+	if r.pemBufs == nil {
+		r.pemBufs = make(map[uint8][]byte)
+	}
+	if buf, active := r.pemBufs[stream]; active {
+		buf = append(buf, data...)
+		if bytes.Contains(buf, pemEndMarker) || len(buf) >= pemMaxBuf {
+			delete(r.pemBufs, stream)
+			return r.applyPatterns(buf), false
+		}
+		r.pemBufs[stream] = buf
+		return nil, true
+	}
+	if bytes.Contains(data, pemBeginMarker) && !bytes.Contains(data, pemEndMarker) {
+		r.pemBufs[stream] = append([]byte(nil), data...)
+		return nil, true
+	}
+
 	// ── 3. Fast Path Check ────────────────────────────────────────────────
 	// If the chunk doesn't contain any trigger patterns AND we aren't in
 	// active masking mode, we can skip all expensive regex replacements.
 	if !r.triggerRegex.Match(data) {
-		return data
+		return data, false
 	}
 
 	// ── 4. Surgical Redaction (Slow Path) ──────────────────────────────────
-	// We only get here if something interesting was found.
+	return r.applyPatterns(data), false
+}
+
+// FlushPEM drains any incomplete PEM buffer for stream and returns
+// best-effort redacted data. Returns nil if nothing was buffered.
+// Must be called at session end to avoid silently dropping partial key output.
+func (r *Redactor) FlushPEM(stream uint8) []byte {
+	if r.pemBufs == nil {
+		return nil
+	}
+	buf := r.pemBufs[stream]
+	delete(r.pemBufs, stream)
+	if len(buf) == 0 {
+		return nil
+	}
+	// If the block is complete the normal patterns can handle it.
+	if bytes.Contains(buf, pemEndMarker) {
+		return r.applyPatterns(buf)
+	}
+	// Incomplete block (session ended before -----END arrived): keep the
+	// -----BEGIN ... ----- header line for context and mask the body.
+	if nl := bytes.IndexByte(buf, '\n'); nl >= 0 {
+		out := make([]byte, nl+1, len(buf))
+		copy(out, buf[:nl+1])
+		out = append(out, bytes.Repeat([]byte("*"), len(buf)-nl-1)...)
+		return out
+	}
+	return bytes.Repeat([]byte("*"), len(buf))
+}
+
+// applyPatterns runs the full regex substitution suite against data.
+func (r *Redactor) applyPatterns(data []byte) []byte {
 	res := make([]byte, len(data))
 	copy(res, data)
 

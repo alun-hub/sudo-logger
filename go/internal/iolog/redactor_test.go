@@ -1,6 +1,7 @@
 package iolog
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestRedactorPromptMaskingLegitimate(t *testing.T) {
 	}
 
 	// The user's typed password should be masked.
-	out := r.Redact([]byte("s3cr3t"), protocol.StreamTtyIn)
+	out, _ := r.Redact([]byte("s3cr3t"), protocol.StreamTtyIn)
 	if string(out) != "******" {
 		t.Fatalf("expected input masked, got %q", out)
 	}
@@ -42,7 +43,7 @@ func TestRedactorEchoBypassPrevented(t *testing.T) {
 
 	// The next command typed by the attacker must appear unmasked.
 	cmd := "rm -rf /important"
-	out := r.Redact([]byte(cmd), protocol.StreamTtyIn)
+	out, _ := r.Redact([]byte(cmd), protocol.StreamTtyIn)
 	if string(out) != cmd {
 		t.Fatalf("command should not be masked after echo bypass attempt, got %q", out)
 	}
@@ -68,6 +69,65 @@ func TestRedactorNoFalsePositiveOnNonPromptOutput(t *testing.T) {
 	}
 }
 
+func TestRedactorPEMSingleChunk(t *testing.T) {
+	r := MustNewRedactor(nil)
+
+	key := "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA=\n-----END OPENSSH PRIVATE KEY-----\n" // pragma: allowlist secret
+	data, buffering := r.Redact([]byte(key), protocol.StreamTtyOut)
+	if buffering {
+		t.Fatal("single-chunk PEM should not be buffered")
+	}
+	if bytes.Contains(data, []byte("b3BlbnNzaC1rZXktdjEAAAA=")) {
+		t.Errorf("key body was not redacted in single-chunk case; got %q", data)
+	}
+}
+
+func TestRedactorPEMCrossChunk(t *testing.T) {
+	r := MustNewRedactor(nil)
+
+	chunks := [][]byte{
+		[]byte("-----BEGIN OPENSSH PRIVATE KEY-----\r\n"), // pragma: allowlist secret
+		[]byte("b3BlbnNzaC1rZXktdjEAAAA=\r\n"),
+		[]byte("-----END OPENSSH PRIVATE KEY-----\r\n"),
+	}
+
+	// First two chunks should be absorbed.
+	for i, chunk := range chunks[:2] {
+		data, buffering := r.Redact(chunk, protocol.StreamTtyOut)
+		if !buffering {
+			t.Fatalf("chunk %d: expected buffering=true", i)
+		}
+		if data != nil {
+			t.Fatalf("chunk %d: expected nil data while buffering, got %q", i, data)
+		}
+	}
+
+	// Third chunk (END marker) should flush and redact.
+	data, buffering := r.Redact(chunks[2], protocol.StreamTtyOut)
+	if buffering {
+		t.Fatal("final chunk should not be buffering")
+	}
+	if bytes.Contains(data, []byte("b3BlbnNzaC1rZXktdjEAAAA=")) {
+		t.Errorf("key body was not redacted in cross-chunk case; got %q", data)
+	}
+}
+
+func TestRedactorPEMFlushIncomplete(t *testing.T) {
+	r := MustNewRedactor(nil)
+
+	// Session ends before -----END arrives; FlushPEM should redact what we have.
+	r.Redact([]byte("-----BEGIN RSA PRIVATE KEY-----\r\n"), protocol.StreamTtyOut) // pragma: allowlist secret
+	r.Redact([]byte("MIIEowIBAAKCAQEA...\r\n"), protocol.StreamTtyOut)
+
+	flushed := r.FlushPEM(protocol.StreamTtyOut)
+	if flushed == nil {
+		t.Fatal("expected non-nil flush for incomplete PEM block")
+	}
+	if bytes.Contains(flushed, []byte("MIIEowIBAAKCAQEA")) {
+		t.Errorf("key body was not redacted on flush; got %q", flushed)
+	}
+}
+
 func TestRedactorSurgicalRedaction(t *testing.T) {
 	r := MustNewRedactor(nil)
 
@@ -86,7 +146,8 @@ func TestRedactorSurgicalRedaction(t *testing.T) {
 		{"https://hooks.slack.com/services/T12345678/B12345678/token12345678", "token12345678"},
 	}
 	for _, tc := range cases {
-		out := string(r.Redact([]byte(tc.input), protocol.StreamTtyOut))
+		data, _ := r.Redact([]byte(tc.input), protocol.StreamTtyOut)
+		out := string(data)
 		if strings.Contains(out, tc.mustMask) {
 			t.Errorf("input %q: secret %q was not redacted; got %q", tc.input, tc.mustMask, out)
 		}
