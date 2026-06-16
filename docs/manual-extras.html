@@ -1,15 +1,20 @@
 <style>
-/* ── Light mode variables ── */
-:root.light {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --card: #f1f5fd;
-  --border: #dde3f0;
-  --text: #1a1d2e;
-  --text-sub: #5a6184;
-  --accent: #3b5bdb;
-  --accent2: #7048e8;
-  --code-bg: #f0f3fb;
+/* ── Light mode — mirrors [data-theme="light"] in index.css ── */
+[data-theme="light"] {
+  --bg:         #f0f2f6;
+  --surface:    #eef0f6;
+  --card:       #ffffff;
+  --card-hover: #e8eaf2;
+  --border:     rgba(0,0,0,0.1);
+  --border-mid: rgba(0,0,0,0.18);
+  --text:       #1a1a2e;
+  --text-sub:   #2d3748;
+  --text-dim:   #4a5568;
+  --green:      #007a40;
+  --blue:       #0969da;
+  --red:        #c0001a;
+  --amber:      #8a6500;
+  --code-bg:    #f0f3fb;
 }
 
 /* ── Nav header toolbar ── */
@@ -18,14 +23,14 @@
   align-items: center;
   gap: 6px;
   padding: 0 12px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-mid);
   margin-bottom: 10px;
 }
 
 #doc-search {
   flex: 1;
   background: var(--card);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-mid);
   border-radius: 5px;
   color: var(--text);
   font-size: 12px;
@@ -33,13 +38,13 @@
   outline: none;
   transition: border-color .15s;
 }
-#doc-search:focus { border-color: var(--accent); }
-#doc-search::placeholder { color: var(--text-sub); }
+#doc-search:focus { border-color: var(--green); }
+#doc-search::placeholder { color: var(--text-dim); }
 
 #theme-toggle {
   flex-shrink: 0;
   background: none;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-mid);
   border-radius: 5px;
   color: var(--text-sub);
   cursor: pointer;
@@ -48,13 +53,13 @@
   padding: 4px 7px;
   transition: color .15s, border-color .15s;
 }
-#theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+#theme-toggle:hover { color: var(--green); border-color: var(--green); }
 
 /* ── Search match count badge ── */
 #search-count {
   display: block;
   font-size: 10px;
-  color: var(--text-sub);
+  color: var(--text-dim);
   padding: 0 20px 6px;
   height: 16px;
 }
@@ -68,7 +73,7 @@ mark.doc-hl {
 }
 mark.doc-hl.first { outline: 2px solid #f59e0b; }
 
-/* ── Nav: kill all horizontal overflow ── */
+/* ── Nav: no horizontal overflow, code inline ── */
 nav#TOC * {
   max-width: 100%;
   box-sizing: border-box;
@@ -86,13 +91,12 @@ nav#TOC code {
   background: none;
   border: none;
   padding: 0;
-  color: var(--accent2);
+  color: var(--blue);
   display: inline;
 }
 
 /* nav entries that don't match search: hide */
 nav#TOC li.search-hidden { display: none; }
-/* parent ul that has all children hidden: keep header visible */
 nav#TOC li.search-partial > a { opacity: .4; }
 </style>
 
@@ -100,7 +104,7 @@ nav#TOC li.search-partial > a { opacity: .4; }
 /* Apply saved theme before first paint to avoid flash */
 (function () {
   if (localStorage.getItem('sudo-logger-docs-theme') === 'light') {
-    document.documentElement.classList.add('light');
+    document.documentElement.setAttribute('data-theme', 'light');
   }
 })();
 </script>
@@ -125,14 +129,19 @@ document.addEventListener('DOMContentLoaded', function () {
   /* ── Theme toggle ── */
   const toggleBtn = document.getElementById('theme-toggle');
   function applyTheme() {
-    const isLight = document.documentElement.classList.contains('light');
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
     toggleBtn.textContent = isLight ? '☽' : '☀';
   }
   applyTheme();
   toggleBtn.addEventListener('click', function () {
-    document.documentElement.classList.toggle('light');
-    const isLight = document.documentElement.classList.contains('light');
-    localStorage.setItem('sudo-logger-docs-theme', isLight ? 'light' : 'dark');
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    if (isLight) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('sudo-logger-docs-theme', 'dark');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'light');
+      localStorage.setItem('sudo-logger-docs-theme', 'light');
+    }
     applyTheme();
   });
 
@@ -153,16 +162,13 @@ document.addEventListener('DOMContentLoaded', function () {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  /* Remove all existing highlights (safe: replaces marks with their text) */
   function clearHighlights() {
     document.querySelectorAll('mark.doc-hl').forEach(function (m) {
       m.parentNode.replaceChild(document.createTextNode(m.textContent), m);
     });
-    /* Normalise text nodes split by previous highlight */
     document.body.normalize();
   }
 
-  /* Walk text nodes outside of <nav> and apply highlights */
   function highlightContent(re) {
     var count = 0;
     var walker = document.createTreeWalker(
@@ -203,7 +209,6 @@ document.addEventListener('DOMContentLoaded', function () {
     return count;
   }
 
-  /* Filter TOC links: hide entries whose text doesn't match */
   function filterTOC(q) {
     document.querySelectorAll('nav#TOC li').forEach(function (li) {
       li.classList.remove('search-hidden', 'search-partial');
@@ -217,10 +222,8 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     });
 
-    /* If a parent li is hidden but has visible children, un-hide it partially */
     document.querySelectorAll('nav#TOC li.search-hidden').forEach(function (li) {
-      var visibleChild = li.querySelector('li:not(.search-hidden)');
-      if (visibleChild) {
+      if (li.querySelector('li:not(.search-hidden)')) {
         li.classList.remove('search-hidden');
         li.classList.add('search-partial');
       }
@@ -241,7 +244,6 @@ document.addEventListener('DOMContentLoaded', function () {
     var re = new RegExp(escapeRe(q), 'gi');
     var count = highlightContent(re);
 
-    /* Scroll to first highlight */
     var first = document.querySelector('mark.doc-hl');
     if (first) {
       first.classList.add('first');

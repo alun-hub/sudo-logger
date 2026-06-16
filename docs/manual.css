@@ -1,24 +1,35 @@
+/* Design tokens aligned with go/cmd/replay-server/ui/src/index.css */
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --card: #20232f;
-  --border: #2d3148;
-  --text: #e2e4ef;
-  --text-sub: #8b8fa8;
-  --accent: #6c8eff;
-  --accent2: #a78bfa;
-  --code-bg: #141720;
-  --warn: #f59e0b;
+  --bg:         #09090f;
+  --surface:    #0f1117;
+  --card:       #161921;
+  --card-hover: #1c1f2e;
+  --border:     #1e2230;
+  --border-mid: #2a2f42;
+  --text:       #d4daf0;
+  --text-sub:   #a1a9c3;
+  --text-dim:   #8b94ab;
+  --green:      #00e87a;
+  --blue:       #4da8ff;
+  --red:        #ff5f6d;
+  --amber:      #e8a44d;
+  --code-bg:    #0a0c14;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Custom scrollbar — matches UI */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 2px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-mid) transparent; }
+
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 15px;
   line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
   margin-left: 260px;
   padding: 48px 56px 96px;
   max-width: calc(260px + 860px);
@@ -44,7 +55,7 @@ nav#TOC::before {
   font-weight: 700;
   letter-spacing: .12em;
   text-transform: uppercase;
-  color: var(--text-sub);
+  color: var(--text-dim);
   padding: 0 20px 10px;
 }
 
@@ -59,22 +70,38 @@ nav#TOC a {
   font-size: 13px;
   border-left: 2px solid transparent;
   transition: color .15s, border-color .15s;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 nav#TOC a:hover,
 nav#TOC a:focus {
   color: var(--text);
-  border-left-color: var(--accent);
-  background: rgba(108,142,255,.07);
+  border-left-color: var(--green);
+  background: rgba(0, 232, 122, 0.05);
 }
 
 nav#TOC ul ul a { padding-left: 36px; font-size: 12px; }
 nav#TOC ul ul ul a { padding-left: 52px; }
 
+nav#TOC * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 /* ── Headings ── */
-h1 { font-size: 2rem; font-weight: 700; color: var(--text); margin: 0 0 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-h2 { font-size: 1.35rem; font-weight: 600; color: var(--text); margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-h3 { font-size: 1.05rem; font-weight: 600; color: var(--accent2); margin: 32px 0 10px; }
+h1 {
+  font-size: 2rem; font-weight: 700; color: var(--text);
+  margin: 0 0 8px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+h2 {
+  font-size: 1.35rem; font-weight: 600; color: var(--text);
+  margin: 48px 0 16px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+h3 { font-size: 1.05rem; font-weight: 600; color: var(--green); margin: 32px 0 10px; }
 h4 { font-size: .95rem; font-weight: 600; color: var(--text-sub); margin: 20px 0 8px; }
 
 p { margin: 0 0 14px; }
@@ -87,12 +114,12 @@ table {
   margin: 16px 0 24px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 5px;
   overflow: hidden;
 }
 th {
   background: var(--surface);
-  color: var(--text-sub);
+  color: var(--text-dim);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: .06em;
@@ -103,14 +130,14 @@ th {
 }
 td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: rgba(255,255,255,.02); }
+tr:hover td { background: var(--card-hover); }
 
 /* ── Code ── */
 code {
-  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
   font-size: 12.5px;
   background: var(--code-bg);
-  color: #a5b4fc;
+  color: var(--blue);
   padding: 2px 6px;
   border-radius: 3px;
   border: 1px solid var(--border);
@@ -119,7 +146,7 @@ code {
 pre {
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 5px;
   padding: 16px 20px;
   overflow-x: auto;
   margin: 12px 0 20px;
@@ -129,7 +156,7 @@ pre code {
   background: none;
   border: none;
   padding: 0;
-  color: #c4cfe8;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -139,22 +166,21 @@ li { margin-bottom: 4px; }
 
 /* ── Blockquote ── */
 blockquote {
-  border-left: 3px solid var(--accent);
-  background: rgba(108,142,255,.07);
+  border-left: 3px solid var(--green);
+  background: rgba(0, 232, 122, 0.05);
   padding: 12px 16px;
   margin: 16px 0;
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 5px 5px 0;
   color: var(--text-sub);
 }
 
 /* ── Misc ── */
 hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
 
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* Document title produced by pandoc --standalone */
-h1.title { font-size: 1.6rem; color: var(--text-sub); margin-bottom: 32px; border-bottom: none; }
+h1.title { font-size: 1.6rem; color: var(--text-dim); margin-bottom: 32px; border-bottom: none; }
 
 @media (max-width: 800px) {
   nav#TOC { display: none; }
