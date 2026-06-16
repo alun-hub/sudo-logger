@@ -180,6 +180,10 @@ hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
 a { color: var(--blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
+/* Underline links inside body text so they're distinguishable without relying on colour alone */
+p a, li a, td a { text-decoration: underline; text-underline-offset: 2px; }
+p a:hover, li a:hover, td a:hover { opacity: .8; }
+
 h1.title { font-size: 1.6rem; color: var(--text-dim); margin-bottom: 32px; border-bottom: none; }
 
 @media (max-width: 800px) {

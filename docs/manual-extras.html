@@ -111,6 +111,15 @@ nav#TOC li.search-partial > a { opacity: .4; }
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  /* ── Wrap non-nav body children in <main> for landmark accessibility ── */
+  const main = document.createElement('main');
+  Array.from(document.body.childNodes).forEach(function (node) {
+    if (node !== document.getElementById('TOC')) {
+      main.appendChild(node);
+    }
+  });
+  document.body.appendChild(main);
+
   const nav = document.getElementById('TOC');
   if (!nav) return;
 

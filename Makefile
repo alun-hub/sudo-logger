@@ -61,6 +61,8 @@ docs-manual:
 	  --toc \
 	  --toc-depth=3 \
 	  --metadata title="sudo-logger Documentation" \
+	  --metadata lang=en \
+	  --highlight-style=breezedark \
 	  --css=docs/manual.css \
 	  --include-in-header=docs/manual-extras.html \
 	  -o docs/manual.html
