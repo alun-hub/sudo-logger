@@ -11,6 +11,13 @@ go/sudo-replay-server
 go/replay-server
 go/loadgen
 
+# Helm bundled dependencies (run: helm dependency update)
+charts/sudo-logger/charts/*.tgz
+
+# Screenshot artifacts
+replay_auth_check.png
+replay_ui_check.png
+
 # Temporary build directories
 selinux/tmp/
 
