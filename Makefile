@@ -57,10 +57,11 @@ docs-manual:
 	  --from markdown \
 	  --to html5 \
 	  --standalone \
+	  --embed-resources \
 	  --toc \
 	  --toc-depth=3 \
 	  --metadata title="sudo-logger Documentation" \
-	  --css=manual.css \
+	  --css=docs/manual.css \
 	  --include-in-header=docs/manual-extras.html \
 	  -o docs/manual.html
 	cp docs/manual.html go/cmd/replay-server/ui/public/docs/manual.html
