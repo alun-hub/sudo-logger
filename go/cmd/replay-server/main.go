@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"embed"
@@ -99,6 +100,75 @@ var (
 
 // sessionStore is the active storage backend, initialised in main().
 var sessionStore store.SessionStore
+
+// loginSession holds server-side state for one authenticated browser session.
+// The session ID (a random 32-byte token) is the only thing stored in the cookie;
+// username and role are never trusted from the client.
+type loginSession struct {
+	username  string
+	role      Role
+	idToken   string // OIDC id_token kept for RP-Initiated Logout; empty for local auth
+	expiresAt time.Time
+}
+
+type loginSessionStore struct {
+	mu   sync.Mutex
+	data map[string]*loginSession
+}
+
+func newLoginSessionStore() *loginSessionStore {
+	return &loginSessionStore{data: make(map[string]*loginSession)}
+}
+
+func (s *loginSessionStore) create(username string, role Role, idToken string) string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+	sid := base64.RawURLEncoding.EncodeToString(b)
+	s.mu.Lock()
+	s.data[sid] = &loginSession{
+		username:  username,
+		role:      role,
+		idToken:   idToken,
+		expiresAt: time.Now().Add(24 * time.Hour),
+	}
+	s.mu.Unlock()
+	return sid
+}
+
+func (s *loginSessionStore) lookup(sid string) *loginSession {
+	if sid == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.data[sid]
+	if !ok || time.Now().After(sess.expiresAt) {
+		delete(s.data, sid)
+		return nil
+	}
+	return sess
+}
+
+func (s *loginSessionStore) delete(sid string) {
+	s.mu.Lock()
+	delete(s.data, sid)
+	s.mu.Unlock()
+}
+
+func (s *loginSessionStore) purgeExpired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for sid, sess := range s.data {
+		if now.After(sess.expiresAt) {
+			delete(s.data, sid)
+		}
+	}
+}
+
+var loginSessions = newLoginSessionStore()
 
 // validRoleName matches safe role names: lowercase letters, digits, hyphens, underscores; 1–64 chars.
 var validRoleName = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
@@ -213,13 +283,10 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		}
 
 		if user == "-" && (cfg.Source == "oidc" || cfg.Source == "local" || cfg.Source == "") {
-			if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
-				if dec, err := base64.URLEncoding.DecodeString(c.Value); err == nil {
-					parts := strings.SplitN(string(dec), ":", 3)
-					if len(parts) >= 2 {
-						user = parts[0]
-						role = parts[1]
-					}
+			if c, err := r.Cookie("sudo_session"); err == nil {
+				if sess := loginSessions.lookup(c.Value); sess != nil {
+					user = sess.username
+					role = sess.role
 				}
 			}
 		}
@@ -346,7 +413,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		if cfg.Source == "oidc" {
-			if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
+			if c, err := r.Cookie("sudo_session"); err == nil && loginSessions.lookup(c.Value) != nil {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -394,8 +461,8 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check for session cookie first (for local users logged in via /login page)
-		if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
+		// Check for a valid server-side session cookie (set by /api/login).
+		if c, err := r.Cookie("sudo_session"); err == nil && loginSessions.lookup(c.Value) != nil {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -913,15 +980,12 @@ func handleLocalLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create session cookie: username:role:idToken (empty idToken for local)
-	sessionData := fmt.Sprintf("%s:%s:%s", u.Username, u.Role, "")
-	encodedSession := base64.URLEncoding.EncodeToString([]byte(sessionData))
-
+	sid := loginSessions.create(u.Username, u.Role, "")
 	secure := r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sudo_session",
-		Value:    encodedSession,
+		Value:    sid,
 		MaxAge:   3600 * 24, // 24 hours
 		HttpOnly: true,
 		Secure:   secure,
@@ -941,12 +1005,15 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Local/Proxy logout: just clear cookie and redirect to login
+	// Local/Proxy logout: invalidate server-side session and clear cookie.
+	if c, err := r.Cookie("sudo_session"); err == nil {
+		loginSessions.delete(c.Value)
+	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "sudo_session",
-		Value:    "",
-		MaxAge:   -1,
-		Path:     "/",
+		Name:   "sudo_session",
+		Value:  "",
+		MaxAge: -1,
+		Path:   "/",
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
@@ -1612,6 +1679,20 @@ func main() {
 	go func() {
 		if _, err := cache.rebuild(ctx); err != nil {
 			log.Printf("initial session cache build: %v", err)
+		}
+	}()
+
+	// Periodically remove expired login sessions from the in-memory store.
+	go func() {
+		t := time.NewTicker(15 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				loginSessions.purgeExpired()
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 

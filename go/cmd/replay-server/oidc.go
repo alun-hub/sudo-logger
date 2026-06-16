@@ -181,13 +181,13 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// 1. Resolve role from group claims using GroupMappings then AdminGroups fallback.
 	role := resolveRoleFromGroups(claims.Groups, cfg)
 
-	// 2. Set session cookie, now containing the id_token for logout
-	sessionData := fmt.Sprintf("%s:%s:%s", username, role, rawIDToken)
-	encodedSession := base64.URLEncoding.EncodeToString([]byte(sessionData))
+	// 2. Create a server-side session; store only the opaque session ID in the cookie.
+	// The id_token is kept server-side for RP-Initiated Logout and never sent to the client.
+	sid := loginSessions.create(username, role, rawIDToken)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sudo_session",
-		Value:    encodedSession,
+		Value:    sid,
 		MaxAge:   3600 * 24, // 24 hours
 		HttpOnly: true,
 		Secure:   strings.HasPrefix(oauthConf.RedirectURL, "https://"),
@@ -209,15 +209,13 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract id_token from current session if available
+	// Retrieve id_token from the server-side session, then invalidate it.
 	var idToken string
-	if c, err := r.Cookie("sudo_session"); err == nil && c.Value != "" {
-		if dec, err := base64.URLEncoding.DecodeString(c.Value); err == nil {
-			parts := strings.SplitN(string(dec), ":", 3)
-			if len(parts) == 3 {
-				idToken = parts[2]
-			}
+	if c, err := r.Cookie("sudo_session"); err == nil {
+		if sess := loginSessions.lookup(c.Value); sess != nil {
+			idToken = sess.idToken
 		}
+		loginSessions.delete(c.Value)
 	}
 
 	// Clear local session cookie
