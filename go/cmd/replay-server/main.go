@@ -2707,6 +2707,7 @@ func handlePutRedactionConfig(w http.ResponseWriter, r *http.Request) {
 // sandboxYAML mirrors the agent's sandboxYAML struct and is used for strict
 // schema validation of sandbox configs submitted via the API.
 type sandboxYAML struct {
+	Enabled *bool `yaml:"enabled"` // nil → true; explicit false disables enforcement
 	// Features must be declared here so that strict (KnownFields) validation in
 	// handlePutSandbox accepts a config that carries the feature-flag block —
 	// which every config written by the Settings UI does.

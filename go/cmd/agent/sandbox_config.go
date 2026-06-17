@@ -13,6 +13,7 @@ import (
 )
 
 type sandboxYAML struct {
+	Enabled  *bool `yaml:"enabled"` // nil → true; explicit false disables enforcement
 	Features struct {
 		DenyNetlink         *bool `yaml:"deny_netlink"`
 		DenyMount           *bool `yaml:"deny_mount"`
@@ -160,6 +161,11 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 	var cfg sandboxYAML
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse sandbox config: %w", err)
+	}
+
+	if cfg.Enabled != nil && !*cfg.Enabled {
+		log.Printf("sandbox: config has enabled: false — enforcement disabled")
+		return &resolvedSandbox{PathInodes: make(map[string]SandboxInodeKey)}, nil
 	}
 
 	res := &resolvedSandbox{
