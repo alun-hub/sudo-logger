@@ -3,6 +3,7 @@ import { BookOpen } from 'lucide-react'
 import { InputDialog } from '@/components/ui/confirm-dialog'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchSandbox, saveSandbox, fetchSandboxTemplates, saveSandboxTemplates } from '@/api/config'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
 // ── Feature definitions ───────────────────────────────────────────────────────
@@ -283,15 +284,6 @@ export function SandboxTab() {
             <BookOpen size={13} /> Docs
           </a>
           <button
-            onClick={() => setEnabled(!current.enabled)}
-            className={cn(
-              'h-8 px-3 rounded-[4px] text-[12px] font-bold border transition-colors',
-              current.enabled
-                ? 'bg-green-dim border-green text-green hover:bg-green/20'
-                : 'bg-red/10 border-red/50 text-red hover:bg-red/20'
-            )}
-          >{current.enabled ? 'Enabled' : 'Disabled'}</button>
-          <button
             onClick={() => setTmplNameOpen(true)}
             className="h-8 px-3 bg-card border border-border rounded-[4px] text-[12px] text-text-dim hover:border-border-mid hover:text-text transition-colors"
           >Save as template</button>
@@ -308,13 +300,16 @@ export function SandboxTab() {
         </div>
       </div>
 
-      {/* Disabled banner */}
-      {!current.enabled && (
-        <div className="flex items-center gap-3 px-4 py-3 bg-red/10 border border-red/30 rounded-[5px] text-[12px] text-red">
-          <span className="font-bold shrink-0">Sandbox disabled.</span>
-          <span className="text-red/70">eBPF enforcement is off — no filesystem or process restrictions are active. Save to push this state to all agents within 60 s.</span>
+      {/* Enable/disable toggle */}
+      <div className="flex items-center justify-between p-4 rounded-[5px] bg-card border border-border">
+        <div className="space-y-0.5">
+          <div className="text-[14px] font-medium text-text">eBPF Process Sandbox</div>
+          <div className="text-[12px] text-text-dim">
+            {current.enabled ? 'Enforcement active — filesystem and process restrictions apply.' : 'Enforcement disabled — no restrictions active. Save to push to all agents within 60 s.'}
+          </div>
         </div>
-      )}
+        <Switch checked={current.enabled} onCheckedChange={setEnabled} />
+      </div>
 
       {/* Template loader */}
       <div className={cn('flex items-center gap-2 p-3 bg-card border border-border rounded-[5px]', !current.enabled && 'opacity-40 pointer-events-none')}>
