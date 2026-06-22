@@ -585,7 +585,7 @@ body::after {
 /* ════════════════════════════════════════════
    DENSE INFO SLIDES — tighter outer padding
 ════════════════════════════════════════════ */
-#s5, #s6, #s7, #s16 { padding: 20px 48px; }
+#s5, #s6, #s7, #s18 { padding: 20px 48px; }
 #s5 .slide-heading, #s6 .slide-heading, #s7 .slide-heading {
   font-size: 40px; margin-bottom: 14px;
 }
@@ -1616,7 +1616,7 @@ body::after {
           <ul class="replay-feat-list">
             <li class="new">Sudoers tab — push rules to hosts; visual card editor; real-time diff &amp; sync badges</li>
             <li class="new">Risk scoring 0–100 — configurable YAML rules</li>
-            <li class="new">SIEM forwarding — JSON / CEF / OCSF · HTTPS · Syslog UDP/TCP/TLS</li>
+            <li class="new">SIEM forwarding — JSON / CEF / OCSF · HTTPS · Syslog UDP/TCP/TLS · login/logout events</li>
             <li class="new">Summary tab — per-user stats, sortable, filterable</li>
             <li class="new">Anomalies tab — incomplete, high-risk, root shell, after-hours</li>
             <li class="new">Settings tab — risk rules + SIEM config in the browser</li>
@@ -1624,11 +1624,11 @@ body::after {
             <li>Live search by user, host, or command</li>
             <li>Play / pause · seek · speed 0.25×–16×</li>
             <li>Keyboard: Space · ← / → · R</li>
-            <li>xterm.js — pixel-accurate terminal replay</li>
+            <li>asciinema-player — pixel-accurate terminal replay</li>
             <li>Single binary with embedded frontend</li>
           </ul>
           <div style="margin-top:20px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);line-height:2;">
-            <span style="color:var(--green-dim)">$</span> dnf install sudo-logger-replay-1.13.0-1.fc43.x86_64.rpm<br>
+            <span style="color:var(--green-dim)">$</span> dnf install sudo-logger-replay-1.20.27-1.fc44.x86_64.rpm<br>
             <span style="color:var(--green-dim)">$</span> systemctl enable --now sudo-replay<br>
             <span style="color:var(--text-dim)">→ http://localhost:8080</span>
           </div>
@@ -1650,7 +1650,7 @@ body::after {
         <!-- topbar -->
         <div class="ui-topbar">
           <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
-          <div class="ui-ver">v1.20.0</div>
+          <div class="ui-ver">v1.20.27</div>
           <div class="ui-sp"></div>
           <div class="ui-tabs">
             <div class="ui-tab on">Sessions</div>
@@ -1790,7 +1790,7 @@ body::after {
         <!-- topbar -->
         <div class="ui-topbar">
           <div class="ui-logo"><span class="ui-logo-icon">⬡</span> sudo-replay</div>
-          <div class="ui-ver">v1.20.0</div>
+          <div class="ui-ver">v1.20.27</div>
           <div class="ui-sp"></div>
           <div class="ui-tabs">
             <div class="ui-tab">Sessions</div>
@@ -2111,7 +2111,7 @@ body::after {
       <div class="feat-grid" style="grid-template-columns:1fr 1fr;gap:16px 40px;margin-top:32px;font-size:13px">
 
         <div style="border-left:2px solid var(--green-dim);padding-left:16px">
-          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">BUILT-IN PATTERNS</div>
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px;font-size:11px;letter-spacing:.1em">BUILT-IN PATTERNS — Gitleaks</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> AWS / GCP / GitHub / Stripe / Vault keys</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> JWT tokens (<code style="font-size:10px">eyJhbGciOi…</code>)</div>
           <div class="feat" style="font-size:12px"><span class="arr">→</span> Bearer &amp; Authorization headers</div>
@@ -2187,8 +2187,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 14b: OPA JIT POLICY ░░ -->
-  <div class="slide" id="s14b">
+  <!-- ░░ SLIDE 15: OPA JIT POLICY ░░ -->
+  <div class="slide" id="s15">
     <div class="s-features" style="max-width:960px">
       <h2>OPA<br>JIT POLICY</h2>
       <div class="sub">▸ Open Policy Agent · Rego rules · deny &gt; allow &gt; challenge</div>
@@ -2231,8 +2231,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 15: DISTRIBUTED STORAGE ░░ -->
-  <div class="slide" id="s15">
+  <!-- ░░ SLIDE 16: DISTRIBUTED STORAGE ░░ -->
+  <div class="slide" id="s16">
     <div class="s-features" style="max-width:900px">
       <h2>DISTRIBUTED<br>STORAGE</h2>
       <div class="sub">▸ S3 · PostgreSQL · horizontal scaling · Kubernetes</div>
@@ -2271,8 +2271,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 15: ENTERPRISE SCALE ░░ -->
-  <div class="slide" id="s15">
+  <!-- ░░ SLIDE 17: ENTERPRISE SCALE ░░ -->
+  <div class="slide" id="s17">
     <div class="s-security" style="max-width:960px">
       <div class="slide-heading">ENTERPRISE SCALE</div>
       <div class="sec-grid">
@@ -2311,16 +2311,32 @@ body::after {
             <div class="sec-desc">The eBPF LSM sandbox runs entirely on the client host — zero server involvement. Adding 1 000 monitored hosts does not increase server load. Sandbox policy is distributed via the same agent config as everything else.</div>
           </div>
         </div>
+
+        <div class="sec-card">
+          <div class="sec-icon">🔑</div>
+          <div>
+            <div class="sec-title">OIDC / SSO Integration</div>
+            <div class="sec-desc">Keycloak, Entra ID, Okta — any OIDC-compliant provider. Group claims map directly to replay-server roles. Custom React login page included. No local accounts required in enterprise deployments.</div>
+          </div>
+        </div>
+
+        <div class="sec-card">
+          <div class="sec-icon">👥</div>
+          <div>
+            <div class="sec-title">Granular RBAC + GDPR</div>
+            <div class="sec-desc">12 built-in permissions, custom roles, group→role mapping for OIDC and reverse-proxy auth. GDPR-compliant session deletion via API. All config changes written to an immutable audit log.</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- ░░ SLIDE 16: PROCESS SANDBOX — KILLER FEATURE ░░ -->
-  <div class="slide" id="s16">
+  <!-- ░░ SLIDE 18: PROCESS SANDBOX — KILLER FEATURE ░░ -->
+  <div class="slide" id="s18">
     <div class="s-sandbox-hero">
 
       <div class="sbh-top">
-        <div class="sbh-label">▶ eBPF LSM &nbsp;·&nbsp; kernel 5.7+ &nbsp;·&nbsp; 13 hooks &nbsp;·&nbsp; inode-tracked &nbsp;·&nbsp; PAM-race-proof</div>
+        <div class="sbh-label">▶ eBPF LSM &nbsp;·&nbsp; kernel 5.7+ &nbsp;·&nbsp; 13 hooks &nbsp;·&nbsp; inode-tracked &nbsp;·&nbsp; PAM-race-proof &nbsp;·&nbsp; enable/disable from UI</div>
         <div class="sbh-heading">PROCESS SANDBOX</div>
         <div class="sbh-claim">Kernel-enforced constraints on every sudo session. Root cannot escape — not even with <code>CAP_ALL</code>.</div>
       </div>
@@ -2372,8 +2388,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 17: EBPF AGENT ░░ -->
-  <div class="slide" id="s17">
+  <!-- ░░ SLIDE 19: EBPF AGENT ░░ -->
+  <div class="slide" id="s19">
     <div class="s-features" style="max-width:960px">
       <h2>EBPF<br>AGENT</h2>
       <div class="sub">▸ The kernel watches even when the plugin can't</div>
@@ -2412,8 +2428,8 @@ body::after {
     </div>
   </div>
 
-  <!-- ░░ SLIDE 18: READY TO DEPLOY ░░ -->
-  <div class="slide" id="s18">
+  <!-- ░░ SLIDE 20: READY TO DEPLOY ░░ -->
+  <div class="slide" id="s20">
     <div class="s-features">
       <h2>READY TO<br>DEPLOY</h2>
       <div class="sub">▸ RPM · systemd · mTLS · browser replay</div>
@@ -2437,6 +2453,10 @@ body::after {
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Distributed storage — S3 + PostgreSQL · horizontal scaling · Kubernetes</div>
         <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> eBPF agent — divergence detection · outage buffering · pkexec tracking</div>
         <div class="feat" style="border-left-color:var(--red);"><span class="arr" style="color:var(--red)">⚡</span> Process sandbox — eBPF LSM · root-proof · kernel-enforced · SIEM-ready structured alerts</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> OIDC / SSO — Keycloak, Entra ID, Okta · group-to-role mapping</div>
+        <div class="feat"><span class="arr" style="color:var(--green)">⚡</span> Granular RBAC — 12 permissions · custom roles · GDPR session deletion</div>
+        <div class="feat"><span class="arr">→</span> Docker image — ghcr.io/alun-hub/sudo-logger</div>
+        <div class="feat"><span class="arr">→</span> Helm chart for Kubernetes — one-command deploy</div>
         <div class="feat"><span class="arr">→</span> sudo 1.9+ · Fedora / RHEL</div>
       </div>
 
@@ -2450,7 +2470,7 @@ body::after {
 
 <script>
 (function () {
-  const N = 19;
+  const N = 21;
   let cur = 0, busy = false;
 
   /* cursor */
