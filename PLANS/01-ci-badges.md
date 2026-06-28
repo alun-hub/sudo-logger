@@ -35,7 +35,7 @@ thing experienced contributors check before deciding to engage.
 
 ### 1.4 — Badges in README
 - [x] Added all 5 badges to README.md (CI, codecov, Go Report Card, License, Latest Release)
-- [ ] MANUAL: Visit https://goreportcard.com/report/github.com/alun-hub/sudo-logger to trigger first scan
+- [x] ~~Go Report Card~~ — N/A: requires .go files in repo root; all Go code is under go/ subdirectory
 - [ ] MANUAL: Verify badges render correctly on GitHub after push
 
 ### 1.5 — Branch protection

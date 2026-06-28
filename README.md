@@ -6,7 +6,6 @@
 
 [![CI](https://github.com/alun-hub/sudo-logger/actions/workflows/test.yml/badge.svg)](https://github.com/alun-hub/sudo-logger/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/alun-hub/sudo-logger/branch/main/graph/badge.svg)](https://codecov.io/gh/alun-hub/sudo-logger)
-[![Go Report Card](https://goreportcard.com/badge/github.com/alun-hub/sudo-logger)](https://goreportcard.com/report/github.com/alun-hub/sudo-logger)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/alun-hub/sudo-logger)](https://github.com/alun-hub/sudo-logger/releases/latest)
 
