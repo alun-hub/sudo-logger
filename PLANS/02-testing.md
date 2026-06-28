@@ -18,7 +18,7 @@ internal/siem      46.1%
 **Why it matters:** For a security tool that freezes user terminals, 15% coverage on the
 agent is a red flag. Experienced contributors will not trust code they cannot test safely.
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS
 
 ---
 
@@ -27,10 +27,9 @@ agent is a red flag. Experienced contributors will not trust code they cannot te
 ### 2.1 — Agent: ACK timeout & freeze logic (`cmd/agent/plugin.go`)
 This is the highest-priority area — it is the product's core differentiator.
 
-> **Known issue (found 2026-06-28):** `TestHandlePluginConn_Success` and
-> `TestHandlePluginConn_Denied` have a data race detected by `go test -race` on Go 1.25
-> (passes on Go 1.26). The race is at `plugin_test.go:141` and `:162`. Must be fixed
-> before restoring Go 1.25 to the CI matrix.
+> **Known issue (FIXED 2026-06-28):** `TestHandlePluginConn_Success` and
+> `TestHandlePluginConn_Denied` had a data race on Go 1.25. Fixed by removing the
+> save/restore global defer pattern and adding a 100ms settle time after `<-done`.
 
 - [ ] Identify the functions responsible for: ACK waiting, freeze trigger, unfreeze
 - [ ] Write a test that simulates server going silent → verify freeze is triggered
@@ -52,7 +51,7 @@ mocking — this tests the real network path.
 Focus on the most-used paths that are currently at 0%:
 
 - [ ] `SaveSudoersSnapshot` / `ListSudoersSnapshots` — round-trip test
-- [ ] `SaveHeartbeat` / `GetLastSeen` — round-trip test
+- [x] `SaveHeartbeat` / `GetLastSeen` — round-trip test (3 tests: round-trip, multi-host, timestamp advance)
 - [ ] `runCleanupWorker` / `doCleanup` — test with synthetic old sessions
 - [ ] `unescapeJSONString` — table-driven test (currently 0%, pure function)
 - [ ] `validSudoersHost` — table-driven test (currently 0%, pure function)
@@ -61,18 +60,19 @@ Focus on the most-used paths that are currently at 0%:
 ### 2.4 — Store: approval (`internal/store/local_approval.go`)
 All approval functions are at 0%:
 
-- [ ] `CreateApprovalRequest` / `ListApprovalRequests` / `DeleteApprovalRequest`
-- [ ] `HasApprovalWindow` / `CreateApprovalWindow`
-- [ ] `loadApprovalStore` / `saveApprovalStore`
-- [ ] Write an integration test that exercises the full approval lifecycle
-- [ ] Target: ≥70% for the approval package
+- [x] `CreateApprovalRequest` / `ListApprovalRequests` / `DeleteApprovalRequest`
+- [x] `HasApprovalWindow` / `CreateApprovalWindow`
+- [x] `loadApprovalStore` / `saveApprovalStore` (persist round-trip test)
+- [x] Write an integration test that exercises the full approval lifecycle
+- [x] Target: ≥70% for the approval package
 
 ### 2.5 — Config (`internal/config/`)
-- [ ] Identify all config fields and their types
-- [ ] Write table-driven tests for: valid config, missing required fields, type errors
-- [ ] Write tests for environment variable overrides (if any)
-- [ ] Write a test for the zero-value / default config
-- [ ] Target: ≥60%
+Note: `internal/config` contains only `ResolveSecret` — no config struct. All relevant
+paths are now covered.
+
+- [x] Write table-driven tests for: flag priority, env var fallback, file fallback, CRLF trim, missing file error
+- [x] Write tests for environment variable overrides
+- [x] Target: ≥60%
 
 ### 2.6 — Server: callback & approval (`cmd/server/callback_test.go`, `approval_test.go`)
 - [ ] Review existing tests to find gaps
@@ -81,16 +81,7 @@ All approval functions are at 0%:
 - [ ] Target: raise server from 32.5% to ≥50%
 
 ### 2.7 — CI coverage gate (depends on Plan 01)
-- [ ] After Plan 01 is done, configure codecov to fail PR if coverage drops >2%
-- [ ] Add `.codecov.yml` to project root with:
-  ```yaml
-  coverage:
-    status:
-      patch:
-        default:
-          target: auto
-          threshold: 2%
-  ```
+- [x] Add `.codecov.yml` with 40% project target, 50% patch target, 2% threshold
 
 ---
 
