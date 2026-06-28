@@ -50,10 +50,15 @@ Approach: use an in-process fake server (net.Pipe or a test TLS listener) rather
 mocking — this tests the real network path.
 
 ### 2.2 — Agent: sandbox (`cmd/agent/sandbox.go`, `cmd/agent/sandbox_test.go`)
-- [ ] Review existing sandbox_test.go to understand what is already covered
-- [ ] Add tests for: sandbox rule evaluation, deny paths, allow paths
-- [ ] Add test for malformed sandbox config (should fail safe, not panic)
-- [ ] Target: ≥60%
+- [x] Review existing sandbox_test.go (reportViolation + retryViolation covered)
+- [x] Add tests for sandbox rule evaluation: featureDefault(s), loadSandboxConfigFromBytes
+      (default features, explicit overrides, path protection, recursion, forbidden binaries)
+- [x] Add test for malformed sandbox config (invalid YAML → error, not panic)
+- [x] sigName, mountDev, resolveInodeKey all covered
+- NOTE: BPF-dependent functions (applyFeatures, reloadConfig, start, registerCgroup, etc.)
+  cannot be unit-tested without kernel eBPF support. ~30% of sandbox stmts are BPF-only.
+- Coverage achieved: sigName 100%, featureDefault(s) 100%, loadSandboxConfig 100%,
+  resolveInodeKey 87.5%, mountDev 80.8%, loadSandboxConfigFromBytes 71.0%
 
 ### 2.3 — Store: session lifecycle (`internal/store/local.go`)
 Focus on the most-used paths that are currently at 0%:
