@@ -1,0 +1,82 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  golangci:
+    name: golangci-lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.11.3
+          working-directory: go
+          args: >-
+            --enable-only=govet,ineffassign,staticcheck
+            ./internal/...
+            ./cmd/server/...
+            ./cmd/replay-server/...
+            ./cmd/agent/...
+            ./cmd/loadgen/...
+
+  trivy:
+    name: Trivy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aquasecurity/trivy-action@0.31.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          skip-dirs: go/vendor
+
+  plugin-c:
+    name: C plugin (cppcheck + flawfinder)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get install -y cppcheck flawfinder
+
+      - name: cppcheck
+        run: >-
+          cppcheck --enable=warning
+          --suppress=missingIncludeSystem
+          --error-exitcode=1
+          plugin/
+
+      - name: flawfinder
+        run: flawfinder --minlevel=3 --error-level=3 plugin/
+
+  pre-commit-general:
+    name: pre-commit (general hooks)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pre-commit
+        run: pip install pre-commit detect-secrets
+
+      - name: Run pre-commit (skip system-tool hooks)
+        env:
+          SKIP: go-vet,golangci-lint,go-test,cppcheck,flawfinder,trivy
+        run: pre-commit run --all-files
