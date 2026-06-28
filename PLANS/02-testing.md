@@ -27,6 +27,11 @@ agent is a red flag. Experienced contributors will not trust code they cannot te
 ### 2.1 — Agent: ACK timeout & freeze logic (`cmd/agent/plugin.go`)
 This is the highest-priority area — it is the product's core differentiator.
 
+> **Known issue (found 2026-06-28):** `TestHandlePluginConn_Success` and
+> `TestHandlePluginConn_Denied` have a data race detected by `go test -race` on Go 1.25
+> (passes on Go 1.26). The race is at `plugin_test.go:141` and `:162`. Must be fixed
+> before restoring Go 1.25 to the CI matrix.
+
 - [ ] Identify the functions responsible for: ACK waiting, freeze trigger, unfreeze
 - [ ] Write a test that simulates server going silent → verify freeze is triggered
 - [ ] Write a test that simulates server recovering → verify unfreeze

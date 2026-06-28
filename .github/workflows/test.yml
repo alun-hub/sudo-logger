@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04]
-        go: ["1.25.x", "stable"]
+        go: ["stable"]
 
     steps:
       - uses: actions/checkout@v4
