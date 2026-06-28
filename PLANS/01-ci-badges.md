@@ -6,7 +6,7 @@ actively maintained and tested. codecov shows coverage trends over time.
 **Why it matters:** A project without CI signals "hobby project." Badges are the first
 thing experienced contributors check before deciding to engage.
 
-**Status:** IN PROGRESS — all code done, 3 manual steps remain (see 1.3, 1.4, 1.5)
+**Status:** DONE
 
 ---
 
@@ -39,9 +39,7 @@ thing experienced contributors check before deciding to engage.
 - [ ] MANUAL: Verify badges render correctly on GitHub after push
 
 ### 1.5 — Branch protection
-- [ ] MANUAL: GitHub repo Settings → Branches → Add branch protection rule for `main`
-  - Enable: "Require status checks to pass before merging"
-  - Required checks: `test (1.25.x, ubuntu-24.04)`, `test (stable, ubuntu-24.04)`, `golangci-lint`, `trivy`
+- [x] Enabled via GitHub API — required checks: Go stable, golangci-lint, Trivy, C plugin, pre-commit
 
 ---
 
