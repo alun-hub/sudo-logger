@@ -258,6 +258,267 @@ func TestHandlePluginConn_Denied(t *testing.T) {
 	time.Sleep(100 * time.Millisecond) // let deferred goroutines from handlePluginConn settle
 }
 
+// setupBreakServer starts a TLS server that accepts one connection, reads
+// SESSION_START, sends SERVER_READY, then immediately closes — simulating a
+// server that dies right after the handshake.
+func setupBreakServer(t *testing.T) (net.Addr, ed25519.PrivateKey, func()) {
+	t.Helper()
+	cert := generateTestCert(t)
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatalf("setupBreakServer listen: %v", err)
+	}
+	_, privSign, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("setupBreakServer keygen: %v", err)
+	}
+	stop := make(chan struct{})
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				select {
+				case <-stop:
+					return
+				default:
+					continue
+				}
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				w := bufio.NewWriter(c)
+				mType, plen, err := protocol.ReadHeader(r)
+				if err != nil {
+					return
+				}
+				protocol.ReadPayload(r, plen)
+				if mType != protocol.MsgSessionStart {
+					return
+				}
+				// Send SERVER_READY then let defer close the connection.
+				protocol.WriteMessage(w, protocol.MsgServerReady, nil)
+			}(conn)
+		}
+	}()
+	return ln.Addr(), privSign, func() { close(stop); ln.Close() }
+}
+
+// newTestSession returns a minimal SessionStart for use in tests.
+func newTestSession(id, user string) protocol.SessionStart {
+	return protocol.SessionStart{
+		SessionID: id,
+		User:      user,
+		Host:      "test-host",
+		Pid:       os.Getpid(),
+		Command:   "ls -l",
+		Ts:        time.Now().Unix(),
+	}
+}
+
+// readAckResponseTs reads one MsgAckResponse from pr and returns the embedded
+// timestamp (0 when the agent considers the server frozen).
+func readAckResponseTs(t *testing.T, pr *bufio.Reader) int64 {
+	t.Helper()
+	mType, plen, err := protocol.ReadHeader(pr)
+	if err != nil || mType != protocol.MsgAckResponse {
+		t.Fatalf("expected MsgAckResponse (0x%02x), got 0x%02x: %v", protocol.MsgAckResponse, mType, err)
+	}
+	payload, _ := protocol.ReadPayload(pr, plen)
+	if len(payload) < 8 {
+		t.Fatalf("AckResponse payload too short: %d bytes", len(payload))
+	}
+	return int64(binary.BigEndian.Uint64(payload[:8]))
+}
+
+// TestHandlePluginConn_ServerUnreachable verifies that when the configured
+// server address is not listening, the agent immediately sends MsgSessionError
+// back to the plugin.
+func TestHandlePluginConn_ServerUnreachable(t *testing.T) {
+	// Grab a free port then close it so nothing is listening.
+	tmpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	addr := tmpLn.Addr().String()
+	tmpLn.Close()
+
+	cfg = defaultConfig()
+	cfg.Server = addr
+	cfg.Ebpf = false
+	cfg.FreezeTimeout = 0
+	cfg.IdleTimeout = 0
+	cgroupBase = ""
+	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	div = newDivergenceTracker("test-host", nil)
+
+	pluginSide, agentSide := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		handlePluginConn(agentSide)
+		close(done)
+	}()
+
+	pr := bufio.NewReader(pluginSide)
+	pw := bufio.NewWriter(pluginSide)
+
+	start := newTestSession("unreachable-session", "alice")
+	startB, _ := json.Marshal(start)
+	protocol.WriteMessage(pw, protocol.MsgSessionStart, startB)
+	pw.Flush()
+
+	// Expect MsgSessionError — dial failed.
+	mType, _, err := protocol.ReadHeader(pr)
+	if err != nil || mType != protocol.MsgSessionError {
+		t.Fatalf("expected MsgSessionError (0x%02x), got 0x%02x: %v", protocol.MsgSessionError, mType, err)
+	}
+
+	pluginSide.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for handlePluginConn to exit")
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestHandlePluginConn_FreezeOnServerClose verifies that when the server
+// closes the connection right after the handshake, the agent detects the
+// outage (markDead) and reports ts=0 in MsgAckResponse — the signal the
+// plugin uses to know the session is frozen.
+func TestHandlePluginConn_FreezeOnServerClose(t *testing.T) {
+	addr, privSign, cleanup := setupBreakServer(t)
+	defer cleanup()
+
+	cfg = defaultConfig()
+	cfg.Server = addr.String()
+	cfg.Ebpf = false
+	cfg.FreezeTimeout = 0
+	cfg.IdleTimeout = 0
+	cgroupBase = ""
+	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	verifyKey = privSign.Public().(ed25519.PublicKey)
+	div = newDivergenceTracker("test-host", nil)
+
+	pluginSide, agentSide := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		handlePluginConn(agentSide)
+		close(done)
+	}()
+
+	pr := bufio.NewReader(pluginSide)
+	pw := bufio.NewWriter(pluginSide)
+
+	start := newTestSession("freeze-session", "alice")
+	startB, _ := json.Marshal(start)
+	protocol.WriteMessage(pw, protocol.MsgSessionStart, startB)
+	pw.Flush()
+
+	// Agent: connects to server → server sends ServerReady → server closes.
+	// Agent: sends MsgSessionReady to plugin.
+	mType, _, err := protocol.ReadHeader(pr)
+	if err != nil || mType != protocol.MsgSessionReady {
+		t.Fatalf("expected MsgSessionReady, got 0x%02x: %v", mType, err)
+	}
+	// Consume payload.
+	protocol.ReadPayload(pr, 0) // plen was already consumed by ReadHeader
+
+	// Wait for the server-reader goroutine to detect the closed connection and
+	// call markDead(), setting serverConnAlive = false.
+	time.Sleep(300 * time.Millisecond)
+
+	// Query ACK state — ts must be 0 (frozen).
+	protocol.WriteMessage(pw, protocol.MsgAckQuery, nil)
+	pw.Flush()
+	ts := readAckResponseTs(t, pr)
+	if ts != 0 {
+		t.Errorf("expected ts=0 (server dead), got %d", ts)
+	}
+
+	// Send SESSION_END and close to let handlePluginConn exit cleanly.
+	endPayload := make([]byte, 12)
+	binary.BigEndian.PutUint64(endPayload[0:], 1)
+	protocol.WriteMessage(pw, protocol.MsgSessionEnd, endPayload)
+	pw.Flush()
+	pluginSide.Close()
+
+	select {
+	case <-done:
+	case <-time.After(8 * time.Second): // 2s sleep inside handlePluginConn + overhead
+		t.Fatal("timeout waiting for handlePluginConn to exit")
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
+// TestHandlePluginConn_DeadBuffering verifies that chunks received while the
+// server is unreachable are buffered (not dropped, not forwarded), and that
+// the frozen state is still reported by MsgAckResponse after the buffered chunk.
+func TestHandlePluginConn_DeadBuffering(t *testing.T) {
+	addr, privSign, cleanup := setupBreakServer(t)
+	defer cleanup()
+
+	cfg = defaultConfig()
+	cfg.Server = addr.String()
+	cfg.Ebpf = false
+	cfg.FreezeTimeout = 0
+	cfg.IdleTimeout = 0
+	cgroupBase = ""
+	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	verifyKey = privSign.Public().(ed25519.PublicKey)
+	div = newDivergenceTracker("test-host", nil)
+
+	pluginSide, agentSide := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		handlePluginConn(agentSide)
+		close(done)
+	}()
+
+	pr := bufio.NewReader(pluginSide)
+	pw := bufio.NewWriter(pluginSide)
+
+	start := newTestSession("dead-buf-session", "alice")
+	startB, _ := json.Marshal(start)
+	protocol.WriteMessage(pw, protocol.MsgSessionStart, startB)
+	pw.Flush()
+
+	mType, _, err := protocol.ReadHeader(pr)
+	if err != nil || mType != protocol.MsgSessionReady {
+		t.Fatalf("expected MsgSessionReady, got 0x%02x: %v", mType, err)
+	}
+	protocol.ReadPayload(pr, 0)
+
+	// Wait for freeze.
+	time.Sleep(300 * time.Millisecond)
+
+	// Send a chunk while server is dead — agent should buffer it, not panic.
+	chunkPayload := protocol.EncodeChunk(1, time.Now().UnixNano(), protocol.StreamTtyOut, []byte("buffered"))
+	protocol.WriteMessage(pw, protocol.MsgChunk, chunkPayload)
+	pw.Flush()
+
+	// ACK state is still 0 (still frozen, chunk just buffered).
+	protocol.WriteMessage(pw, protocol.MsgAckQuery, nil)
+	pw.Flush()
+	ts := readAckResponseTs(t, pr)
+	if ts != 0 {
+		t.Errorf("expected ts=0 after dead-buffered chunk, got %d", ts)
+	}
+
+	endPayload := make([]byte, 12)
+	binary.BigEndian.PutUint64(endPayload[0:], 1)
+	protocol.WriteMessage(pw, protocol.MsgSessionEnd, endPayload)
+	pw.Flush()
+	pluginSide.Close()
+
+	select {
+	case <-done:
+	case <-time.After(8 * time.Second):
+		t.Fatal("timeout waiting for handlePluginConn to exit")
+	}
+	time.Sleep(100 * time.Millisecond)
+}
+
 func TestHandlePluginConn_IdleTimeout(t *testing.T) {
 	addr, _, cleanup := setupMockServer(t)
 	defer cleanup()
