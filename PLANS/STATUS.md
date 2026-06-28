@@ -11,7 +11,7 @@ Last updated: 2026-06-28
 
 | # | Plan | Status | Notes |
 |---|------|--------|-------|
-| 01 | [CI/CD & Badges](01-ci-badges.md) | NOT STARTED | |
+| 01 | [CI/CD & Badges](01-ci-badges.md) | IN PROGRESS | Workflows + badges committed. 3 manual steps remain (codecov token, goreportcard, branch protection) |
 | 02 | [Test Coverage](02-testing.md) | NOT STARTED | |
 | 03 | [Refactoring](03-refactoring.md) | NOT STARTED | |
 | 04 | [Releases & Distribution](04-releases-distribution.md) | NOT STARTED | |
