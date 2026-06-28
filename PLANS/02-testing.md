@@ -31,12 +31,20 @@ This is the highest-priority area — it is the product's core differentiator.
 > `TestHandlePluginConn_Denied` had a data race on Go 1.25. Fixed by removing the
 > save/restore global defer pattern and adding a 100ms settle time after `<-done`.
 
-- [ ] Identify the functions responsible for: ACK waiting, freeze trigger, unfreeze
-- [ ] Write a test that simulates server going silent → verify freeze is triggered
+- [x] Identify the functions responsible for: ACK waiting, freeze trigger, unfreeze
+      (markDead, markAlive, heartbeat goroutine — all in handlePluginConn)
+- [x] Write a test for server unreachable → MsgSessionError (TestHandlePluginConn_ServerUnreachable)
+- [x] Write a test that simulates server going silent → verify freeze detected (TestHandlePluginConn_FreezeOnServerClose)
+- [x] Write a test for chunks buffered during outage (TestHandlePluginConn_DeadBuffering)
 - [ ] Write a test that simulates server recovering → verify unfreeze
-- [ ] Write a test for ACK arriving within deadline → no freeze
+      NOTE: markAlive() requires the heartbeat goroutine to see 2 consecutive HeartbeatAcks
+      after silence. Since the agent does not auto-reconnect, this path cannot be tested
+      without either production-code refactoring or a 6s+ test. Deferred.
+- [x] Write a test for ACK arriving within deadline → no freeze
+      (existing TestHandlePluginConn_Success covers this path)
 - [ ] Write a test for partial chunk delivery (truncation scenario)
-- [ ] Target: these specific functions at ≥80% coverage
+      NOTE: requires instrumenting the ackLagLimit (currently a 5s const). Deferred.
+- [ ] Target: these specific functions at ≥80% coverage (currently ~17%)
 
 Approach: use an in-process fake server (net.Pipe or a test TLS listener) rather than
 mocking — this tests the real network path.

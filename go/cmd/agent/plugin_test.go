@@ -20,35 +20,46 @@ import (
 	"sudo-logger/internal/protocol"
 )
 
-// generateTestCert creates a self-signed certificate for the mock server.
-func generateTestCert(t *testing.T) tls.Certificate {
+// generateTestCert creates a self-signed TLS certificate for test servers and
+// returns both the certificate (for the server) and a CA pool (for clients).
+func generateTestCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("Failed to generate key: %v", err)
 	}
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "localhost"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		IsCA:         true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "localhost"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		IsCA:                  true,
 		BasicConstraintsValid: true,
-		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
 	}
 	certDER, err := x509.CreateCertificate(rand.Reader, template, template, pub, priv)
 	if err != nil {
 		t.Fatalf("Failed to create certificate: %v", err)
 	}
-	return tls.Certificate{
-		Certificate: [][]byte{certDER},
-		PrivateKey:  priv,
+	parsed, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("Failed to parse certificate: %v", err)
 	}
+	pool := x509.NewCertPool()
+	pool.AddCert(parsed)
+	tlsCert := tls.Certificate{Certificate: [][]byte{certDER}, PrivateKey: priv}
+	return tlsCert, pool
 }
 
-func setupMockServer(t *testing.T) (net.Addr, ed25519.PrivateKey, func()) {
-	cert := generateTestCert(t)
+// testClientTLS returns a TLS client config that trusts only the given CA pool.
+// MinVersion is set to TLS 1.3 to match production config.
+func testClientTLS(pool *x509.CertPool) *tls.Config {
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13}
+}
+
+func setupMockServer(t *testing.T) (net.Addr, ed25519.PrivateKey, *x509.CertPool, func()) {
+	cert, caPool := generateTestCert(t)
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
 	if err != nil {
 		t.Fatalf("Failed to listen: %v", err)
@@ -122,14 +133,14 @@ func setupMockServer(t *testing.T) (net.Addr, ed25519.PrivateKey, func()) {
 		}
 	}()
 
-	return ln.Addr(), privSign, func() {
+	return ln.Addr(), privSign, caPool, func() {
 		close(stop)
 		ln.Close()
 	}
 }
 
 func TestHandlePluginConn_Success(t *testing.T) {
-	addr, privSign, cleanup := setupMockServer(t)
+	addr, privSign, caPool, cleanup := setupMockServer(t)
 	defer cleanup()
 
 	cfg = defaultConfig()
@@ -138,7 +149,7 @@ func TestHandlePluginConn_Success(t *testing.T) {
 	cfg.FreezeTimeout = 0
 	cfg.IdleTimeout = 0
 	cgroupBase = "" // Disable cgroups
-	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	tlsCfg = testClientTLS(caPool)
 	verifyKey = privSign.Public().(ed25519.PublicKey)
 	div = newDivergenceTracker("test-host", nil)
 
@@ -208,7 +219,7 @@ func TestHandlePluginConn_Success(t *testing.T) {
 }
 
 func TestHandlePluginConn_Denied(t *testing.T) {
-	addr, _, cleanup := setupMockServer(t)
+	addr, _, caPool, cleanup := setupMockServer(t)
 	defer cleanup()
 
 	cfg = defaultConfig()
@@ -217,7 +228,7 @@ func TestHandlePluginConn_Denied(t *testing.T) {
 	cfg.FreezeTimeout = 0
 	cfg.IdleTimeout = 0
 	cgroupBase = ""
-	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	tlsCfg = testClientTLS(caPool)
 	div = newDivergenceTracker("test-host", nil)
 
 	pluginSide, agentSide := net.Pipe()
@@ -261,9 +272,9 @@ func TestHandlePluginConn_Denied(t *testing.T) {
 // setupBreakServer starts a TLS server that accepts one connection, reads
 // SESSION_START, sends SERVER_READY, then immediately closes — simulating a
 // server that dies right after the handshake.
-func setupBreakServer(t *testing.T) (net.Addr, ed25519.PrivateKey, func()) {
+func setupBreakServer(t *testing.T) (net.Addr, ed25519.PrivateKey, *x509.CertPool, func()) {
 	t.Helper()
-	cert := generateTestCert(t)
+	cert, caPool := generateTestCert(t)
 	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
 	if err != nil {
 		t.Fatalf("setupBreakServer listen: %v", err)
@@ -301,7 +312,7 @@ func setupBreakServer(t *testing.T) (net.Addr, ed25519.PrivateKey, func()) {
 			}(conn)
 		}
 	}()
-	return ln.Addr(), privSign, func() { close(stop); ln.Close() }
+	return ln.Addr(), privSign, caPool, func() { close(stop); ln.Close() }
 }
 
 // newTestSession returns a minimal SessionStart for use in tests.
@@ -349,7 +360,8 @@ func TestHandlePluginConn_ServerUnreachable(t *testing.T) {
 	cfg.FreezeTimeout = 0
 	cfg.IdleTimeout = 0
 	cgroupBase = ""
-	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	// Dial fails before TLS; use a valid (empty) pool for consistency.
+	tlsCfg = testClientTLS(x509.NewCertPool())
 	div = newDivergenceTracker("test-host", nil)
 
 	pluginSide, agentSide := net.Pipe()
@@ -387,7 +399,7 @@ func TestHandlePluginConn_ServerUnreachable(t *testing.T) {
 // outage (markDead) and reports ts=0 in MsgAckResponse — the signal the
 // plugin uses to know the session is frozen.
 func TestHandlePluginConn_FreezeOnServerClose(t *testing.T) {
-	addr, privSign, cleanup := setupBreakServer(t)
+	addr, privSign, caPool, cleanup := setupBreakServer(t)
 	defer cleanup()
 
 	cfg = defaultConfig()
@@ -396,7 +408,7 @@ func TestHandlePluginConn_FreezeOnServerClose(t *testing.T) {
 	cfg.FreezeTimeout = 0
 	cfg.IdleTimeout = 0
 	cgroupBase = ""
-	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	tlsCfg = testClientTLS(caPool)
 	verifyKey = privSign.Public().(ed25519.PublicKey)
 	div = newDivergenceTracker("test-host", nil)
 
@@ -455,7 +467,7 @@ func TestHandlePluginConn_FreezeOnServerClose(t *testing.T) {
 // server is unreachable are buffered (not dropped, not forwarded), and that
 // the frozen state is still reported by MsgAckResponse after the buffered chunk.
 func TestHandlePluginConn_DeadBuffering(t *testing.T) {
-	addr, privSign, cleanup := setupBreakServer(t)
+	addr, privSign, caPool, cleanup := setupBreakServer(t)
 	defer cleanup()
 
 	cfg = defaultConfig()
@@ -464,7 +476,7 @@ func TestHandlePluginConn_DeadBuffering(t *testing.T) {
 	cfg.FreezeTimeout = 0
 	cfg.IdleTimeout = 0
 	cgroupBase = ""
-	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	tlsCfg = testClientTLS(caPool)
 	verifyKey = privSign.Public().(ed25519.PublicKey)
 	div = newDivergenceTracker("test-host", nil)
 
@@ -520,18 +532,8 @@ func TestHandlePluginConn_DeadBuffering(t *testing.T) {
 }
 
 func TestHandlePluginConn_IdleTimeout(t *testing.T) {
-	addr, _, cleanup := setupMockServer(t)
+	addr, _, caPool, cleanup := setupMockServer(t)
 	defer cleanup()
-
-	// Mock global state
-	origCfg := cfg
-	origTlsCfg := tlsCfg
-	origCgroupBase := cgroupBase
-	defer func() {
-		cfg = origCfg
-		tlsCfg = origTlsCfg
-		cgroupBase = origCgroupBase
-	}()
 
 	cfg = defaultConfig()
 	cfg.Server = addr.String()
@@ -539,7 +541,7 @@ func TestHandlePluginConn_IdleTimeout(t *testing.T) {
 	cfg.FreezeTimeout = 0
 	cfg.IdleTimeout = 100 * time.Millisecond // Short timeout for testing
 	cgroupBase = ""
-	tlsCfg = &tls.Config{InsecureSkipVerify: true}
+	tlsCfg = testClientTLS(caPool)
 	div = newDivergenceTracker("test-host", nil)
 
 	pluginSide, agentSide := net.Pipe()
