@@ -18,7 +18,7 @@ internal/siem      46.1%
 **Why it matters:** For a security tool that freezes user terminals, 15% coverage on the
 agent is a red flag. Experienced contributors will not trust code they cannot test safely.
 
-**Status:** IN PROGRESS
+**Status:** DONE
 
 ---
 
@@ -63,12 +63,12 @@ mocking — this tests the real network path.
 ### 2.3 — Store: session lifecycle (`internal/store/local.go`)
 Focus on the most-used paths that are currently at 0%:
 
-- [ ] `SaveSudoersSnapshot` / `ListSudoersSnapshots` — round-trip test
+- [x] `SaveSudoersSnapshot` / `ListSudoersSnapshots` — round-trip test
 - [x] `SaveHeartbeat` / `GetLastSeen` — round-trip test (3 tests: round-trip, multi-host, timestamp advance)
-- [ ] `runCleanupWorker` / `doCleanup` — test with synthetic old sessions
-- [ ] `unescapeJSONString` — table-driven test (currently 0%, pure function)
-- [ ] `validSudoersHost` — table-driven test (currently 0%, pure function)
-- [ ] Target: raise store from 20.6% to ≥50%
+- [x] `runCleanupWorker` / `doCleanup` — test with synthetic old sessions
+- [x] `unescapeJSONString` — table-driven test (currently 0%, pure function)
+- [x] `validSudoersHost` — table-driven test (currently 0%, pure function)
+- [x] Target: raise store from 20.6% to ≥50%
 
 ### 2.4 — Store: approval (`internal/store/local_approval.go`)
 All approval functions are at 0%:
@@ -88,10 +88,10 @@ paths are now covered.
 - [x] Target: ≥60%
 
 ### 2.6 — Server: callback & approval (`cmd/server/callback_test.go`, `approval_test.go`)
-- [ ] Review existing tests to find gaps
-- [ ] Add tests for: session rejection, malformed chunk handling, duplicate sessions
-- [ ] Add tests for: approval expiry, concurrent approval requests
-- [ ] Target: raise server from 32.5% to ≥50%
+- [x] Review existing tests to find gaps
+- [x] Add tests for: session rejection, malformed chunk handling, duplicate sessions
+- [x] Add tests for: approval expiry, concurrent approval requests
+- [x] Target: raise server from 32.5% to ≥50%
 
 ### 2.7 — CI coverage gate (depends on Plan 01)
 - [x] Add `.codecov.yml` with 40% project target, 50% patch target, 2% threshold

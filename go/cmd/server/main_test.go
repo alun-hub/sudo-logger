@@ -772,3 +772,178 @@ func TestHandleConnMultipleSessions(t *testing.T) {
 		t.Errorf("sessionsTotal: got %d, want 2", srv.sessionsTotal.Load())
 	}
 }
+
+func connPairWithClientCert(t *testing.T, clientCommonName string) (serverConn, clientConn *tls.Conn) {
+	t.Helper()
+
+	serverPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate server key: %v", err)
+	}
+	serverTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-server"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	serverCertDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, serverTemplate, &serverPriv.PublicKey, serverPriv)
+	if err != nil {
+		t.Fatalf("create server cert: %v", err)
+	}
+	serverCert := tls.Certificate{
+		Certificate: [][]byte{serverCertDER},
+		PrivateKey:  serverPriv,
+	}
+
+	srvCert, err := x509.ParseCertificate(serverCertDER)
+	if err != nil {
+		t.Fatalf("parse server cert: %v", err)
+	}
+
+	clientPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate client key: %v", err)
+	}
+	clientTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: clientCommonName},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	clientCertDER, err := x509.CreateCertificate(rand.Reader, clientTemplate, srvCert, &clientPriv.PublicKey, serverPriv)
+	if err != nil {
+		t.Fatalf("create client cert: %v", err)
+	}
+	clientCert := tls.Certificate{
+		Certificate: [][]byte{clientCertDER},
+		PrivateKey:  clientPriv,
+	}
+
+	serverPool := x509.NewCertPool()
+	serverPool.AddCert(srvCert)
+	serverTLS := &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    serverPool,
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	clientTLS := &tls.Config{
+		Certificates:       []tls.Certificate{clientCert},
+		InsecureSkipVerify: true,
+	}
+
+	c1, c2 := net.Pipe()
+	serverConn = tls.Server(c1, serverTLS)
+	clientConn = tls.Client(c2, clientTLS)
+	return
+}
+
+func TestHandleConnStrictCertHostRejection(t *testing.T) {
+	old := *flagStrictCertHost
+	*flagStrictCertHost = true
+	defer func() { *flagStrictCertHost = old }()
+
+	srv := newTestServer(t)
+	srvConn, cliConn := connPairWithClientCert(t, "wrong-host")
+	done := runHandleConn(t, srv, srvConn)
+
+	w := bufio.NewWriter(cliConn)
+	start := testSessionStart("host1-alice-1-2-aabb", "alice", "host1")
+	writeMsg(t, w, protocol.MsgSessionStart, encodeSessionStart(t, start))
+	if err := w.Flush(); err != nil {
+		t.Fatalf("flush SESSION_START: %v", err)
+	}
+
+	drainAndWait(t, cliConn, done)
+}
+
+func TestHandleConnStrictCertHostSuccess(t *testing.T) {
+	old := *flagStrictCertHost
+	*flagStrictCertHost = true
+	defer func() { *flagStrictCertHost = old }()
+
+	srv := newTestServer(t)
+	srvConn, cliConn := connPairWithClientCert(t, "host1")
+	done := runHandleConn(t, srv, srvConn)
+
+	r := bufio.NewReader(cliConn)
+	w := bufio.NewWriter(cliConn)
+	start := testSessionStart("host1-alice-1-2-aabb", "alice", "host1")
+	writeMsg(t, w, protocol.MsgSessionStart, encodeSessionStart(t, start))
+	if err := w.Flush(); err != nil {
+		t.Fatalf("flush SESSION_START: %v", err)
+	}
+
+	msgType, _ := readMsg(t, r)
+	if msgType != protocol.MsgServerReady {
+		t.Errorf("expected SERVER_READY, got 0x%02x", msgType)
+	}
+
+	writeMsg(t, w, protocol.MsgSessionEnd, encodeSessionEnd(0, 0))
+	w.Flush()
+	drainAndWait(t, cliConn, done)
+}
+
+func TestHandleConnMalformedChunk(t *testing.T) {
+	srv := newTestServer(t)
+	srvConn, cliConn := connPair(t)
+	done := runHandleConn(t, srv, srvConn)
+
+	r := bufio.NewReader(cliConn)
+	w := bufio.NewWriter(cliConn)
+
+	start := testSessionStart("host1-alice-1-2-aabb", "alice", "host1")
+	writeMsg(t, w, protocol.MsgSessionStart, encodeSessionStart(t, start))
+	w.Flush()
+	readMsg(t, r) // SERVER_READY
+
+	writeMsg(t, w, protocol.MsgChunk, []byte("too short"))
+	w.Flush()
+
+	writeMsg(t, w, protocol.MsgChunk, encodeChunk(1, protocol.StreamTtyOut, []byte("valid")))
+	w.Flush()
+
+	msgType, ackPayload := readMsg(t, r)
+	if msgType != protocol.MsgAck {
+		t.Errorf("expected ACK, got 0x%02x", msgType)
+	}
+	ack, _ := protocol.ParseAck(ackPayload)
+	if ack.Seq != 1 {
+		t.Errorf("expected ACK for seq 1, got %d", ack.Seq)
+	}
+
+	writeMsg(t, w, protocol.MsgSessionEnd, encodeSessionEnd(1, 0))
+	w.Flush()
+	drainAndWait(t, cliConn, done)
+}
+
+func TestHandleConnDuplicateSessionAcrossConnections(t *testing.T) {
+	srv := newTestServer(t)
+
+	srvConn1, cliConn1 := connPair(t)
+	done1 := runHandleConn(t, srv, srvConn1)
+	r1 := bufio.NewReader(cliConn1)
+	w1 := bufio.NewWriter(cliConn1)
+	start := testSessionStart("host1-alice-1-2-aabb", "alice", "host1")
+	writeMsg(t, w1, protocol.MsgSessionStart, encodeSessionStart(t, start))
+	w1.Flush()
+	readMsg(t, r1) // SERVER_READY
+
+	srvConn2, cliConn2 := connPair(t)
+	done2 := runHandleConn(t, srv, srvConn2)
+	w2 := bufio.NewWriter(cliConn2)
+	writeMsg(t, w2, protocol.MsgSessionStart, encodeSessionStart(t, start))
+	w2.Flush()
+
+	drainAndWait(t, cliConn2, done2)
+
+	writeMsg(t, w1, protocol.MsgSessionEnd, encodeSessionEnd(0, 0))
+	w1.Flush()
+	drainAndWait(t, cliConn1, done1)
+}

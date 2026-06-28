@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"sudo-logger/internal/iolog"
+	"sudo-logger/internal/protocol"
 	"sudo-logger/internal/store"
 )
 
@@ -605,5 +606,94 @@ func TestLocalStoreHeartbeat_UpdatedOnRepeat(t *testing.T) {
 
 	if ts2 <= ts1 {
 		t.Errorf("expected timestamp to advance: ts1=%d ts2=%d", ts1, ts2)
+	}
+}
+
+func TestLocalStoreSudoersSnapshots_RoundTrip(t *testing.T) {
+	s, _ := newLocalStore(t)
+	defer s.Close()
+
+	ctx := context.Background()
+	snap := &protocol.SudoersSnapshot{
+		Host:    "worker-01",
+		Content: "some sudoers rules",
+		SHA256:  "5cf25595822e03947b0a701962bf65d83ad59616238cc3f3aa7cf67417e923e2", // pragma: allowlist secret
+	}
+
+	if err := s.SaveSudoersSnapshot(ctx, snap); err != nil {
+		t.Fatalf("SaveSudoersSnapshot: %v", err)
+	}
+
+	snaps, err := s.ListSudoersSnapshots(ctx, "worker-01", 10)
+	if err != nil {
+		t.Fatalf("ListSudoersSnapshots: %v", err)
+	}
+
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snaps))
+	}
+	if snaps[0].Host != "worker-01" {
+		t.Errorf("expected host worker-01, got %q", snaps[0].Host)
+	}
+	if snaps[0].Content != "some sudoers rules" {
+		t.Errorf("expected content %q, got %q", "some sudoers rules", snaps[0].Content)
+	}
+
+	// ListSudoersHosts
+	hosts, err := s.ListSudoersHosts(ctx)
+	if err != nil {
+		t.Fatalf("ListSudoersHosts: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0] != "worker-01" {
+		t.Errorf("expected hosts [worker-01], got %v", hosts)
+	}
+}
+
+func TestLocalStoreSudoersSnapshots_InvalidHost(t *testing.T) {
+	s, _ := newLocalStore(t)
+	defer s.Close()
+
+	ctx := context.Background()
+	snap := &protocol.SudoersSnapshot{
+		Host:    "../escaped",
+		Content: "some content",
+		SHA256:  "sha",
+	}
+
+	if err := s.SaveSudoersSnapshot(ctx, snap); err == nil {
+		t.Error("expected error for path-traversal host, got nil")
+	}
+
+	if _, err := s.ListSudoersSnapshots(ctx, "../escaped", 10); err == nil {
+		t.Error("expected error for path-traversal host in List, got nil")
+	}
+}
+
+func TestLocalStoreSudoersSnapshots_Deduplication(t *testing.T) {
+	s, _ := newLocalStore(t)
+	defer s.Close()
+
+	ctx := context.Background()
+	snap := &protocol.SudoersSnapshot{
+		Host:    "worker-02",
+		Content: "duplicate rules",
+		SHA256:  "abcdef123", // pragma: allowlist secret
+	}
+
+	if err := s.SaveSudoersSnapshot(ctx, snap); err != nil {
+		t.Fatalf("SaveSudoersSnapshot 1: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := s.SaveSudoersSnapshot(ctx, snap); err != nil {
+		t.Fatalf("SaveSudoersSnapshot 2: %v", err)
+	}
+
+	// Should not have multiple files because duplicate SHA256 deletes previous files.
+	snaps, err := s.ListSudoersSnapshots(ctx, "worker-02", 10)
+	if err != nil {
+		t.Fatalf("ListSudoersSnapshots: %v", err)
+	}
+	if len(snaps) != 1 {
+		t.Errorf("expected 1 snapshot due to deduplication/overwrite, got %d", len(snaps))
 	}
 }
