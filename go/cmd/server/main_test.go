@@ -665,6 +665,7 @@ func TestHandleConnSessionFreezing(t *testing.T) {
 	srv.mu.Unlock()
 	if sess == nil {
 		t.Fatal("active session not found after SESSION_FREEZING")
+		return
 	}
 	if !sess.freezeCandidate {
 		t.Error("freezeCandidate should be true after SESSION_FREEZING")

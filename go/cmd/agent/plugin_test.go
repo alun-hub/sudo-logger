@@ -132,18 +132,6 @@ func TestHandlePluginConn_Success(t *testing.T) {
 	addr, privSign, cleanup := setupMockServer(t)
 	defer cleanup()
 
-	// Mock global state
-	origCfg := cfg
-	origTlsCfg := tlsCfg
-	origVerifyKey := verifyKey
-	origCgroupBase := cgroupBase
-	defer func() {
-		cfg = origCfg
-		tlsCfg = origTlsCfg
-		verifyKey = origVerifyKey
-		cgroupBase = origCgroupBase
-	}()
-
 	cfg = defaultConfig()
 	cfg.Server = addr.String()
 	cfg.Ebpf = false // Disable eBPF for this test
@@ -216,21 +204,12 @@ func TestHandlePluginConn_Success(t *testing.T) {
 	case <-time.After(5 * time.Second): // handlePluginConn has a 2s sleep at the end
 		t.Fatal("Timeout waiting for handlePluginConn to exit")
 	}
+	time.Sleep(100 * time.Millisecond) // let deferred goroutines from handlePluginConn settle
 }
 
 func TestHandlePluginConn_Denied(t *testing.T) {
 	addr, _, cleanup := setupMockServer(t)
 	defer cleanup()
-
-	// Mock global state
-	origCfg := cfg
-	origTlsCfg := tlsCfg
-	origCgroupBase := cgroupBase
-	defer func() {
-		cfg = origCfg
-		tlsCfg = origTlsCfg
-		cgroupBase = origCgroupBase
-	}()
 
 	cfg = defaultConfig()
 	cfg.Server = addr.String()
@@ -276,6 +255,7 @@ func TestHandlePluginConn_Denied(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Timeout waiting for handlePluginConn to exit")
 	}
+	time.Sleep(100 * time.Millisecond) // let deferred goroutines from handlePluginConn settle
 }
 
 func TestHandlePluginConn_IdleTimeout(t *testing.T) {

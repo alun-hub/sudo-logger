@@ -427,6 +427,7 @@ func TestLocalStoreRiskCache(t *testing.T) {
 	}
 	if rc == nil {
 		t.Fatal("expected cache hit, got nil")
+		return
 	}
 	if rc.Score != 75 {
 		t.Errorf("Score: got %d, want 75", rc.Score)
@@ -519,5 +520,90 @@ func TestLocalStorePathConfinement(t *testing.T) {
 	_, err := s.ReadEvents(ctx, "../../../etc/passwd")
 	if err == nil {
 		t.Error("expected error for path-traversal TSID, got nil")
+	}
+}
+
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
+
+// newHeartbeatStore creates a LocalStore with the .sudoers-config subdirectory
+// that SaveHeartbeat requires (created lazily on first sudoers snapshot write,
+// but not by store initialisation).
+func newHeartbeatStore(t *testing.T) (*store.LocalStore, string) {
+	t.Helper()
+	s, dir := newLocalStore(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".sudoers-config"), 0o750); err != nil {
+		t.Fatalf("mkdir .sudoers-config: %v", err)
+	}
+	return s, dir
+}
+
+func TestLocalStoreHeartbeat_RoundTrip(t *testing.T) {
+	s, _ := newHeartbeatStore(t)
+	defer s.Close()
+
+	ctx := context.Background()
+
+	// No heartbeat yet — should return 0 with no error.
+	ts, err := s.GetLastSeen(ctx, "unknown-host")
+	if err != nil {
+		t.Fatalf("GetLastSeen on missing host: %v", err)
+	}
+	if ts != 0 {
+		t.Errorf("expected 0 for unknown host, got %d", ts)
+	}
+
+	before := time.Now().Unix()
+	if err := s.SaveHeartbeat(ctx, "worker-01"); err != nil {
+		t.Fatalf("SaveHeartbeat: %v", err)
+	}
+	after := time.Now().Unix()
+
+	ts, err = s.GetLastSeen(ctx, "worker-01")
+	if err != nil {
+		t.Fatalf("GetLastSeen: %v", err)
+	}
+	if ts < before || ts > after {
+		t.Errorf("timestamp %d not in [%d, %d]", ts, before, after)
+	}
+}
+
+func TestLocalStoreHeartbeat_MultipleHosts(t *testing.T) {
+	s, _ := newHeartbeatStore(t)
+	defer s.Close()
+
+	ctx := context.Background()
+	for _, host := range []string{"host-a", "host-b", "host-c"} {
+		if err := s.SaveHeartbeat(ctx, host); err != nil {
+			t.Fatalf("SaveHeartbeat(%s): %v", host, err)
+		}
+	}
+
+	for _, host := range []string{"host-a", "host-b", "host-c"} {
+		ts, err := s.GetLastSeen(ctx, host)
+		if err != nil || ts == 0 {
+			t.Errorf("GetLastSeen(%s): ts=%d err=%v", host, ts, err)
+		}
+	}
+}
+
+func TestLocalStoreHeartbeat_UpdatedOnRepeat(t *testing.T) {
+	s, _ := newHeartbeatStore(t)
+	defer s.Close()
+
+	ctx := context.Background()
+	if err := s.SaveHeartbeat(ctx, "worker-02"); err != nil {
+		t.Fatalf("first SaveHeartbeat: %v", err)
+	}
+	ts1, _ := s.GetLastSeen(ctx, "worker-02")
+
+	time.Sleep(1100 * time.Millisecond) // ensure Unix second advances
+
+	if err := s.SaveHeartbeat(ctx, "worker-02"); err != nil {
+		t.Fatalf("second SaveHeartbeat: %v", err)
+	}
+	ts2, _ := s.GetLastSeen(ctx, "worker-02")
+
+	if ts2 <= ts1 {
+		t.Errorf("expected timestamp to advance: ts1=%d ts2=%d", ts1, ts2)
 	}
 }
