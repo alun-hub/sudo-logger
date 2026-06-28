@@ -517,3 +517,54 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 		log.Printf("error streaming cast %s: %v", tsid, err)
 	}
 }
+
+// handleMetrics serves a Prometheus text exposition (no external library needed).
+// Endpoint: GET /metrics
+func handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessions, err := cache.get(r.Context())
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	var total, active, incomplete int
+	byRisk := map[string]int{"low": 0, "medium": 0, "high": 0, "critical": 0}
+	for _, s := range sessions {
+		total++
+		if s.InProgress {
+			active++
+		}
+		if s.Incomplete {
+			incomplete++
+		}
+		byRisk[store.RiskLevel(s.RiskScore)]++
+	}
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	fmt.Fprintf(w, "# HELP sudoreplay_sessions_total Total number of recorded sessions.\n")
+	fmt.Fprintf(w, "# TYPE sudoreplay_sessions_total gauge\n")
+	fmt.Fprintf(w, "sudoreplay_sessions_total %d\n", total)
+
+	fmt.Fprintf(w, "# HELP sudoreplay_sessions_active Sessions currently being recorded.\n")
+	fmt.Fprintf(w, "# TYPE sudoreplay_sessions_active gauge\n")
+	fmt.Fprintf(w, "sudoreplay_sessions_active %d\n", active)
+
+	fmt.Fprintf(w, "# HELP sudoreplay_sessions_incomplete Sessions that ended without clean termination.\n")
+	fmt.Fprintf(w, "# TYPE sudoreplay_sessions_incomplete gauge\n")
+	fmt.Fprintf(w, "sudoreplay_sessions_incomplete %d\n", incomplete)
+
+	fmt.Fprintf(w, "# HELP sudoreplay_sessions_by_risk Number of sessions per risk level.\n")
+	fmt.Fprintf(w, "# TYPE sudoreplay_sessions_by_risk gauge\n")
+	for _, level := range []string{"low", "medium", "high", "critical"} {
+		fmt.Fprintf(w, "sudoreplay_sessions_by_risk{level=%q} %d\n", level, byRisk[level])
+	}
+
+	fmt.Fprintf(w, "# HELP sudoreplay_session_views_total Total session views via the replay UI since last restart.\n")
+	fmt.Fprintf(w, "# TYPE sudoreplay_session_views_total counter\n")
+	fmt.Fprintf(w, "sudoreplay_session_views_total %d\n", viewsTotal.Load())
+}
