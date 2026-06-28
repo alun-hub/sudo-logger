@@ -202,6 +202,9 @@ func TestApprovalManager_Concurrent(t *testing.T) {
 	if len(pending) != workers {
 		t.Errorf("expected %d pending requests, got %d", workers, len(pending))
 	}
+
+	// Give background cleanup worker time to finish before TempDir cleanup
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestApprovalManager_OPARejection(t *testing.T) {

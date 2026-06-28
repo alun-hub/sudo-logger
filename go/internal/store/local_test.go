@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -674,10 +676,11 @@ func TestLocalStoreSudoersSnapshots_Deduplication(t *testing.T) {
 	defer s.Close()
 
 	ctx := context.Background()
+	hash := sha256.Sum256([]byte("duplicate rules"))
 	snap := &protocol.SudoersSnapshot{
 		Host:    "worker-02",
 		Content: "duplicate rules",
-		SHA256:  "abcdef123", // pragma: allowlist secret
+		SHA256:  hex.EncodeToString(hash[:]),
 	}
 
 	if err := s.SaveSudoersSnapshot(ctx, snap); err != nil {
