@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add GTK accessibility warning explanation to README
 - Add AI reliability mandates
-- Update CLAUDE.md with reliability commands
+- Update developer configuration and reliability commands
 - Align technical and operational documentation with Release 12 architecture
 - **readme:** Correct stale constants and version numbers
 
@@ -92,7 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix factual errors and improve structure in README and ARCHITECTURE
 - Add AGENTS.md, JIT-TODO and code-review TODO
-- **claude:** Rewrite CLAUDE.md with project context and fix instructions
+- Update developer guide with project context and fix instructions
 - Update README for Wayland capture and shipper.conf config file
 - **slides:** Add Wayland screen capture slide, move Ready to Deploy last
 - Update README with surgical masking details

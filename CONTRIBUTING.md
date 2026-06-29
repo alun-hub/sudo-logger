@@ -35,7 +35,7 @@ cd go && go test ./...
 ## Making Changes
 
 1. **Fork** the repository and create a branch from `main`.
-2. **Run impact analysis** before editing any function — see `CLAUDE.md` for details.
+2. **Run impact analysis** before editing any function — use `npx gitnexus impact --target <FunctionName>` to check the blast radius.
 3. **Write tests** for new behavior where practical.
 4. **Run pre-commit** before pushing:
    ```bash

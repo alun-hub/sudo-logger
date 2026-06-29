@@ -661,7 +661,7 @@ fi
 - store: add source, divergence_status, matched_session_id to SessionRecord
 
 * Sat Apr 25 2026 sudo-logger 1.17.36-1
-- fix(shipper): restore heartbeat dead-declaration to 2 missed (800 ms); Gemini had raised it to 5 missed (2000 ms) as a workaround for false freezes now resolved by plugin mutex fix
+- fix(shipper): restore heartbeat dead-declaration to 2 missed (800 ms); previously raised to 5 missed as a workaround for false freezes now resolved by plugin mutex fix
 
 * Sat Apr 25 2026 sudo-logger 1.17.35-1
 - fix(plugin): add mutex to prevent race between ship_chunk and refresh_ack_cache causing stream corruption and session freeze under high I/O
