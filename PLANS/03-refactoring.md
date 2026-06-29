@@ -62,11 +62,11 @@ go/internal/store/
 ```
 
 Steps:
-- [ ] Map every function in local.go to its target file
-- [ ] Create new files with package declaration
-- [ ] Move functions group by group, compile-check after each
-- [ ] Run full test suite after all moves
-- [ ] Ensure `local_test.go` imports still work (may need to update test file locations)
+- [x] Map every function in local.go to its target file
+- [x] Create new files with package declaration
+- [x] Move functions group by group, compile-check after each
+- [x] Run full test suite after all moves
+- [x] Ensure `local_test.go` imports still work (may need to update test file locations)
 
 ### 3.3 — Split `go/cmd/server/main.go`
 
