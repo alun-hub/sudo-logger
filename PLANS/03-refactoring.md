@@ -37,12 +37,12 @@ go/cmd/replay-server/
 ```
 
 Steps:
-- [ ] Read main.go fully and catalogue all top-level functions by category
-- [ ] Create the new files as empty shells with correct package declaration
-- [ ] Move functions one category at a time, verify `go build ./...` after each move
-- [ ] Ensure no circular imports are introduced
-- [ ] Run `go test ./cmd/replay-server/...` after each move
-- [ ] Run `pre-commit run --all-files` before committing
+- [x] Read main.go fully and catalogue all top-level functions by category
+- [x] Create the new files as empty shells with correct package declaration
+- [x] Move functions one category at a time, verify `go build ./...` after each move
+- [x] Ensure no circular imports are introduced
+- [x] Run `go test ./cmd/replay-server/...` after each move
+- [x] Run `pre-commit run --all-files` before committing
 
 ### 3.2 — Split `go/internal/store/local.go`
 
