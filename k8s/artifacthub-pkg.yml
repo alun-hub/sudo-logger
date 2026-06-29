@@ -29,7 +29,6 @@ links:
     url: https://github.com/alun-hub/sudo-logger/blob/main/README.md
 maintainers:
   - name: Alun Hub
-    email: andreas.lundqvist@gmail.com
 provider:
   name: Alun Hub
 ignore: []

@@ -94,3 +94,5 @@ old/
 # Added by goreleaser init:
 dist/
 node_modules/
+PLANS/
+artifacthub-repo.yml
