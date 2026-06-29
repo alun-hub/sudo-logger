@@ -80,9 +80,9 @@ go/cmd/server/
 ```
 
 Steps:
-- [ ] Catalogue functions in main.go by responsibility
-- [ ] Move in groups, compile-check after each
-- [ ] Run test suite after all moves
+- [x] Catalogue functions in main.go by responsibility
+- [x] Move in groups, compile-check after each
+- [x] Run test suite after all moves
 
 ### 3.4 — Review `go/cmd/agent/ebpf.go` (1246 lines)
 - [ ] Read the file and determine if it can be split meaningfully
