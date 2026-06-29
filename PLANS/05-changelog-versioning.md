@@ -9,17 +9,17 @@ No semver policy documented.
 **Why it matters:** "Is this project maintained?" is answered in 3 seconds by looking at
 the changelog. A missing changelog signals abandonment.
 
-**Status:** NOT STARTED
+**Status:** DONE
 
 ---
 
 ## Tasks
 
 ### 5.1 — Write CHANGELOG.md from git history
-- [ ] Install `git-cliff`: `cargo install git-cliff` or download binary from GitHub
-- [ ] Run `git-cliff --output CHANGELOG.md` to auto-generate from commit history
-- [ ] Review and clean up the generated output — remove noise, fix descriptions
-- [ ] Structure: newest release at top, each entry with sections:
+- [x] Install `git-cliff`: `cargo install git-cliff` or download binary from GitHub
+- [x] Run `git-cliff --output CHANGELOG.md` to auto-generate from commit history
+- [x] Review and clean up the generated output — remove noise, fix descriptions
+- [x] Structure: newest release at top, each entry with sections:
   ```
   ## [1.20.27] - 2026-06-xx
   ### Added
@@ -29,21 +29,21 @@ the changelog. A missing changelog signals abandonment.
   ### Changed
   - ...
   ```
-- [ ] Go back to at least v1.18.0 or the first "public" release
-- [ ] Commit the CHANGELOG.md to main
+- [x] Go back to at least v1.18.0 or the first "public" release
+- [x] Commit the CHANGELOG.md to main
 
 ### 5.2 — Configure git-cliff for future releases
-- [ ] Create `cliff.toml` in project root
-- [ ] Configure commit types to sections:
+- [x] Create `cliff.toml` in project root
+- [x] Configure commit types to sections:
   - `feat` → Added
   - `fix` → Fixed
   - `refactor` → Changed
   - `docs` → Documentation
   - `chore` → Internal (hidden from changelog unless significant)
   - `security` → Security (always shown, highlighted)
-- [ ] Add `git-cliff --bump` step to release process so changelog updates automatically
+- [x] Add `git-cliff --bump` step to release process so changelog updates automatically
   on each tag
-- [ ] Document the process in CONTRIBUTING.md:
+- [x] Document the process in CONTRIBUTING.md:
   > When releasing: `git-cliff --bump --output CHANGELOG.md && git commit -am "chore: update changelog" && git tag vX.Y.Z`
 
 ### 5.3 — Document semver policy
@@ -63,25 +63,25 @@ sudo-logger follows [Semantic Versioning](https://semver.org).
 The plugin.so and agent must always be compatible within the same MAJOR version.
 ```
 
-- [ ] Add versioning section to CONTRIBUTING.md
-- [ ] Verify current version numbering is consistent with this policy
+- [x] Add versioning section to CONTRIBUTING.md
+- [x] Verify current version numbering is consistent with this policy
   (currently at v1.20.x — check if any past bumps violated semver)
 
 ### 5.4 — Version in Go code
-- [ ] Confirm there is a canonical version string in the codebase (e.g., `cmd/agent/version.go`)
-- [ ] If not: create `go/internal/version/version.go` with `var Version = "dev"`
-- [ ] Wire goreleaser ldflags to inject version at build time:
+- [x] Confirm there is a canonical version string in the codebase (e.g., `cmd/agent/version.go`)
+- [x] If not: create `go/internal/version/version.go` with `var Version = "dev"`
+- [x] Wire goreleaser ldflags to inject version at build time:
   ```yaml
   # in .goreleaser.yaml
   builds:
     - ldflags:
         - -X sudo-logger/internal/version.Version={{.Version}}
   ```
-- [ ] Ensure `--version` flag works on agent, server, and replay-server
-- [ ] Add version to log output on startup (already common practice)
+- [x] Ensure `--version` flag works on agent, server, and replay-server
+- [x] Add version to log output on startup (already common practice)
 
 ### 5.5 — GitHub Release notes template
-- [ ] Create `.github/release.yml` to categorise PRs/commits in GitHub's auto-generated
+- [x] Create `.github/release.yml` to categorise PRs/commits in GitHub's auto-generated
   release notes (complementary to CHANGELOG.md):
   ```yaml
   changelog:
