@@ -1,0 +1,46 @@
+version: 1.22.0
+name: sudo-logger
+displayName: sudo-logger
+createdAt: "2026-04-25T00:00:00Z"
+description: Mandatory sudo session recording with terminal freeze enforcement
+logoURL: https://raw.githubusercontent.com/alun-hub/sudo-logger/main/docs/sudo-logger.png
+digest: ""
+license: AGPL-3.0
+homeURL: https://github.com/alun-hub/sudo-logger
+appVersion: 1.22.0
+containsSecurityUpdates: false
+prerelease: false
+keywords:
+  - sudo
+  - audit
+  - security
+  - logging
+  - compliance
+  - session-recording
+  - privileged-access
+  - siem
+  - golang
+links:
+  - name: GitHub
+    url: https://github.com/alun-hub/sudo-logger
+  - name: Demo
+    url: https://sudo-logger.unixkonsult.se
+  - name: Documentation
+    url: https://github.com/alun-hub/sudo-logger/blob/main/README.md
+maintainers:
+  - name: Alun Hub
+    email: andreas.lundqvist@gmail.com
+provider:
+  name: Alun Hub
+ignore: []
+annotations:
+  artifacthub.io/category: security
+  artifacthub.io/changes: |
+    - kind: added
+      description: Mandatory sudo session recording with terminal freeze on network loss
+  artifacthub.io/license: AGPL-3.0
+  artifacthub.io/recommendations: |
+    - url: https://artifacthub.io/packages/helm/cert-manager/cert-manager
+  artifacthub.io/signKey: |
+    fingerprint: ""
+    url: ""
