@@ -210,11 +210,15 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 			"addr": r.RemoteAddr,
 		})
 	}
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 	http.SetCookie(w, &http.Cookie{
-		Name:   "sudo_session",
-		Value:  "",
-		MaxAge: -1,
-		Path:   "/",
+		Name:     "sudo_session",
+		Value:    "",
+		MaxAge:   -1,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }

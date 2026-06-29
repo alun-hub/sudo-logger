@@ -210,7 +210,8 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 	_, provider, _, oauthConf, err := getOIDCConfig(r.Context(), r)
 	if err != nil {
 		// Just clear cookie and go home if provider is gone
-		http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/"})
+		secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+		http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -234,7 +235,7 @@ func handleOIDCLogout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear local session cookie
-	http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/"})
+	http.SetCookie(w, &http.Cookie{Name: "sudo_session", Value: "", MaxAge: -1, Path: "/", HttpOnly: true, Secure: strings.HasPrefix(oauthConf.RedirectURL, "https://"), SameSite: http.SameSiteLaxMode})
 
 	// Try to get end_session_endpoint from provider discovery claims
 	var claims struct {
