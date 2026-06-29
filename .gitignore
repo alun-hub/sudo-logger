@@ -96,3 +96,19 @@ dist/
 node_modules/
 PLANS/
 artifacthub-repo.yml
+
+# Runtime artifacts from system tests
+tests/*.pid
+tests/*.out
+
+# Generated documentation (build with: make docs-manual)
+docs/manual.html
+
+# Internal / not for public repo
+package-lock.json
+docs/security-review-*.md
+scripts/test_replay_ui.py
+scripts/full_audit.py
+scripts/portal-screencast-test.py
+scripts/audit_parity.py
+contrib/launch/
