@@ -3,7 +3,7 @@
 Master tracker. Update status here when a plan (or individual task) is completed.
 Each plan file has full detail. This file is the single source of truth for progress.
 
-Last updated: 2026-06-28 22:42
+Last updated: 2026-06-29 07:35
 
 ---
 
@@ -13,7 +13,7 @@ Last updated: 2026-06-28 22:42
 |---|------|--------|-------|
 | 01 | [CI/CD & Badges](01-ci-badges.md) | DONE | CI green, codecov active, branch protection enabled |
 | 02 | [Test Coverage](02-testing.md) | DONE | All coverage goals (freeze, ACK, sandbox, store, config, server callback/approval) met |
-| 03 | [Refactoring](03-refactoring.md) | NOT STARTED | |
+| 03 | [Refactoring](03-refactoring.md) | DONE | Split monoliths in store, agent, and replay-server |
 | 04 | [Releases & Distribution](04-releases-distribution.md) | NOT STARTED | |
 | 05 | [Changelog & Versioning](05-changelog-versioning.md) | NOT STARTED | |
 | 06 | [Discoverability & Marketing](06-discoverability.md) | NOT STARTED | |
