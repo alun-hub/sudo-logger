@@ -26,11 +26,15 @@ import (
 
 	"github.com/cilium/ebpf/rlimit"
 	"sudo-logger/internal/iolog"
+	"sudo-logger/internal/version"
 )
 
 const defaultConfigPath = "/etc/sudo-logger/agent.conf"
 
-var flagConfig = flag.String("config", defaultConfigPath, "Path to configuration file")
+var (
+	flagConfig  = flag.String("config", defaultConfigPath, "Path to configuration file")
+	flagVersion = flag.Bool("version", false, "Print version and exit")
+)
 
 // Package-level state shared across plugin.go, ebpf.go, cgroup.go.
 var (
@@ -46,6 +50,11 @@ var debugLog = func(format string, args ...any) {}
 
 func main() {
 	flag.Parse()
+
+	if *flagVersion {
+		fmt.Printf("sudo-logger-agent %s\n", version.Version)
+		os.Exit(0)
+	}
 
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Printf("warning: failed to remove memlock limit: %v", err)
@@ -174,8 +183,8 @@ func main() {
 	if ebpfSys != nil {
 		mode = "plugin+eBPF"
 	}
-	log.Printf("sudo-logger-agent listening on %s, forwarding to %s [mode: %s]",
-		cfg.Socket, cfg.Server, mode)
+	log.Printf("sudo-logger-agent %s listening on %s, forwarding to %s [mode: %s]",
+		version.Version, cfg.Socket, cfg.Server, mode)
 
 	for {
 		conn, err := ln.Accept()

@@ -5,6 +5,7 @@ import (
 )
 
 var (
+	flagVersion        = flag.Bool("version", false, "Print version and exit")
 	flagListen         = flag.String("listen", ":9876", "Listen address (TLS)")
 	flagLogDir         = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
 	flagCert           = flag.String("cert", "/etc/sudo-logger/server.crt", "Server TLS certificate")

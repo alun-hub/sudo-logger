@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"embed"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -30,6 +31,7 @@ import (
 
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
+	"sudo-logger/internal/version"
 )
 
 //go:embed static
@@ -168,6 +170,11 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 
 func main() {
 	flag.Parse()
+
+	if *flagVersion {
+		fmt.Printf("sudo-replay-server %s\n", version.Version)
+		os.Exit(0)
+	}
 
 	// Initialise storage first — rules and siem config may be loaded from DB.
 	var storeErr error
@@ -337,10 +344,10 @@ func main() {
 	// Start serving.
 	var serveErr error
 	if httpSrv.TLSConfig != nil && *flagTLSCert != "" {
-		log.Printf("sudo-replay-server listening on %s (TLS), logdir=%s", *flagListen, *flagLogDir)
+		log.Printf("sudo-replay-server %s listening on %s (TLS), logdir=%s", version.Version, *flagListen, *flagLogDir)
 		serveErr = httpSrv.ListenAndServeTLS(*flagTLSCert, *flagTLSKey)
 	} else {
-		log.Printf("sudo-replay-server listening on %s, logdir=%s", *flagListen, *flagLogDir)
+		log.Printf("sudo-replay-server %s listening on %s, logdir=%s", version.Version, *flagListen, *flagLogDir)
 		serveErr = httpSrv.ListenAndServe()
 	}
 	if serveErr != nil && serveErr != http.ErrServerClosed {

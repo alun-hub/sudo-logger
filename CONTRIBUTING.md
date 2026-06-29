@@ -64,3 +64,31 @@ Example: `fix(siem): validate HTTPS URL scheme before sending`
 - One logical change per PR.
 - Reference any related issues in the PR description.
 - PRs require all CI checks to pass before merging.
+
+## Versioning
+
+sudo-logger follows [Semantic Versioning](https://semver.org).
+
+| Change type | Version bump | Example |
+|---|---|---|
+| Breaking wire protocol change | MAJOR | 1.x.x → 2.0.0 |
+| New feature, backwards-compatible | MINOR | 1.20.x → 1.21.0 |
+| Bug fix, no API/protocol change | PATCH | 1.20.27 → 1.20.28 |
+
+The plugin.so and agent must always be compatible within the same MAJOR version.
+
+## Releasing
+
+```bash
+# 1. Update CHANGELOG and bump the version tag
+git-cliff --bump --output CHANGELOG.md
+git commit -am "chore: update changelog for vX.Y.Z"
+git tag vX.Y.Z
+
+# 2. Push — goreleaser CI picks up the tag and builds releases
+git push origin main vX.Y.Z
+```
+
+`git-cliff` is available as a pre-built binary from
+[github.com/orhun/git-cliff/releases](https://github.com/orhun/git-cliff/releases)
+or via `cargo install git-cliff`.

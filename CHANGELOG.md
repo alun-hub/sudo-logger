@@ -1,0 +1,201 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.22.0] - 2026-04-25
+
+### Added
+
+- **replay:** Implement split-view and synchronized playback for TTY and Wayland
+- **replay:** Add pop-out window and smart sync visibility for Wayland
+- **replay:** Implement loading screen, fix pop-out layout, and enable pure Wayland playback
+- **wayland:** Support multiple sequential GUI applications
+- Add verify-integrity script for AI validation
+- **replay:** Instant playback with progressive streaming (Release 13.1)
+
+### Changed
+
+- **shipper:** Implement smart batching to prevent freezes under high I/O
+
+### Documentation
+
+- Add GTK accessibility warning explanation to README
+- Add AI reliability mandates
+- Update CLAUDE.md with reliability commands
+- Align technical and operational documentation with Release 12 architecture
+- **readme:** Correct stale constants and version numbers
+
+### Fixed
+
+- Require 2 consecutive heartbeat windows before declaring server alive
+- Remove unfreeze from updateAck to prevent duplicate freeze banners
+- **plugin:** Remove redundant banner write from terminal-reclaim
+- **plugin:** Remove redundant FREEZE_MSG from monitor thread
+- **shipper:** Close done before serverConnAlive=false to eliminate ghost banner
+- **shipper:** Stability period for recovery, fix(plugin): terminal-reclaim cooldown
+- **plugin:** JSON injection, cgroup path traversal, and protocol robustness
+- Suppress GTK accessibility warnings in sudo sessions
+- **replay:** Fix pop-out sync and enable pure Wayland playback
+- **replay:** Fix infinite message loop and ensure stable frontend
+- **replay:** Fix JS syntax error in template literals
+- **replay:** Absolute fix for frontend syntax and logic
+- **replay:** Ensure loading screen resets on session switch
+- Make verify-integrity script more robust for Go internal packages
+- **replay:** Ensure autoplay works for pure IMAGE sessions
+- **replay:** Make IMAGE session detection robust to fix autoplay race condition
+- **replay:** Final robust fix for IMAGE autoplay race condition
+- **shipper:** Implement wait-on-drain to prevent premature freezes and 'incomplete' reports
+- **shipper:** Replace unsafe channel closures with safe drain signal and increase bulk buffer (Release 6)
+- **server:** Async ACK coalescing and final shipper tuning (Release 7)
+- **server:** Implement asynchronous disk writer to handle high I/O bursts (Release 8)
+- **shipper:** Use single bufio reader to prevent stream corruption during handshake
+- **server:** Implement disk write batching and panic-free termination (Release 10)
+- **server:** Protect shared network buffer with a mutex to prevent stream corruption (Release 11)
+- Non-blocking server disk handoff and precise shipper write deadlines (Release 12)
+- **plugin:** Add mutex to prevent race between ship_chunk and refresh_ack_cache
+- **replay:** Implement streaming NDJSON architecture to handle large sessions (Release 13)
+- **shipper:** Restore heartbeat dead-declaration to 2 missed (800 ms)
+
+### Security
+
+- Fix path traversal (VULN-001, VULN-003) and DoS (VULN-002)
+- Fix path traversal in WAYLAND_DISPLAY and resource exhaustion in wayland-proxy
+- Fix multiple critical vulnerabilities and regressions
+- **server:** Implement bounded overflow and log sanitization (Release 14)
+
+## [1.21.0] - 2026-04-20
+
+### Added
+
+- **ui:** Improve replay web UI accessibility and visual polish
+- **gui:** Add Wayland proxy screen capture for GUI sudo sessions
+- **distributed:** Implement ScreenFrameWriter/ScreenFrameStore for S3
+- **replay:** Screen capture slideshow player for GUI sessions
+- **shipper:** Config file replaces CLI flags; wayland toggle
+- **selinux:** Bundle SELinux policy module in client RPM
+- **wayland:** Force last-frame capture; configurable proxy_period
+- **redaction:** Automatic secret masking before log transmission
+- Implement automated session retention cleanup via Replay GUI
+- Configurable disclaimer shown at sudo session start
+- Disclaimer colour and \n/\t support
+- Preserve NO_AT_BRIDGE in sudoers to suppress AT-SPI warnings
+- Add idle_timeout to shipper — terminate sessions with no user input
+
+### Changed
+
+- **redaction:** Implement fast-path optimization for redactor
+
+### Documentation
+
+- Fix factual errors and improve structure in README and ARCHITECTURE
+- Add AGENTS.md, JIT-TODO and code-review TODO
+- **claude:** Rewrite CLAUDE.md with project context and fix instructions
+- Update README for Wayland capture and shipper.conf config file
+- **slides:** Add Wayland screen capture slide, move Ready to Deploy last
+- Update README with surgical masking details
+- Document idle_timeout in shipper.conf, README and man page
+
+### Fixed
+
+- **distributed:** Split multi-statement schema version upsert into two Exec calls
+- **security:** Address CodeQL findings — log injection, SSRF, path injection
+- **security:** Check raw TLS path for traversal before filepath.Clean
+- **rpm:** Correct misplaced changelog date in replay spec (1.13.0 was Apr 06, should be Apr 05)
+- **shipper:** Start wayland-proxy whenever WAYLAND_DISPLAY is set, not only when tty_path is empty
+- **plugin:** Read WAYLAND_DISPLAY from /proc/self/environ, not user_env[]
+- **selinux:** Allow sudo_shipper_t to exec wayland-proxy and connect to Wayland socket
+- **client:** Install sudoers drop-in to preserve WAYLAND_DISPLAY through env_reset
+- **shipper:** Run wayland-proxy as invoking user, not root
+- **shipper:** Resolve wayland user IDs from XDG_RUNTIME_DIR, not NSS
+- **selinux:** Allow setuid/setgid for wayland-proxy privilege drop
+- **wayland:** Get invoking user UID/GID from sudo user_info[], not NSS
+- **selinux:** Allow wayland-proxy to bind/unlink socket in /run/user/<uid>/
+- **wayland:** Shipper creates proxy socket, passes fd to wayland-proxy
+- **wayland:** Preserve proxy socket file after ln.Close()
+- **wayland:** Connectto compositor + kill lingering proxy
+- **service:** Allow wayland-proxy to connect to compositor socket
+- **wayland:** Proxy socket in /run/user/<uid>/ for SELinux compatibility
+- **wayland:** Protocol desync, mutex, linger mode, FD leak, plugin syslog
+- **spec:** Add wayland-proxy to immutable chattr scriptlets
+- **service:** Remove ProtectHome — breaks wayland-proxy /run/user access
+- **config:** Accept legacy LOGSERVER key as alias for server
+- **selinux:** Grant dac_override and dac_read_search to sudo_shipper_t
+- **selinux:** Allow user_tmp_t file map/write and dri_device_t access
+- **store:** Add JSON tags to ScreenFrameInfo struct
+- **wayland-proxy:** Remove double lock in captureCommit
+- **spec:** Correct changelog dates to silence RPM build warnings
+- Warn user before idle timeout closes session
+- Log idle warning failures and remove extra goroutine
+- Resolve /dev/tty to actual PTY path for TTY banner writes
+- **selinux:** Allow sudo_shipper_t to read /proc/<pid>/fd symlinks
+- **selinux:** Allow sudo_shipper_t to write to user PTY devices
+- Use yellow for idle termination banner, same as warning
+- Stop watchdog goroutines when session ends via done channel
+
+### Security
+
+- Remediate CodeQL scanning alerts (SSRF, Path Traversal, Regex)
+- Implement strict allow-list for TLS certificate paths (VULN-002)
+- Sanitize user identity in session view logs (VULN-003)
+- Harden SSRF protection and fix missing regex anchors (v2)
+- Suppress CodeQL false positives with inline lgtm annotations
+
+## [1.20.0] - 2026-04-14
+
+### Changed
+
+- Code review fixes — bug fixes, security hardening, deduplication
+
+### Fixed
+
+- **distributed:** Retry advisory lock on WatchSessions instead of blocking
+- S2 S4 K4 K6 — TLS 1.3, payload limits, flag docs, schema versioning
+
+## [1.19.4] - 2026-04-12
+
+### Fixed
+
+- **shipper:** Lower -freeze-timeout default from 5 min to 3 min
+- **spec:** Correct bogus day-of-week in sudo-logger-client changelog
+
+## [1.19.3] - 2026-04-12
+
+### Fixed
+
+- **client:** Prevent spurious SESSION_FREEZING on clean session end
+- **replay:** OR command_base_any with content matching in matchesRule
+
+## [1.19.2] - 2026-04-12
+
+### Fixed
+
+- **shipper:** Prevent spurious SESSION_FREEZING on clean session end
+
+## [1.19.1] - 2026-04-12
+
+### Fixed
+
+- **freeze-banner:** Restore plugin FREEZE_MSG write as fallback
+
+## [1.19.0] - 2026-04-12
+
+### Documentation
+
+- **architecture:** Add network-outage timeline to freeze section
+
+### Fixed
+
+- **freeze-banner:** Write FREEZE_MSG from shipper directly to TTY
+
+## [1.18.0] - 2026-04-12
+
+### Added
+
+- **network-outage:** Distinguish network loss from shipper kill in replay UI
+
+### Documentation
+
+- **readme:** Document SESSION_ABANDON and freeze-timeout/shipper distinction

@@ -28,6 +28,7 @@ import (
 
 	"sudo-logger/internal/config"
 	"sudo-logger/internal/store"
+	"sudo-logger/internal/version"
 )
 
 // validName matches safe directory name components: alphanumeric plus .-_
@@ -88,6 +89,11 @@ type session struct {
 
 func main() {
 	flag.Parse()
+
+	if *flagVersion {
+		fmt.Printf("sudo-logserver %s\n", version.Version)
+		os.Exit(0)
+	}
 
 	signKey, err := loadEd25519PrivKey(*flagSignKey)
 	if err != nil {
@@ -221,7 +227,7 @@ func main() {
 		log.Printf("health/metrics listening on %s", *flagHealthListen)
 	}
 
-	log.Printf("sudo-logserver listening on %s, storage=%s logdir=%s", *flagListen, *flagStorage, *flagLogDir)
+	log.Printf("sudo-logserver %s listening on %s, storage=%s logdir=%s", version.Version, *flagListen, *flagStorage, *flagLogDir)
 
 	// Graceful shutdown: close the TLS listener on SIGTERM/SIGINT so that
 	// ln.Accept() returns an error and the loop exits. Then wait up to 30 s

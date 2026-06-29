@@ -5,6 +5,7 @@ import (
 )
 
 var (
+	flagVersion                 = flag.Bool("version", false, "Print version and exit")
 	flagListen                  = flag.String("listen", ":8080", "Listen address")
 	flagLogDir                  = flag.String("logdir", "/var/log/sudoreplay", "Base directory for session logs")
 	flagRules                   = flag.String("rules", "/etc/sudo-logger/risk-rules.yaml", "Risk scoring rules file")
