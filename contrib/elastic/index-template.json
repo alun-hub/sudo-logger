@@ -1,0 +1,41 @@
+{
+  "index_patterns": ["sudo-logger-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 1,
+      "index.lifecycle.name": "sudo-logger-policy",
+      "index.lifecycle.rollover_alias": "sudo-logger"
+    },
+    "mappings": {
+      "dynamic": "strict",
+      "properties": {
+        "@timestamp":        { "type": "date" },
+        "session_id":        { "type": "keyword" },
+        "user":              { "type": "keyword" },
+        "host":              { "type": "keyword" },
+        "runas":             { "type": "keyword" },
+        "runas_uid":         { "type": "integer" },
+        "runas_gid":         { "type": "integer" },
+        "command": {
+          "type": "text",
+          "fields": { "keyword": { "type": "keyword", "ignore_above": 1024 } }
+        },
+        "resolved_command":  { "type": "keyword" },
+        "cwd":               { "type": "keyword" },
+        "flags":             { "type": "keyword" },
+        "start_time":        { "type": "date" },
+        "end_time":          { "type": "date" },
+        "duration_s":        { "type": "float" },
+        "exit_code":         { "type": "integer" },
+        "incomplete":        { "type": "boolean" },
+        "risk_score":        { "type": "integer" },
+        "risk_reasons":      { "type": "keyword" },
+        "replay_url":        { "type": "keyword", "index": false }
+      }
+    }
+  },
+  "_meta": {
+    "description": "sudo-logger SIEM events (format: json). Configure sudo-logger with transport: https and format: json pointing at Logstash or an Elasticsearch ingest pipeline."
+  }
+}

@@ -9,14 +9,33 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/alun-hub/sudo-logger)](https://github.com/alun-hub/sudo-logger/releases/latest)
 
-Real-time sudo session logging with mandatory remote acknowledgement.
-All sudo commands and interactive sessions are recorded and shipped to a
-central log server over mutual TLS. If the log server stops responding,
-the user's terminal is frozen — preventing any unlogged sudo activity.
+**The problem:** Linux ships with no mandatory sudo audit trail. `sudo` can write logs
+locally or to `sudo-logsrvd`, but logging is opt-in — an attacker who controls
+`sudo.conf` can disable it entirely, or simply wait for a network outage. SOC teams
+and compliance frameworks (PCI-DSS, ISO 27001, CIS L2) require that privileged
+activity is *always* logged, but nothing in the standard sudo stack enforces that
+guarantee.
+
+**What sudo-logger does differently:** Every sudo session is streamed to a central
+log server over mutual TLS. The server sends a cryptographic acknowledgement (ed25519)
+for every I/O chunk. If acknowledgements stop arriving — network loss, server crash,
+or deliberate disruption — the running process is frozen within ~800 ms via Linux
+cgroups. The user sees a banner and can exit with Ctrl+C, but *no further input is
+accepted until the server confirms receipt*. Logging is not optional; it is enforced
+at the kernel level.
+
+**Who should use this:** Security and compliance teams that need a provable audit
+trail for privileged access (PCI-DSS, ISO 27001, HIPAA), infrastructure engineers
+on Fedora/RHEL/Rocky Linux who want mandatory recording without a full PAM stack,
+and organisations that need eBPF-based divergence detection to catch bypass attempts.
+
+> **Live demo:** [sudo-logger.unixkonsult.se](https://sudo-logger.unixkonsult.se) —
+> try searching and replaying sessions from a real monitored host.
 
 ## Table of Contents
 
 - [How it works](#how-it-works)
+- [Why sudo-logger?](#why-sudo-logger)
 - [Architecture](#architecture)
 - [Security properties](#security-properties)
 - [Features](#features)
@@ -94,6 +113,27 @@ periodic heartbeat probes. If ACKs and heartbeats stop arriving (network
 loss, server crash), the child process is frozen within ~800 ms — no
 further input reaches it until ACKs resume or the session is killed with
 Ctrl+C.
+
+---
+
+## Why sudo-logger?
+
+The short version: `sudo_logsrvd` and `auditd` record what *did* happen.
+sudo-logger enforces that everything *must* be recorded before it can happen.
+
+| | sudo_logsrvd | auditd | sudo-logger |
+|---|:---:|:---:|:---:|
+| Freeze terminal if server unreachable | ✗ | ✗ | ✅ |
+| Cryptographic per-chunk ACKs | ✗ | ✗ | ✅ |
+| eBPF bypass detection | ✗ | partial | ✅ |
+| Web replay UI with risk scoring | ✗ | ✗ | ✅ |
+| SIEM forwarding (CEF / OCSF) | ✗ | ✗ | ✅ |
+| Secret redaction before transit | ✗ | ✗ | ✅ |
+| Ships with sudo / no install needed | ✅ | ✅ | ✗ |
+| Relay / hierarchical logging | ✅ | ✗ | ✗ |
+
+For the full comparison see [docs/comparison.md](docs/comparison.md).
+For the rationale behind mandatory logging see [docs/why-mandatory-logging.md](docs/why-mandatory-logging.md).
 
 ---
 
