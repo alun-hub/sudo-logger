@@ -85,10 +85,10 @@ Steps:
 - [x] Run test suite after all moves
 
 ### 3.4 — Review `go/cmd/agent/ebpf.go` (1246 lines)
-- [ ] Read the file and determine if it can be split meaningfully
-- [ ] If it contains both BPF program loading AND event processing: split them
+- [x] Read the file and determine if it can be split meaningfully
+- [x] If it contains both BPF program loading AND event processing: split them
 - [ ] If it is inherently monolithic (one concern, just verbose): leave it, document why
-- [ ] Decision to be logged here before any changes are made
+- [x] Decision: We will split `ebpfSession` (network connection, ACK draining, chunk streaming, heartbeat) into `ebpf_session.go`, keeping `ebpfSubsystem` (tracepoints, BPF ringbuffer event loop, metadata resolution) in `ebpf.go`.
 
 ### 3.5 — Verify no behaviour changes
 - [ ] `go test -race ./...` passes after all splits
