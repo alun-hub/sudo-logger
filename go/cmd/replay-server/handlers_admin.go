@@ -776,10 +776,20 @@ func handleGetRules(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	var rs RuleSet
+	if content != "" {
+		if err := yaml.Unmarshal([]byte(content), &rs); err != nil {
+			http.Error(w, "parse rules: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if rs.Rules == nil {
+		rs.Rules = []Rule{}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{
-		"content": content,
-		"path":    *flagRules,
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"rules": rs.Rules,
+		"path":  *flagRules,
 	}); err != nil {
 		log.Printf("encode rules response: %v", err)
 	}
