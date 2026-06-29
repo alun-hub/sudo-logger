@@ -394,6 +394,23 @@ migrate-sessions \
 
 ## Installation
 
+### Quick Install (Debian/Ubuntu & Fedora/RHEL/Rocky Linux)
+
+For the fastest setup, use our one-liner install script to download and install pre-compiled packages directly:
+
+```bash
+# To install Client (Monitored Hosts)
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- client
+
+# To install Log Server
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- server
+
+# To install Replay Server
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- replay
+```
+
+For manual installation and verification details, see [INSTALLATION.md](INSTALLATION.md).
+
 ### 1. PKI bootstrap
 
 Run once on a secure machine (CA machine). You need `openssl`.

@@ -91,3 +91,6 @@ demo_audit.json
 # MkDocs generated site (run: make docs-site)
 docs/site/
 old/
+# Added by goreleaser init:
+dist/
+node_modules/

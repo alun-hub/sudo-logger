@@ -6,6 +6,40 @@ This guide covers installing and configuring `sudo-logger` in two scenarios:
 
 ---
 
+## Quick Install (Debian, Ubuntu, Fedora, RHEL, Rocky Linux)
+
+You can install `sudo-logger` packages directly using our one-liner install script. The script automatically detects your distribution (Debian/Ubuntu `.deb` or RedHat/Fedora/Rocky `.rpm`) and architecture (`amd64` or `arm64`), downloads the latest release, verifies its signature, and installs it.
+
+### Install Client (Monitored Hosts)
+```bash
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- client
+```
+
+### Install Log Server
+```bash
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- server
+```
+
+### Install Replay Server
+```bash
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- replay
+```
+
+### Signature Verification
+All releases are signed using **Sigstore/cosign** (keyless OIDC). To verify the downloaded package manually:
+1. Download the package, signature, and certificate files from the [Releases](https://github.com/alun-hub/sudo-logger/releases) page.
+2. Run:
+```bash
+cosign verify-blob \
+  --signature sudo-logger-client_<version>_linux_amd64.deb.sig \
+  --certificate sudo-logger-client_<version>_linux_amd64.deb.pem \
+  --certificate-identity-regexp "https://github.com/alun-hub/sudo-logger/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  sudo-logger-client_<version>_linux_amd64.deb
+```
+
+---
+
 ## Architecture Overview
 
 | Component | Package | Role |

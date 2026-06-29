@@ -90,3 +90,15 @@ jobs:
         env:
           SKIP: go-vet,golangci-lint,go-test,cppcheck,flawfinder,trivy
         run: pre-commit run --all-files
+
+  goreleaser:
+    name: GoReleaser Check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run GoReleaser Check
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: check

@@ -15,22 +15,22 @@ GitHub. Blocks adoption on Debian/Ubuntu (the majority of Linux servers).
 ### 4.1 — goreleaser setup
 goreleaser automates building multi-arch binaries and publishing GitHub Releases.
 
-- [ ] Install goreleaser locally: `go install github.com/goreleaser/goreleaser/v2@latest`
-- [ ] Run `goreleaser init` in project root to generate `.goreleaser.yaml`
-- [ ] Configure builds for:
+- [x] Install goreleaser locally: `go install github.com/goreleaser/goreleaser/v2@latest`
+- [x] Run `goreleaser init` in project root to generate `.goreleaser.yaml`
+- [x] Configure builds for:
   - `cmd/agent` → binary `sudo-logger-agent`
   - `cmd/server` → binary `sudo-logger-server`
   - `cmd/replay-server` → binary `sudo-logger-replay`
-- [ ] Target platforms: `linux/amd64`, `linux/arm64`
-- [ ] Configure archives: `.tar.gz` with binary + default config files
-- [ ] Add `goreleaser check` step to CI (lints the config)
-- [ ] Test locally with `goreleaser release --snapshot --clean`
+- [x] Target platforms: `linux/amd64`, `linux/arm64`
+- [x] Configure archives: `.tar.gz` with binary + default config files
+- [x] Add `goreleaser check` step to CI (lints the config)
+- [x] Test locally with `goreleaser release --snapshot --clean`
 
 ### 4.2 — Signed releases with cosign (Sigstore)
 Critical for a security tool. Sysadmins will not install unsigned audit software.
 
-- [ ] Install cosign: `go install github.com/sigstore/cosign/v2/cmd/cosign@latest`
-- [ ] Add cosign signing step to goreleaser config:
+- [x] Install cosign: `go install github.com/sigstore/cosign/v2/cmd/cosign@latest`
+- [x] Add cosign signing step to goreleaser config:
   ```yaml
   signs:
     - cmd: cosign
@@ -40,8 +40,8 @@ Critical for a security tool. Sysadmins will not install unsigned audit software
         - ${artifact}
       artifacts: all
   ```
-- [ ] Use keyless signing (OIDC-based, no key to manage) with GitHub Actions OIDC
-- [ ] Add verification instructions to INSTALLATION.md:
+- [x] Use keyless signing (OIDC-based, no key to manage) with GitHub Actions OIDC
+- [x] Add verification instructions to INSTALLATION.md:
   ```bash
   cosign verify-blob \
     --bundle sudo-logger-agent-linux-amd64.tar.gz.bundle \
@@ -50,38 +50,38 @@ Critical for a security tool. Sysadmins will not install unsigned audit software
 - [ ] Test that a release can be verified after signing
 
 ### 4.3 — GitHub Actions release workflow
-- [ ] Create `.github/workflows/release.yml`
-- [ ] Trigger on: push of a tag matching `v*.*.*`
-- [ ] Steps:
+- [x] Create `.github/workflows/release.yml`
+- [x] Trigger on: push of a tag matching `v*.*.*`
+- [x] Steps:
   1. Checkout with full history (`fetch-depth: 0`) — goreleaser needs git tags
   2. Setup Go
   3. Install cosign
   4. Run `goreleaser release --clean`
   5. Publish to GitHub Releases automatically
-- [ ] Set `GITHUB_TOKEN` permissions: `contents: write`
+- [x] Set `GITHUB_TOKEN` permissions: `contents: write`
 - [ ] Test with a pre-release tag (`v0.0.1-test`) before a real release
 
 ### 4.4 — Debian/Ubuntu packages (.deb)
-- [ ] Use `nfpm` (included in goreleaser) to build `.deb` alongside `.rpm`
-- [ ] Add `nfpm.yaml` or inline config in `.goreleaser.yaml` for:
+- [x] Use `nfpm` (included in goreleaser) to build `.deb` alongside `.rpm`
+- [x] Add `nfpm.yaml` or inline config in `.goreleaser.yaml` for:
   - Package name: `sudo-logger-client`, `sudo-logger-server`, `sudo-logger-replay`
   - Dependencies: `sudo` (client), `postgresql-client` (server optional)
   - Systemd service files: include existing `.service` files
   - Post-install script: `systemctl daemon-reload && systemctl enable sudo-logger-agent`
-- [ ] Test `.deb` install on Ubuntu 22.04 (Docker container is fine)
-- [ ] Add `.deb` to GitHub Release artifacts
+- [x] Test `.deb` install on Ubuntu 24.04 (Docker container is fine)
+- [x] Add `.deb` to GitHub Release artifacts
 
 ### 4.5 — One-liner install script
-- [ ] Create `scripts/install.sh`:
+- [x] Create `scripts/install.sh`:
   - Detect distro (rpm-based vs deb-based)
   - Detect arch (amd64/arm64)
   - Download latest release from GitHub API
   - Verify cosign signature before installing
   - Install the binary + service file
   - Print next-steps (configure `/etc/sudo-logger/agent.conf`)
-- [ ] Host script at a stable URL (GitHub raw or docs site)
-- [ ] Document in README: `curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash`
-- [ ] Test on: Fedora, Ubuntu, Rocky Linux, Debian
+- [x] Host script at a stable URL (GitHub raw or docs site)
+- [x] Document in README: `curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash`
+- [x] Test on: Fedora, Ubuntu, Rocky Linux, Debian
 
 ### 4.6 — Ansible role (stretch goal)
 - [ ] Create `contrib/ansible/roles/sudo-logger-client/`

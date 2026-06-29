@@ -1,0 +1,327 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: sudo-logger
+
+before:
+  hooks:
+    - make -C plugin
+    - sh -c "cd go/cmd/replay-server/ui && npm ci && npm run build"
+
+builds:
+  - id: agent
+    main: ./cmd/agent
+    dir: go
+    binary: sudo-logger-agent
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: server
+    main: ./cmd/server
+    dir: go
+    binary: sudo-logger-server
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: replay-server
+    main: ./cmd/replay-server
+    dir: go
+    binary: sudo-logger-replay
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: agent-archive
+    ids:
+      - agent
+    formats: [tar.gz]
+    name_template: "sudo-logger-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: agent.conf
+        dst: agent.conf.default
+      - src: sandbox.yaml
+        dst: sandbox.yaml.default
+      - src: sudo-logger-agent.service
+        dst: sudo-logger-agent.service
+      - src: sudo-logger-agent.preset
+        dst: 50-sudo-logger-agent.preset
+      - src: plugin/sudo_logger_plugin.so
+        dst: sudo_logger_plugin.so
+      - src: man/sudo-logger-agent.8
+        dst: sudo-logger-agent.8
+      - src: man/sudo_logger_plugin.8
+        dst: sudo_logger_plugin.8
+      - src: man/sandbox.yaml.5
+        dst: sandbox.yaml.5
+      - src: audit/99-immutable.rules
+        dst: 99-immutable.rules
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: refuse-stop.conf
+
+  - id: server-archive
+    ids:
+      - server
+    formats: [tar.gz]
+    name_template: "sudo-logger-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: server.conf
+        dst: server.conf.default
+      - src: sudo-logserver.service
+        dst: sudo-logserver.service
+      - src: sudo-logserver-restart.service
+        dst: sudo-logserver-restart.service
+      - src: sudo-logserver-restart.timer
+        dst: sudo-logserver-restart.timer
+      - src: sudo-logserver.logrotate
+        dst: sudo-logserver.logrotate
+      - src: man/sudo-logserver.8
+        dst: sudo-logserver.8
+
+  - id: replay-archive
+    ids:
+      - replay-server
+    formats: [tar.gz]
+    name_template: "sudo-logger-replay_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: go/cmd/replay-server/risk-rules.yaml
+        dst: risk-rules.yaml.default
+      - src: siem.yaml
+        dst: siem.yaml.default
+      - src: sudo-replay.service
+        dst: sudo-replay.service
+      - src: man/sudo-replay-server.8
+        dst: sudo-replay-server.8
+
+nfpms:
+  - id: client-pkg
+    package_name: sudo-logger-client
+    ids:
+      - agent
+    formats:
+      - deb
+      - rpm
+    homepage: https://github.com/alun-hub/sudo-logger
+    maintainer: Alun Hub <alun@alun.se>
+    description: Sudo I/O plugin and agent for remote session logging
+    license: MIT
+    dependencies:
+      - systemd
+    contents:
+      - src: plugin/sudo_logger_plugin.so
+        dst: /usr/libexec/sudo/sudo_logger_plugin.so
+        file_info:
+          mode: 0755
+      - src: agent.conf
+        dst: /etc/sudo-logger/agent.conf
+        type: "config|noreplace"
+        file_info:
+          mode: 0640
+      - src: sandbox.yaml
+        dst: /etc/sudo-logger/sandbox.yaml
+        type: "config|noreplace"
+        file_info:
+          mode: 0640
+      - src: sudo-logger-agent.service
+        dst: /usr/lib/systemd/system/sudo-logger-agent.service
+        file_info:
+          mode: 0644
+      - src: sudo-logger-agent.preset
+        dst: /usr/lib/systemd/system-preset/50-sudo-logger-agent.preset
+        file_info:
+          mode: 0644
+      - src: audit/99-immutable.rules
+        dst: /etc/audit/rules.d/99-immutable.rules
+        type: "config|noreplace"
+        file_info:
+          mode: 0640
+      - src: man/sudo-logger-agent.8
+        dst: /usr/share/man/man8/sudo-logger-agent.8
+        file_info:
+          mode: 0644
+      - src: man/sudo_logger_plugin.8
+        dst: /usr/share/man/man8/sudo_logger_plugin.8
+        file_info:
+          mode: 0644
+      - src: man/sandbox.yaml.5
+        dst: /usr/share/man/man5/sandbox.yaml.5
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/sshd.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/sssd.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/rsyslog.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/polkit.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/chronyd.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/NetworkManager.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/firewalld.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/crond.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+      - src: systemd-drop-ins/refuse-stop.conf
+        dst: /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
+        file_info:
+          mode: 0644
+    overrides:
+      deb:
+        dependencies:
+          - sudo (>= 1.9)
+        scripts:
+          postinstall: scripts/deb-post-client.sh
+          preremove: scripts/deb-preremove-client.sh
+          postremove: scripts/deb-postremove-client.sh
+      rpm:
+        dependencies:
+          - sudo >= 1.9
+        scripts:
+          preinstall: scripts/rpm-pre-client.sh
+          postinstall: scripts/rpm-post-client.sh
+          preremove: scripts/rpm-preun-client.sh
+          postremove: scripts/rpm-postun-client.sh
+
+  - id: server-pkg
+    package_name: sudo-logger-server
+    ids:
+      - server
+    formats:
+      - deb
+      - rpm
+    homepage: https://github.com/alun-hub/sudo-logger
+    maintainer: Alun Hub <alun@alun.se>
+    description: Remote log server for sudo session recordings
+    license: MIT
+    dependencies:
+      - systemd
+    contents:
+      - src: server.conf
+        dst: /etc/sudo-logger/server.conf
+        type: "config|noreplace"
+        file_info:
+          mode: 0640
+      - src: sudo-logserver.service
+        dst: /usr/lib/systemd/system/sudo-logserver.service
+        file_info:
+          mode: 0644
+      - src: sudo-logserver-restart.timer
+        dst: /usr/lib/systemd/system/sudo-logserver-restart.timer
+        file_info:
+          mode: 0644
+      - src: sudo-logserver-restart.service
+        dst: /usr/lib/systemd/system/sudo-logserver-restart.service
+        file_info:
+          mode: 0644
+      - src: sudo-logserver.logrotate
+        dst: /etc/logrotate.d/sudo-logserver
+        type: "config|noreplace"
+        file_info:
+          mode: 0644
+      - src: man/sudo-logserver.8
+        dst: /usr/share/man/man8/sudo-logserver.8
+        file_info:
+          mode: 0644
+    overrides:
+      rpm:
+        scripts:
+          preinstall: scripts/rpm-pre-server.sh
+          postinstall: scripts/rpm-post-server.sh
+          preremove: scripts/rpm-preun-server.sh
+          postremove: scripts/rpm-postun-server.sh
+      deb:
+        scripts:
+          preinstall: scripts/deb-pre-server.sh
+          postinstall: scripts/deb-post-server.sh
+          preremove: scripts/deb-preremove-server.sh
+          postremove: scripts/deb-postremove-server.sh
+
+  - id: replay-pkg
+    package_name: sudo-logger-replay
+    ids:
+      - replay-server
+    formats:
+      - deb
+      - rpm
+    homepage: https://github.com/alun-hub/sudo-logger
+    maintainer: Alun Hub <alun@alun.se>
+    description: Web interface for replaying sudo session logs
+    license: MIT
+    dependencies:
+      - systemd
+    contents:
+      - src: go/cmd/replay-server/risk-rules.yaml
+        dst: /etc/sudo-logger/risk-rules.yaml
+        type: "config|noreplace"
+        file_info:
+          mode: 0664
+      - src: siem.yaml
+        dst: /etc/sudo-logger/siem.yaml
+        type: "config|noreplace"
+        file_info:
+          mode: 0664
+      - src: sudo-replay.service
+        dst: /usr/lib/systemd/system/sudo-replay.service
+        file_info:
+          mode: 0644
+      - src: man/sudo-replay-server.8
+        dst: /usr/share/man/man8/sudo-replay-server.8
+        file_info:
+          mode: 0644
+    overrides:
+      rpm:
+        scripts:
+          postinstall: scripts/rpm-post-replay.sh
+          preremove: scripts/rpm-preun-replay.sh
+          postremove: scripts/rpm-postun-replay.sh
+      deb:
+        scripts:
+          postinstall: scripts/deb-post-replay.sh
+          preremove: scripts/deb-preremove-replay.sh
+          postremove: scripts/deb-postremove-replay.sh
+
+signs:
+  - id: cosign
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: all
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
