@@ -17,12 +17,54 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 )
 
 // ── test store helper ─────────────────────────────────────────────────────────
+
+// testStoreConfig returns a store.Config with every LocalStore path field
+// pointed under dir. newLocalStore defaults any empty path field to a real
+// file under /etc/sudo-logger/... (see internal/store/local.go), so leaving
+// any of these unset lets a test silently read or overwrite live production
+// config on a machine where that directory happens to be writable (e.g. as
+// root in CI). Always build test configs through this helper instead of a
+// bare store.Config{} literal.
+func testStoreConfig(dir string) store.Config {
+	return store.Config{
+		Backend:              "local",
+		LogDir:               dir,
+		BlockedUsersPath:     dir + "/blocked-users.yaml",
+		WhitelistedUsersPath: dir + "/whitelisted-users.yaml",
+		UsersPath:            dir + "/users.yaml",
+		RolesPath:            dir + "/roles.yaml",
+		AuthConfigPath:       dir + "/auth-config.yaml",
+		SiemConfigPath:       dir + "/siem.yaml",
+		RiskRulesPath:        dir + "/risk-rules.yaml",
+		SandboxConfigPath:    dir + "/sandbox.yaml",
+		RetentionPath:        dir + "/retention.json",
+		SandboxTemplatesPath: dir + "/sandbox-templates.json",
+		ApprovalPolicyPath:   dir + "/approval-policy.yaml",
+		ApprovalStorePath:    dir + "/approval-store.yaml",
+		RedactionConfigPath:  dir + "/redaction-config.json",
+	}
+}
+
+// resetTestCaches clears the two package-level caches that can leak session
+// state between tests: cache (risk-scored session list) and sessionsCache
+// (handlers_session.go, a separate raw-session-list cache with its own TTL).
+func resetTestCaches(t *testing.T) {
+	t.Helper()
+	cache.mu.Lock()
+	cache.built = false
+	cache.mu.Unlock()
+	sessionsCache.mu.Lock()
+	sessionsCache.expiry = time.Time{}
+	sessionsCache.records = nil
+	sessionsCache.mu.Unlock()
+}
 
 // initTestStore points the global sessionStore at a temp directory and
 // registers a cleanup that closes it. Call at the start of any handler test
@@ -31,21 +73,12 @@ func initTestStore(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	var err error
-	sessionStore, err = store.New(store.Config{
-		Backend:          "local",
-		LogDir:           dir,
-		RiskRulesPath:    dir + "/risk-rules.yaml",
-		SiemConfigPath:   dir + "/siem.yaml",
-		BlockedUsersPath: dir + "/blocked-users.yaml",
-	})
+	sessionStore, err = store.New(testStoreConfig(dir))
 	if err != nil {
 		t.Fatalf("init test store: %v", err)
 	}
 	t.Cleanup(func() { sessionStore.Close() })
-	// Reset the session cache so state from other tests does not bleed in.
-	cache.mu.Lock()
-	cache.built = false
-	cache.mu.Unlock()
+	resetTestCaches(t)
 }
 
 // ── validateTLSPaths ──────────────────────────────────────────────────────────
@@ -306,13 +339,7 @@ func TestHandlePutAndGetBlockedUsersRoundtrip(t *testing.T) {
 	// the round-trip we PUT via the API, then re-open the store so that the
 	// new store instance loads the file into memory, and finally GET via the API.
 	dir := t.TempDir()
-	cfg := store.Config{
-		Backend:          "local",
-		LogDir:           dir,
-		BlockedUsersPath: dir + "/blocked-users.yaml",
-		RiskRulesPath:    dir + "/risk-rules.yaml",
-		SiemConfigPath:   dir + "/siem.yaml",
-	}
+	cfg := testStoreConfig(dir)
 	var err error
 	sessionStore, err = store.New(cfg)
 	if err != nil {
@@ -334,9 +361,7 @@ func TestHandlePutAndGetBlockedUsersRoundtrip(t *testing.T) {
 		t.Fatalf("reopen store: %v", err)
 	}
 	t.Cleanup(func() { sessionStore.Close() })
-	cache.mu.Lock()
-	cache.built = false
-	cache.mu.Unlock()
+	resetTestCaches(t)
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/blocked-users", nil)
 	getRec := httptest.NewRecorder()
@@ -396,14 +421,12 @@ func TestHandleListSessionsWithSeededSessions(t *testing.T) {
 	// Seed two sessions on disk and verify they appear in the API response.
 	dir := t.TempDir()
 	var err error
-	sessionStore, err = store.New(store.Config{Backend: "local", LogDir: dir, RiskRulesPath: dir + "/risk-rules.yaml"})
+	sessionStore, err = store.New(testStoreConfig(dir))
 	if err != nil {
 		t.Fatalf("init store: %v", err)
 	}
 	t.Cleanup(func() { sessionStore.Close() })
-	cache.mu.Lock()
-	cache.built = false
-	cache.mu.Unlock()
+	resetTestCaches(t)
 
 	// Use the helper from the existing test file to plant sessions on disk.
 	seedHTTPSession(t, dir, "alice", "host1", "visudo /etc/sudoers")
@@ -436,14 +459,12 @@ func TestHandleListSessionsWithSeededSessions(t *testing.T) {
 func TestHandleListSessionsQueryFilter(t *testing.T) {
 	dir := t.TempDir()
 	var err error
-	sessionStore, err = store.New(store.Config{Backend: "local", LogDir: dir, RiskRulesPath: dir + "/risk-rules.yaml"})
+	sessionStore, err = store.New(testStoreConfig(dir))
 	if err != nil {
 		t.Fatalf("init store: %v", err)
 	}
 	t.Cleanup(func() { sessionStore.Close() })
-	cache.mu.Lock()
-	cache.built = false
-	cache.mu.Unlock()
+	resetTestCaches(t)
 
 	seedHTTPSession(t, dir, "alice", "host1", "visudo /etc/sudoers")
 	seedHTTPSession(t, dir, "bob", "host2", "echo hello")

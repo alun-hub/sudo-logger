@@ -56,6 +56,56 @@ func TestValidSudoersHost(t *testing.T) {
 	}
 }
 
+// TestSudoersConfigPath_TraversalNeutralized verifies the traversal-prevention
+// mechanism backing every sudoers config handler: filepath.Base strips any
+// ".." or "/" components from the key's subpath before it is joined onto the
+// sudoers config directory, so a malicious key with embedded traversal
+// segments can only ever resolve to a plain filename inside that directory.
+func TestSudoersConfigPath_TraversalNeutralized(t *testing.T) {
+	logDir := t.TempDir()
+	ls := &LocalStore{cfg: Config{LogDir: logDir}}
+	wantDir := filepath.Join(logDir, ".sudoers-config")
+
+	tests := []struct {
+		key      string
+		wantBase string
+	}{
+		{"sudoers/host1", "host1"},
+		{"sudoers/../../etc/passwd", "passwd"},
+		{"sudoers/../../../../root/.ssh/authorized_keys", "authorized_keys"},
+		{"sudoers/foo/bar", "bar"},
+	}
+	for _, tt := range tests {
+		got := ls.sudoersConfigPath(tt.key)
+		if filepath.Base(got) != tt.wantBase {
+			t.Errorf("sudoersConfigPath(%q) base = %q, want %q (full: %q)", tt.key, filepath.Base(got), tt.wantBase, got)
+		}
+		if !strings.HasPrefix(got, wantDir+string(filepath.Separator)) {
+			t.Errorf("sudoersConfigPath(%q) = %q, escaped the sudoers config dir %q", tt.key, got, wantDir)
+		}
+	}
+}
+
+// TestSudoersConfigPath_BareDotDotEscapesSubdir documents a narrower case:
+// a key of exactly "sudoers/.." is NOT reduced to a safe basename —
+// filepath.Base("..") returns ".." unchanged, so the joined path collapses
+// back to LogDir itself, one level above the intended .sudoers-config
+// subdirectory. sudoersConfigPath alone does not fully neutralize this; the
+// HTTP handlers (handlePutSudoersConfig/handleDeleteSudoersConfig) are what
+// actually block it, by rejecting any host containing ".." before it ever
+// reaches this function. This test exists to make that reliance explicit —
+// if the handler-level check is ever removed, this is the function that
+// would need a matching fix.
+func TestSudoersConfigPath_BareDotDotEscapesSubdir(t *testing.T) {
+	logDir := t.TempDir()
+	ls := &LocalStore{cfg: Config{LogDir: logDir}}
+
+	got := ls.sudoersConfigPath("sudoers/..")
+	if got != logDir {
+		t.Errorf("sudoersConfigPath(\"sudoers/..\") = %q, want %q (documented escape to LogDir)", got, logDir)
+	}
+}
+
 func TestRunCleanupWorkerCancel(t *testing.T) {
 	ls := &LocalStore{
 		cfg: Config{

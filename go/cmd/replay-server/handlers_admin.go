@@ -1639,33 +1639,38 @@ func loadRulesFromText(text string) error {
 	return nil
 }
 
+// containsAny reports whether text contains at least one of terms.
+func containsAny(text string, terms []string) bool {
+	for _, s := range terms {
+		if strings.Contains(text, strings.ToLower(s)) {
+			return true
+		}
+	}
+	return false
+}
+
 // matchPattern returns true when text satisfies both ContainsAny and AlsoAny.
+// When both groups are set, at least one ContainsAny term and at least one
+// AlsoAny term must appear on the same line of text. Matching each group
+// independently against the whole blob would let unrelated lines (e.g. an
+// `ls` line naming "sudo-log" and an unrelated `dmesg` line containing
+// "stop") jointly satisfy a rule meant to catch a single command or a single
+// block of terminal output.
 func matchPattern(p *MatchPattern, text string) bool {
-	if len(p.ContainsAny) > 0 {
-		found := false
-		for _, s := range p.ContainsAny {
-			if strings.Contains(text, strings.ToLower(s)) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
+	switch {
+	case len(p.ContainsAny) == 0 && len(p.AlsoAny) == 0:
+		return true
+	case len(p.AlsoAny) == 0:
+		return containsAny(text, p.ContainsAny)
+	case len(p.ContainsAny) == 0:
+		return containsAny(text, p.AlsoAny)
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if containsAny(line, p.ContainsAny) && containsAny(line, p.AlsoAny) {
+			return true
 		}
 	}
-	if len(p.AlsoAny) > 0 {
-		found := false
-		for _, s := range p.AlsoAny {
-			if strings.Contains(text, strings.ToLower(s)) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
+	return false
 }
 
 // matchesRule returns true when all conditions in the rule are satisfied.

@@ -10,21 +10,13 @@ import (
 
 func newApprovalStore(t *testing.T) (*store.LocalStore, string) {
 	t.Helper()
-	dir := t.TempDir()
-	s, err := store.New(store.Config{
-		Backend:           "local",
-		LogDir:            dir,
-		ApprovalStorePath: dir + "/approval-store.yaml",
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	s, dir := newLocalStore(t)
 	// Close before TempDir cleanup; sleep briefly so async save goroutines drain.
 	t.Cleanup(func() {
 		s.Close()
 		time.Sleep(150 * time.Millisecond)
 	})
-	return s.(*store.LocalStore), dir
+	return s, dir
 }
 
 func TestApproval_CreateListDelete(t *testing.T) {
@@ -150,14 +142,9 @@ func TestApprovalWindow_ExpiredNotFound(t *testing.T) {
 
 func TestApproval_PersistRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	approvalPath := dir + "/approval-store.yaml"
 
 	open := func() *store.LocalStore {
-		s, err := store.New(store.Config{
-			Backend:           "local",
-			LogDir:            dir,
-			ApprovalStorePath: approvalPath,
-		})
+		s, err := store.New(testStoreConfig(dir))
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}

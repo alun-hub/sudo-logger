@@ -35,13 +35,8 @@ func TestLocalStoreGetBlockedPolicyEmpty(t *testing.T) {
 
 func TestLocalStoreSaveAndGetBlockedPolicy(t *testing.T) {
 	tmpDir := t.TempDir()
-	blockedPath := filepath.Join(tmpDir, "blocked-users.yaml")
 
-	s, err := store.New(store.Config{
-		Backend:          "local",
-		LogDir:           tmpDir,
-		BlockedUsersPath: blockedPath,
-	})
+	s, err := store.New(testStoreConfig(tmpDir))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -62,17 +57,13 @@ func TestLocalStoreSaveAndGetBlockedPolicy(t *testing.T) {
 	}
 
 	// File must exist on disk.
-	if _, err := os.Stat(blockedPath); err != nil {
+	if _, err := os.Stat(tmpDir + "/blocked-users.yaml"); err != nil {
 		t.Fatalf("blocked-users.yaml not written: %v", err)
 	}
 
 	// In-memory state is NOT updated synchronously by SaveBlockedPolicy;
 	// reload it by creating a new store pointing at the same file.
-	s2, err := store.New(store.Config{
-		Backend:          "local",
-		LogDir:           tmpDir,
-		BlockedUsersPath: blockedPath,
-	})
+	s2, err := store.New(testStoreConfig(tmpDir))
 	if err != nil {
 		t.Fatalf("New (reload): %v", err)
 	}
@@ -200,13 +191,38 @@ func testMeta(user, host string) iolog.SessionMeta {
 	}
 }
 
+// testStoreConfig returns a store.Config with every LocalStore path field
+// pointed under dir. The package constructor defaults any empty path field
+// to a real file under /etc/sudo-logger/..., so leaving any of these unset
+// would let tests read or overwrite live production config on a machine
+// where that directory happens to be writable. Always build test configs
+// through this helper instead of a bare store.Config{} literal.
+func testStoreConfig(dir string) store.Config {
+	return store.Config{
+		Backend:              "local",
+		LogDir:               dir,
+		BlockedUsersPath:     dir + "/blocked-users.yaml",
+		WhitelistedUsersPath: dir + "/whitelisted-users.yaml",
+		UsersPath:            dir + "/users.yaml",
+		RolesPath:            dir + "/roles.yaml",
+		AuthConfigPath:       dir + "/auth-config.yaml",
+		SiemConfigPath:       dir + "/siem.yaml",
+		RiskRulesPath:        dir + "/risk-rules.yaml",
+		SandboxConfigPath:    dir + "/sandbox.yaml",
+		RetentionPath:        dir + "/retention.json",
+		SandboxTemplatesPath: dir + "/sandbox-templates.json",
+		ApprovalPolicyPath:   dir + "/approval-policy.yaml",
+		ApprovalStorePath:    dir + "/approval-store.yaml",
+		RedactionConfigPath:  dir + "/redaction-config.json",
+	}
+}
+
+// newLocalStore returns a LocalStore built via testStoreConfig against a
+// fresh temp dir.
 func newLocalStore(t *testing.T) (*store.LocalStore, string) {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := store.New(store.Config{
-		Backend: "local",
-		LogDir:  dir,
-	})
+	s, err := store.New(testStoreConfig(dir))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -448,7 +464,6 @@ func TestLocalStoreRiskCache(t *testing.T) {
 // TestLocalStoreIsBlocked verifies blocked/allowed user lookups.
 func TestLocalStoreIsBlocked(t *testing.T) {
 	tmpDir := t.TempDir()
-	blockedPath := filepath.Join(tmpDir, "blocked-users.yaml")
 
 	blockedYAML := `block_message: "You are blocked"
 users:
@@ -459,15 +474,11 @@ users:
     hosts: [host99]
     reason: host-specific block
 `
-	if err := os.WriteFile(blockedPath, []byte(blockedYAML), 0o640); err != nil {
+	if err := os.WriteFile(tmpDir+"/blocked-users.yaml", []byte(blockedYAML), 0o640); err != nil {
 		t.Fatalf("write blocked-users.yaml: %v", err)
 	}
 
-	s, err := store.New(store.Config{
-		Backend:          "local",
-		LogDir:           tmpDir,
-		BlockedUsersPath: blockedPath,
-	})
+	s, err := store.New(testStoreConfig(tmpDir))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
