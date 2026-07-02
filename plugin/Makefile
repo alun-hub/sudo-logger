@@ -1,7 +1,11 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -O2 -fPIC -shared \
           -I/usr/include/sudo \
-          -D_GNU_SOURCE
+          -D_GNU_SOURCE \
+          -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
+          -fstack-clash-protection -fcf-protection \
+          -Wformat -Werror=format-security
+LDFLAGS = -Wl,-z,relro -Wl,-z,now
 
 TARGET  = sudo_logger_plugin.so
 SRC     = plugin.c
@@ -11,7 +15,7 @@ SRC     = plugin.c
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test: test_plugin.c $(SRC)
 	$(CC) -Wall -Wextra -O0 -g -I/usr/include/sudo -D_GNU_SOURCE test_plugin.c -o test_plugin -lpthread

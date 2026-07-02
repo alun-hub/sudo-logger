@@ -53,6 +53,14 @@
 #define ACK_TIMEOUT_SECS     2
 #define ACK_REFRESH_SECS     0      /* re-query agent on every check */
 #define ACK_QUERY_TIMEOUT_MS 100    /* max wait for ACK_RESPONSE */
+/* Sanity cap on any single message payload read from the agent. Normal
+ * traffic (ACK responses, control messages) is a few bytes; this only
+ * guards against a malformed/hostile peer declaring an absurd length. */
+#define MAX_MSG_PAYLOAD       (1u * 1024 * 1024)
+/* Sanity cap on a single I/O chunk handed to us by sudo. sudo's own PTY/pipe
+ * buffers are far smaller than this; guards ship_chunk()'s length arithmetic
+ * against a bogus dlen on platforms where size_t is 32-bit. */
+#define MAX_CHUNK_LEN         (16u * 1024 * 1024)
 
 /* ---------- wire protocol (shared with Go) ---------- */
 #define MSG_SESSION_START  0x01
@@ -201,6 +209,23 @@ static int read_exact(int fd, void *buf, size_t n)
 }
 
 /*
+ * Read and discard exactly n bytes from fd, in bounded chunks.
+ * Used to keep the framed wire protocol in sync when a message's payload
+ * is not needed, or exceeds a fixed-size stack buffer.
+ */
+static int drain_payload(int fd, uint32_t n)
+{
+    uint8_t discard[64];
+    while (n > 0) {
+        uint32_t chunk = n < (uint32_t)sizeof(discard) ? n : (uint32_t)sizeof(discard);
+        if (read_exact(fd, discard, chunk) < 0)
+            return -1;
+        n -= chunk;
+    }
+    return 0;
+}
+
+/*
  * Connect to agent Unix socket. Returns fd or -1.
  */
 static int connect_agent(void)
@@ -252,6 +277,12 @@ static void refresh_ack_cache(void)
             uint32_t plen;
             memcpy(&plen, hdr + 1, 4);
             plen = be32toh(plen);
+            if (plen > MAX_MSG_PAYLOAD) {
+                /* Malformed/hostile length — the framed stream can no
+                 * longer be trusted; stop trying to parse it. */
+                atomic_store(&g_agent_dead, 1);
+                return;
+            }
             if (hdr[0] == MSG_FREEZE_TIMEOUT)
                 atomic_store(&g_freeze_timeout, 1);
             if (hdr[0] == MSG_SESSION_EXPIRED)
@@ -317,6 +348,10 @@ static void refresh_ack_cache(void)
     uint32_t plen;
     memcpy(&plen, hdr + 1, 4);
     plen = be32toh(plen);
+    if (plen > MAX_MSG_PAYLOAD) {
+        atomic_store(&g_agent_dead, 1);
+        return;
+    }
     if (plen < 16) {
         /* Drain undersized payload to keep the socket in sync. */
         uint8_t drain[16];
@@ -591,7 +626,7 @@ static void *monitor_thread_fn(void *arg)
  */
 static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
 {
-    if (g_agent_fd < 0 || dlen == 0)
+    if (g_agent_fd < 0 || dlen == 0 || dlen > MAX_CHUNK_LEN)
         return;
 
     size_t plen = 8 + 8 + 1 + 4 + dlen;
@@ -723,12 +758,15 @@ static void build_cmdline_json(char *buf, size_t bufsz,
     if (bufsz == 0)
         return;
 
+    int truncated = 0;
     size_t pos = 0;
-    for (int i = 0; i < argc && pos + 1 < bufsz; i++) {
+    int i;
+    for (i = 0; i < argc && pos + 1 < bufsz; i++) {
         if (i > 0 && pos + 1 < bufsz)
             buf[pos++] = ' ';
 
-        for (const char *p = argv[i]; *p && pos + 2 < bufsz; p++) {
+        const char *p = argv[i];
+        for (; *p && pos + 2 < bufsz; p++) {
             unsigned char c = (unsigned char)*p;
             if (c == '\\' || c == '"') {
                 buf[pos++] = '\\';
@@ -743,8 +781,25 @@ static void build_cmdline_json(char *buf, size_t bufsz,
                 buf[pos++] = (char)c;
             }
         }
+        if (*p != '\0')
+            truncated = 1;
     }
+    if (i < argc)
+        truncated = 1;
     buf[pos] = '\0';
+
+    /* Mark truncation explicitly rather than silently dropping trailing
+     * arguments — search/alerting on the "command" field must not be able
+     * to mistake a cut-off command for the complete one. */
+    if (truncated) {
+        static const char marker[] = "...[truncated]";
+        size_t mlen = sizeof(marker) - 1;
+        if (mlen < bufsz) {
+            size_t start = pos > mlen ? pos - mlen : 0;
+            memcpy(buf + start, marker, mlen);
+            buf[start + mlen] = '\0';
+        }
+    }
 }
 
 /* ---------- plugin API ---------- */
@@ -973,6 +1028,10 @@ read_agent:
             char cbuf[4096] = {0};
             read_exact(g_agent_fd, cbuf, clen);
             /* challenge body consumed; content unused */
+        } else if (clen >= 4096) {
+            /* Oversized payload — drain it so the next read_agent iteration
+             * starts on a real header instead of leftover challenge bytes. */
+            drain_payload(g_agent_fd, clen);
         }
 
         if (g_tty_fd >= 0 && conversation != NULL) {
@@ -1069,6 +1128,12 @@ read_agent:
         uint32_t rlen;
         memcpy(&rlen, hdr + 1, 4);
         rlen = be32toh(rlen);
+        if (rlen >= 4096) {
+            /* Oversized payload — drain it so the monitor thread's first
+             * refresh_ack_cache() read starts on a real header instead of
+             * leftover disclaimer bytes. */
+            drain_payload(g_agent_fd, rlen);
+        }
         if (rlen > 0 && rlen < 4096) {
             char rbuf[4096] = {0};
             if (read_exact(g_agent_fd, rbuf, rlen) == 0) {

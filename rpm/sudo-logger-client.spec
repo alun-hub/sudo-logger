@@ -38,8 +38,12 @@ cd plugin
 gcc -Wall -Wextra -O2 -fPIC -shared \
     -I/usr/include/sudo \
     -D_GNU_SOURCE \
+    -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
+    -fstack-clash-protection -fcf-protection \
+    -Wformat -Werror=format-security \
     -o sudo_logger_plugin.so \
-    plugin.c -lpthread
+    plugin.c -lpthread \
+    -Wl,-z,relro -Wl,-z,now
 
 # Build the agent daemon.
 # The eBPF Go bindings (recorder_bpf*.go / *.o) are pre-generated and
