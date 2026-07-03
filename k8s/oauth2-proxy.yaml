@@ -137,8 +137,15 @@ kind: Ingress
 metadata:
   name: sudo-replay-server
   namespace: sudo-logger
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web, websecure
 spec:
   ingressClassName: traefik
+  tls:
+    - secretName: sudo-logger-tls  # pragma: allowlist secret
+      hosts:
+        - replay.192.168.2.163.nip.io
+        - gnarg.alun.se
   rules:
     - http:
         paths:
@@ -157,6 +164,16 @@ spec:
                 port:
                   number: 8080
     - host: replay.192.168.2.163.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sudo-replay-server
+                port:
+                  number: 8080
+    - host: gnarg.alun.se
       http:
         paths:
           - path: /

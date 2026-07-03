@@ -42,7 +42,7 @@ spec:
                   name: keycloak-secret
                   key: admin-password
             - name: KC_HOSTNAME
-              value: keycloak.192.168.2.163.nip.io
+              value: gnarg.alun.se
             - name: KC_PROXY
               value: edge
             - name: KC_HTTP_ENABLED
@@ -76,14 +76,43 @@ metadata:
   name: keycloak
   namespace: sudo-logger
   annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.entrypoints: web, websecure
 spec:
   ingressClassName: traefik
+  tls:
+    - secretName: sudo-logger-tls  # pragma: allowlist secret
+      hosts:
+        - keycloak.192.168.2.163.nip.io
+        - gnarg.alun.se
   rules:
     - host: keycloak.192.168.2.163.nip.io
       http:
         paths:
           - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+    - host: gnarg.alun.se
+      http:
+        paths:
+          - path: /realms
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /resources
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /admin
             pathType: Prefix
             backend:
               service:

@@ -16,6 +16,10 @@ spec:
       labels:
         app: sudo-replay-server
     spec:
+      hostAliases:
+        - ip: "192.168.2.163"
+          hostnames:
+            - "gnarg.alun.se"
       terminationGracePeriodSeconds: 40
       securityContext:
         runAsNonRoot: true
@@ -75,6 +79,9 @@ spec:
               mountPath: /var/lib/sudo-logger/buffer
             - name: tmp
               mountPath: /tmp
+            - name: ca-cert
+              mountPath: /etc/ssl/certs/ca-certificates.crt
+              subPath: ca.crt
 
           securityContext:
             allowPrivilegeEscalation: false
@@ -110,6 +117,12 @@ spec:
           emptyDir: {}
         - name: tmp
           emptyDir: {}
+        - name: ca-cert
+          secret:
+            secretName: sudo-logger-tls  # pragma: allowlist secret
+            items:
+              - key: ca.crt
+                path: ca.crt
 ---
 apiVersion: v1
 kind: Service

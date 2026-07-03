@@ -422,6 +422,20 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Record who viewed this session before streaming the response.
+	var replayURL string
+	if base := strings.TrimRight(siem.Get().ReplayURLBase, "/"); base != "" {
+		replayURL = base + "/?tsid=" + url.QueryEscape(tsid)
+	} else {
+		scheme := "https"
+		if r.TLS == nil {
+			scheme = "http"
+		}
+		replayURL = scheme + "://" + r.Host + "/?tsid=" + url.QueryEscape(tsid)
+	}
+	recordView(r, tsid, replayURL)
+	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", sanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
+
 	rc, err := sessionStore.OpenCast(r.Context(), tsid)
 	if err != nil {
 		log.Printf("open cast %s: %v", tsid, err)
