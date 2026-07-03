@@ -125,7 +125,9 @@ type ApprovalManager struct {
 	lastPolicyHash string // SHA256 hex of last successfully loaded policy bytes
 	opaEngine      *policy.Engine // nil if OPA policy not configured
 	opaPolicy      policy.Policy  // last successfully loaded OPA policy
-	redactor       *iolog.Redactor // masks secrets pasted into a justification
+
+	redactMu sync.Mutex      // serializes access to redactor: it is not safe for concurrent use
+	redactor *iolog.Redactor // masks secrets pasted into a justification
 }
 
 func newApprovalManager(policyPath string, backend store.ApprovalStore) *ApprovalManager {
@@ -215,21 +217,24 @@ func (m *ApprovalManager) loadRedactor(ctx context.Context) {
 		log.Printf("approval: build redactor: %v", err)
 		return
 	}
-	m.mu.Lock()
+	m.redactMu.Lock()
 	m.redactor = red
-	m.mu.Unlock()
+	m.redactMu.Unlock()
 }
 
 // redactJustification masks secret-looking substrings in a free-text
 // justification before it is stored, logged, or forwarded to a webhook.
+// iolog.Redactor mutates internal state on every call and is documented as
+// unsafe for concurrent use, so access is serialized here — Check() (and
+// therefore this) can otherwise be called concurrently from multiple
+// sessions at once.
 func (m *ApprovalManager) redactJustification(s string) string {
-	m.mu.RLock()
-	red := m.redactor
-	m.mu.RUnlock()
-	if red == nil {
+	m.redactMu.Lock()
+	defer m.redactMu.Unlock()
+	if m.redactor == nil {
 		return s
 	}
-	return red.RedactString(s)
+	return m.redactor.RedactString(s)
 }
 
 // loadOPAPolicy loads the OPA JIT policy from the store and (re)compiles it.
