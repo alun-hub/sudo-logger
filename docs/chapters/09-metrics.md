@@ -6,12 +6,12 @@ Two components expose Prometheus metrics in the standard text exposition format 
 
 | Component | Endpoint | Port | Authentication |
 |---|---|---|---|
-| Replay server | `GET /metrics` | 8080 (or `--listen`) | Same as rest of UI (Basic Auth / trusted header / none) |
+| Replay server | `GET /metrics` | 8080 (or `--listen`) | None — always unauthenticated, regardless of `--htpasswd`/OIDC/`--trusted-user-header` |
 | Log server | `GET /metrics` | configured via `--health-listen` | None (plain HTTP, no auth) |
 
 > **Note:** The log server metrics endpoint is disabled by default. It is activated only when `--health-listen` is set (for example `--health-listen :9877`). The endpoint serves plain HTTP with no authentication — restrict access with a firewall rule or network policy.
 
-> **Note:** The replay server's `/metrics` endpoint is protected by the same authentication layer as the rest of the web UI. When Basic Auth (`--htpasswd`) is configured, create a dedicated read-only scraper account rather than reusing an operator account.
+> **Note:** The replay server's `basicAuthMiddleware` explicitly bypasses `/metrics` (alongside `/healthz`, `/login`, OIDC endpoints, and static assets) before checking any auth configuration — see `go/cmd/replay-server/middleware.go`. This means `/metrics` is unauthenticated even when `--htpasswd`, OIDC, or `--trusted-user-header` is configured for the rest of the UI. Restrict access to this port with a firewall rule or network policy if that matters for your deployment; do not rely on Basic Auth credentials to protect it.
 
 ---
 
@@ -93,19 +93,17 @@ sudologger_sessions_incomplete_total 14
 
 ## Scraping configuration
 
-Add both endpoints to your `prometheus.yml`. The replay server requires credentials when Basic Auth is enabled; the log server endpoint has no authentication but must be reachable on its separate port.
+Add both endpoints to your `prometheus.yml`. Neither endpoint requires credentials — both are unauthenticated regardless of any Basic Auth/OIDC configured elsewhere — but the replay server's `/metrics` is reachable on its normal listen port while the log server's is only reachable when `--health-listen` is set.
 
 ```yaml
 scrape_configs:
-  # Replay server — protected by Basic Auth when --htpasswd is configured.
-  # Replace credentials with those of a dedicated read-only scraper account.
+  # Replay server — /metrics bypasses Basic Auth/OIDC/trusted-header auth
+  # unconditionally (see go/cmd/replay-server/middleware.go). No credentials
+  # needed; restrict access at the network level instead if that matters.
   - job_name: sudo-logger-replay
     static_configs:
       - targets:
           - replay.example.internal:8080
-    basic_auth:
-      username: prometheus-scraper
-      password: <scraper-password>
     metrics_path: /metrics
     scheme: http   # or https when --tls-cert is configured
 
@@ -119,7 +117,7 @@ scrape_configs:
     scheme: http
 ```
 
-> **Warning:** The log server `/metrics` endpoint serves plain HTTP with no authentication. Do not expose port 9877 (or whichever port `--health-listen` is set to) on a public interface. Use a host-based firewall (`firewalld`, `iptables`) or Kubernetes `NetworkPolicy` to limit access to the Prometheus scraper.
+> **Warning:** Neither `/metrics` endpoint is authenticated. The log server's is plain HTTP with no TLS either. Do not expose port 9877 (or whichever port `--health-listen` is set to), or the replay server's listen port if metrics exposure is a concern, on a public interface. Use a host-based firewall (`firewalld`, `iptables`) or Kubernetes `NetworkPolicy` to limit access to the Prometheus scraper.
 
 ---
 
@@ -245,16 +243,10 @@ increase(sudoreplay_session_views_total[1h])
 
 Both endpoints can be tested with `curl` before Prometheus is configured.
 
-**Replay server (no auth):**
+**Replay server (no credentials needed — `/metrics` always bypasses auth):**
 
 ```bash
 curl -s http://localhost:8080/metrics
-```
-
-**Replay server (Basic Auth):**
-
-```bash
-curl -s -u <username>:<password> http://localhost:8080/metrics
 ```
 
 **Log server health port:**
@@ -269,7 +261,7 @@ Expected output starts with `# HELP` lines followed by `# TYPE` and metric value
 systemctl cat sudo-logserver | grep health-listen
 ```
 
-If the replay server returns `401 Unauthorized`, the Prometheus scraper account credentials are incorrect or the account does not exist in the htpasswd file.
+A `401 Unauthorized` from the replay server's `/metrics` would indicate a bug — the endpoint is designed to bypass the auth middleware entirely (see `basicAuthMiddleware` in `go/cmd/replay-server/middleware.go`). A 401 elsewhere in the UI is unrelated to `/metrics` access.
 
 ---
 
@@ -283,13 +275,11 @@ Both endpoints set `Content-Type: text/plain; version=0.0.4; charset=utf-8` on a
 
 ### Replay server
 
-The `/metrics` endpoint on the replay server is served by the same HTTP mux as all other routes. This means:
+The `/metrics` endpoint is served by the same HTTP mux as all other routes, but `basicAuthMiddleware` explicitly allow-lists it (alongside `/healthz`, `/login`, OIDC endpoints, and static assets) and returns before checking any auth configuration. This means:
 
-- When `--htpasswd` is configured, every request to `/metrics` must carry valid Basic Auth credentials.
-- When `--trusted-user-header` is configured (reverse-proxy header injection), the scraper must be behind the same proxy and the proxy must inject the trusted header.
-- When neither is configured, `/metrics` is unauthenticated. This is appropriate for closed internal networks but should not be exposed on a public interface.
-
-A dedicated Prometheus scraper account (with a complex password stored in a Prometheus `basic_auth` configuration block or Kubernetes `Secret`) is the recommended approach. Do not reuse operator accounts for automated scraping.
+- `/metrics` is **always unauthenticated** — regardless of `--htpasswd`, OIDC, or `--trusted-user-header` being configured for the rest of the UI.
+- No scraper account or credentials are needed, and none can be created for this endpoint specifically.
+- If this exposure is a concern, restrict access at the network level (firewall rule, Kubernetes `NetworkPolicy`, or an Ingress rule that blocks `/metrics` from outside the cluster) rather than relying on the application's auth layer.
 
 ### Log server
 

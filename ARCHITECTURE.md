@@ -104,7 +104,7 @@ If the agent stops receiving ACKs or heartbeat replies for ~800 ms, it calls `cg
 
 ### 4. Freeze-timeout and network-outage detection
 
-If the network does not recover, the agent's freeze-timeout watchdog (default 5 min, `-freeze-timeout`) terminates the session. Two out-of-band messages allow the server to distinguish a **network outage** from an **agent kill**:
+If the network does not recover, the agent's freeze-timeout watchdog (default 3 min, `freeze_timeout` in `agent.conf` — not a CLI flag) terminates the session. Two out-of-band messages allow the server to distinguish a **network outage** from an **agent kill**:
 
 | Time | Actor | Event |
 |------|-------|-------|
@@ -192,12 +192,21 @@ Defined in `go/internal/protocol/protocol.go` (Go) and inline in `plugin/plugin.
 | `0x0a` | `HEARTBEAT_ACK` | server→agent | empty |
 | `0x0b` | `SERVER_READY` | server→agent | empty — session accepted |
 | `0x0c` | `SESSION_DENIED` | server→agent, agent→plugin | string block message — policy denial |
-| `0x0d` | `FREEZE_TIMEOUT` | agent→plugin | empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
+| `0x0d` | `FREEZE_TIMEOUT` | agent→plugin | empty — server unreachable beyond `freeze_timeout`; session will be terminated |
 | `0x0e` | `SESSION_ABANDON` | agent→server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session `freeze_timeout` |
 | `0x0f` | `SESSION_FREEZING` | agent→server (new conn) | UTF-8 session_id — session is being frozen due to network loss |
+| `0x10` | `MsgDivergenceAlert` | agent→server | JSON — sudo/pkexec execve seen with no matching plugin SESSION_START within 30 s |
+| `0x11` | `MsgSandboxAlert` | agent→server | JSON — process sandbox blocked an operation via kernel LSM |
+| `0x12` | `MsgFetchConfig` | agent→server | UTF-8 key — request a config blob; server only answers a fixed allowlist (`sandbox.yaml`, `redaction_config`, `sudoers/*`) |
+| `0x13` | `MsgConfigData` | server→agent | UTF-8 YAML/JSON — response to `MsgFetchConfig` (empty = not found or not allowed) |
+| `0x14` | `MsgSessionChallenge` | server→agent→plugin | JSON `SessionChallenge` — JIT approval requires a justification |
+| `0x15` | `MsgSessionChallengeResponse` | plugin→agent→server | JSON `SessionChallengeResponse` — user-provided justification |
+| `0x16` | `MsgSessionExpired` | agent→plugin | empty — JIT approval window expired, session is being terminated |
+| `0x17` | `MsgSessionWarning` | agent→plugin | UTF-8 seconds-remaining — JIT approval window expiring soon |
 | `0x18` | `MsgSudoersSnapshot` | agent→server | JSON `SudoersSnapshot` — full snapshot of `/etc/sudoers` + `/etc/sudoers.d/` |
 | `0x19` | `MsgSudoersError` | agent→server | JSON `SudoersError` — `visudo -c` validation failure when applying a pushed config |
 | `0x1a` | `MsgHeartbeatAgent` | agent→server | UTF-8 host name — sudoers liveness keepalive, every 30 s |
+| `0x1b` | `MsgResize` | plugin→agent→server | ts_ns(8, BE)+cols(2, BE)+rows(2, BE) — terminal resize event |
 
 CHUNK stream types: `0x00` stdin, `0x01` stdout, `0x02` stderr, `0x03` tty-in, `0x04` tty-out.
 
@@ -284,7 +293,9 @@ The log server writes sessions to disk in a two-level hierarchy:
         └── exit_code      ← written on clean SESSION_END
 ```
 
-`session.cast` is compatible with `sudoreplay(8)` and asciinema v2 viewers:
+`session.cast` is an asciinema v2 file, playable with `asciinema play` or any
+asciinema v2 viewer — it is **not** compatible with sudo's own `sudoreplay(8)`
+tool, which expects sudo's native I/O log format:
 
 ```
 line 1:  JSON header  {"version":2, "width":..., "height":..., "user":..., "host":..., ...}
@@ -371,6 +382,19 @@ Who viewed which session is recorded in the access log:
 | `GET` | `/api/sudoers/hosts` | All hosts with sudoers snapshot or session history; includes `inSync`, `isOffline`, `isOverride`, and `error` fields |
 | `GET` | `/api/sudoers/snapshots` | Latest snapshots for a host (`?host=`) |
 | `GET/PUT/DELETE` | `/api/sudoers/config` | Desired sudoers config for a host or `_default` template |
+| `GET/PUT` | `/api/jit-policy` | OPA/Rego JIT approval policy (rule table) |
+| `GET` | `/api/roles`, `/api/roles/{name}` | RBAC role definitions (12-permission model, see [Role-based access control](#security-properties)) |
+| `POST/PUT/DELETE` | `/api/roles`, `/api/roles/{name}` | Create/update/delete a custom role |
+| `GET/PUT` | `/api/users`, `/api/users/{name}` | Local user management |
+| `GET/PUT` | `/api/auth-config`, `/api/auth-mapping` | Auth source (local/OIDC/proxy) and group→role mapping |
+| `GET` | `/api/oidc/login`, `/api/oidc/callback`, `/api/oidc/logout` | OIDC login flow |
+| `GET/PUT` | `/api/whitelisted-users` | JIT-approval-exempt users/hosts |
+| `GET/PUT` | `/api/retention` | Data retention policy |
+| `GET/PUT` | `/api/sandbox`, `/api/sandbox/templates` | Process sandbox deny-list and reusable templates |
+| `GET/PUT` | `/api/redaction-config` | Custom secret-redaction regex patterns pushed to agents |
+
+This table covers the most operationally relevant endpoints; see
+[API.md](API.md) for the complete reference with request/response bodies.
 
 ---
 

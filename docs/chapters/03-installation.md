@@ -474,12 +474,18 @@ The `k8s/` directory contains:
 | `postgresql.yaml` | PostgreSQL StatefulSet |
 | `minio.yaml` | MinIO StatefulSet (S3-compatible object store) |
 | `service.yaml` | LoadBalancer for port 9876 + ClusterIP for port 9877 |
-| `deployment.yaml` | Combined log server + replay server (local storage) |
+| `deployment.yaml` | Log server only, local storage (single ReadWriteOnce PVC) |
 | `deployment-distributed.yaml` | Log server with PostgreSQL + S3/MinIO |
-| `replay-server.yaml` | Replay server deployment (distributed storage) |
+| `replay-server.yaml` | Replay server deployment (distributed storage only) |
 | `oauth2-proxy.yaml` | Optional OIDC authentication proxy |
-| `kustomization.yaml` | Kustomize overlay for local mode |
-| `kustomization-distributed.yaml` | Kustomize overlay for distributed mode |
+| `kustomization.yaml` | Kustomize overlay for local mode (log server only — no replay server manifest is provided for local storage mode yet) |
+
+There is no kustomize overlay for distributed mode: kustomize's default
+security restrictions block referencing files outside a kustomization's own
+directory, and `kubectl apply -k` does not expose a way to lift that
+restriction — so a distributed overlay sharing files with `k8s/` cannot be
+applied this way. Use `deploy-local.sh`, or apply each file listed above
+individually with `kubectl apply -f`.
 
 ### Quick deployment
 
@@ -505,15 +511,17 @@ kubectl apply -f k8s/replay-server.yaml
 kubectl apply -f k8s/oauth2-proxy.yaml    # optional: OIDC proxy
 ```
 
-Or with kustomize:
+Or with kustomize, for local (single-node, log-server-only) mode:
 
 ```bash
-# Local (single-node) mode
 kubectl apply -k k8s/
-
-# Distributed mode (PostgreSQL + MinIO)
-kubectl apply -f k8s/kustomization-distributed.yaml
 ```
+
+There is no kustomize overlay for distributed mode — kustomize's default
+security restrictions block a kustomization from referencing files outside
+its own directory, and `kubectl apply -k` does not expose a way to lift
+that. Use the individual `kubectl apply -f` commands above, or
+`./deploy-local.sh` which also creates the required Secrets for you.
 
 ### Configuring agents to connect to the Kubernetes log server
 

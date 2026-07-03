@@ -1,4 +1,4 @@
-.TH SUDO\-LOGSERVER 8 "2026-04-11" "sudo-logger 1.17.0" "System Administration"
+.TH SUDO\-LOGSERVER 8 "2026-07-03" "sudo-logger 1.20.16" "System Administration"
 .SH NAME
 sudo\-logserver \- remote TLS server for sudo session recordings
 .SH SYNOPSIS
@@ -20,7 +20,7 @@ sudo\-logserver \- remote TLS server for sudo session recordings
 .SH DESCRIPTION
 .B sudo\-logserver
 is a TLS server that receives sudo session recordings from one or more
-.BR sudo\-shipper (8)
+.BR sudo\-logger\-agent (8)
 instances and writes them to disk as asciinema v2 session recordings.
 .PP
 Each client connection must present a certificate signed by the configured CA
@@ -104,7 +104,7 @@ field does not match the CN or a DNS SAN of the presenting client certificate.
 Disabled by default to support the common case of a single shared client
 certificate (e.g.\& CN=\fIsudo-client\fR).
 Enable this flag when each machine has its own certificate to prevent a
-compromised shipper on host A from forging log entries attributed to host B.
+compromised agent on host A from forging log entries attributed to host B.
 .TP
 .BI \-health\-listen " addr"
 Start a plain HTTP server on
@@ -180,7 +180,7 @@ Default:
 .SH SIGNALS
 .TP
 .B SIGTERM\fR / \fBSIGINT
-Stop accepting new shipper connections and wait up to 30 seconds for active
+Stop accepting new agent connections and wait up to 30 seconds for active
 sessions to complete before the process exits.
 Sessions that are still open after the drain window are marked
 .B INCOMPLETE
@@ -269,7 +269,7 @@ Session and user/host fields are validated against
 .B [a-zA-Z0-9._-]
 before use in filesystem paths.
 .SH SEE ALSO
-.BR sudo\-shipper (8),
+.BR sudo\-logger\-agent (8),
 .BR sudo\-replay\-server (8),
 .BR sudo_logger_plugin (8),
 .BR systemd.unit (5)

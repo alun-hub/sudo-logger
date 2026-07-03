@@ -23,16 +23,18 @@ sudo-logger records the full byte stream of terminal I/O for each individual `su
 
 ### C plugin (`plugin/plugin.c`)
 
-The sudo I/O plugin is a shared library (`sudo_logger_plugin.so`) loaded by sudo via the `Plugin` directive in `/etc/sudo.conf`. It hooks sudo's plugin API at the `log_ttyout`, `log_stdin`, and `log_stdout` entry points to intercept all terminal I/O before it reaches the terminal or the child process. The plugin connects to the local agent over a Unix domain socket (`/run/sudo-logger/plugin.sock`) and forwards session data as a length-prefixed binary protocol. It also participates in the cgroup freeze mechanism: when the agent signals a freeze the plugin blocks its I/O forwarding loop, preventing any further output from being delivered to the terminal until the agent receives an acknowledgement from the server.
+The sudo I/O plugin is a shared library (`sudo_logger_plugin.so`) loaded by sudo via the `Plugin` directive in `/etc/sudo.conf`. It hooks sudo's plugin API at the `log_ttyin`, `log_ttyout`, `log_stdin`, `log_stdout`, and `log_stderr` entry points to intercept all terminal I/O before it reaches the terminal or the child process. The plugin connects to the local agent over a Unix domain socket (`/run/sudo-logger/plugin.sock`) and forwards session data as a length-prefixed binary protocol. It also participates in the cgroup freeze mechanism: when the agent signals a freeze the plugin blocks its I/O forwarding loop, preventing any further output from being delivered to the terminal until the agent receives an acknowledgement from the server.
 
 ### Agent (`go/cmd/agent/`)
 
-The agent is a Go daemon running as root on each monitored host (systemd unit: `sudo-logger-agent`). It consolidates four subsystems:
+The agent is a Go daemon running as root on each monitored host (systemd unit: `sudo-logger-agent`). It consolidates six subsystems:
 
 - **Plugin handler** — listens on the Unix socket, accepts connections from the sudo plugin (verified via `SO_PEERCRED` to be root), opens one mTLS connection to the log server per session, and forwards framed session data in real time. ACKs received from the server are verified against the ed25519 public key (`VerifyKey` in `agentConfig`).
 - **eBPF subsystem** — loads three kernel tracepoints at startup (`sys_enter_write`, `sys_enter_execve`, `sched_process_exit`) to capture TTY I/O from all processes in tracked cgroups, including `pkexec` invocations and subprocesses inside SSH or TTY login sessions. Degrades gracefully to plugin-only mode on kernels without BTF support (`/sys/kernel/btf/vmlinux`).
 - **Cgroup manager** — creates a per-session cgroup subtree for each sudo invocation. Freezes all child processes in the cgroup within approximately 800 ms if ACKs from the server stop arriving, preventing output from escaping capture during a network outage. Sessions frozen longer than `FreezeTimeout` (default: 3 minutes) are terminated with a human-readable banner.
 - **D-Bus/polkit monitor** — monitors the system D-Bus using `BecomeMonitor` to track polkit privilege grants, generating event records with `source = "dbus-polkit"`.
+- **Process sandbox (eBPF LSM)** — an optional kernel-level restriction layer (`go/cmd/agent/bpf/sandbox.bpf.c`) enforcing a deny-list of protected files, capabilities, and operations on every process running inside a session cgroup. Twenty hooks are loaded at startup: 18 LSM hooks plus `sched_process_fork`/`sched_process_exit` tracepoints. Enabled by setting `SandboxConfig` to a `sandbox.yaml` path.
+- **Sudoers management** — polls the log server for a desired sudoers config per host, validates it with `visudo -c`, and atomically installs it to `/etc/sudoers.d/sudo-logger-managed`; reports state back via `MsgSudoersSnapshot`.
 
 The agent reads its configuration from `/etc/sudo-logger/agent.conf` at startup (parsed by `go/cmd/agent/config.go`).
 
@@ -67,7 +69,8 @@ The replay server is a Go daemon (systemd unit: `sudo-replay`) that serves a bro
 │  │  (loads /usr/libexec/sudo/sudo_logger_plugin.so                  │   │
 │  │   via Plugin directive in /etc/sudo.conf)                        │   │
 │  │                                                                  │   │
-│  │  I/O hooks: log_ttyout, log_stdin, log_stdout                   │   │
+│  │  I/O hooks: log_ttyin, log_ttyout, log_stdin,                   │   │
+│  │             log_stdout, log_stderr                                │   │
 │  └────────────────────────┬─────────────────────────────────────────┘   │
 │                           │ Unix socket                                  │
 │                           │ /run/sudo-logger/plugin.sock                 │
@@ -181,36 +184,36 @@ sudo-logger is designed so that a compromised client (agent or plugin) cannot fo
 
 ## Agent configuration reference
 
-The agent reads `/etc/sudo-logger/agent.conf` at startup. The file uses `key = value` syntax; unknown keys are silently ignored for backward compatibility. The `agentConfig` struct in `go/cmd/agent/config.go` defines the full set of fields.
+The agent reads `/etc/sudo-logger/agent.conf` at startup. The file uses `key = value` syntax; keys are matched case-sensitively as exact lowercase strings (the loader does not lower-case input), and unknown keys are silently ignored for backward compatibility. The `agentConfig` struct in `go/cmd/agent/config.go` defines the full set of fields.
 
 | Key | Default | Description |
 |---|---|---|
-| `Server` | `logserver:9876` | Log server address (`host:port`); mTLS connection target |
-| `Socket` | `/run/sudo-logger/plugin.sock` | Unix socket path the agent listens on for plugin connections |
-| `Cert` | `/etc/sudo-logger/client.crt` | Agent client TLS certificate (PEM) |
-| `Key` | `/etc/sudo-logger/client.key` | Agent client TLS private key (PEM) |
-| `CA` | `/etc/sudo-logger/ca.crt` | CA certificate used to verify the server (PEM) |
-| `VerifyKey` | `/etc/sudo-logger/ack-verify.key` | ed25519 public key for ACK signature verification (PEM) |
-| `MaskPatterns` | (empty) | List of regular expressions; matching lines in session output are redacted before forwarding |
-| `FreezeTimeout` | `3m` | How long to keep the cgroup frozen before terminating the session |
-| `IdleTimeout` | (unset) | Maximum time a session can be idle before it is terminated |
-| `Disclaimer` | (empty) | Text displayed to users before a sudo session begins |
-| `DisclaimerColor` | (empty) | Terminal colour for the disclaimer banner |
-| `Ebpf` | `true` | Enable or disable the eBPF subsystem (set to `false` on kernels without BTF) |
-| `SandboxConfig` | (empty) | Path to `sandbox.yaml` deny-list; empty disables the eBPF LSM sandbox |
-| `Hostname` | (auto) | Override the agent's auto-detected hostname (FQDN via reverse DNS) |
-| `Debug` | `false` | Enable verbose debug logging to stderr |
+| `server` (also accepts the literal key `LOGSERVER`) | `logserver:9876` | Log server address (`host:port`); mTLS connection target |
+| `socket` | `/run/sudo-logger/plugin.sock` | Unix socket path the agent listens on for plugin connections |
+| `cert` | `/etc/sudo-logger/client.crt` | Agent client TLS certificate (PEM) |
+| `key` | `/etc/sudo-logger/client.key` | Agent client TLS private key (PEM) |
+| `ca` | `/etc/sudo-logger/ca.crt` | CA certificate used to verify the server (PEM) |
+| `verify_key` | `/etc/sudo-logger/ack-verify.key` | ed25519 public key for ACK signature verification (PEM) |
+| `mask_pattern` | (empty) | One regular expression per occurrence; repeat the key on multiple lines to add more than one pattern. Matching content in session output is redacted before forwarding |
+| `freeze_timeout` | `3m` | How long to keep the cgroup frozen before terminating the session |
+| `idle_timeout` | `0` (disabled) | Maximum time a session can be idle before it is terminated |
+| `disclaimer` | (empty) | Text displayed to users before a sudo session begins |
+| `disclaimer_color` | (empty) | Terminal colour for the disclaimer banner |
+| `ebpf` | `true` | Enable or disable the eBPF subsystem (set to `false` on kernels without BTF) |
+| `sandbox_config` | (empty) | Path to `sandbox.yaml` deny-list; empty disables the eBPF LSM sandbox |
+| `hostname` | (auto) | Override the agent's auto-detected hostname (FQDN via reverse DNS) |
+| `debug` | `false` | Enable verbose debug logging to stderr |
 
 ### Minimal agent.conf example
 
 ```ini
-Server       = logserver.example.internal:9876
-Cert         = /etc/sudo-logger/client.crt
-Key          = /etc/sudo-logger/client.key
-CA           = /etc/sudo-logger/ca.crt
-VerifyKey    = /etc/sudo-logger/ack-verify.key
-FreezeTimeout = 3m
-Ebpf         = true
+server        = logserver.example.internal:9876
+cert          = /etc/sudo-logger/client.crt
+key           = /etc/sudo-logger/client.key
+ca            = /etc/sudo-logger/ca.crt
+verify_key    = /etc/sudo-logger/ack-verify.key
+freeze_timeout = 3m
+ebpf          = true
 ```
 
 ---
@@ -227,10 +230,6 @@ The replay UI displays a source badge on session cards that were not recorded th
 | `dbus-polkit` | `polkit` | D-Bus polkit privilege grant; event record only, no terminal I/O |
 
 Sessions with `source = "ebpf-pkexec"` that have no associated I/O, and all `dbus-polkit` sessions, are displayed as event cards in the replay UI rather than as playable recordings.
-
----
-
-## Repository layout
 
 ---
 
@@ -270,7 +269,7 @@ Add to `/etc/sudo.conf`:
 
 ```
 Plugin sudoers_policy sudoers.so
-Plugin sudo_logger sudo_logger_plugin.so
+Plugin sudo_logger_plugin sudo_logger_plugin.so
 ```
 
 **5. Verify**
@@ -286,28 +285,61 @@ The complete source tree is structured as follows:
 ```
 sudo-logger/
 ├── plugin/
-│   └── plugin.c                 # sudo I/O plugin (C)
+│   ├── plugin.c                 # sudo I/O plugin (C)
+│   └── include/
+│       └── sudo_plugin.h        # vendored sudo plugin API header (no sudo-devel needed to build)
 ├── go/
 │   ├── go.mod
 │   └── cmd/
 │       ├── agent/               # Agent daemon
-│       │   ├── main.go
+│       │   ├── main.go          # Entry point: flags (-config, -version), startup
 │       │   ├── plugin.go        # Unix socket handler
 │       │   ├── ebpf.go          # eBPF ring buffer consumer
+│       │   ├── ebpf_session.go  # eBPF-sourced session (pkexec/tty) writer
+│       │   ├── divergence.go    # plugin vs. eBPF divergence detection
 │       │   ├── cgroup.go        # Per-session cgroup management
 │       │   ├── config.go        # agentConfig struct and file parser
-│       │   ├── sandbox.go       # eBPF LSM sandbox
+│       │   ├── sandbox.go       # eBPF LSM sandbox loader/attacher
+│       │   ├── sandbox_config.go   # sandbox.yaml parser
+│       │   ├── sandbox_watch.go    # inotify re-protection on atomic file replace
+│       │   ├── sandbox_poll.go     # polls server for sandbox.yaml via MsgFetchConfig
+│       │   ├── redaction.go     # output redaction patterns
+│       │   ├── sudoers.go       # sudoers snapshot push/pull
+│       │   ├── tls.go           # mTLS config helpers
+│       │   ├── groups.go        # local group resolution
 │       │   └── bpf/
-│       │       └── recorder.c   # eBPF tracepoint hooks
+│       │       ├── recorder.c      # eBPF tracepoint hooks (I/O + execve + exit)
+│       │       └── sandbox.bpf.c   # eBPF LSM sandbox (18 LSM hooks + 2 tracepoints)
 │       ├── server/
-│       │   └── main.go          # Log server
+│       │   ├── main.go          # Entry point
+│       │   ├── config.go        # CLI flags
+│       │   ├── handler.go       # Per-connection frame handling
+│       │   ├── heartbeat.go     # Agent liveness tracking
+│       │   └── approval.go      # JIT approval manager + REST API
 │       ├── replay-server/
-│       │   └── main.go          # Web replay UI
-│       └── migrate-sessions/
-│           └── main.go          # Local-to-distributed migration tool
+│       │   ├── main.go          # Entry point
+│       │   ├── config.go        # CLI flags
+│       │   ├── routes.go        # HTTP route registration
+│       │   ├── middleware.go    # Auth/access-log middleware
+│       │   ├── handlers_auth.go     # Login, OIDC, session cookies
+│       │   ├── handlers_session.go  # Session list/replay/cast endpoints
+│       │   ├── handlers_admin.go    # Users, roles, config endpoints
+│       │   ├── approval_proxy.go    # Proxies approval calls to the log server
+│       │   ├── oidc.go          # OIDC discovery/token verification
+│       │   ├── rbac.go          # Role/permission model
+│       │   ├── websocket.go     # Stub — unimplemented
+│       │   ├── ui/              # React/TS SPA source
+│       │   └── static/          # Vite build output (embedded via go:embed)
+│       ├── migrate-sessions/
+│       │   └── main.go          # Local-to-distributed migration tool
+│       └── loadgen/
+│           └── main.go          # Synthetic session load generator for testing
 │   └── internal/
 │       ├── store/               # SessionStore interface + local + distributed backends
+│       ├── protocol/            # Wire protocol frame types and constants
+│       ├── iolog/               # asciinema v2 session.cast writer
 │       ├── config/              # ResolveSecret helper
+│       ├── policy/              # Blocked/whitelisted user policy helpers
 │       └── siem/                # SIEM forwarding (HTTPS, syslog; JSON, CEF, OCSF)
 ├── rpm/
 │   ├── sudo-logger-client.spec

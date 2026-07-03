@@ -250,6 +250,8 @@ migrate-sessions \
 | `--s3-path-style` | false | Use path-style S3 URLs (required for MinIO) |
 | `--s3-access-key` | — | Static access key (omit to use IAM role or environment) |
 | `--s3-secret-key` | — | Static secret key (omit to use IAM role or environment) |
+| `--dry-run` | false | Print what would be migrated without writing anything |
+| `--workers` | 4 | Number of concurrent upload workers |
 
 After migration completes successfully, update the log server and replay server startup flags to include `--storage=distributed` along with the `--db-url` and `--s3-*` flags, then restart both services.
 
@@ -267,15 +269,10 @@ Each component handles configuration changes differently. The table below summar
 | **Log server** (`sudo-logserver`) | `approval-policy.yaml` | Automatic background poll | Every 30 s |
 | **Log server** (`sudo-logserver`) | `sandbox.yaml` | Served to agents on request | No explicit reload interval; agents fetch on connect |
 | **Log server** (`sudo-logserver`) | `siem.yaml` | Automatic background poll | Every 30 s |
-| **Replay server** (`sudo-replay`) | `htpasswd` | Reloaded on `SIGHUP` | `kill -HUP <pid>` or `systemctl reload sudo-replay` |
 | **Replay server** (`sudo-replay`) | `risk-rules.yaml` | Automatic background poll | Every 30 s |
 | **Replay server** (`sudo-replay`) | `siem.yaml` | Automatic background poll | Every 30 s |
 
-To send `SIGHUP` to the replay server via systemd:
-
-```bash
-systemctl reload sudo-replay
-```
+> **Note:** The `-htpasswd` flag's help text says "reload with SIGHUP", but this is not currently wired up: `go/cmd/replay-server/main.go` only registers signal handling for `SIGTERM`/`SIGINT`, and the shipped `sudo-replay.service` unit has no `ExecReload=` directive. Sending `kill -HUP <pid>` or running `systemctl reload sudo-replay` will not reload anything — with no `ExecReload=` configured, systemd will report the reload as unsupported for this unit, and a raw `SIGHUP` to the process falls back to the OS default action (process termination), not a graceful reload. Local user accounts (used for Basic Auth login) are managed through the `/api/users` API and the local store, not by re-reading a htpasswd-format file at runtime. If you change local user passwords, do so via `/api/users`; there is no supported live-reload path for this flag today.
 
 Changes to `agent.conf` require a full agent restart. Active sudo sessions survive a brief agent restart because the log server connection is re-established per session and the plugin holds the Unix socket open; however, sessions in flight at the exact moment of restart may be marked `INCOMPLETE`.
 
@@ -353,9 +350,6 @@ systemctl restart sudo-replay
 systemctl enable sudo-logger-agent
 systemctl enable sudo-logserver
 systemctl enable sudo-replay
-
-# Reload replay server htpasswd (SIGHUP):
-systemctl reload sudo-replay
 
 # View logs
 journalctl -u sudo-logger-agent -f

@@ -36,8 +36,8 @@ The following table lists the configurable parameters of the sudo-logger chart a
 | Parameter | Description | Default |
 | --- | --- | --- |
 | `replicaCount` | Number of logserver replicas | `1` |
-| `image.repository` | Logserver image repository | `ghcr.io/alun-hub/sudo-logserver` |
-| `image.tag` | Logserver image tag | `1.0` |
+| `image.repository` | Logserver image repository (same combined image as `replay.image.repository`) | `ghcr.io/alun-hub/sudo-logger` |
+| `image.tag` | Logserver image tag | defaults to `Chart.AppVersion` |
 | `storage.type` | Storage type (`local` or `distributed`) | `local` |
 | `storage.local.size` | PVC size for local storage | `10Gi` |
 | `tls.mode` | TLS mode (`self-signed`, `provided`, `cert-manager`) | `self-signed` |

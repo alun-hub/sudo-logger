@@ -178,7 +178,8 @@ directory (e.g. `./pki`) before running the deploy script:
 
 ```bash
 cd k8s
-./deploy-local.sh --image ghcr.io/alun-hub/sudo-logserver:latest
+./deploy-local.sh                                        # uses the locally-built localhost/sudo-logger:latest image
+./deploy-local.sh --image ghcr.io/alun-hub/sudo-logger:1.25.5   # or pin a published image
 ```
 
 The script performs these steps automatically:
@@ -191,16 +192,41 @@ The script performs these steps automatically:
 
 ### C. Manual deployment (without the script)
 
-If you prefer to apply manifests yourself:
+If you prefer to apply manifests yourself, create the required Secrets first
+— `deployment-distributed.yaml` and `replay-server.yaml` both reference them,
+so applying those manifests without the Secrets in place will leave the pods
+stuck unable to start:
 
 ```bash
 kubectl apply -f k8s/namespace.yaml
+
+kubectl create secret generic sudo-logger-tls \
+  --namespace sudo-logger \
+  --from-file=ca.crt=./pki/ca.crt \
+  --from-file=server.crt=./pki/server.crt \
+  --from-file=server.key=./pki/server.key \
+  --from-file=ack-sign.key=./pki/ack-sign.key
+
+kubectl create secret generic sudo-logger-distributed \
+  --namespace sudo-logger \
+  --from-literal=s3-access-key=<your-access-key> \
+  --from-literal=s3-secret-key=<your-secret-key> \
+  --from-literal=db-user=sudologger \
+  --from-literal=db-password=<your-db-password> \
+  --from-literal=db-url='postgres://sudologger:<your-db-password>@postgresql:5432/sudologger?sslmode=disable'  # pragma: allowlist secret
+
 kubectl apply -f k8s/postgresql.yaml
 kubectl apply -f k8s/minio.yaml
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/deployment-distributed.yaml
 kubectl apply -f k8s/replay-server.yaml
 ```
+
+There is no working `kubectl apply -k` kustomize shortcut for this mode —
+kustomize's default security restrictions block a kustomization from
+referencing files outside its own directory, and `kubectl apply -k` doesn't
+expose a way to lift that, so the individual `kubectl apply -f` commands
+above (or `deploy-local.sh`) are the only two working paths.
 
 ### D. Access
 
@@ -280,9 +306,10 @@ Additional flags (TLS, etc.) can be appended to `REPLAY_ARGS` in the same file.
 
 ## 5. SELinux
 
-On SELinux-enforcing systems the `sudo-logger-client` and `sudo-logger-server` RPMs
-install and activate the required policy module automatically during `%post`. No
-manual steps are needed.
+On SELinux-enforcing systems the `sudo-logger-client` RPM installs and
+activates the required policy module automatically during `%post`. No manual
+steps are needed. (The server and replay RPMs do not ship or require any
+SELinux policy module.)
 
 If you build from source, load the policy manually:
 

@@ -204,6 +204,8 @@ subsystem using kernel LSM hooks.
 ### Schema
 
 ```yaml
+enabled: true   # top-level switch; omit or set true to enforce, false disables the whole sandbox
+
 features:
   deny_netlink: true
   deny_mount: true
@@ -234,6 +236,7 @@ protect:
 
 | YAML key | Default | What it blocks | Notes |
 |----------|---------|---------------|-------|
+| `enabled` (top-level, not under `features`) | `true` | The entire sandbox subsystem | `nil`/absent → enforced (`true`); set `enabled: false` to disable sandbox enforcement entirely while keeping the file for reference |
 | `deny_netlink` | `true` | Netlink socket creation (raw kernel interface access) | Blocks low-level network manipulation and iptables bypasses |
 | `deny_mount` | `true` | `mount(2)` system calls | Prevents bind mounts and overlay filesystem escapes |
 | `deny_ptrace` | `true` | `ptrace(2)` and `/proc/<pid>/mem` writes | Prevents process injection and credential dumping |

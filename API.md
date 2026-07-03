@@ -10,17 +10,53 @@ The Replay Server (`sudo-replay-server`) provides the endpoints used by the web 
 
 ### 1.1 Identity & Access Management
 
+> **Note on "Role Required" below:** access control is permission-based, not
+> a fixed two-role switch. There are 12 granular permissions (`sessions:list_own`,
+> `sessions:list_all`, `sessions:replay_own`, `sessions:replay_all`,
+> `sessions:delete`, `users:read`, `users:write`, `audit_log:read`,
+> `approvals:read`, `approvals:decide`, `config:read`, `config:write`). `admin`
+> (locked, all 12) and `viewer` (default: `sessions:list_own` +
+> `sessions:replay_own`) are just the two built-in roles — custom roles with
+> any subset of permissions can be created via `/api/roles` below. Where this
+> doc says "Role Required: admin", the actual check is for the specific
+> permission that role happens to hold (usually `config:write` for settings
+> endpoints, `users:write` for user/role management) — a custom role with
+> that permission works identically without being named `admin`.
+
 #### `GET /api/me`
-Returns the currently authenticated user's identity and effective role.
+Returns the currently authenticated user's identity, role, and resolved permission set.
 *   **Role Required:** *None* (Open to all authenticated users; unauthenticated users get 401, or fallback to proxy mapping).
 *   **Response (200 OK):**
     ```json
     {
       "user": "alice",
       "role": "admin",
-      "logoutUrl": "/api/oidc/login"
+      "logoutUrl": "/api/oidc/login",
+      "permissions": ["sessions:list_own", "sessions:list_all", "..."]
     }
     ```
+
+#### `GET /api/roles`
+Lists all roles (built-in and custom) with their permission sets.
+*   **Role Required:** `users:read`
+*   **Response (200 OK):**
+    ```json
+    [
+      {"name": "admin", "permissions": ["sessions:list_own", "..."], "built_in": true},
+      {"name": "viewer", "permissions": ["sessions:list_own", "sessions:replay_own"], "built_in": false},
+      {"name": "operator", "description": "On-call", "permissions": ["sessions:list_all", "approvals:decide"], "built_in": false}
+    ]
+    ```
+
+#### `POST / PUT /api/roles`
+Creates or updates a custom role.
+*   **Role Required:** `users:write` — and you may only grant permissions your own account already holds (prevents privilege escalation via role creation).
+*   **Request Body:** `{"name": "operator", "description": "...", "permissions": ["sessions:list_all", "approvals:decide"]}` (name must match `^[a-z0-9_-]{1,64}$`)
+*   **Response (204 No Content)**
+
+#### `GET /api/roles/{name}` & `DELETE /api/roles/{name}`
+Fetch or delete a single role by name.
+*   **Role Required:** `users:read` (GET) / `users:write` (DELETE) — built-in roles cannot be deleted.
 
 #### `GET /api/users`
 Lists all users managed in the local database.
@@ -84,11 +120,15 @@ Updates the authentication strategy.
 *   **Response (204 No Content)**
 
 #### `PUT /api/auth-mapping`
-Updates the mapping of External Groups (from OIDC or Proxy) to the `admin` role.
-*   **Role Required:** `admin`
+Updates group→role mapping for OIDC/Proxy-authenticated users. `group_mappings`
+is an ordered list of `{group, role}` pairs (first match wins, maps a group to
+*any* role, not just `admin`); `admin_groups` is the older, simpler fallback —
+any group in that comma-separated list still maps to the built-in `admin` role.
+*   **Role Required:** `users:write`
 *   **Request Body:**
     ```json
     {
+      "group_mappings": [{"group": "sudo-oncall", "role": "operator"}],
       "admin_groups": "sudo-admins, security-ops"
     }
     ```
@@ -100,6 +140,10 @@ Redirects the user to the configured OIDC Identity Provider to initiate the OAut
 
 #### `GET /api/oidc/callback`
 Handles the redirect back from the OIDC IdP. Validates the `code` and `state`, exchanges them for an ID token, maps roles based on the `groups` claim, sets the `sudo_session` cookie, and redirects the user to `/`.
+*   **Role Required:** *None*
+
+#### `GET /api/oidc/logout`
+Clears the local session cookie and, when configured, redirects to the IdP's end-session endpoint.
 *   **Role Required:** *None*
 
 ---
@@ -282,12 +326,16 @@ All endpoints in this section require the `admin` role and use `GET` to retrieve
 Responses and Requests share the same JSON shapes.
 
 *   `GET / PUT /api/rules` — Risk scoring engine rules (`risk-rules.yaml` format).
-*   `GET / PUT /api/sandbox` — eBPF process sandbox restrictions (preventing sudo from modifying specific files/sockets).
-*   `GET / PUT /api/blocked-users` — Array of strings representing users/hosts strictly blocked from executing sudo.
-*   `GET / PUT /api/whitelisted-users` — Array of strings representing users exempt from JIT approval prompts.
+*   `GET / PUT /api/sandbox` — eBPF process sandbox deny-list (`sandbox.yaml` format: protected files, forbidden binaries, noexec dirs, devices, /proc entries, sockets, process names).
+*   `GET / PUT /api/sandbox/templates` — Reusable named sandbox rule templates offered in the sandbox editor UI.
+*   `GET / PUT /api/redaction-config` — Custom regex patterns (`mask_pattern` equivalents) pushed to agents in addition to the built-in redaction rules.
+*   `GET / PUT /api/blocked-users` — Blocked users/hosts config (`blocked-users.yaml` format).
+*   `GET / PUT /api/whitelisted-users` — Users/hosts exempt from JIT approval prompts.
 *   `GET / PUT /api/retention` — Data retention policy (e.g., `{"days_to_keep": 90}`).
 *   `GET / PUT /api/siem-config` — Configuration for forwarding events to a remote SIEM (Syslog, HTTP, or stdout).
-*   `PUT /api/siem-cert` — Multipart form-data upload for SIEM mTLS certificates (`ca`, `cert`, `key`).
+*   `PUT /api/siem-cert` — Multipart form-data upload for SIEM mTLS certificates (`ca`, `cert`, `key`; local storage mode only — returns 501 in distributed mode, use Kubernetes Secrets instead).
+
+All of the above require the `config:read` (GET) / `config:write` (PUT) permission.
 
 ---
 
@@ -309,17 +357,30 @@ Generates a high-level summary report for the UI dashboard (total sessions, high
 
 ---
 
-## 2. Log Server API (Agent Facing)
+## 2. Log Server (Agent Facing) — not an HTTP API
 
-The Log Server (`sudo-logserver`) provides endpoints strictly used by the `sudo-logger-agent` binary running on the monitored host machines.
+The Log Server (`sudo-logserver`) does **not** expose an HTTP/REST API to
+agents. The agent↔log-server channel is a single persistent mutual-TLS TCP
+connection (port 9876, one connection per session) speaking a custom binary
+wire protocol: a 5-byte frame (`[1 byte type][4 bytes big-endian length][N
+bytes payload]`) defined in `go/internal/protocol/protocol.go`. There is no
+JSON REST surface here at all — see [ARCHITECTURE.md](ARCHITECTURE.md#wire-protocol)
+for the full message-type table and session lifecycle.
 
-> **Security Note:** These endpoints are highly sensitive and should never be exposed to the public internet. Authentication is handled via mTLS (Mutual TLS) using client certificates deployed to the agents.
+Key messages, for reference (full list in ARCHITECTURE.md): `SESSION_START`
+(0x01, JSON metadata — user/host/command/cwd/etc, evaluated against JIT and
+block policy), `CHUNK` (0x02, binary TTY I/O), `SESSION_END` (0x03),
+`HEARTBEAT`/`HEARTBEAT_ACK` (0x09/0x0a, every 400 ms — not ~3 s), `ACK`
+(0x04, ed25519-signed), `MsgSessionChallenge`/`MsgSessionChallengeResponse`
+(0x14/0x15, JIT justification prompt/response), `MsgFetchConfig` (0x12, the
+agent's mechanism for pulling `sandbox.yaml`, `redaction_config`, and
+`sudoers/<host>` — restricted to that fixed allowlist server-side, not an
+open key-value fetch).
 
-| Method | Endpoint | Description | Payload Format |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/healthz` | Readiness/Liveness probe. | N/A |
-| `POST` | `/api/agent/session` | Called immediately when a user types `sudo`. The agent transmits the command metadata (user, host, command, cwd, env). The server evaluates JIT and Block policies and responds with `allow`, `deny`, or `require_approval`. | JSON |
-| `POST` | `/api/agent/events` | Streams the real-time TTY I/O payload chunks to the server for an active session. Uses a custom chunked binary or JSON format depending on config. | Binary/JSON Stream |
-| `POST` | `/api/agent/heartbeat` | Periodic check-in from active sessions (every ~3s). Used by the server's watchdog to detect if a host has gone offline or if the agent was forcefully killed. | JSON |
-| `POST` | `/api/agent/approval` | Submits a JIT justification string to the server. The agent then polls or waits for a server push to determine if the admin approved the request. | JSON |
-| `GET` | `/api/agent/sudoers` | Checks for new centralised sudoers configuration updates specifically staged for the agent's hostname. The agent downloads it, runs `visudo -c`, and applies it atomically. | JSON |
+The only place `sudo-logserver` speaks HTTP at all is the optional
+`-health-listen` port (e.g. `:9877`), which serves `GET /healthz` (always
+200), `GET /metrics` (Prometheus text: `sudologger_sessions_active`,
+`sudologger_sessions_total`, `sudologger_sessions_incomplete_total`), and
+`DELETE /api/sessions/<tsid>` (GDPR deletion, Bearer-token authenticated —
+this is what the replay server's `DELETE /api/sessions/{tsid}` above
+proxies to).

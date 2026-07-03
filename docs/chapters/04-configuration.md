@@ -12,53 +12,57 @@ The agent (`sudo-logger-agent`) runs on every monitored host. It receives
 session data from the plugin via a Unix socket and forwards it to the log
 server over mutual-TLS.
 
-### CLI flag
+### CLI flags
 
-The agent accepts exactly one command-line flag:
+The agent accepts exactly two command-line flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--config <path>` | `/etc/sudo-logger/agent.conf` | Path to the agent configuration file |
+| `-config <path>` | `/etc/sudo-logger/agent.conf` | Path to the agent configuration file |
+| `-version` | `false` | Print version and exit |
 
 All other settings are read from the configuration file.
 
 ### agent.conf format
 
-`agent.conf` uses a simple `Key = Value` format, one setting per line.
-Key names are case-insensitive. Lines beginning with `#` are comments.
-Unknown keys are silently ignored for backward compatibility.
+`agent.conf` uses a simple `key = value` format, one setting per line.
+Key names are matched **case-sensitively** as exact lowercase strings (the
+parser does not lower-case input) — `Cert = ...` or `FREEZE_TIMEOUT = ...`
+are silently ignored as unknown keys, not accepted. The one exception is the
+log server address, which may be given as either `server` or the literal
+uppercase key `LOGSERVER`. Lines beginning with `#` are comments. Unknown
+keys are silently ignored for backward compatibility.
 
 ```
 # Example: /etc/sudo-logger/agent.conf
-Server         = logserver.example.com:9876
-Cert           = /etc/sudo-logger/client.crt
-Key            = /etc/sudo-logger/client.key
-CA             = /etc/sudo-logger/ca.crt
+server         = logserver.example.com:9876
+cert           = /etc/sudo-logger/client.crt
+key            = /etc/sudo-logger/client.key
+ca             = /etc/sudo-logger/ca.crt
 ```
 
 ### Complete agent.conf reference
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `Server` | string | `logserver:9876` | Address of the log server in `host:port` form |
-| `Socket` | string | `/run/sudo-logger/plugin.sock` | Unix socket path for communication with the sudo plugin |
-| `Cert` | string | `/etc/sudo-logger/client.crt` | Client TLS certificate presented to the log server |
-| `Key` | string | `/etc/sudo-logger/client.key` | Private key for the client TLS certificate |
-| `CA` | string | `/etc/sudo-logger/ca.crt` | CA certificate used to verify the log server's certificate |
-| `VerifyKey` | string | `/etc/sudo-logger/ack-verify.key` | Path to the ed25519 public key used to verify ACK signatures from the log server |
-| `MaskPatterns` | []string | _(empty)_ | Newline- or comma-separated list of regular expressions; matching content in session output is redacted before forwarding |
-| `FreezeTimeout` | duration | `3m` | Duration after which a session with no network progress is terminated (prevents resource leaks from hung connections) |
-| `IdleTimeout` | duration | _(none)_ | Duration after which a session with no terminal activity is terminated; zero means no idle timeout |
-| `Disclaimer` | string | _(empty)_ | Message displayed to the user at the start of every sudo session |
-| `DisclaimerColor` | string | _(empty)_ | ANSI color name or code applied to the disclaimer text (e.g. `yellow`, `red`) |
-| `Debug` | bool | `false` | Enable verbose debug logging to stderr |
-| `Ebpf` | bool | `true` | Enable eBPF-based session sandbox. Auto-disabled when the kernel lacks BTF support. Set to `false` to disable explicitly |
-| `SandboxConfig` | string | _(empty)_ | Path to `sandbox.yaml`; sandbox is disabled when this key is absent or empty |
-| `Hostname` | string | _(empty)_ | Override the auto-detected fully-qualified hostname. When empty, the agent resolves the FQDN via `os.Hostname` + reverse DNS lookup |
+| `server` (or literal `LOGSERVER`) | string | `logserver:9876` | Address of the log server in `host:port` form |
+| `socket` | string | `/run/sudo-logger/plugin.sock` | Unix socket path for communication with the sudo plugin |
+| `cert` | string | `/etc/sudo-logger/client.crt` | Client TLS certificate presented to the log server |
+| `key` | string | `/etc/sudo-logger/client.key` | Private key for the client TLS certificate |
+| `ca` | string | `/etc/sudo-logger/ca.crt` | CA certificate used to verify the log server's certificate |
+| `verify_key` | string | `/etc/sudo-logger/ack-verify.key` | Path to the ed25519 public key used to verify ACK signatures from the log server |
+| `mask_pattern` | string (repeatable) | _(empty)_ | One Go regular expression per line; repeat the key on multiple lines to add more than one pattern. Matching content in session output is redacted before forwarding |
+| `freeze_timeout` | duration | `3m` | Duration after which a session with no network progress is terminated (prevents resource leaks from hung connections) |
+| `idle_timeout` | duration | `0` | Duration after which a session with no terminal activity is terminated; zero (default) means no idle timeout |
+| `disclaimer` | string | _(empty)_ | Message displayed to the user at the start of every sudo session |
+| `disclaimer_color` | string | _(empty)_ | ANSI color name or code applied to the disclaimer text (e.g. `yellow`, `red`) |
+| `debug` | bool | `false` | Enable verbose debug logging to stderr |
+| `ebpf` | bool | `true` | Enable the eBPF recorder/sandbox subsystems. Auto-disabled when the kernel lacks BTF support. Set to `false` to disable explicitly |
+| `sandbox_config` | string | _(empty)_ | Path to `sandbox.yaml`; sandbox is disabled when this key is absent or empty |
+| `hostname` | string | _(empty)_ | Override the auto-detected fully-qualified hostname. When empty, the agent resolves the FQDN via `os.Hostname` + reverse DNS lookup |
 
-> **Note:** `MaskPatterns` entries are Go regular expressions. Each pattern is
-> matched against the raw byte stream of terminal output. Matched regions are
-> replaced with `[REDACTED]` before the data reaches the log server.
+> **Note:** `mask_pattern` entries are Go regular expressions matched against
+> the raw byte stream of terminal output before it reaches the log server.
 
 > **Note:** Duration values use Go duration syntax: `30s`, `5m`, `1h30m`.
 
@@ -68,35 +72,35 @@ CA             = /etc/sudo-logger/ca.crt
 # /etc/sudo-logger/agent.conf
 
 # Log server address
-Server          = logserver.corp.example.com:9876
+server          = logserver.corp.example.com:9876
 
 # Mutual TLS certificates
-Cert            = /etc/sudo-logger/client.crt
-Key             = /etc/sudo-logger/client.key
-CA              = /etc/sudo-logger/ca.crt
+cert            = /etc/sudo-logger/client.crt
+key             = /etc/sudo-logger/client.key
+ca              = /etc/sudo-logger/ca.crt
 
 # ACK signature verification
-VerifyKey       = /etc/sudo-logger/ack-verify.key
+verify_key      = /etc/sudo-logger/ack-verify.key
 
 # Redact passwords from output streams
-MaskPatterns    = [Pp]assword\s*[:=]\s*\S+
+mask_pattern    = [Pp]assword\s*[:=]\s*\S+
 
 # Kill frozen sessions after 5 minutes
-FreezeTimeout   = 5m
+freeze_timeout  = 5m
 
 # Terminate idle sessions after 30 minutes
-IdleTimeout     = 30m
+idle_timeout    = 30m
 
 # Show a warning banner at session start
-Disclaimer      = WARNING: This session is recorded and audited.
-DisclaimerColor = yellow
+disclaimer      = WARNING: This session is recorded and audited.
+disclaimer_color = yellow
 
 # eBPF sandbox
-Ebpf            = true
-SandboxConfig   = /etc/sudo-logger/sandbox.yaml
+ebpf            = true
+sandbox_config  = /etc/sudo-logger/sandbox.yaml
 
 # Override hostname detection (uncomment if FQDN resolution is unreliable)
-# Hostname = myhost.example.com
+# hostname = myhost.example.com
 ```
 
 ### Configuration priority
@@ -274,7 +278,7 @@ sudo-replay-server \
 | `--logserver-admin-token-file` | _(empty)_ | File containing the Bearer token; env `SUDO_LOGGER_ADMIN_TOKEN` is also accepted |
 | `--tls-cert` | _(empty)_ | TLS certificate file; HTTPS is enabled when this flag is set |
 | `--tls-key` | _(empty)_ | TLS private key file |
-| `--htpasswd` | _(empty)_ | Path to bcrypt htpasswd file for HTTP Basic Auth; reload without restart with `SIGHUP` |
+| `--htpasswd` | _(empty)_ | Any non-empty path forces Basic Auth on even with zero passworded local users. The file's contents are never read — see [Authentication configuration](#authentication-configuration) below. |
 | `--trusted-user-header` | _(empty)_ | HTTP request header containing a pre-authenticated username from an upstream proxy (e.g. `X-Forwarded-User`) |
 | `--admin-users` | _(empty)_ | Comma-separated list of usernames granted the admin role (can view all sessions, approve requests, delete sessions) |
 | `--oidc-issuer` | _(empty)_ | OIDC provider issuer URL (e.g. `https://accounts.google.com`) |
@@ -297,24 +301,25 @@ sudo-replay-server \
 The replay server supports four authentication modes. Modes can be combined
 (for example: HTTPS + htpasswd, or trusted-header + admin-users).
 
-#### 1. HTTP Basic Auth (htpasswd)
+#### 1. HTTP Basic Auth (htpasswd flag, local database accounts)
 
-Set `--htpasswd` to a bcrypt htpasswd file. Only bcrypt hashes are supported;
-MD5 and SHA1 hashes are rejected.
-
-```bash
-# Create a new htpasswd file with the first user
-htpasswd -B -c /etc/sudo-logger/htpasswd alice
-
-# Add another user to an existing file
-htpasswd -B /etc/sudo-logger/htpasswd bob
-```
-
-The replay server reloads the htpasswd file without restart when it receives
-`SIGHUP`:
+Despite the flag's name, `--htpasswd <file>` does not parse that file at
+all — the code only checks that the path is non-empty, to force Basic Auth
+on before any local user has a password set. Real accounts are always
+managed in the local user database (Bootstrap modal, **Config → Users &
+Auth** in the UI, or `POST /api/users`), the same store used regardless of
+whether `--htpasswd` is set. There is no reload signal of any kind for the
+replay server — it only handles `SIGTERM`/`SIGINT` for graceful shutdown —
+so changes to local users via `/api/users` simply take effect on the next
+request, with nothing to reload.
 
 ```bash
-kill -HUP $(systemctl show -p MainPID --value sudo-logger-replay)
+# Any non-empty file works — its content is irrelevant:
+touch /etc/sudo-logger/htpasswd
+
+# Create the actual login account:
+curl -ku alice:adminpass -X POST https://localhost:8080/api/users \
+  -d '{"username":"bob","password_hash":"NewPassword123!","role":"viewer"}'  # pragma: allowlist secret
 ```
 
 #### 2. Trusted-header proxy authentication
@@ -382,18 +387,20 @@ The replay server accepts the token from three sources, in priority order:
 ## /etc/sudo.conf
 
 The sudo configuration file tells sudo which plugins to load. The
-`sudo_logger.so` plugin must be declared after the policy plugin.
+`sudo_logger_plugin.so` plugin must be declared after the policy plugin.
 
 ```
 # /etc/sudo.conf
 
-Plugin sudoers_policy  sudoers.so
-Plugin sudo_io_logger  /usr/libexec/sudo/sudo_logger.so
+Plugin sudoers_policy       sudoers.so
+Plugin sudo_logger_plugin   /usr/libexec/sudo/sudo_logger_plugin.so
 ```
 
 > **Note:** Plugin line order matters. `sudoers_policy` must appear before
-> `sudo_io_logger`. Reversing the order causes sudo to fail at startup.
+> `sudo_logger_plugin`. Reversing the order causes sudo to fail at startup.
 
-The `sudo_logger.so` plugin is installed to `/usr/libexec/sudo/` by the
-`sudo-logger-client` RPM package. After editing `/etc/sudo.conf`, no service
-restart is required — sudo reads the file on every invocation.
+The `sudo_logger_plugin.so` plugin is installed to `/usr/libexec/sudo/` by the
+`sudo-logger-client` RPM package, which also adds the `Plugin` line above to
+`/etc/sudo.conf` automatically during install (and removes it on uninstall).
+After editing `/etc/sudo.conf` manually, no service restart is required —
+sudo reads the file on every invocation.

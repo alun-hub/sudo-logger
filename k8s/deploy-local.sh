@@ -9,14 +9,14 @@
 # Usage:
 #   bash deploy-local.sh [--image <image>] [--dry-run]
 #
-# Example:
-#   bash deploy-local.sh --image ghcr.io/alun-hub/sudo-logserver:1.14.0
+# Example (override the default locally-built image with a published one):
+#   bash deploy-local.sh --image ghcr.io/alun-hub/sudo-logger:1.25.5
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKI_DIR="${SCRIPT_DIR}/../pki"
 NAMESPACE="sudo-logger"
-IMAGE="${IMAGE:-ghcr.io/alun-hub/sudo-logserver:latest}"
+IMAGE="${IMAGE:-localhost/sudo-logger:latest}"
 DRY_RUN=false
 
 # Credentials — override via env vars before running.
@@ -137,13 +137,13 @@ patch_image() {
 # ── Deploy logserver (distributed) ───────────────────────────────────────────
 log "Deploying sudo-logserver (distributed mode)..."
 kubectl apply -f "${SCRIPT_DIR}/deployment-distributed.yaml"
-[[ "${IMAGE}" != "ghcr.io/alun-hub/sudo-logserver:latest" ]] && \
+[[ "${IMAGE}" != "localhost/sudo-logger:latest" ]] && \
   patch_image sudo-logserver sudo-logserver
 
 # ── Deploy replay server ──────────────────────────────────────────────────────
 log "Deploying sudo-replay-server..."
 kubectl apply -f "${SCRIPT_DIR}/replay-server.yaml"
-[[ "${IMAGE}" != "ghcr.io/alun-hub/sudo-logserver:latest" ]] && \
+[[ "${IMAGE}" != "localhost/sudo-logger:latest" ]] && \
   patch_image sudo-replay-server sudo-replay-server
 
 # ── Wait for rollouts ─────────────────────────────────────────────────────────

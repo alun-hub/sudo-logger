@@ -316,16 +316,27 @@ On the replay server:
 
 ### Webhook notification
 
-When a pending approval is created, the log server fires a Mattermost-compatible webhook:
+When a pending approval is created, the log server fires a Slack/Mattermost-compatible incoming webhook. The JSON body is an attachment-style payload, not a plain `channel`+`text` message:
 
 ```json
 {
   "channel": "sudo-approvals",
-  "text": "@charlie requested sudo approval on db01.example.com\nCommand: `psql -U postgres production`\n[Approve](https://replay.example.com/approvals/req_abc123) | [Deny](https://replay.example.com/approvals/req_abc123)"
+  "text": ":lock: *Sudo approval request*\n@charlie requested sudo approval on db01.example.com",
+  "username": "sudo-logger",
+  "icon_emoji": ":lock:",
+  "attachments": [
+    {
+      "color": "#ff9900",
+      "fields": [
+        { "title": "Command", "value": "psql -U postgres production", "short": false }
+      ],
+      "actions": []
+    }
+  ]
 }
 ```
 
-`webhook_secret` is used to compute an HMAC-SHA256 signature over the request body, sent as `X-Webhook-Signature`. The receiving system can verify authenticity with this secret.
+`webhook_secret` is used to compute an HMAC-SHA256 signature over the request body, sent as `X-Sudo-Logger-Signature: sha256=<hex>`. The receiving system can verify authenticity with this secret.
 
 ### Exempt and whitelisted users
 
@@ -396,7 +407,7 @@ For OIDC and proxy-header auth, user groups can be mapped to roles:
 ]
 ```
 
-First matching mapping wins. Configured via `PUT /api/auth-mapping` or inside `PUT /api/auth-config`.
+First matching mapping wins. The ordered `group_mappings` list is configured as part of the full config body via `PUT /api/auth-config`. `PUT /api/auth-mapping` is a separate, legacy endpoint that only manages the `admin_groups` fallback list (each entry there maps to the built-in `admin` role) — it does not write `group_mappings`.
 
 ### Bootstrap mode
 
@@ -474,7 +485,7 @@ CEF extension fields use standard ArcSight keys: `rt` (receive time ms), `shost`
 
 ### OCSF format
 
-Events are mapped to OCSF class `Process Activity` (class UID 1007) with activity `Execute` (activity ID 1). Key field mappings follow the OCSF schema; the replay URL is included in `unmapped.replay_url`.
+Events are mapped to OCSF v1.3.0 class `Process Activity` (class UID `3003`, category `System Activity`/category UID `3`) with activity `Launch` (activity ID 1). Key field mappings follow the OCSF schema; the replay URL is included in `unmapped.replay_url`.
 
 ### Transport modes
 
@@ -505,7 +516,9 @@ The agent loads an eBPF LSM (Linux Security Module) program (`sandbox.bpf.c`) th
 
 ### LSM hooks
 
-The `sandbox.bpf.c` program attaches 16 LSM hooks:
+The `sandbox.bpf.c` program attaches 18 LSM hooks (20 hooks total, including the
+2 tracepoints below). Verify with:
+`grep -c 'SEC("lsm/\|SEC("tp_btf/' go/cmd/agent/bpf/sandbox.bpf.c`
 
 | Hook | What it blocks |
 |------|---------------|
@@ -520,13 +533,15 @@ The `sandbox.bpf.c` program attaches 16 LSM hooks:
 | `lsm/inode_mknod` | Creating device nodes inside protected directories |
 | `lsm/inode_symlink` | Creating symlinks inside protected directories |
 | `lsm/task_kill` | Sending signals to processes with protected names |
+| `lsm/bpf` | Blocks the `bpf()` syscall entirely for sandboxed processes (prevents manipulation of eBPF maps/programs) |
 | `lsm/socket_create` | Creating `AF_NETLINK` sockets (route/firewall/audit tampering) |
 | `lsm/ptrace_access_check` | Ptrace of processes outside the sandbox cgroup |
 | `lsm/sb_mount` | Mounting over protected inodes (bind-mount bypass) |
 | `lsm/capable` | Capability use: `CAP_AUDIT_CONTROL`, `CAP_NET_ADMIN`, `CAP_SYS_MODULE`, `CAP_MAC_ADMIN`, `CAP_SYS_RAWIO`, `CAP_SYS_BOOT` |
+| `lsm/unix_stream_connect` | Connecting to systemd/D-Bus control sockets from inside the sandbox — blocks the `systemd-run`/`busctl StartTransientUnit` escape (spawns a process outside the sandboxed cgroup). Gated by `deny_systemd_ipc` (off by default); sudo's own PAM/logind D-Bus call is exempted |
 | `lsm/bprm_check_security` | Executing forbidden binaries or binaries from noexec directories |
 
-Additionally, `sched_process_fork` and `sched_process_exit` tracepoints track child processes entering and leaving the sandboxed cgroup.
+Additionally, `sched_process_fork` and `sched_process_exit` tracepoints (attached via `tp_btf/`) track child processes entering and leaving the sandboxed cgroup.
 
 ### eBPF maps (sandbox)
 
@@ -589,40 +604,38 @@ The `DeleteSession(ctx, tsid, reason, deletedBy)` store method is the single aut
 
 ### Audit trail
 
-The deletion itself is recorded in the config/audit log with: `actor`, `action = "delete_session"`, `tsid`, `reason`, `deleted_by`, `timestamp`. This audit entry is stored separately from the session and is not deleted.
+Deletion is recorded by `LocalStore.DeleteSession` as a JSON line appended to
+`.deletion-log.jsonl` in the configured `--logdir` (e.g.
+`/var/log/sudoreplay/.deletion-log.jsonl`): `{"time", "event":"session_deleted",
+"tsid", "reason", "deleted_by"}`. This file is separate from the session
+directory (which is fully removed) and is not exposed through any API — it is
+a plain append-only log on disk, intended for manual/offline review.
 
 ---
 
-## Config change audit log
+## Session view / access log
 
-### What is logged
-
-Every write operation on a configuration endpoint is recorded:
-
-| Action | Trigger |
-|--------|---------|
-| `update_rules` | `PUT /api/rules` |
-| `update_siem_config` | `PUT /api/siem-config` |
-| `update_sandbox` | `PUT /api/sandbox` |
-| `update_approval_config` | `PUT /api/approval-config` |
-| `update_jit_policy` | `PUT /api/jit-policy` |
-| `update_auth_config` | `PUT /api/auth-config` |
-| `upsert_user` | `PUT /api/users` |
-| `delete_user` | `DELETE /api/users/{id}` |
-| `upsert_role` | `POST/PUT /api/roles` |
-| `delete_role` | `DELETE /api/roles/{id}` |
-| `delete_session` | `DELETE /api/sessions/{tsid}` |
-| `update_blocked_users` | `PUT /api/blocked-users` |
-| `update_whitelisted_users` | `PUT /api/whitelisted-users` |
+There is no separate "config change" audit log with per-endpoint action names
+(e.g. no `update_rules`/`upsert_role`-style entries are recorded anywhere in
+the store). The only queryable audit trail is the **session view log**:
+every time a session is opened for replay, `RecordView(ctx, tsid, viewer,
+replayURL)` appends an entry.
 
 ### Format and access
 
-Audit entries are stored alongside sessions in the store (`RecordView` for session views; config changes via the store's config audit methods). Access via:
+Each entry (`AccessLogEntry`) has exactly four fields: `time`, `viewer`,
+`tsid`, `replay_url` (omitted when empty).
 
-- **UI:** Settings → Audit Log tab (if available, check current UI)
-- **API:** `GET /api/access-log` (requires `audit_log:read`)
+- **API:** `GET /api/access-log` (requires `audit_log:read`). Optional query
+  params: `viewer=<name>` to filter, `limit=N` (default 200, max 1000).
+- **UI:** exposed wherever the current navigation surfaces the access log
+  (check the running UI — this is not guaranteed to be a fixed "Audit Log" tab
+  name).
 
-Each entry: `{ time, viewer/actor, action, tsid/resource, detail }`.
+Configuration writes (rules, SIEM, sandbox, approval policy, auth config,
+users, roles, blocked/whitelisted users) are **not** separately logged with an
+action/resource/detail record. Session deletion has its own on-disk log (see
+GDPR section above), independent of this API.
 
 ---
 

@@ -6,7 +6,11 @@
 sudo-logger/
 ├── plugin/
 │   ├── plugin.c              # sudo I/O plugin (C) — all hook implementations
-│   └── Makefile              # builds plugin.so (clang, links sudo_plugin.h)
+│   ├── Makefile              # builds sudo_logger_plugin.so (gcc, -Iinclude)
+│   ├── include/
+│   │   └── sudo_plugin.h     # vendored — no sudo-devel package needed to build
+│   ├── test_plugin.c         # unit test harness (make -C plugin test)
+│   └── sudo.conf.example     # example /etc/sudo.conf Plugin line
 ├── go/
 │   ├── go.mod                # module: sudo-logger, requires Go 1.25+
 │   ├── go.sum
@@ -14,25 +18,46 @@ sudo-logger/
 │   ├── vendor/               # vendored Go dependencies (no network access needed)
 │   ├── cmd/
 │   │   ├── agent/
-│   │   │   ├── main.go           # Agent entry point: flags, config, startup
+│   │   │   ├── main.go           # Agent entry point: flags (-config, -version), startup
 │   │   │   ├── plugin.go         # Unix socket server: one goroutine per plugin connection
 │   │   │   ├── ebpf.go           # eBPF ring buffer consumer + pkexec / TTY tracking
+│   │   │   ├── ebpf_session.go   # eBPF-only session lifecycle: connect/chunk/heartbeat/ACK drain
 │   │   │   ├── divergence.go     # eBPF vs. plugin divergence detection (30 s timer)
 │   │   │   ├── cgroup.go         # Per-session cgroup v2 management + freeze/unfreeze
 │   │   │   ├── config.go         # Agent config file parser (YAML)
+│   │   │   ├── generate.go       # go:generate directive driving bpf2go (see Build system below)
+│   │   │   ├── groups.go         # resolveUserGroups: NSS group lookup for SESSION_START
+│   │   │   ├── redaction.go      # MaskPatterns poller: agent-side output redaction
 │   │   │   ├── sandbox.go        # eBPF LSM sandbox: load, attach, cgroup/PID registration
 │   │   │   ├── sandbox_config.go # sandbox.yaml parser + mountinfo-based inode resolver
+│   │   │   ├── sandbox_poll.go   # Fetches sandbox.yaml from the server (MsgFetchConfig/MsgConfigData)
 │   │   │   ├── sandbox_watch.go  # inotify watcher: refreshes protected inodes on rename
+│   │   │   ├── sudoers.go        # Collects/sends sudoers snapshots; heartbeat + sudoers watchers
+│   │   │   ├── tls.go            # buildTLSConfig, ACK ed25519 signature verification
+│   │   │   ├── test_dpath_load.go # //go:build ignore — dev tool for exercising test_dpath.bpf.c
 │   │   │   └── bpf/
 │   │   │       ├── vmlinux.h         # generated from /sys/kernel/btf/vmlinux (not committed)
 │   │   │       ├── recorder.c        # eBPF tracepoints: sl_io_event, exec_event, exit_event
-│   │   │       └── sandbox.bpf.c     # eBPF LSM: 11 hooks + sched_process_fork/exit
+│   │   │       ├── sandbox.bpf.c     # eBPF LSM: 18 LSM hooks + 2 tracepoints (20 total)
+│   │   │       └── test_dpath.bpf.c  # Minimal LSM program used by test_dpath_load.go
 │   │   ├── server/
 │   │   │   ├── main.go           # Remote TLS log server: frame handling, ACK signing
-│   │   │   └── approval.go       # JIT approval manager: policy, pending requests, REST API
+│   │   │   ├── config.go         # Flags: -listen, -cert/-key/-ca, -signkey, -strict-cert-host, storage/S3/DB
+│   │   │   ├── handler.go        # Per-connection frame dispatch (SESSION_START/CHUNK/SESSION_END, etc.)
+│   │   │   ├── heartbeat.go      # HEARTBEAT/HEARTBEAT_ACK keepalive handling
+│   │   │   └── approval.go       # JIT approval manager: policy, pending requests, REST API, webhooks
 │   │   ├── replay-server/
-│   │   │   ├── main.go           # Web replay server: HTTP routes, embedded SPA, auth
+│   │   │   ├── main.go           # Entry point: flags, startup, background pollers, embedded SPA
+│   │   │   ├── config.go         # Flag declarations (-listen, -logdir, -rules, -admin-users, OIDC, S3/DB, ...)
+│   │   │   ├── routes.go         # registerRoutes: all HTTP route registrations
+│   │   │   ├── middleware.go     # basicAuthMiddleware, accessLogMiddleware, securityHeadersMiddleware
+│   │   │   ├── handlers_auth.go  # Local login, bcrypt password check
+│   │   │   ├── handlers_session.go # Session listing/events/cast serving, /metrics
+│   │   │   ├── handlers_admin.go # Rules/SIEM/sandbox/retention/users config endpoints, access log
+│   │   │   ├── approval_proxy.go # Proxies JIT approval API to the log server's --logserver-admin port
+│   │   │   ├── oidc.go           # OIDC login/callback flow
 │   │   │   ├── rbac.go           # Role type, Permission constants, context helpers
+│   │   │   ├── websocket.go      # Stub — unimplemented (3 lines)
 │   │   │   ├── risk-rules.yaml   # Default risk scoring rules (shipped in RPM)
 │   │   │   ├── static/           # Built React SPA (git-ignored; generated by npm run build)
 │   │   │   └── ui/               # React + TypeScript frontend source
@@ -52,21 +77,31 @@ sudo-logger/
 │   │       └── main.go           # One-time migrator: local filesystem → distributed store
 │   └── internal/
 │       ├── protocol/
-│       │   └── protocol.go       # Shared wire protocol: frame format, message type constants
+│       │   └── protocol.go       # Shared wire protocol: frame format, message type constants (0x01-0x1b)
 │       ├── store/
-│       │   ├── store.go          # SessionStore / SessionWriter interfaces + New()
-│       │   ├── local.go          # Local filesystem backend (default)
-│       │   ├── local_test.go     # Tests for LocalStore
+│       │   ├── store.go          # SessionStore / SessionWriter interfaces, Permission constants, New()
+│       │   ├── local.go          # Local filesystem backend (default): core type + startup/reload
+│       │   ├── local_sessions.go # LocalStore: session CRUD, listing, cast/event reads
+│       │   ├── local_risk.go     # LocalStore: risk.json cache read/write
+│       │   ├── local_approval.go # LocalStore: JIT approval request persistence
+│       │   ├── local_cleanup.go  # LocalStore: retention/auto-cleanup background job
+│       │   ├── local_heartbeat.go # LocalStore: host heartbeat tracking
+│       │   ├── local_sudoers.go  # LocalStore: sudoers snapshot persistence
 │       │   └── distributed.go    # S3 + PostgreSQL backend
 │       ├── iolog/
-│       │   └── iolog.go          # asciicast v2 writer: binary-safe JSON encoding
+│       │   ├── iolog.go          # asciicast v2 writer: binary-safe JSON encoding
+│       │   └── redactor.go       # Server-side redaction pattern matching for cast playback
 │       ├── config/
 │       │   └── secret.go         # ResolveSecret: flag → env var → file priority chain
 │       ├── policy/
-│       │   └── policy.go         # OPA-based policy evaluation (session allow/deny)
-│       └── siem/
-│           ├── config.go         # SIEM YAML config loader (30 s polling)
-│           └── event.go          # SIEM event struct + JSON/CEF/OCA formatters
+│       │   ├── engine.go         # OPA-based policy evaluation (session allow/deny)
+│       │   └── rules.go          # Policy rule types and matching helpers
+│       ├── siem/
+│       │   ├── config.go         # SIEM YAML config loader (30 s polling)
+│       │   ├── event.go          # SIEM event struct + JSON/CEF/OCSF formatters
+│       │   └── sender.go         # Transport dispatch: https/syslog/stdout
+│       └── version/
+│           └── version.go        # Build version string shared by all binaries
 ├── rpm/
 │   ├── sudo-logger-client.spec   # RPM spec for the plugin + agent
 │   ├── sudo-logger-server.spec   # RPM spec for the log server
@@ -82,9 +117,11 @@ sudo-logger/
 │   └── manual.html               # Built HTML manual (embedded in replay server)
 ├── man/
 │   ├── sudo-logger-agent.8
-│   ├── sudo-logger-server.8
-│   └── sudo-logger-replay.8
-├── Makefile                      # Top-level: delegates to go/Makefile + plugin/Makefile
+│   ├── sudo_logger_plugin.8
+│   ├── sudo-logserver.8
+│   ├── sudo-replay-server.8
+│   └── sandbox.yaml.5
+├── Makefile                      # Top-level: agent/vmlinux-agent/generate-agent/docs-manual/docs-site/test targets
 ├── Dockerfile                    # Multi-stage: ui-builder (Node) + builder (Go) + runtime
 └── .pre-commit-config.yaml       # Pre-commit hooks: detect-secrets, golangci-lint, trivy, etc.
 ```
@@ -99,11 +136,12 @@ sudo-logger/
 sudo dnf install clang llvm libbpf-devel bpftool golang
 ```
 
-For the C plugin:
-
-```bash
-sudo dnf install sudo-devel    # provides sudo_plugin.h
-```
+The C plugin's `sudo_plugin.h` header is vendored in `plugin/include/` (verify
+with `ls plugin/include/`), so no `sudo-devel` package is required to build
+the plugin from source — `plugin/Makefile` compiles with `-Iinclude`, pointing
+at the vendored copy, not a system header. (The `sudo-logger-client` RPM spec
+still lists `BuildRequires: sudo-devel`, but the actual `%build` step does not
+reference anything from that package — it only uses the vendored header.)
 
 For documentation:
 
@@ -146,25 +184,41 @@ The resulting binary is written to `bin/sudo-logger-agent`.
 
 ### Building the log server and replay server
 
-From `go/Makefile`:
+`go/Makefile` is a separate, smaller Makefile from the top-level one used for
+the agent (that one lives at the repo root and has the `agent`/`vmlinux-agent`
+targets described above). Run these from the `go/` directory:
 
 ```bash
-make server         # go build -o ../bin/sudo-logserver ./cmd/server/
-make replay         # go build -o ../bin/sudo-replay-server ./cmd/replay-server/
+make server         # go build -o cmd/server/server ./cmd/server/
+make replay-server   # runs ui-build (npm ci && npm run build) first, then
+                     # go build -o cmd/replay-server/replay-server ./cmd/replay-server/
+make all             # builds both replay-server and server
 ```
 
-The replay server binary embeds `cmd/replay-server/static/` using
-`//go:embed`. Build the frontend first (see below) so that directory exists.
+There is no `make replay` target — it is named `replay-server`. Binaries land
+inside their own `cmd/` subdirectory (`go/cmd/server/server`,
+`go/cmd/replay-server/replay-server`), not in a shared `bin/` directory like
+the agent. The RPM specs do not use `go/Makefile` at all — they invoke
+`go build -mod=vendor -o sudo-logserver ./cmd/server` and
+`go build -mod=vendor -o sudo-replay-server ./cmd/replay-server` directly,
+which is where the `sudo-logserver`/`sudo-replay-server` binary names actually
+come from.
+
+Because `replay-server` depends on `ui-build`, `make replay-server` (or
+`make all`) builds the frontend automatically — you do not need to build it
+separately first. The replay server binary embeds `cmd/replay-server/static/`
+using `//go:embed`.
 
 ### Building the plugin (C)
 
 ```bash
-make -C plugin      # clang → plugin.so
-# installs to /usr/libexec/sudo/ with make install -C plugin
+make -C plugin        # gcc → sudo_logger_plugin.so
+make install -C plugin # installs to /usr/libexec/sudo/
 ```
 
-The plugin Makefile uses `clang` and links against the system `sudo_plugin.h`
-header. The output is `plugin/sudo-logger.so`.
+The plugin Makefile uses `gcc` (not clang) and links against the vendored
+`plugin/include/sudo_plugin.h` header via `-Iinclude`. The output is
+`plugin/sudo_logger_plugin.so`.
 
 ### Building the frontend (React SPA)
 
@@ -234,9 +288,9 @@ build workflow.
 
 | RPM | Binary | Config files | Systemd units | Other |
 |---|---|---|---|---|
-| `sudo-logger-client` | `sudo-logger-agent` → `/usr/sbin/` | `/etc/sudo-logger/` (cert dir) | `sudo-logger-agent.service` | `sudo-logger.so` → `/usr/libexec/sudo/`; man page; sudoers snippet |
-| `sudo-logger-server` | `sudo-logserver` → `/usr/sbin/` | `/etc/sudo-logger/` (cert dir, policy YAML) | `sudo-logger-server.service` | man page; `sudologger` user/group |
-| `sudo-logger-replay` | `sudo-replay-server` → `/usr/sbin/` | `/etc/sudo-logger/` (auth YAML, risk-rules) | `sudo-logger-replay.service` | Embedded React SPA (baked in binary); man page |
+| `sudo-logger-client` | `sudo-logger-agent` → `/usr/bin/` | `/etc/sudo-logger/` (agent.conf, sandbox.yaml) | `sudo-logger-agent.service` | `sudo_logger_plugin.so` → `/usr/libexec/sudo/`; SELinux policy; 3 man pages; immutable audit rule; `refuse-stop.conf` drop-ins for sshd/sssd/rsyslog/polkit/chronyd/NetworkManager/firewalld/crond/gssproxy (no sudoers.d env_keep drop-in — see Chapter 11) |
+| `sudo-logger-server` | `sudo-logserver` → `/usr/bin/` | `/etc/sudo-logger/` (cert dir, policy YAML) | `sudo-logserver.service`, `sudo-logserver-restart.timer` | man page; `sudologger` user/group |
+| `sudo-logger-replay` | `sudo-replay-server` → `/usr/bin/` | `/etc/sudo-logger/` (auth YAML, risk-rules) | `sudo-replay.service` | Embedded React SPA (baked in binary); man page |
 
 All three packages create the `sudologger` system user and group, install a
 systemd preset that enables the service on install, and drop a
@@ -284,9 +338,9 @@ case protocol.MsgMyNewMessage:
 If the message flows through the agent without processing, add it to the
 proxy forwarding logic.
 
-**Step 4: Add a handler in `go/cmd/server/main.go` (if the server receives it)**
+**Step 4: Add a handler in `go/cmd/server/handler.go` (if the server receives it)**
 
-Add a case in the per-session goroutine's frame dispatch loop.
+Add a case in `(srv *server) handleConn`'s per-connection frame dispatch loop.
 
 **Step 5: Update this documentation**
 
@@ -295,28 +349,39 @@ protocol section) and update the relevant sequence diagrams.
 
 ### Protocol constants (go/internal/protocol/protocol.go)
 
+Message types now run through `0x1b`. This table was significantly out of
+date (stopped at `0x14` and had one value wrong); verify against the source
+directly if in doubt.
+
 ```go
 const (
-    MsgSessionStart     = uint8(0x01) // plugin→agent→server: JSON SessionStart
-    MsgChunk            = uint8(0x02) // plugin→agent→server: binary chunk
-    MsgSessionEnd       = uint8(0x03) // plugin→agent→server: binary final_seq+exit_code
-    MsgAck              = uint8(0x04) // server→agent: binary seq+ts_ns+sig(64)
-    MsgAckQuery         = uint8(0x05) // plugin→agent: empty
-    MsgAckResponse      = uint8(0x06) // agent→plugin: binary last_ack_ts_ns+last_seq
-    MsgSessionReady     = uint8(0x07) // agent→plugin: empty — server OK, sudo may proceed
-    MsgSessionError     = uint8(0x08) // agent→plugin: string error — sudo blocked
-    MsgHeartbeat        = uint8(0x09) // agent→server: empty keepalive (every 400 ms)
-    MsgHeartbeatAck     = uint8(0x0a) // server→agent: empty reply to heartbeat
-    MsgServerReady      = uint8(0x0b) // server→agent: empty — session accepted
-    MsgSessionDenied    = uint8(0x0c) // server→agent→plugin: string block message
-    MsgFreezeTimeout    = uint8(0x0d) // server→agent: empty — apply cgroup freeze
-    MsgSessionExpired   = uint8(0x0e) // server→agent: empty — approval window expired
-    MsgSessionFreezing  = uint8(0x0f) // agent→server: UTF-8 session ID — freeze confirmed
-    MsgDivergenceAlert  = uint8(0x10) // agent→server: JSON divergence metadata
-    MsgSandboxAlert     = uint8(0x11) // agent→server: JSON sandbox violation
-    MsgFetchConfig      = uint8(0x12) // agent→server: UTF-8 config key
-    MsgConfigData       = uint8(0x13) // server→agent: UTF-8 YAML (empty = not found)
-    MsgSessionChallenge = uint8(0x14) // server→agent→plugin: UTF-8 justification prompt
+    MsgSessionStart             = uint8(0x01) // plugin→agent→server: JSON SessionStart
+    MsgChunk                    = uint8(0x02) // plugin→agent→server: binary chunk
+    MsgSessionEnd               = uint8(0x03) // plugin→agent→server: binary final_seq+exit_code
+    MsgAck                      = uint8(0x04) // server→agent: binary seq+ts_ns+sig(64)
+    MsgAckQuery                 = uint8(0x05) // plugin→agent: empty
+    MsgAckResponse              = uint8(0x06) // agent→plugin: binary last_ack_ts_ns+last_seq
+    MsgSessionReady             = uint8(0x07) // agent→plugin: empty — server OK, sudo may proceed
+    MsgSessionError             = uint8(0x08) // agent→plugin: string error — sudo blocked
+    MsgHeartbeat                = uint8(0x09) // agent→server: empty keepalive (every 400 ms)
+    MsgHeartbeatAck             = uint8(0x0a) // server→agent: empty reply to heartbeat
+    MsgServerReady              = uint8(0x0b) // server→agent: session accepted, agent may send SESSION_READY
+    MsgSessionDenied            = uint8(0x0c) // server→agent AND agent→plugin: policy denial, string block message
+    MsgFreezeTimeout            = uint8(0x0d) // agent→plugin: server unreachable too long, session will be terminated
+    MsgSessionAbandon           = uint8(0x0e) // agent→server (new conn): freeze-timeout fired; payload = session_id UTF-8
+    MsgSessionFreezing          = uint8(0x0f) // agent→server (new conn): session frozen due to network loss; payload = session_id UTF-8
+    MsgDivergenceAlert          = uint8(0x10) // agent→server: JSON divergence metadata (DivergenceAlert)
+    MsgSandboxAlert             = uint8(0x11) // agent→server: JSON sandbox violation (SandboxAlert)
+    MsgFetchConfig              = uint8(0x12) // agent→server: UTF-8 config key (e.g. "sandbox.yaml")
+    MsgConfigData               = uint8(0x13) // server→agent: UTF-8 YAML content (empty = not found)
+    MsgSessionChallenge         = uint8(0x14) // server→agent→plugin: JSON SessionChallenge — justification required
+    MsgSessionChallengeResponse = uint8(0x15) // plugin→agent→server: JSON SessionChallengeResponse — user's justification
+    MsgSessionExpired           = uint8(0x16) // agent→plugin: approval window expired, session is being terminated
+    MsgSessionWarning           = uint8(0x17) // agent→plugin: session will be terminated soon; payload = UTF-8 seconds left
+    MsgSudoersSnapshot          = uint8(0x18) // agent→server: JSON SudoersSnapshot
+    MsgSudoersError             = uint8(0x19) // agent→server: JSON SudoersError — failed to apply received config
+    MsgHeartbeatAgent           = uint8(0x1a) // agent→server: periodic liveness signal; payload = UTF-8 host
+    MsgResize                   = uint8(0x1b) // plugin→agent→server: binary ts_ns(8BE)+cols(2BE)+rows(2BE)
 )
 ```
 
@@ -382,10 +447,10 @@ Each file in `api/` wraps a group of backend endpoints. All functions use
 | File | Endpoints wrapped |
 |---|---|
 | `client.ts` | Base `apiFetch` wrapper; `ApiError` class |
-| `sessions.ts` | `GET /api/sessions`, `GET /api/session/events`, `DELETE /api/session/:tsid`, `GET /api/session/cast` |
+| `sessions.ts` | `GET /api/sessions`, `GET /api/session/events`, `DELETE /api/sessions/{tsid}` (note: plural, proxied to the log server's admin API when `--logserver-admin` is configured), `GET /api/session/cast` |
 | `reports.ts` | `GET /api/report`, `GET /api/access-log` |
 | `policy.ts` | `GET/PUT /api/risk-rules`, `GET/PUT /api/blocked-users`, `GET/PUT /api/whitelisted-users`, `GET /api/sudoers` |
-| `config.ts` | `GET/PUT /api/siem-config`, `GET/PUT /api/auth-config`, `GET/POST/DELETE /api/users`, `GET/POST/DELETE /api/roles`, `GET/PUT /api/retention`, `GET/PUT /api/sandbox-config`, `GET/PUT /api/jit-config` |
+| `config.ts` | `GET/PUT /api/siem-config`, `GET/PUT /api/auth-config`, `PUT /api/auth-mapping` (legacy `admin_groups` only), `GET/POST/DELETE /api/users`, `GET/POST/PUT/DELETE /api/roles`, `GET/PUT /api/retention`, `GET/PUT /api/sandbox`, `GET/PUT /api/jit-policy` |
 | `approvals.ts` | `GET /api/approvals`, `POST /api/approvals/:id/approve`, `POST /api/approvals/:id/deny` |
 
 ### Adding a new UI page
@@ -441,11 +506,20 @@ The replay server must be running separately:
 cd go && go test ./...
 ```
 
-Test packages and what they cover:
+Test coverage spans most of the tree (~29 `_test.go` files at last count) —
+this list was previously limited to a single file and badly understated it:
 
-| Package | Test file | Coverage |
+| Package | Test files | Coverage area |
 |---|---|---|
-| `go/internal/store` | `local_test.go` | LocalStore: session CRUD, `ReadEvents`, asciicast parsing, path traversal rejection, concurrent writes |
+| `go/cmd/agent` | `config_test.go`, `plugin_auth_test.go`, `plugin_test.go`, `sandbox_config_test.go`, `sandbox_test.go`, `tls_config_test.go` | Config parsing, plugin socket auth/protocol, sandbox config + LSM behavior, TLS setup |
+| `go/cmd/server` | `approval_test.go`, `approval_api_test.go`, `callback_test.go`, `main_test.go` | JIT approval manager, approval REST API, webhook callback handling, connection handling |
+| `go/cmd/replay-server` | `handlers_admin_test.go`, `handlers_auth_test.go`, `handlers_report_test.go`, `handlers_siem_cert_test.go`, `handlers_sudoers_test.go`, `handlers_test.go`, `middleware_test.go` | Admin/config endpoints, auth flows, reporting, SIEM cert upload, sudoers endpoints, RBAC middleware/group mapping |
+| `go/internal/store` | `local_test.go`, `local_approval_test.go`, `local_internal_test.go`, `local_rbac_test.go`, `local_session_audit_test.go`, `cleanup_test.go`, `distributed_test.go`, `distributed_infra_test.go` | LocalStore session CRUD, asciicast parsing, path traversal rejection, concurrent writes, RBAC/roles, retention cleanup, distributed (S3+Postgres) backend |
+| `go/internal/protocol` | `protocol_test.go` | Wire frame encode/decode, size-limit guards |
+| `go/internal/siem` | `siem_test.go`, `dispatch_test.go` | JSON/CEF/OCSF formatting, transport dispatch |
+| `go/internal/iolog` | `iolog_test.go`, `redactor_test.go` | asciicast writer, server-side redaction matching |
+| `go/internal/policy` | `engine_test.go` | OPA-based allow/deny evaluation |
+| `go/internal/config` | `config_test.go` | `ResolveSecret` priority chain |
 
 To run a single package:
 
@@ -485,11 +559,15 @@ Hooks configured in `.pre-commit-config.yaml`:
 |---|---|---|
 | `detect-secrets` | Yelp/detect-secrets v1.5.0 | Credentials and secrets in source files; uses `.secrets.baseline` |
 | `go-vet` | `go vet` | Go static analysis: suspicious constructs |
-| `golangci-lint` | golangci-lint | Go style, correctness, and performance lints |
+| `golangci-lint` | golangci-lint (`--enable-only=govet,ineffassign,staticcheck`) | Go style, correctness, and performance lints |
 | `go-test` | `go test -count=1 ./...` | All Go unit tests pass |
 | `cppcheck` | cppcheck | C plugin: warnings (excluding missing system headers) |
 | `flawfinder` | flawfinder | C plugin: security flaws at level 3 or higher |
-| `trivy` | Trivy | Dependency and IaC vulnerability scanning |
+| `trivy` | Trivy filesystem scan | Dependency and IaC vulnerability scanning (`go.mod`/`go.sum`/`Dockerfile`/`*.yaml`/`*.yml`) |
+
+Plus the standard `pre-commit-hooks` set (`trailing-whitespace`, `end-of-file-fixer`,
+`check-yaml`, `check-json`, `check-toml`, `check-merge-conflict`,
+`check-added-large-files` at 1024 KB, `mixed-line-ending` fixed to LF).
 
 The `go/vendor/` directory is excluded from all hooks (`exclude: ^go/vendor/`).
 

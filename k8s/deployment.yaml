@@ -30,7 +30,8 @@ spec:
 
       containers:
         - name: sudo-logserver
-          image: ghcr.io/alun-hub/sudo-logserver:1.0
+          image: localhost/sudo-logger:latest
+          imagePullPolicy: Never
           args:
             - -listen=:9876
             - -logdir=/var/log/sudoreplay

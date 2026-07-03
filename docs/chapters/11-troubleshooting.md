@@ -13,9 +13,10 @@ journalctl -u sudo-logger-agent -n 100 --no-pager
 systemctl status sudo-logserver
 journalctl -u sudo-logserver -n 100 --no-pager
 
-# Replay server status
-systemctl status sudo-replay-server
-journalctl -u sudo-replay-server -n 100 --no-pager
+# Replay server status (systemd unit is "sudo-replay"; the binary itself is
+# named sudo-replay-server — see below)
+systemctl status sudo-replay
+journalctl -u sudo-replay -n 100 --no-pager
 
 # Session files on disk
 ls -lh /var/log/sudoreplay/
@@ -111,7 +112,7 @@ Enable debug logging in the agent for verbose output (see [Getting debug output]
 
    ```bash
    # Check the replay server command line
-   systemctl cat sudo-replay-server | grep logdir
+   systemctl cat sudo-replay | grep logdir
    ```
 
    The replay server's `--logdir` must match the log server's `--logdir` (default: `/var/log/sudoreplay`).
@@ -119,7 +120,7 @@ Enable debug logging in the agent for verbose output (see [Getting debug output]
 5. Check replay server logs for indexing or read errors:
 
    ```bash
-   journalctl -u sudo-replay-server -n 100
+   journalctl -u sudo-replay -n 100
    ```
 
 ---
@@ -176,7 +177,7 @@ Also verify that the plugin `.so` and the agent binary were compiled from the sa
 
 | Cause | Check | Fix |
 |---|---|---|
-| Kernel < 5.8 | `uname -r` | Upgrade kernel; 5.8+ required for BPF LSM |
+| Kernel < 5.7 | `uname -r` | Upgrade kernel; 5.7+ required for BPF LSM (`CONFIG_BPF_LSM=y`, `lsm=bpf` boot parameter) |
 | No BTF support | `ls /sys/kernel/btf/vmlinux` | Install a kernel built with `CONFIG_DEBUG_INFO_BTF=y` |
 | Missing capabilities | `systemctl cat sudo-logger-agent` | Agent must run as root with `CAP_BPF`, `CAP_SYS_ADMIN` |
 | SELinux blocking BPF | `ausearch -m avc -ts recent` | Reinstall SELinux policy module |
@@ -255,10 +256,10 @@ semanage permissive -a sudo_agent_t
 2. Check replay server logs for rule parsing errors:
 
    ```bash
-   journalctl -u sudo-replay-server | grep -i 'risk\|rules\|yaml'
+   journalctl -u sudo-replay | grep -i 'risk\|rules\|yaml'
    ```
 
-3. The rules file is hot-reloaded on change. Trigger a reload by saving a trivial edit (e.g., add a blank comment line) or sending `SIGHUP` to the replay server process.
+3. Rules take effect immediately when saved through the Settings tab (or `PUT /api/rules`) — there is no signal-based reload; the replay server only handles `SIGTERM`/`SIGINT` for shutdown. Editing the on-disk YAML file directly does not get picked up without going through the API/UI.
 
 ---
 
@@ -286,10 +287,10 @@ semanage permissive -a sudo_agent_t
 4. Check replay server logs for SIEM-related errors:
 
    ```bash
-   journalctl -u sudo-replay-server | grep -i 'siem\|forward\|hec\|http'
+   journalctl -u sudo-replay | grep -i 'siem\|forward\|hec\|http'
    ```
 
-5. The `siem.yaml` file is polled for changes every 30 seconds. After editing it, either wait or send `SIGHUP` to the replay server.
+5. The `siem.yaml` file is polled for changes every 30 seconds — after editing it directly, wait for the next poll (there is no signal-based reload; the replay server only handles `SIGTERM`/`SIGINT`). Changes saved through the Settings tab take effect immediately.
 
 ---
 
@@ -323,7 +324,7 @@ semanage permissive -a sudo_agent_t
 
 ## RBAC: 403 on API endpoints
 
-**Symptoms:** A user receives an HTTP 403 response when accessing the replay UI or API endpoints that require admin or reviewer permissions.
+**Symptoms:** A user receives an HTTP 403 response when accessing the replay UI or API endpoints that require a permission their role does not hold (e.g. `sessions:list_all`, `approvals:decide`, `config:write`).
 
 **Diagnosis:**
 
@@ -339,7 +340,7 @@ semanage permissive -a sudo_agent_t
 2. Verify the user is listed in `--admin-users` (for the admin role):
 
    ```bash
-   systemctl cat sudo-replay-server | grep admin-users
+   systemctl cat sudo-replay | grep admin-users
    ```
 
    `--admin-users` accepts a comma-separated list of usernames. Users not listed here do not receive the admin role.
@@ -364,11 +365,11 @@ The `scripts/verify-integrity.sh` script performs a syntax check on source files
 
 > **Note:** This script validates source file syntax, not session recording integrity. It is a development tool, not a runtime integrity check for session log files.
 
-To verify session log files on disk, check that the files are present and non-zero:
+To verify session log files on disk, check that the files are present and non-zero. Sessions are stored as asciinema v2 `session.cast` files (see Chapter 7), not sudo's native `.iolog` format, so check for empty `session.cast` files:
 
 ```bash
 ls -lh /var/log/sudoreplay/
-find /var/log/sudoreplay/ -name '*.iolog' -empty
+find /var/log/sudoreplay/ -name 'session.cast' -empty
 ```
 
 ---

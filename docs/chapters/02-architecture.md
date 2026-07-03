@@ -67,7 +67,7 @@ sudo reads `/etc/sudo.conf` at startup. A `Plugin` line names the shared
 library and the exported symbol:
 
 ```
-Plugin sudo_logger_plugin /usr/libexec/sudo/sudo-logger.so
+Plugin sudo_logger_plugin /usr/libexec/sudo/sudo_logger_plugin.so
 ```
 
 sudo calls `dlopen()` on the `.so` file, resolves the `sudo_logger_plugin`
@@ -219,8 +219,14 @@ The mutex was introduced in commit `cba194f`.
 | `sandbox.go` | Loads and attaches the eBPF LSM program; registers/deregisters cgroups and PIDs in BPF maps |
 | `sandbox_config.go` | Parses `sandbox.yaml`; resolves path → device+inode pair using `/proc/self/mountinfo` |
 | `sandbox_watch.go` | inotify watcher on protected files; refreshes inode map when a file is atomically replaced |
+| `sandbox_poll.go` | Fetches `sandbox.yaml` from the server via `MsgFetchConfig`/`MsgConfigData` |
+| `redaction.go` | Applies output-redaction regex patterns to session streams before forwarding |
+| `sudoers.go` | Polls/pushes sudoers snapshots (`MsgSudoersSnapshot`/`MsgSudoersError`/`MsgHeartbeatAgent`); validates with `visudo -c` |
+| `tls.go` | mTLS client configuration helpers |
+| `groups.go` | Local group membership resolution |
+| `ebpf_session.go` | Session writer for eBPF-sourced sessions (`ebpf-tty`, `ebpf-pkexec`) |
 | `bpf/recorder.c` | eBPF C source: three tracepoint hooks, three maps |
-| `bpf/sandbox.bpf.c` | eBPF LSM C source: 11 LSM hooks + `sched_process_fork` + `sched_process_exit` |
+| `bpf/sandbox.bpf.c` | eBPF LSM C source: 18 LSM hooks + 2 tracepoints (`sched_process_fork`, `sched_process_exit`) — 20 hooks total |
 
 ### Unix socket server (plugin.go)
 
@@ -422,17 +428,22 @@ An optional eBPF LSM subsystem (`bpf/sandbox.bpf.c`) enforces kernel-level
 restrictions on all processes running inside session cgroups. The LSM program
 is loaded and attached by `sandbox.go` at agent startup.
 
-The LSM source implements 11 hooks:
+The LSM source implements 18 LSM hooks plus 2 tracepoints (20 total):
 
-- File access: `file_open`, `path_truncate`
-- Inode operations: `inode_create`, `path_mkdir`, `inode_rename`,
-  `inode_unlink`, `inode_setattr`
-- Process control: `task_kill`, `ptrace_access_check`
-- Networking: `socket_create`
+- File access: `file_open`, `path_truncate`, `file_permission`
+- Inode operations: `inode_create`, `inode_mkdir`, `inode_mknod`,
+  `inode_symlink`, `inode_rename`, `inode_unlink`, `inode_setattr`
+- Process control: `task_kill`, `ptrace_access_check`, `bprm_check_security`
+- Capabilities: `capable`
+- Networking: `socket_create`, `unix_stream_connect`
 - Filesystem: `sb_mount`
+- BPF: `bpf` (restricts BPF program loading from inside sandboxed sessions)
 
 Plus two tracepoints: `sched_process_fork` (to propagate sandbox membership
 to child processes) and `sched_process_exit` (cleanup).
+
+Verify the hook count directly against the source with:
+`grep -c 'SEC("lsm/\|SEC("tp_btf/' go/cmd/agent/bpf/sandbox.bpf.c`.
 
 `sandbox_config.go` parses `sandbox.yaml` — a policy file listing protected
 paths and allowed/blocked operation rules. Path resolution uses
@@ -660,20 +671,35 @@ All integer fields in payloads are big-endian unless noted.
 | `MsgAck` | `0x04` | server→agent | Binary: seq(8)+ts_ns(8)+sig(64) |
 | `MsgAckQuery` | `0x05` | plugin→agent | Empty |
 | `MsgAckResponse` | `0x06` | agent→plugin | Binary: last_ack_ts_ns(8)+last_seq(8) |
-| `MsgSessionReady` | `0x07` | agent→plugin | Empty |
-| `MsgSessionError` | `0x08` | agent→plugin | UTF-8 error string |
-| `MsgHeartbeat` | `0x09` | agent→server | Empty |
-| `MsgHeartbeatAck` | `0x0a` | server→agent | Empty |
-| `MsgServerReady` | `0x0b` | server→agent | Empty |
-| `MsgSessionDenied` | `0x0c` | server→agent→plugin | UTF-8 block/reason message |
-| `MsgFreezeTimeout` | `0x0d` | server→agent | Empty — server signals agent to apply cgroup freeze |
-| `MsgSessionExpired` | `0x0e` | server→agent | Empty — JIT approval window expired mid-session |
-| `MsgSessionFreezing` | `0x0f` | agent→server | UTF-8 session ID — confirms cgroup freeze was applied |
+| `MsgSessionReady` | `0x07` | agent→plugin | Empty, or JSON `SessionReadyBody` (disclaimer, session_ttl, freeze_timeout_secs) when any of those are non-default — server connection OK |
+| `MsgSessionError` | `0x08` | agent→plugin | UTF-8 error string — server connection failed |
+| `MsgHeartbeat` | `0x09` | agent→server | Empty — keepalive probe |
+| `MsgHeartbeatAck` | `0x0a` | server→agent | Empty — keepalive reply |
+| `MsgServerReady` | `0x0b` | server→agent | JSON `ServerReadyBody` (session_ttl) — session accepted, proceed |
+| `MsgSessionDenied` | `0x0c` | server→agent AND agent→plugin | UTF-8 block/reason message |
+| `MsgFreezeTimeout` | `0x0d` | agent→plugin | Empty — agent signals the plugin that the server has been unreachable too long and the session will be terminated |
+| `MsgSessionAbandon` | `0x0e` | agent→server (new connection) | UTF-8 session ID — freeze-timeout fired; abandons the session |
+| `MsgSessionFreezing` | `0x0f` | agent→server (new connection) | UTF-8 session ID — confirms cgroup freeze was applied due to network loss |
 | `MsgDivergenceAlert` | `0x10` | agent→server | JSON divergence metadata |
 | `MsgSandboxAlert` | `0x11` | agent→server | JSON sandbox violation event |
 | `MsgFetchConfig` | `0x12` | agent→server | UTF-8 config key (e.g. `"sandbox.yaml"`) |
 | `MsgConfigData` | `0x13` | server→agent | UTF-8 YAML payload (empty = not found) |
-| `MsgSessionChallenge` | `0x14` | server→agent→plugin | UTF-8 justification prompt for JIT approval |
+| `MsgSessionChallenge` | `0x14` | server→agent→plugin | JSON `SessionChallenge` — justification required for JIT approval |
+| `MsgSessionChallengeResponse` | `0x15` | plugin→agent→server | JSON `SessionChallengeResponse` — user-supplied justification |
+| `MsgSessionExpired` | `0x16` | agent→plugin | Empty — JIT approval window expired mid-session |
+| `MsgSessionWarning` | `0x17` | agent→plugin | UTF-8 seconds-left string — session will be terminated soon |
+| `MsgSudoersSnapshot` | `0x18` | agent→server | JSON `SudoersSnapshot` — sudoers state snapshot |
+| `MsgSudoersError` | `0x19` | agent→server | JSON `SudoersError` — failed to apply a pushed sudoers config |
+| `MsgHeartbeatAgent` | `0x1a` | agent→server | UTF-8 hostname — periodic liveness signal (drives the Sudoers tab online/offline badge) |
+| `MsgResize` | `0x1b` | plugin→agent→server | Binary: ts_ns(8BE)+cols(2BE)+rows(2BE) — terminal resize event |
+
+> **Security note:** `MsgFetchConfig` is restricted to an allowlist enforced by
+> the server (`agentFetchableConfigKey` in `go/cmd/server/handler.go`): only
+> the literal keys `"sandbox.yaml"` and `"redaction_config"`, plus any key with
+> the `"sudoers/"` prefix, are served. Any other key (e.g. `approval-policy.yaml`,
+> `jit-policy`, `siem.yaml`) is refused and logged as a `SECURITY:` event —
+> a compromised agent cannot pull server-side secrets or policy files it has
+> no legitimate need for.
 
 ### Normal session sequence diagram
 

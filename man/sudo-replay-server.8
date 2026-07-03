@@ -1,4 +1,4 @@
-.TH SUDO\-REPLAY\-SERVER 8 "2026-04-11" "sudo-logger 1.17.0" "System Administration"
+.TH SUDO\-REPLAY\-SERVER 8 "2026-07-03" "sudo-logger 1.20.27" "System Administration"
 .SH NAME
 sudo\-replay\-server \- web interface for replaying sudo session recordings
 .SH SYNOPSIS
@@ -208,22 +208,48 @@ It needs read access to the log directory and read/write access to
 .B risk.json
 cache files).
 .PP
-Three authentication modes are supported and can be combined freely:
+Four authentication strategies are supported, configured dynamically via
+.B Config \-> Users & Auth
+in the browser UI (not by a single startup flag):
 .IP \(bu 4
-.B No auth
-\(em deploy behind a reverse proxy (Pomerium, oauth2-proxy, OpenShift ingress)
-that handles authentication.
+.B Local database
+\(em users and bcrypt password hashes are managed in the UI; the server
+enforces HTTP Basic Auth locally.
+The bootstrap-mode first-admin account can instead be seeded at startup with
+.BR \-admin\-users .
 .IP \(bu
-.B HTTP Basic Auth
+.B htpasswd file
 \(em pass
-.B \-auth user:bcrypt-hash
-to require login.
-The server enforces auth locally without external dependencies.
+.B \-htpasswd \fIfile\fR
+to require login against a static bcrypt-hash file (see
+.B \-htpasswd
+below); does not require the UI-managed local database.
 .IP \(bu
-.B Trusted header
+.B OIDC (enterprise SSO)
+\(em the server acts as an OIDC relying party (e.g. Keycloak, Okta, Entra ID).
+Configured entirely via the UI (issuer URL, client ID/secret); roles are
+mapped from the ID token's
+.B groups
+claim.
+.IP \(bu
+.B Trusted header (external proxy)
 \(em pass
 .B \-trusted-user-header X-Forwarded-User
-to log the username set by an upstream proxy.
+to trust the username set by an upstream proxy (Pomerium, oauth2-proxy,
+OpenShift ingress). No authentication is enforced by this flag alone \(em
+the proxy must restrict access before requests reach the server.
+.PP
+Access control beyond authentication is permission-based: 12 granular
+permissions (session listing/replay, own vs. all, user/role management,
+audit log, approvals, config read/write) can be assigned to the built-in
+.B admin
+/
+.B viewer
+roles or to custom roles created via the
+.B Config \-> Users & Auth \-> Roles
+UI tab or the
+.B /api/roles
+endpoint.
 .SH OPTIONS
 .TP
 .BI \-listen " addr"
@@ -302,38 +328,26 @@ Must be combined with
 .BR \-tls-cert .
 .TP
 .BI \-htpasswd " file"
-Enable HTTP Basic Auth using credentials loaded from an htpasswd file.
-The file must contain one entry per line in the format
-.IR username : bcrypt-hash .
-Lines beginning with
-.B #
-and blank lines are ignored.
-Only bcrypt hashes (
-.BR $2b$ ,
-.BR $2y$ )
-are accepted; MD5 and SHA1 entries are rejected with a log warning and skipped.
-The server exits at startup if the file cannot be read.
-.PP
-.B Recommended file permissions:
-.EX
-chown root:sudologger /etc/sudo\-logger/replay.htpasswd
-chmod 0640            /etc/sudo\-logger/replay.htpasswd
-.EE
-.RS
-Root owns and writes the file.
-The
-.B sudologger
-service user has read access.
-World access is denied — the file contains bcrypt hashes that could be
-brute-forced offline if exposed.
-.RE
-.PP
-Send
-.B SIGHUP
-to reload the file without restarting the service:
-.EX
-systemctl kill \-\-signal=HUP sudo\-replay
-.EE
+Forces HTTP Basic Auth to be required even before any local user has a
+password set.
+.B The file's contents are never read \(em only that the path is non-empty
+matters.
+Real credentials always live in the local user database (managed via the
+Bootstrap flow, the
+.B Config \-> Users & Auth
+UI, or the
+.B /api/users
+API) and are checked against bcrypt hashes stored there, not against this
+file.
+There is no reload signal for this or any other config: the process only
+handles
+.B SIGTERM
+/
+.B SIGINT
+for graceful shutdown.
+User/password changes made via
+.B /api/users
+take effect immediately, no restart required.
 .TP
 .BI \-trusted-user-header " header"
 Name of an HTTP request header that contains the pre-authenticated username
@@ -344,10 +358,13 @@ No authentication is enforced by this flag alone \(em the proxy must
 restrict access before requests reach the server.
 .SS Authentication examples
 .PP
-Standalone with HTTPS and Basic Auth:
+Standalone with HTTPS and Basic Auth (any non-empty file works for
+.BR \-htpasswd ;
+create real accounts afterwards via
+.B /api/users
+or the Bootstrap modal):
 .EX
-# Create htpasswd file
-htpasswd \-cBb /etc/sudo\-logger/replay.htpasswd admin yourpassword
+touch /etc/sudo\-logger/replay.htpasswd
 
 sudo\-replay\-server \e
   \-tls\-cert   /etc/sudo\-logger/replay.crt \e
@@ -430,17 +447,52 @@ Filename must match
 .BR [a-zA-Z0-9._-]{1,64}\\.(crt|pem|key) .
 Maximum 64 KB.
 Returns the saved path.
+.TP
+.B GET /metrics
+Prometheus text-format metrics:
+.BR sudoreplay_sessions_total ,
+.BR sudoreplay_sessions_active ,
+.BR sudoreplay_sessions_incomplete ,
+.BR sudoreplay_sessions_by_risk{level=...} ,
+.BR sudoreplay_session_views_total .
+.TP
+.B DELETE /api/sessions/\fITSID\fR
+GDPR right-to-erasure: permanently deletes a session recording. Requires a
+JSON body
+.B {"reason": "..."}
+and the
+.B sessions:delete
+permission. Proxied to
+.BR sudo\-logserver (8)\'s
+health-listen port.
+.PP
+This page does not exhaustively document the RBAC (
+.BR /api/roles ,
+.BR /api/users ),
+JIT sudo approval (
+.BR /api/approvals* ,
+.BR /api/jit\-policy ),
+centralised sudoers management (
+.BR /api/sudoers/* ),
+blocked-users (
+.BR /api/blocked\-users ,
+.BR /api/whitelisted\-users ),
+OIDC (
+.BR /api/oidc/* ,
+.BR /api/auth\-config ,
+.BR /api/auth\-mapping ),
+or process-sandbox/redaction config (
+.BR /api/sandbox* ,
+.BR /api/redaction\-config )
+endpoints \(em see
+.B API.md
+in the source repository for the complete reference.
 .SH SIGNALS
 .TP
 .B SIGTERM\fR / \fBSIGINT
 Initiate a graceful shutdown.
 The server stops accepting new HTTP connections and waits up to 30 seconds
 for in-flight requests to complete before the process exits.
-.TP
-.B SIGHUP
-Reload the htpasswd file (when
-.B \-htpasswd
-is in use) without restarting the server.
 .SH FILES
 .TP
 .B /var/log/sudoreplay/
@@ -667,7 +719,7 @@ Only match sessions that lasted at least this many seconds (float).
 Boolean.
 Only match sessions that ended without a clean
 .B SESSION_END
-message (e.g.\& the shipper was killed mid-session).
+message (e.g.\& the agent was killed mid-session).
 .TP
 .B after_hours
 Boolean.
@@ -707,4 +759,4 @@ the terminal output matches (while all other conditions still hold).
 .EE
 .SH SEE ALSO
 .BR sudo\-logserver (8),
-.BR sudo\-shipper (8)
+.BR sudo\-logger\-agent (8)

@@ -246,7 +246,7 @@ Audit log of who viewed which session.
 
 All configuration endpoints require `config:read` (GET) or `config:write` (PUT).
 
-#### `GET /PUT /api/rules`
+#### `GET / PUT /api/rules`
 
 Read or replace the risk-rules configuration.
 
@@ -464,7 +464,8 @@ Return the authenticated user's identity and permissions.
 
 ```json
 {
-  "username": "alice",
+  "user": "alice",
+  "logoutUrl": "/api/oidc/logout",
   "role": "admin",
   "permissions": [
     "sessions:list_own",
@@ -479,10 +480,14 @@ Return the authenticated user's identity and permissions.
     "approvals:decide",
     "config:read",
     "config:write"
-  ],
-  "is_admin": true
+  ]
 }
 ```
+
+`logoutUrl` is `""` for local (htpasswd) auth, `/api/oidc/logout` when
+`AuthConfig.Source == "oidc"`, or `/oauth2/sign_out` when a trusted-header
+proxy is configured. There is no `is_admin` field; check `role` or the
+`permissions` array instead.
 
 ---
 
@@ -499,11 +504,17 @@ List all user accounts.
   {
     "username": "alice",
     "role": "admin",
+    "source": "local",
+    "full_name": "",
+    "email": "",
     "created_at": "2026-01-10T09:00:00Z",
-    "last_seen": "2026-06-15T14:30:00Z"
+    "last_login": "2026-06-15T14:30:00Z"
   }
 ]
 ```
+
+`source` is one of `"local"`, `"oidc"`, `"proxy"`. `last_login` is omitted
+when the user has never logged in. The password hash is never included.
 
 ---
 
@@ -522,7 +533,9 @@ Create or update a user account.
 }
 ```
 
-For local (htpasswd) auth, include a `"password"` field with the new plaintext password (will be bcrypt-hashed server-side).
+For local (htpasswd) auth, include a `"password_hash"` field containing the
+new **plaintext** password — despite the field name, this is not a
+pre-computed hash; the server bcrypt-hashes it before storing.
 
 ---
 
@@ -549,15 +562,17 @@ List all role definitions (built-in and custom).
   {
     "name": "admin",
     "permissions": ["sessions:list_own", "sessions:list_all", "..."],
-    "builtin": true
+    "built_in": true
   },
   {
     "name": "on-call",
     "permissions": ["sessions:list_all", "sessions:replay_all", "approvals:read", "approvals:decide"],
-    "builtin": false
+    "built_in": false
   }
 ]
 ```
+
+An optional `"description"` string field may also be present on any role.
 
 ---
 

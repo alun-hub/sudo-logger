@@ -52,7 +52,10 @@ and organisations that need eBPF-based divergence detection to catch bypass atte
 - [Web replay interface](#web-replay-interface)
   - [Authentication](#authentication)
   - [Role-based access control (RBAC)](#role-based-access-control-rbac)
+- [SIEM forwarding](#siem-forwarding)
+- [Blocking users](#blocking-users)
 - [GDPR session deletion](#gdpr-session-deletion)
+- [Prometheus metrics](#prometheus-metrics)
 - [Sudoers management](#sudoers-management)
 - [Viewing and replaying sessions](#viewing-and-replaying-sessions)
 - [Developer guide](#developer-guide)
@@ -62,6 +65,8 @@ and organisations that need eBPF-based divergence detection to catch bypass atte
   - [ACK mechanism](#ack-mechanism)
   - [Freeze mechanism](#freeze-mechanism)
   - [Building RPMs](#building-rpms)
+- [Container deployment (Podman)](#container-deployment-podman)
+- [Kubernetes deployment](#kubernetes-deployment)
 - [Performance and capacity](#performance-and-capacity)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -200,7 +205,7 @@ in the replay UI, indicating sudo ran without the plugin logging it.
 **Process sandbox** — optional eBPF LSM subsystem that enforces kernel-level
 write, open-for-write, truncate, setattr, delete, rename, directory-create,
 network-socket, mount, ptrace, and kill restrictions on all processes running
-inside sudo session cgroups. Eighteen hooks (16 LSM + 2 tracepoints) are loaded
+inside sudo session cgroups. Twenty hooks (18 LSM + 2 tracepoints) are loaded
 at startup. Each hook checks whether the calling process is in a sandboxed
 cgroup (`sandboxed_cgroups` BPF map) or has been PID-tracked since session start
 (`sandboxed_pids` map, propagated to all descendants via `sched_process_fork`),
@@ -291,7 +296,7 @@ migrate-sessions \
 | **Input validated before filesystem use** | User, host, and session ID fields are validated with strict regexes; cgroup names are validated before directory creation |
 | **Log directory confinement** | iolog writer and replay server both verify the resolved session path stays within the base log directory (symlinks resolved with `EvalSymlinks`) |
 | **SELinux domain confinement** | `sudo-logger-agent` runs as `sudo_agent_t` in enforcing mode; kernel-level restrictions on what the agent process can access |
-| **Process sandbox (optional)** | 18 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Also blocks `AF_NETLINK` (firewall tampering), `mount()` (masking audit dirs), and `ptrace()` (code injection into external processes). Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Active by default on Fedora 38+; older or non-Fedora kernels may need `lsm=bpf`. See [Process sandbox](#process-sandbox). |
+| **Process sandbox (optional)** | 20 eBPF LSM/tracepoint hooks enforce a deny-list of files, devices, `/proc` entries, sockets, and process names that sudo session processes cannot open for writing, truncate, write to, setattr, delete, rename, create files inside, or kill — not bypassable even by root. Also blocks `AF_NETLINK` (firewall tampering), `mount()` (masking audit dirs), and `ptrace()` (code injection into external processes). Scoped via cgroup ID and PID tracking propagated atomically at fork time. Device IDs resolved via `/proc/self/mountinfo` for correct Btrfs subvolume support. Active by default on Fedora 38+; older or non-Fedora kernels may need `lsm=bpf`. See [Process sandbox](#process-sandbox). |
 | **Active session terminated if agent dies** | If the agent socket drops mid-session (EPIPE/ECONNRESET/EOF), the plugin sends SIGTERM to sudo within 150 ms — terminating the active shell. The attacker cannot continue working unlogged; they must start a new sudo session, which is fail-closed until the agent restarts (~2 s). |
 | **Incomplete session detection** | If the agent is killed mid-session, the server logs a `SECURITY:` warning, writes an `INCOMPLETE` marker, and the replay UI flags the session with a red ⚠ badge. Sessions terminated by the freeze-timeout watchdog are distinguished with an amber ⏱ badge and carry no risk score — a network outage is not a security incident. |
 | **Approval token not exposed in process list** | The approval token can be loaded from a file (`-approval-token-file`) or environment variable (`SUDO_LOGGER_APPROVAL_TOKEN`) rather than passed as a CLI flag, preventing it from appearing in `ps aux` or shell history. |
@@ -884,6 +889,9 @@ All of these go in `/etc/sudo-logger/agent.conf`:
 | `ebpf` | `true` | Enable eBPF session recording. Requires kernel BTF support (`/sys/kernel/btf/vmlinux`). Degrades gracefully to plugin-only mode on older kernels. |
 | `mask_pattern` | — | Additional regex pattern to redact from terminal streams. Can be repeated for multiple patterns. See [Secret redaction](#secret-redaction). |
 | `sandbox_config` | — | Path to a YAML deny-list for the process sandbox. Empty (default) disables sandbox enforcement. See [Process sandbox](#process-sandbox). |
+| `disclaimer` | — | Text banner shown to the user at session start (e.g. an acceptable-use notice). Supports `\n`/`\t` escapes. Empty (default) shows no banner. |
+| `disclaimer_color` | — | ANSI color for the disclaimer banner. One of `red`, `green`, `blue`, `orange`, `bold_red`, `bold_green`, `bold_blue`, `bold_orange`. Any other value (including empty) prints the banner uncolored. |
+| `hostname` | *(auto-detected)* | Overrides the hostname reported to the log server. When empty, the agent resolves the FQDN via `os.Hostname()` plus a reverse DNS lookup, falling back to the short hostname. |
 
 ### Process sandbox
 
@@ -1231,35 +1239,28 @@ systemctl daemon-reload && systemctl restart sudo-replay
 
 #### Mode 2: Built-in HTTP Basic Auth with TLS
 
-Standalone deployment with no external proxy required.  Credentials are stored
-in a standard htpasswd file with bcrypt hashing.  Multiple users are supported
-and credentials can be rotated without restarting the service.
+Standalone deployment with no external proxy required. **Despite its name and
+help text, `-htpasswd <file>` does not actually read that file's contents —
+the value only needs to be non-empty.** It exists purely to force
+authentication on even before any local user has a password set (without it,
+a fresh install with zero passworded users is treated as an open deployment).
+Real credentials are always managed in the local user database (the same
+one used by the Bootstrap flow and **Config → Users & Auth**, accessible via
+the UI or the `/api/users` API — see [Role-based access control](#role-based-access-control-rbac--enterprise-sso)),
+checked via `authenticate()` against bcrypt hashes stored there — the
+htpasswd file's actual bcrypt entries are never parsed. There is also no
+`SIGHUP` (or any other) reload handler in the replay server; the process
+only handles `SIGTERM`/`SIGINT` for graceful shutdown.
 
-**Step 1 — Create the htpasswd file:**
+**Step 1 — Point the flag at any existing, non-empty file** (its content is
+irrelevant, but a real htpasswd-style file for later external tooling
+doesn't hurt):
 
 ```bash
-# Install htpasswd (part of httpd-tools):
 dnf install httpd-tools
-
-# Create the file with the first user (-c creates, -B forces bcrypt):
-htpasswd -cB /etc/sudo-logger/replay.htpasswd alice
-
-# Add more users:
-htpasswd -B /etc/sudo-logger/replay.htpasswd bob
-
-# Set ownership and permissions:
-#   root owns and writes the file; sudologger (the service user) reads it;
-#   no world access — the file contains bcrypt hashes that could be
-#   brute-forced offline if exposed.
+htpasswd -cB /etc/sudo-logger/replay.htpasswd alice   # content unused by sudo-logger itself
 chown root:sudologger /etc/sudo-logger/replay.htpasswd
 chmod 0640 /etc/sudo-logger/replay.htpasswd
-```
-
-The file format is one entry per line:
-```
-alice:$2b$12$...bcrypt-hash...
-bob:$2b$12$...bcrypt-hash...
-# Comments and blank lines are ignored
 ```
 
 **Step 2 — Obtain a TLS certificate:**
@@ -1289,22 +1290,20 @@ systemctl restart sudo-replay
 
 # Verify TLS is active (look for "listening on ... (TLS)"):
 journalctl -u sudo-replay -n 5
-
-# Test with curl (skip cert verification for self-signed):
-curl -ku alice:your-password https://localhost:8080/api/sessions
 ```
 
-**Rotating passwords or adding users — no restart needed:**
+**Step 4 — Create the actual login accounts** via the Bootstrap modal (first
+launch) or **Config → Users & Auth** in the UI, or `POST /api/users`
+(`{"username","password_hash":"<plaintext, hashed server-side>","role"}`).
+Rotating a password or removing a user is done the same way — through the
+user database, not the htpasswd file — and takes effect immediately, no
+restart or signal needed:
 
 ```bash
-# Change a password:
-htpasswd -B /etc/sudo-logger/replay.htpasswd alice
+curl -ku alice:adminpassword -X POST https://localhost:8080/api/users \
+  -d '{"username":"bob","password_hash":"NewPassword123!","role":"viewer"}'  # pragma: allowlist secret
 
-# Remove a user (edit the file manually or use sed):
-sed -i '/^alice:/d' /etc/sudo-logger/replay.htpasswd
-
-# Reload credentials (no service restart):
-systemctl kill --signal=HUP sudo-replay
+curl -ku alice:adminpassword https://localhost:8080/api/sessions   # test login
 ```
 
 #### OIDC (Enterprise SSO) with Keycloak
@@ -1375,7 +1374,7 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 |------|---------|-------------|
 | `-tls-cert file` | — | PEM TLS certificate (enables HTTPS, requires `-tls-key`) |
 | `-tls-key file` | — | PEM TLS private key |
-| `-htpasswd file` | — | htpasswd file for Basic Auth (bcrypt only; reload with `SIGHUP`) |
+| `-htpasswd file` | — | Any non-empty path forces Basic Auth on even with zero passworded local users. Content is never read — real credentials live in the local user database (`/api/users`). No reload signal exists. |
 | `-trusted-user-header hdr` | — | Log username from this request header (e.g. `X-Forwarded-User`) |
 | `-admin-users list` | — | Comma-separated list of usernames that receive the `admin` role (e.g. `alice,bob`). All other authenticated users receive the `viewer` role. |
 | `-listen addr` | `:8080` | Listen address |
@@ -1389,18 +1388,52 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 
 ### Role-based access control (RBAC) & Enterprise SSO
 
-The replay server enforces two roles on every authenticated request:
+Access control is permission-based, not just a fixed two-role split. There
+are 12 granular permissions, and any role — built-in or custom — is just a
+named subset of them:
 
-| Role | Session list | Session replay | Access log | Approvals | GDPR deletion | UI Config |
-|------|-------------|---------------|-----------|-----------|---------------|-----------|
-| `viewer` | Own sessions only | Own sessions | — | — | — | — |
-| `admin` | All sessions | All sessions | Yes | Yes | Yes | Yes |
+| Permission | Grants |
+|------------|--------|
+| `sessions:list_own` | List your own sessions |
+| `sessions:list_all` | List every user's sessions |
+| `sessions:replay_own` | Replay your own sessions |
+| `sessions:replay_all` | Replay any user's sessions |
+| `sessions:delete` | GDPR deletion API |
+| `users:read` | View users and roles |
+| `users:write` | Create/edit/delete users and roles |
+| `audit_log:read` | View the access log |
+| `approvals:read` | View pending JIT approval requests |
+| `approvals:decide` | Approve/deny JIT requests |
+| `config:read` | View config (SIEM, sudoers, sandbox, retention, redaction, risk rules) |
+| `config:write` | Edit config |
+
+Two roles are built in:
+
+| Role | Permissions |
+|------|-------------|
+| `admin` | All 12 (locked — cannot be edited or deleted) |
+| `viewer` | `sessions:list_own` + `sessions:replay_own` (editable default) |
+
+**Custom roles** — e.g. an `operator` that can see all sessions and decide
+approvals but not touch config — are created in the UI (**Config -> Users &
+Auth -> Roles**) or via the API:
+
+```
+GET    /api/roles          → list all roles
+POST   /api/roles          → create/update a role: {"name","description","permissions"}
+GET    /api/roles/{name}   → get one role
+DELETE /api/roles/{name}   → delete a custom role (built-in roles are protected)
+```
+
+You can only grant a permission on a role if your own account already holds
+it — this prevents a `users:write`-only account from creating a role with
+more privilege than itself.
 
 #### Authentication Strategies
 Authentication and RBAC are configured dynamically via the web UI under **Config -> Users & Auth**. Three strategies are supported:
 
 1. **Local Database (Standalone)**: Users are managed directly in the UI. When running in this mode, the server uses HTTP Basic Auth.
-2. **OIDC (Enterprise SSO)**: The server acts as an OIDC relying party (e.g., Okta, Keycloak, Entra ID). Admins are mapped dynamically from the `groups` claim in the ID token.
+2. **OIDC (Enterprise SSO)**: The server acts as an OIDC relying party (e.g., Okta, Keycloak, Entra ID). Roles are mapped dynamically from the `groups` claim in the ID token.
 3. **External Proxy (e.g., oauth2-proxy, Pomerium)**: The server trusts headers injected by a reverse proxy.
 
 #### First-time Setup (Bootstrap)
@@ -1413,18 +1446,18 @@ REPLAY_ARGS=-admin-users alice,bob
 This flag is only evaluated when the database is completely empty (bootstrap phase) and inserts the users into the persistent database.
 
 #### Dynamic Role Mapping (OIDC & Proxy)
-If you configure an External Proxy or OIDC, you can define **Role Mapping** in the UI. For example, if you set the *Admin Groups* to `sudo-admins`, any user presenting that group (either via the proxy's group header like `X-Forwarded-Groups`, or the OIDC `groups` claim) is dynamically granted the `admin` role.
+If you configure an External Proxy or OIDC, define **Group Mappings** in the UI: an ordered list of `group -> role` pairs (first match wins), evaluated against the proxy's group header (e.g. `X-Forwarded-Groups`) or the OIDC `groups` claim. This maps a group to *any* role, not just `admin` — e.g. map `sudo-oncall` to a custom `operator` role. The older single-list **Admin Groups** setting still works as a fallback: any group in that list maps to the built-in `admin` role, for backward compatibility with simpler setups.
 
 #### Hybrid Proxy Mode
-If you use an External Proxy (like `oauth2-proxy`) but do not wish to use Group headers, the replay server will read the `User Header` (e.g., `X-Forwarded-User`) and perform a lookup in the **Local Database**. This allows you to let the proxy handle authentication (MFA, SSO), while you assign the `admin` role to specific users manually in the sudo-logger UI.
+If you use an External Proxy (like `oauth2-proxy`) but do not wish to use Group headers, the replay server will read the `User Header` (e.g., `X-Forwarded-User`) and perform a lookup in the **Local Database**. This allows you to let the proxy handle authentication (MFA, SSO), while you assign a role to specific users manually in the sudo-logger UI.
 
-The current user's role is exposed at `GET /api/me`:
+The current user's role and resolved permissions are exposed at `GET /api/me`:
 
 ```json
-{"user": "alice", "logoutUrl": "", "role": "admin"}
+{"user": "alice", "logoutUrl": "", "role": "admin", "permissions": ["sessions:list_own", "sessions:list_all", "..."]}
 ```
 
-The browser UI uses this to show or hide admin-only tabs (Access Log, Approvals, Settings). Viewer-role users see only their own sessions in the session list; attempts to load another user's session cast return `403 Forbidden`.
+The browser UI uses this to show or hide tabs the caller lacks permission for (Access Log, Approvals, Settings). A user without `sessions:list_all`/`sessions:replay_all` sees only their own sessions; attempts to load another user's session cast return `403 Forbidden`.
 
 ---
 
@@ -1669,7 +1702,7 @@ The log server exposes a `DELETE /api/sessions/<tsid>` endpoint on the `-health-
 
 - `-health-listen` must be enabled on the log server (e.g. `-health-listen :9877`).
 - An approval token must be configured on the log server (`-approval-token`, `-approval-token-file`, or `SUDO_LOGGER_APPROVAL_TOKEN` env var).
-- The replay server must have `-logserver-admin-token` (or equivalent) set to the same token and must know the log server's health-listen address via `-logserver-url`.
+- The replay server must have `-logserver-admin-token` (or equivalent) set to the same token and must know the log server's health-listen address via `-logserver-admin` (e.g. `http://localhost:9877`).
 
 ### How it works
 
@@ -1796,9 +1829,9 @@ Replay UI (browser)
   ├─ PUT /api/sudoers/config?host=_default   ← global template
   └─ PUT /api/sudoers/config?host=<hostname> ← per-host override
        │
-       log server stores config in SessionStore
+       log server stores config in SessionStore under key sudoers/<host>
        │
-       agent polls /api/sudoers/<host> every 15 s (MsgFetchConfig)
+       agent polls that key every 15 s over the wire protocol (MsgFetchConfig)
          │
          ├─ content changed?
          │    └─ visudo -c validates → atomic rename onto
@@ -1893,44 +1926,67 @@ asciinema play /var/log/sudoreplay/alice/gnarg_20260404-120000/session.cast
 ```
 sudo-logger/
 ├── plugin/
-│   └── plugin.c            # sudo I/O plugin (C)
+│   ├── plugin.c             # sudo I/O plugin (C)
+│   └── include/
+│       └── sudo_plugin.h    # vendored sudo plugin API header (ISC-licensed)
 ├── go/
 │   ├── go.mod
 │   ├── cmd/
 │   │   ├── agent/
-│   │   │   ├── main.go          # Agent daemon (plugin handler + eBPF)
+│   │   │   ├── main.go          # Agent daemon entrypoint (plugin handler + eBPF)
 │   │   │   ├── plugin.go        # Unix socket handler for sudo plugin
 │   │   │   ├── ebpf.go          # eBPF ring buffer consumer + pkexec tracking
+│   │   │   ├── ebpf_session.go  # eBPF-tracked session bookkeeping
 │   │   │   ├── divergence.go    # eBPF vs plugin divergence detection
 │   │   │   ├── cgroup.go        # Per-session cgroup management + freeze
-│   │   │   ├── config.go        # Config file parser
+│   │   │   ├── groups.go        # OS group resolution (NSS/SSSD/LDAP/AD) for JIT policy
+│   │   │   ├── config.go        # agent.conf parser
+│   │   │   ├── tls.go           # Client-side mTLS config
+│   │   │   ├── redaction.go     # Secret redaction: local + server-pushed patterns
+│   │   │   ├── sudoers.go       # Sudoers polling, visudo -c validation, atomic apply
 │   │   │   ├── sandbox.go       # eBPF LSM sandbox: load, attach, cgroup + PID registration
 │   │   │   ├── sandbox_config.go # sandbox.yaml parser + inode resolver (mountinfo-based dev ID)
 │   │   │   ├── sandbox_watch.go  # inotify watcher: refreshes protected inodes on file replace
+│   │   │   ├── sandbox_poll.go   # Polls sandbox.yaml/redaction_config/sudoers from the server
 │   │   │   └── bpf/
 │   │   │       ├── recorder.c   # eBPF tracepoint hooks (compiled via bpf2go)
-│   │   │       └── sandbox.bpf.c # eBPF LSM: 11 file/inode/kill hooks + sched_process_fork/exit
+│   │   │       └── sandbox.bpf.c # eBPF LSM: 20 hooks (18 LSM + 2 tracepoints)
 │   │   ├── server/
-│   │   │   ├── main.go          # Remote log server
+│   │   │   ├── main.go          # Remote log server entrypoint
+│   │   │   ├── config.go        # CLI flags
+│   │   │   ├── handler.go       # Per-connection wire protocol handling
+│   │   │   ├── heartbeat.go     # Agent heartbeat tracking
 │   │   │   └── approval.go      # JIT approval manager (policy reload, audit log)
 │   │   ├── replay-server/
-│   │   │   ├── main.go          # Web replay interface (HTTP + embedded SPA)
-│   │   │   ├── rbac.go          # Role type, context helpers, requireAdmin middleware
-│   │   │   ├── risk-rules.yaml  # Default risk scoring rules
-│   │   │   └── static/
-│   │   │       └── index.html   # Single-page terminal player (xterm.js)
+│   │   │   ├── main.go             # Web replay interface entrypoint
+│   │   │   ├── config.go           # CLI flags
+│   │   │   ├── routes.go           # Route registration
+│   │   │   ├── middleware.go       # Auth/access-log HTTP middleware
+│   │   │   ├── handlers_auth.go    # Local/OIDC/proxy login handlers
+│   │   │   ├── handlers_session.go # Session list/replay handlers
+│   │   │   ├── handlers_admin.go   # Config, report, sudoers, users/roles handlers
+│   │   │   ├── approval_proxy.go   # Proxies approval actions to the log server
+│   │   │   ├── oidc.go             # OIDC relying-party flow
+│   │   │   ├── rbac.go             # Permission/role resolution, require()/can()
+│   │   │   ├── websocket.go        # (reserved; not yet implemented)
+│   │   │   ├── risk-rules.yaml     # Default risk scoring rules
+│   │   │   ├── static/             # Built SPA assets (npm run build output — not source)
+│   │   │   └── ui/                 # React/TypeScript SPA source
 │   │   └── migrate-sessions/
 │   │       └── main.go          # One-time migrator: local → distributed storage
 │   └── internal/
 │       ├── protocol/
 │       │   └── protocol.go # Shared wire protocol
 │       ├── iolog/
-│       │   └── iolog.go    # asciinema v2 session writer
+│       │   ├── iolog.go    # asciinema v2 session writer
+│       │   └── redactor.go # Regex-based secret redaction engine
+│       ├── policy/
+│       │   ├── engine.go   # OPA/Rego JIT-policy evaluation engine
+│       │   └── rules.go    # Rule table → compiled Rego source
 │       ├── store/
 │       │   ├── store.go    # SessionStore / SessionWriter interfaces + New()
-│       │   ├── local.go    # Local filesystem backend (default)
-│       │   ├── local_test.go
-│       │   └── distributed.go  # S3 + PostgreSQL backend
+│       │   ├── local.go, local_*.go  # Local filesystem backend (default)
+│       │   └── distributed.go        # S3 + PostgreSQL backend
 │       ├── config/
 │       │   └── secret.go   # ResolveSecret: flag → env var → file priority
 │       └── siem/
@@ -1998,9 +2054,19 @@ Implemented in `go/internal/protocol/protocol.go` (Go) and inline in
 | `SESSION_DENIED` | `0x0c` | server → agent → plugin | String block message — policy denial, sudo blocked |
 | `FREEZE_TIMEOUT` | `0x0d` | agent → plugin | Empty — server unreachable beyond `-freeze-timeout`; session will be terminated |
 | `SESSION_ABANDON` | `0x0e` | agent → server (new conn) | UTF-8 session_id — freeze-timeout fired; server marks session as `freeze_timeout` |
+| `MsgSessionFreezing` | `0x0f` | agent → server (new conn) | UTF-8 session_id — session frozen due to network loss |
+| `MsgDivergenceAlert` | `0x10` | agent → server | JSON — sudo/pkexec execve seen with no matching plugin SESSION_START within 30 s (see [Divergence detector](#go-agent-gocmdagent)) |
+| `MsgSandboxAlert` | `0x11` | agent → server | JSON — process sandbox blocked an operation via kernel LSM (see [Process sandbox](#process-sandbox)) |
+| `MsgFetchConfig` | `0x12` | agent → server | UTF-8 key — request a named config blob. The server only answers a fixed allowlist (`sandbox.yaml`, `redaction_config`, `sudoers/*`) — everything else gets an empty response |
+| `MsgConfigData` | `0x13` | server → agent | UTF-8 YAML/JSON — response to `MsgFetchConfig` (empty = not found or not allowed) |
+| `MsgSessionChallenge` | `0x14` | server → agent → plugin | JSON `SessionChallenge` — JIT approval requires a justification (see [JIT Sudo Approval](#just-in-time-jit-sudo-approval)) |
+| `MsgSessionChallengeResponse` | `0x15` | plugin → agent → server | JSON `SessionChallengeResponse` — user-provided justification |
+| `MsgSessionExpired` | `0x16` | agent → plugin | Empty — JIT approval window expired, session is being terminated |
+| `MsgSessionWarning` | `0x17` | agent → plugin | UTF-8 seconds-remaining — JIT approval window expiring soon |
 | `MsgSudoersSnapshot` | `0x18` | agent → server | JSON `SudoersSnapshot` — full snapshot of `/etc/sudoers` and `/etc/sudoers.d/` on the agent host |
 | `MsgSudoersError` | `0x19` | agent → server | JSON `SudoersError` — `visudo -c` validation failure when applying a config pushed from the server |
 | `MsgHeartbeatAgent` | `0x1a` | agent → server | UTF-8 host name — sudoers liveness keepalive sent every 30 s; drives online/offline badge in the Sudoers tab |
+| `MsgResize` | `0x1b` | plugin → agent → server | Binary: ts_ns(8, BE) + cols(2, BE) + rows(2, BE) — terminal resize event |
 
 **CHUNK stream types:**
 
@@ -2130,9 +2196,10 @@ and prints a different banner:
 [ SUDO-LOGGER: gave up waiting for log server — session terminated ]
 ```
 
-The `-freeze-timeout` flag (default `3m`) controls how long the agent
-waits before giving up. Set to `0` to disable (not recommended — sessions
-may hang indefinitely if the log server is permanently unreachable).
+The `freeze_timeout` config key in `agent.conf` (default `3m`) controls how
+long the agent waits before giving up. Set to `0` to disable (not
+recommended — sessions may hang indefinitely if the log server is
+permanently unreachable).
 
 The freeze-timeout is also the reason the plugin calls
 `unfreeze_session_cgroup()` itself on receiving `FREEZE_TIMEOUT`: even if
@@ -2312,8 +2379,12 @@ podman-compose up -d
 
 ### Access session logs from the host
 
-Session recordings are stored in the named volume `sudo-logger_sudologs`.
-To find the path on disk (e.g. for `sudoreplay` or backup):
+Session recordings are stored in the named volume `sudo-logger_sudologs`, one
+asciinema v2 `session.cast` file per session under `<user>/<host>_<timestamp>/`.
+This is **not** sudo's native I/O log format, so the standard `sudoreplay`
+tool cannot read it — use `asciinema play` instead, or the web replay UI.
+
+To find the path on disk (e.g. for backup):
 
 ```bash
 podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}'
@@ -2322,9 +2393,8 @@ podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}'
 To replay a session directly from the host:
 
 ```bash
-sudoreplay -d \
-    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}') \
-    alun/fedora_20260311-175401
+asciinema play \
+    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}')/alun/fedora_20260311-175401/session.cast
 ```
 
 ### Fixing permission errors after a failed start
@@ -2403,85 +2473,44 @@ to S3 and all metadata goes to PostgreSQL. This enables:
 manual schema migration is needed — the schema is applied automatically at
 startup.
 
-**Step 1 — create the Secret with PKI + credentials:**
+**`k8s/deploy-local.sh`** automates the whole distributed setup end to end —
+namespace, TLS secret (from your `pki/` directory), PostgreSQL, MinIO, the
+distributed-mode log server, and the replay server:
 
 ```bash
-kubectl create secret generic sudo-logger-tls \
-  --namespace sudo-logger \
-  --from-file=ca.crt=/path/to/pki/ca/ca.crt \
-  --from-file=server.crt=/path/to/pki/server/server.crt \
-  --from-file=server.key=/path/to/pki/server/server.key \
-  --from-file=ack-sign.key=/etc/sudo-logger/ack-sign.key
-
-kubectl create secret generic sudo-logger-distributed \
-  --namespace sudo-logger \
-  --from-literal=db-url='postgres://sudologger:YOURPASSWORD@postgres:5432/sudologger?sslmode=require' \  # pragma: allowlist secret
-  --from-literal=s3-access-key='YOUR_ACCESS_KEY' \  # pragma: allowlist secret
-  --from-literal=s3-secret-key='YOUR_SECRET_KEY'  # pragma: allowlist secret
+# PKI files expected in ../pki/ (ca.crt, server.crt, server.key, ack-sign.key)
+# or /etc/sudo-logger if run on a host with an existing install.
+cd k8s
+bash deploy-local.sh                              # uses default MinIO/PostgreSQL credentials
+bash deploy-local.sh --image ghcr.io/alun-hub/sudo-logger:1.25.5   # pin a specific image
+bash deploy-local.sh --dry-run                    # preview without applying
 ```
 
-**Step 2 — patch the deployment** (`k8s/distributed/deployment-patch.yaml`):
+Override the default (insecure, dev-only) MinIO/PostgreSQL credentials via
+environment variables before running: `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+`DB_USER`, `DB_PASSWORD`. The script deploys `postgresql.yaml` and
+`minio.yaml` directly — for production, point at externally managed S3 and
+PostgreSQL instead and adapt the script accordingly.
 
-```yaml
-# k8s/distributed/deployment-patch.yaml
-- op: replace
-  path: /spec/template/spec/containers/0/args
-  value:
-    - -listen=:9876
-    - -cert=/etc/sudo-logger/server.crt
-    - -key=/etc/sudo-logger/server.key
-    - -ca=/etc/sudo-logger/ca.crt
-    - -signkey=/etc/sudo-logger/ack-sign.key
-    - -storage=distributed
-    - -s3-bucket=sudo-logs
-    - -s3-endpoint=https://minio.internal:9000
-    - -s3-path-style
-    - -buffer-dir=/var/lib/sudo-logger/buffer
-- op: replace
-  path: /spec/replicas
-  value: 3
-```
+There is no working `kubectl apply -k` one-liner for distributed mode:
+kustomize's default security restrictions block a kustomization from
+referencing files outside its own directory, and `kubectl`'s built-in
+kustomize support (unlike the standalone `kustomize` CLI) does not expose a
+way to lift that restriction — so a distributed-mode overlay sharing files
+with the `k8s/` directory can't be applied this way. Use `deploy-local.sh`,
+or apply each file individually with `kubectl apply -f` (`namespace.yaml`,
+`service.yaml`, `postgresql.yaml`, `minio.yaml`, `deployment-distributed.yaml`,
+`replay-server.yaml`, plus the `sudo-logger-tls`/`sudo-logger-distributed`
+Secrets — see the `kubectl create secret` commands inside `deploy-local.sh`
+for the exact fields expected).
 
-Add env vars sourced from the Secret:
-```yaml
-env:
-  - name: S3_ACCESS_KEY
-    valueFrom:
-      secretKeyRef: { name: sudo-logger-distributed, key: s3-access-key }
-  - name: S3_SECRET_KEY
-    valueFrom:
-      secretKeyRef: { name: sudo-logger-distributed, key: s3-secret-key }
-  - name: DB_URL
-    valueFrom:
-      secretKeyRef: { name: sudo-logger-distributed, key: db-url }
-```
+Note that local storage mode's own overlay (`k8s/kustomization.yaml`,
+applied by the Quick start above) only deploys `sudo-logserver` — there is
+currently no local-storage replay-server manifest in `k8s/`, since
+`replay-server.yaml` is hardcoded for distributed-mode storage
+(`-storage=distributed` and PostgreSQL/S3 credentials baked into its args).
 
-Or pass `--s3-access-key` / `--s3-secret-key` / `--db-url` directly in args
-(not recommended for production — use Secrets or an external secrets manager).
-
-Replace the PVC volume with an `emptyDir` for the write buffer:
-
-```yaml
-volumes:
-  - name: tls-certs
-    secret:
-      secretName: sudo-logger-tls
-      defaultMode: 0400
-  - name: buffer
-    emptyDir: {}   # replaces the PVC — only holds in-flight uploads
-```
-
-And mount it:
-```yaml
-volumeMounts:
-  - name: tls-certs
-    mountPath: /etc/sudo-logger
-    readOnly: true
-  - name: buffer
-    mountPath: /var/lib/sudo-logger/buffer
-```
-
-**Step 3 — migrate existing sessions (first deployment only):**
+**Migrate existing sessions (first deployment only):**
 
 ```bash
 # Run once from any machine that can reach S3 and PostgreSQL
@@ -2577,14 +2606,23 @@ When running GUI applications (like `gvim`) with `sudo`, you may see warnings ab
 GTK applications attempt to connect to the AT-SPI (Assistive Technology) bus for accessibility features. Under `sudo`, the root process lack access to the user's session D-Bus. Additionally, `sudo-logger` uses **cgroup namespace isolation** (`CLONE_NEWCGROUP`) to sandbox the session, which further restricts the process from spawning or reaching external bus helpers. This triggers a "Permission denied" error as GTK tries to fallback to spawning its own bus.
 
 **How to fix it:**
-These features are typically not required for root-owned GUI sessions. You can suppress the warnings by setting the following environment variables in your shell profile (`~/.bashrc`) or globally in `/etc/environment`:
+These features are typically not required for root-owned GUI sessions. Set
+the following in your shell profile (`~/.bashrc`) or globally in
+`/etc/environment`:
 
 ```bash
 export NO_AT_BRIDGE=1
 export NO_AT_SPI=1
 ```
 
-The `sudo-logger` package automatically includes these variables in its `env_keep` list, so once they are set in your user environment, they will be passed through to the `sudo` session automatically.
+The client package does **not** ship a sudoers `env_keep` entry for these
+variables, so `sudo` strips them by default even if they're set in your
+shell. Add one yourself:
+
+```bash
+echo 'Defaults env_keep += "NO_AT_BRIDGE NO_AT_SPI"' | sudo tee /etc/sudoers.d/99-at-spi
+sudo chmod 440 /etc/sudoers.d/99-at-spi
+```
 
 ### Terminal freezes and network has returned
 

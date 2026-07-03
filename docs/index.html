@@ -2324,7 +2324,7 @@ body::after {
           <div class="sec-icon">👥</div>
           <div>
             <div class="sec-title">Granular RBAC + GDPR</div>
-            <div class="sec-desc">12 built-in permissions, custom roles, group→role mapping for OIDC and reverse-proxy auth. GDPR-compliant session deletion via API. All config changes written to an immutable audit log.</div>
+            <div class="sec-desc">12 built-in permissions, custom roles, group→role mapping for OIDC and reverse-proxy auth. GDPR-compliant session deletion via API. Session views are recorded in a queryable access log.</div>
           </div>
         </div>
       </div>
@@ -2336,7 +2336,7 @@ body::after {
     <div class="s-sandbox-hero">
 
       <div class="sbh-top">
-        <div class="sbh-label">▶ eBPF LSM &nbsp;·&nbsp; kernel 5.7+ &nbsp;·&nbsp; 13 hooks &nbsp;·&nbsp; inode-tracked &nbsp;·&nbsp; PAM-race-proof &nbsp;·&nbsp; enable/disable from UI</div>
+        <div class="sbh-label">▶ eBPF LSM &nbsp;·&nbsp; kernel 5.7+ &nbsp;·&nbsp; 20 hooks &nbsp;·&nbsp; inode-tracked &nbsp;·&nbsp; PAM-race-proof &nbsp;·&nbsp; enable/disable from UI</div>
         <div class="sbh-heading">PROCESS SANDBOX</div>
         <div class="sbh-claim">Kernel-enforced constraints on every sudo session. Root cannot escape — not even with <code>CAP_ALL</code>.</div>
       </div>
@@ -2364,7 +2364,7 @@ body::after {
           <div class="sbh-panel">
             <div class="sbh-panel-title">WHY ROOT CANNOT BYPASS IT</div>
             <div class="sbh-why">LSM hooks run in the kernel, <em>below</em> capability checks — <code>CAP_SYS_ADMIN</code> and <code>CAP_DAC_OVERRIDE</code> don't help</div>
-            <div class="sbh-why">13 hooks cover every attack vector: open, write, truncate, rename, unlink, setattr, mkdir, create, mknod, symlink, signal</div>
+            <div class="sbh-why">20 hooks (18 LSM + 2 tracepoints) cover every attack vector: open, write, truncate, rename, unlink, setattr, mkdir, create, mknod, symlink, signal, plus bpf(), netlink sockets, ptrace, mount, capabilities, and D-Bus/systemd IPC</div>
             <div class="sbh-why">Inode + superblock device ID — immune to symlinks, bind-mounts, path aliasing, and Btrfs subvolumes</div>
             <div class="sbh-why">Dual scoping: cgroup-based + PID propagated at fork → PAM session scope migration race has no effect</div>
             <div class="sbh-why">inotify watcher refreshes inodes on atomic rename — protected files stay protected after every editor write</div>

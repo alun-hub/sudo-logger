@@ -6,12 +6,14 @@
 replicaCount: 1
 
 image:
-  # -- Logserver image repository
-  repository: ghcr.io/alun-hub/sudo-logserver
+  # -- Logserver image repository. Note: this is the same combined image as
+  # replay.image.repository below (it contains both the sudo-logserver and
+  # sudo-replay-server binaries) — only the command differs between the two.
+  repository: ghcr.io/alun-hub/sudo-logger
   # -- Image pull policy
   pullPolicy: IfNotPresent
   # -- Image tag (defaults to chart appVersion if empty)
-  tag: "1.0"
+  tag: ""
 
 storage:
   # -- Storage type: 'local' for single-node PVC, 'distributed' for PostgreSQL + S3/MinIO
@@ -45,12 +47,12 @@ replay:
   # -- Number of replay-server replicas to run
   replicaCount: 1
   image:
-    # -- Replay-server image repository
-    repository: ghcr.io/alun-hub/sudo-replay-server
+    # -- Replay-server image repository (same combined image as image.repository above)
+    repository: ghcr.io/alun-hub/sudo-logger
     # -- Image pull policy
     pullPolicy: IfNotPresent
     # -- Image tag (defaults to chart appVersion if empty)
-    tag: "1.0"
+    tag: ""
 
 ingress:
   # -- Enable ingress for the replay-server

@@ -255,7 +255,7 @@ footer{border-top:1px solid var(--border);padding:60px 40px;background:#050708;}
     <div class="guarantee-card">
       <div class="g-number">03</div>
       <h3>20 kernel hooks — root cannot hide</h3>
-      <p>The eBPF LSM Sandbox attaches 20 hooks (16 LSM + 2 tracepoints). They block writes to protected files, the <code>bpf()</code> syscall, <code>AF_NETLINK</code> (firewall tampering), <code>ptrace()</code>, <code>mount()</code> and <code>CAP_AUDIT_CONTROL</code> — all scoped per session cgroup. Root cannot swap the agent, kill auditd, or delete logs.</p>
+      <p>The eBPF LSM Sandbox attaches 20 hooks (18 LSM + 2 tracepoints). They block writes to protected files, the <code>bpf()</code> syscall, <code>AF_NETLINK</code> (firewall tampering), <code>ptrace()</code>, <code>mount()</code> and <code>CAP_AUDIT_CONTROL</code> — all scoped per session cgroup. Root cannot swap the agent, kill auditd, or delete logs.</p>
       <div class="g-stat">Kernel-enforced · not bypassable even by root</div>
     </div>
     <div class="guarantee-card">
@@ -296,7 +296,7 @@ footer{border-top:1px solid var(--border);padding:60px 40px;background:#050708;}
     <div class="feature-card">
       <div class="feat-icon">🛡️</div>
       <div class="feat-title">eBPF LSM Process Sandbox</div>
-      <p class="feat-desc">20 kernel hooks (16 LSM + 2 tracepoints) enforce a deny-list inside the Linux kernel. Blocked operations include writes to protected files and devices, kill signals to protected processes, the <code>bpf()</code> syscall, <code>AF_NETLINK</code>, ptrace, mount, and dangerous capabilities. All enforcement is scoped per session via cgroup-ID with PID tracking propagated atomically at every fork.</p>
+      <p class="feat-desc">20 kernel hooks (18 LSM + 2 tracepoints) enforce a deny-list inside the Linux kernel. Blocked operations include writes to protected files and devices, kill signals to protected processes, the <code>bpf()</code> syscall, <code>AF_NETLINK</code>, ptrace, mount, and dangerous capabilities. All enforcement is scoped per session via cgroup-ID with PID tracking propagated atomically at every fork.</p>
       <div class="feat-tags"><span class="feat-tag">eBPF LSM</span><span class="feat-tag">kernel-enforced</span><span class="feat-tag">cgroup scoped</span></div>
     </div>
 
@@ -366,7 +366,7 @@ footer{border-top:1px solid var(--border);padding:60px 40px;background:#050708;}
     <div class="feature-card">
       <div class="feat-icon">🔐</div>
       <div class="feat-title">RBAC + OIDC Authentication</div>
-      <p class="feat-desc">The replay UI supports role-based access control with 12 granular permissions across custom roles. Groups are mapped to roles for proxy and OIDC authentication flows. Tokens can be provided via file or environment variable. All permission changes and configuration modifications are written to the audit log alongside session events.</p>
+      <p class="feat-desc">The replay UI supports role-based access control with 12 granular permissions across custom roles. Groups are mapped to roles for proxy and OIDC authentication flows. Tokens can be provided via file or environment variable. A queryable access log records who viewed which session and when.</p>
       <div class="feat-tags"><span class="feat-tag">OIDC</span><span class="feat-tag">12 permissions</span><span class="feat-tag">audit log</span></div>
     </div>
 
@@ -448,20 +448,16 @@ footer{border-top:1px solid var(--border);padding:60px 40px;background:#050708;}
   <div class="install-box">
     <div class="ic"># --- On each monitored host ---</div>
     <div><span class="ik">sudo dnf install</span> sudo-logger-client</div>
-    <br>
-    <div class="ic"># /etc/sudo.conf — load the plugin</div>
-    <div>Plugin sudoreplay /usr/libexec/sudo/plugin.so \</div>
-    <div>&nbsp;&nbsp;logserver=logserver.corp.local:9876 \</div>
-    <div>&nbsp;&nbsp;cert=/etc/sudo-logger/client.crt \</div>
-    <div>&nbsp;&nbsp;key=/etc/sudo-logger/client.key \</div>
-    <div>&nbsp;&nbsp;ca=/etc/sudo-logger/ca.crt</div>
+    <div class="ic"># RPM auto-adds "Plugin sudo_logger_plugin sudo_logger_plugin.so" to /etc/sudo.conf</div>
+    <div class="ic"># Set the log server address in /etc/sudo-logger/agent.conf:</div>
+    <div>server = logserver.corp.local:9876</div>
     <br>
     <div class="ic"># --- On the log server ---</div>
     <div><span class="ik">sudo dnf install</span> sudo-logger-server sudo-logger-replay</div>
-    <div><span class="ik">sudo systemctl enable --now</span> sudo-logger-server sudo-logger-replay</div>
+    <div><span class="ik">sudo systemctl enable --now</span> sudo-logserver sudo-replay</div>
     <br>
     <div class="ic"># Deploy with Helm (Kubernetes)</div>
-    <div><span class="ik">helm install</span> sudo-logger ./helm/sudo-logger \</div>
+    <div><span class="ik">helm install</span> sudo-logger ./charts/sudo-logger \</div>
     <div>&nbsp;&nbsp;--set tls.existingSecret=sudo-logger-tls</div>
   </div>
 </div>

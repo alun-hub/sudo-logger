@@ -4,7 +4,7 @@ sudo\-logger\-agent \- audit agent for sudo session recording and privilege esca
 .SH SYNOPSIS
 .B sudo\-logger\-agent
 [\fB\-config\fR \fIfile\fR]
-[\fB\-health\-listen\fR \fIaddr\fR]
+[\fB\-version\fR]
 .SH DESCRIPTION
 .B sudo\-logger\-agent
 is a systemd daemon that runs as root on each client machine.
@@ -74,15 +74,9 @@ badge.
 Path to the configuration file.
 Default:
 .BR /etc/sudo-logger/agent.conf .
-If
-.B agent.conf
-is absent and the legacy
-.B /etc/sudo-logger/shipper.conf
-exists, it is used automatically with a warning.
 .TP
-.BI \-health\-listen " addr"
-Specify an address (e.g. \fI:9877\fR) to listen on for HTTP health checks
-on \fB/healthz\fR.
+.B \-version
+Print the version and exit.
 .SH CONFIGURATION
 Configuration is read from the file specified by
 .BR \-config .
@@ -109,7 +103,9 @@ idle_timeout|0|Terminate sessions idle for this duration (0 = disabled)
 ebpf|true|Enable eBPF session recording (requires kernel BTF)
 mask_pattern|\fI\(em\fR|Additional regex pattern for secret redaction (repeatable)
 disclaimer|\fI\(em\fR|Banner text written to each session terminal at start
-disclaimer_color|yellow|ANSI color for the disclaimer banner
+disclaimer_color|\fI\(em\fR|ANSI color for the disclaimer banner: red, green, blue, orange, bold_red, bold_green, bold_blue, or bold_orange (unset or unrecognized = uncolored)
+sandbox_config|\fI\(em\fR|Path to a YAML deny-list for the process sandbox (empty disables it)
+hostname|\fI(auto-detected)\fR|Override the hostname reported to the log server
 debug|false|Enable verbose debug logging
 .TE
 .SH FILES

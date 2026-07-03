@@ -1,4 +1,4 @@
-.TH SANDBOX.YAML 5 "2026-05-23" "sudo-logger" "Sudo-logger Configuration"
+.TH SANDBOX.YAML 5 "2026-07-03" "sudo-logger" "Sudo-logger Configuration"
 .SH NAME
 sandbox.yaml \- Configuration file for the sudo-logger eBPF LSM process sandbox
 .SH DESCRIPTION
@@ -8,7 +8,7 @@ modification or interference by processes running inside a \fBsudo-logger\fR ses
 
 The restrictions are enforced at the kernel level using \fBeBPF LSM\fR hooks,
 making them effective even against the root user within a sandboxed session.
-The following hooks are used for enforcement:
+20 hooks (18 LSM + 2 tracepoints) are attached in total:
 .IP \(bu 2
 \fBlsm/file_open\fR, \fBlsm/file_permission\fR: Deny write-mode opens on protected inodes.
 .IP \(bu 2
@@ -20,9 +20,23 @@ The following hooks are used for enforcement:
 .IP \(bu 2
 \fBlsm/task_kill\fR: Prevent sending signals to protected processes.
 .IP \(bu 2
-\fBlsm/socket_bind\fR: Prevent binding to protected Unix sockets.
+\fBlsm/socket_create\fR: Prevent creating \fBAF_NETLINK\fR sockets (firewall/route tampering).
 .IP \(bu 2
-\fBtp_btf/sched_process_fork\fR: Propagate sandbox state to all child processes.
+\fBlsm/bprm_check_security\fR: Block execution of binaries in \fBforbidden\fR or under \fBnoexec\fR directories.
+.IP \(bu 2
+\fBlsm/ptrace_access_check\fR: Prevent attaching to/debugging processes outside the sandbox.
+.IP \(bu 2
+\fBlsm/sb_mount\fR: Prevent mounting a filesystem over a protected inode.
+.IP \(bu 2
+\fBlsm/capable\fR: Restrict specific capabilities (\fBCAP_NET_ADMIN\fR, \fBCAP_AUDIT_CONTROL\fR, \fBCAP_SYS_MODULE\fR).
+.IP \(bu 2
+\fBlsm/unix_stream_connect\fR: Block D-Bus/systemd control-socket connections when \fBdeny_systemd_ipc\fR is enabled.
+.IP \(bu 2
+\fBlsm/bpf\fR: Prevent tampering with the sandbox's own BPF maps.
+.IP \(bu 2
+\fBtp_btf/sched_process_fork\fR: Propagate sandbox state to all child processes at fork time.
+.IP \(bu 2
+\fBtp_btf/sched_process_exit\fR: Remove a process from sandbox tracking on exit.
 .SH FILE FORMAT
 The file uses YAML format with a single top-level \fBprotect\fR key.
 .PP
@@ -32,6 +46,11 @@ The file uses YAML format with a single top-level \fBprotect\fR key.
   \fBfiles:\fR
     \- /etc/sudoers
     \- /etc/sudo-logger
+  \fBforbidden:\fR
+    \- /usr/bin/firewall\-cmd
+  \fBnoexec:\fR
+    \- /tmp
+    \- /dev/shm
   \fBdevices:\fR
     \- /dev/nvme0n1
   \fBproc:\fR
@@ -50,6 +69,20 @@ A list of absolute paths to regular files or directories.
 Protected files cannot be opened for writing, truncated, deleted, or renamed.
 Protected directories cannot have new files or subdirectories created inside them.
 Protection is recursive for all existing files found inside a directory at agent startup.
+.TP
+.B forbidden
+A list of absolute paths to binaries forbidden from execution inside any
+session, matched by inode (renaming the binary is still blocked; copying it
+to a new path creates a new inode that is not covered — pair with
+\fBnoexec\fR to close that gap).
+.TP
+.B noexec
+A list of directories under which execution is blocked entirely, preventing
+a forbidden binary from being copied elsewhere and run from there.
+\fBWARNING:\fR not safe on Btrfs — every subvolume root (e.g. \fB/\fR,
+\fB/home\fR) shares inode 256 on the same device, so listing a subvolume
+root also matches \fB/\fR and blocks all execution in the session. Safe on
+ext4 and xfs only; the agent logs a warning if inode 256 is detected.
 .TP
 .B devices
 A list of device nodes (e.g., \fB/dev/sda\fR). Prevents raw hardware access.
