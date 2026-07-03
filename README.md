@@ -426,9 +426,12 @@ migrate-sessions \
 
 ### Build dependencies
 - `gcc`
-- `sudo-devel` (for `sudo_plugin.h`)
 - Go 1.25+
 - `rpm-build` (for RPM packaging)
+
+`sudo_plugin.h` is vendored under `plugin/include/` (ISC-licensed, from the
+sudo project), so no system `sudo-devel`/`sudo-dev` package is required to
+build the plugin.
 
 ---
 
@@ -499,7 +502,7 @@ The ACK signing key pair is generated automatically on the server when the
 
 ```bash
 # Install RPM
-dnf install sudo-logger-server-1.20.5-1.fc43.x86_64.rpm
+dnf install sudo-logger-server-1.20.16-1.fc43.x86_64.rpm
 
 # Install certificates
 cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
@@ -533,7 +536,7 @@ journalctl -u sudo-logserver -f
 
 ```bash
 # Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.20.85-1.fc43.x86_64.rpm
+dnf install sudo-logger-client-1.20.124-1.fc43.x86_64.rpm
 
 # Install certificates and ACK verify key
 cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
@@ -1135,7 +1138,7 @@ terminal player for recorded sessions.  It reads asciinema v2 session recordings
 
 ```bash
 # Install RPM on the log server
-dnf install sudo-logger-replay-1.20.7-1.fc43.x86_64.rpm
+dnf install sudo-logger-replay-1.20.27-1.fc43.x86_64.rpm
 
 # Start the service (runs as sudologger, reads /var/log/sudoreplay)
 systemctl enable --now sudo-replay
@@ -1955,7 +1958,7 @@ sudo-logger/
 # Build the plugin
 cd plugin
 gcc -Wall -Wextra -O2 -fPIC -shared \
-    -I/usr/include/sudo \
+    -Iinclude \
     -D_GNU_SOURCE \
     -o sudo_logger_plugin.so plugin.c
 
@@ -2184,7 +2187,7 @@ rpmdev-setuptree
 
 # Set the version to match the Version: field in the target spec file
 # (each package is versioned independently — see rpm/*.spec)
-VERSION=1.20.85
+VERSION=1.20.124
 
 # 1. Commit your changes first, then create the source tarball from HEAD
 git archive --format=tar.gz --prefix=sudo-logger-${VERSION}/ HEAD \

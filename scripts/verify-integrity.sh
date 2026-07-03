@@ -2,6 +2,7 @@
 # scripts/verify-integrity.sh
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FILE=$1
 if [ -z "$FILE" ]; then
     echo "Usage: $0 <file>"
@@ -19,7 +20,7 @@ case "$EXTENSION" in
         ;;
     c)
         echo "[*] Validating C file: $FILE"
-        gcc -fsyntax-only -I/usr/include/sudo "$FILE"
+        gcc -fsyntax-only -I"$SCRIPT_DIR/../plugin/include" "$FILE"
         ;;
     *)
         echo "[!] Unknown file type for $FILE, skipping syntax check."

@@ -1,6 +1,6 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -O2 -fPIC -shared \
-          -I/usr/include/sudo \
+          -Iinclude \
           -D_GNU_SOURCE \
           -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
           -fstack-clash-protection -fcf-protection \
@@ -18,7 +18,7 @@ $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 test: test_plugin.c $(SRC)
-	$(CC) -Wall -Wextra -O0 -g -I/usr/include/sudo -D_GNU_SOURCE test_plugin.c -o test_plugin -lpthread
+	$(CC) -Wall -Wextra -O0 -g -Iinclude -D_GNU_SOURCE test_plugin.c -o test_plugin -lpthread
 	./test_plugin
 
 install: $(TARGET)

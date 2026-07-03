@@ -36,7 +36,7 @@ users from running sudo commands without a verified log trail.
 # Build the sudo I/O plugin
 cd plugin
 gcc -Wall -Wextra -O2 -fPIC -shared \
-    -I/usr/include/sudo \
+    -Iinclude \
     -D_GNU_SOURCE \
     -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
     -fstack-clash-protection -fcf-protection \
