@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.123
+Version:        1.20.124
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -214,6 +214,11 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Fri Jul 03 2026 sudo-logger 1.20.124-1
+- security: drop a session chunk that fails to parse instead of forwarding
+  it unredacted, so malformed data can never bypass the secret-redaction
+  filter
+
 * Mon Jun 02 2026 sudo-logger 1.20.99-1
 - revert(plugin): restore return 0 on dead agent — return 1 broke session
   termination (sudo relies on return 0 to send SIGHUP directly to bash's PID;
