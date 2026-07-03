@@ -272,3 +272,70 @@ func TestAccessLogMiddleware_BootstrapForcesAdmin(t *testing.T) {
 		t.Errorf("bootstrap-mode role = %q, want admin", gotRole)
 	}
 }
+
+// ── basicAuthMiddleware: /login in OIDC mode ────────────────────────────────
+
+func TestBasicAuthMiddleware_LoginRedirectsToOIDCWhenNoSession(t *testing.T) {
+	initTestStore(t)
+	// Seed a user so isBootstrapMode is false and the OIDC branch is exercised.
+	u := newUserWithPassword(t, "alice", "Correct-Horse1!", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if err := sessionStore.SetAuthConfig(t.Context(), store.AuthConfig{Source: "oidc"}); err != nil {
+		t.Fatalf("SetAuthConfig: %v", err)
+	}
+
+	h := basicAuthMiddleware(newOKHandler())
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("GET /login in oidc mode without session: got %d, want 302", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/api/oidc/login" {
+		t.Errorf("Location = %q, want /api/oidc/login", loc)
+	}
+}
+
+func TestBasicAuthMiddleware_LoginServedDirectlyWithValidOIDCSession(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "Correct-Horse1!", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if err := sessionStore.SetAuthConfig(t.Context(), store.AuthConfig{Source: "oidc"}); err != nil {
+		t.Fatalf("SetAuthConfig: %v", err)
+	}
+	sid := loginSessions.create("alice", RoleAdmin, "")
+	t.Cleanup(func() { loginSessions.delete(sid) })
+
+	h := basicAuthMiddleware(newOKHandler())
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	req.AddCookie(&http.Cookie{Name: "sudo_session", Value: sid})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("GET /login with a valid oidc session: got %d, want 200 (serve SPA as-is)", rr.Code)
+	}
+}
+
+func TestBasicAuthMiddleware_LoginPassesThroughInLocalMode(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "Correct-Horse1!", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	// No AuthConfig source set → defaults to local/"" — must not be redirected.
+
+	h := basicAuthMiddleware(newOKHandler())
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("GET /login in local mode: got %d, want 200 (serve local login page)", rr.Code)
+	}
+}

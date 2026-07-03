@@ -175,12 +175,26 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Allow OIDC endpoints, health checks, login pages, and static assets to bypass auth.
+		// In OIDC mode, a (re)load of the local login page should go straight to the
+		// identity provider instead of showing the unusable local username/password form.
+		if r.URL.Path == "/login" {
+			cfg, _ := sessionStore.GetAuthConfig(r.Context())
+			if cfg.Source == "oidc" {
+				if c, err := r.Cookie("sudo_session"); err != nil || loginSessions.lookup(c.Value) == nil {
+					http.Redirect(w, r, "/api/oidc/login", http.StatusFound)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Allow OIDC endpoints, health checks, and static assets to bypass auth.
 		// Use anchored prefix/exact checks only — never suffix checks, which can be smuggled
 		// past API routes (e.g. /api/admin/export.js would bypass auth with a suffix allowlist).
 		// JS/CSS are all under /assets/; root-level SVGs are listed explicitly.
 		if strings.HasPrefix(r.URL.Path, "/api/oidc/") || r.URL.Path == "/api/login" ||
-			r.URL.Path == "/login" || r.URL.Path == "/healthz" || r.URL.Path == "/metrics" ||
+			r.URL.Path == "/healthz" || r.URL.Path == "/metrics" ||
 			strings.HasPrefix(r.URL.Path, "/assets/") ||
 			strings.HasPrefix(r.URL.Path, "/docs/") ||
 			r.URL.Path == "/favicon.svg" || r.URL.Path == "/icons.svg" ||
