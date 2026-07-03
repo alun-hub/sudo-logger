@@ -37,7 +37,6 @@ spec:
             - -s3-secret-key=$(S3_SECRET_KEY)
             - -db-url=$(DB_URL)
             - -buffer-dir=/var/lib/sudo-logger/buffer
-            - -trusted-user-header=X-Forwarded-User
             - -logserver-admin=http://sudo-logserver-admin:9877
             - -logserver-admin-token=$(APPROVAL_TOKEN)
             - -admin-users=alun-hub
