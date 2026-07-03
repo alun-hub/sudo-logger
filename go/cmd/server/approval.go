@@ -35,6 +35,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/policy"
 	"sudo-logger/internal/store"
 )
@@ -124,6 +125,7 @@ type ApprovalManager struct {
 	lastPolicyHash string // SHA256 hex of last successfully loaded policy bytes
 	opaEngine      *policy.Engine // nil if OPA policy not configured
 	opaPolicy      policy.Policy  // last successfully loaded OPA policy
+	redactor       *iolog.Redactor // masks secrets pasted into a justification
 }
 
 func newApprovalManager(policyPath string, backend store.ApprovalStore) *ApprovalManager {
@@ -193,7 +195,41 @@ func (m *ApprovalManager) loadPolicy() error {
 	}
 
 	m.loadOPAPolicy(ctx)
+	m.loadRedactor(ctx)
 	return nil
+}
+
+// loadRedactor rebuilds the justification redactor from the same
+// redaction_config key the agent already polls (go/cmd/agent/redaction.go),
+// so a secret pasted into a JIT justification is masked before it reaches
+// logs, the pending-request record, or the approval webhook.
+func (m *ApprovalManager) loadRedactor(ctx context.Context) {
+	var patterns []string
+	if cfgStr, err := m.backend.GetConfig(ctx, "redaction_config"); err == nil && cfgStr != "" {
+		if err := json.Unmarshal([]byte(cfgStr), &patterns); err != nil {
+			log.Printf("approval: parse redaction_config: %v", err)
+		}
+	}
+	red, err := iolog.NewRedactor(patterns)
+	if err != nil {
+		log.Printf("approval: build redactor: %v", err)
+		return
+	}
+	m.mu.Lock()
+	m.redactor = red
+	m.mu.Unlock()
+}
+
+// redactJustification masks secret-looking substrings in a free-text
+// justification before it is stored, logged, or forwarded to a webhook.
+func (m *ApprovalManager) redactJustification(s string) string {
+	m.mu.RLock()
+	red := m.redactor
+	m.mu.RUnlock()
+	if red == nil {
+		return s
+	}
+	return red.RedactString(s)
 }
 
 // loadOPAPolicy loads the OPA JIT policy from the store and (re)compiles it.
@@ -317,7 +353,7 @@ func (m *ApprovalManager) Check(user, host, runas, command string, groups []stri
 		User:          user,
 		Host:          host,
 		Command:       command,
-		Justification: justification,
+		Justification: m.redactJustification(justification),
 		SubmittedAt:   now,
 		ExpiresAt:     now.Add(pol.PendingTTL),
 	}

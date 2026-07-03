@@ -10,6 +10,9 @@ import (
 
 // SaveHeartbeat implements SessionStore.
 func (ls *LocalStore) SaveHeartbeat(_ context.Context, host string) error {
+	if !validSudoersHost(host) {
+		return fmt.Errorf("invalid host %q", host)
+	}
 	p := filepath.Join(ls.cfg.LogDir, ".sudoers-config", ".seen-"+host)
 	data := []byte(fmt.Sprintf("%d", time.Now().Unix()))
 	return os.WriteFile(p, data, 0o640)
@@ -17,6 +20,9 @@ func (ls *LocalStore) SaveHeartbeat(_ context.Context, host string) error {
 
 // GetLastSeen implements SessionStore.
 func (ls *LocalStore) GetLastSeen(_ context.Context, host string) (int64, error) {
+	if !validSudoersHost(host) {
+		return 0, fmt.Errorf("invalid host %q", host)
+	}
 	p := filepath.Join(ls.cfg.LogDir, ".sudoers-config", ".seen-"+host)
 	data, err := os.ReadFile(p)
 	if os.IsNotExist(err) {

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.25.4] - 2026-07-03
+
+### Security
+
+- **replay:** Enforce RBAC permissions on the sudoers management API (list/read/write/delete) — previously reachable by any authenticated user regardless of role
+- **replay:** Scope the session report to the caller's own sessions unless they hold the list-all permission, matching the session list API
+- **replay:** Require a permission check on the host-listing API
+- **server:** Restrict which config keys an agent may fetch over the wire to the small set it legitimately needs, preventing disclosure of unrelated server-side secrets
+- **server:** Mask secret-looking text in a JIT approval justification before it is logged or forwarded to a notification webhook
+- **server:** Sanitize user/host fields before writing them to the server log, preventing log-injection via control characters
+- **agent:** Drop (rather than forward) a session chunk that fails to parse, so malformed data can never bypass the secret-redaction filter
+- **store:** Add defense-in-depth path validation to the heartbeat storage layer
+
 ## [1.22.0] - 2026-04-25
 
 ### Added

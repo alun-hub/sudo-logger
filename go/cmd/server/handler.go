@@ -239,6 +239,12 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("parse session start from %s: %v", remote, err)
 				return
 			}
+			// Neutralize control characters before User/Host ever reach a log
+			// line — sanitizeName() below is the authoritative validity check,
+			// but that only runs on the Allow path, well after several
+			// SECURITY:-prefixed lines have already been written.
+			start.User = sanitizeForLog(start.User)
+			start.Host = sanitizeForLog(start.Host)
 			// Verify the claimed host matches the presenting TLS certificate.
 			// With shared client certificates (default setup) this is advisory only
 			// and logs a warning.  Enable -strict-cert-host to reject mismatches
@@ -543,10 +549,13 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			// Agent requests a named config blob (e.g. "sandbox.yaml").
 			// Respond immediately and keep reading — peer closes after receiving.
 			key := strings.TrimSpace(string(payload))
-			content, err := srv.sessionStore.GetConfig(context.Background(), key)
-			if err != nil {
+			var content string
+			if !agentFetchableConfigKey(key) {
+				log.Printf("SECURITY: MsgFetchConfig for disallowed key %q from %s — denying", key, remote)
+			} else if c, err := srv.sessionStore.GetConfig(context.Background(), key); err != nil {
 				log.Printf("fetch config %q from %s: %v", key, remote, err)
-				content = ""
+			} else {
+				content = c
 			}
 			netWriteMu.Lock()
 			_ = protocol.WriteMessage(w, protocol.MsgConfigData, []byte(content))
@@ -600,6 +609,8 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("parse DIVERGENCE_ALERT from %s: %v", remote, err)
 				return
 			}
+			alert.User = sanitizeForLog(alert.User)
+			alert.Host = sanitizeForLog(alert.Host)
 			log.Printf("SECURITY ALERT: DIVERGENCE_ALERT from %s — %s ran %q on %s at %s but plugin did not log it",
 				remote, alert.User, alert.Comm, alert.Host,
 				time.Unix(alert.Ts, 0).Format(time.RFC3339))
@@ -740,6 +751,18 @@ func (srv *server) buildACK(sessionID string, seq uint64) []byte {
 	var sig [64]byte
 	copy(sig[:], sigSlice)
 	return protocol.EncodeAck(seq, ts, sig)
+}
+
+// agentFetchableConfigKey reports whether key is one an agent may legitimately
+// request via MsgFetchConfig. This is the only allowlist enforced on that
+// message type — anything not listed here (e.g. approval-policy.yaml,
+// jit-policy, siem.yaml) must never be handed to a peer over the wire.
+func agentFetchableConfigKey(key string) bool {
+	switch key {
+	case "sandbox.yaml", "redaction_config":
+		return true
+	}
+	return strings.HasPrefix(key, "sudoers/")
 }
 
 // certMatchesHost returns true if the TLS client certificate was issued for

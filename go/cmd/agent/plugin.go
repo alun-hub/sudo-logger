@@ -744,7 +744,14 @@ loop:
 			}
 		case protocol.MsgChunk:
 			chunk, err := protocol.ParseChunk(payload)
-			if err == nil && chunk.Stream <= protocol.StreamTtyOut {
+			if err != nil {
+				// Never forward a chunk we couldn't parse: it never went
+				// through the redactor, so it could carry an unmasked
+				// secret. Drop it rather than risk shipping raw bytes.
+				log.Printf("[%s] drop malformed CHUNK (%d bytes): %v", start.SessionID, len(payload), err)
+				continue loop
+			}
+			if chunk.Stream <= protocol.StreamTtyOut {
 				data, buffering := redactor.Redact(chunk.Data, chunk.Stream)
 				if buffering {
 					continue loop
@@ -752,7 +759,7 @@ loop:
 				chunk.Data = data
 				payload = protocol.EncodeChunk(chunk.Seq, chunk.Timestamp, chunk.Stream, chunk.Data)
 			}
-			if err == nil && (chunk.Stream == protocol.StreamStdin || chunk.Stream == protocol.StreamTtyIn) {
+			if chunk.Stream == protocol.StreamStdin || chunk.Stream == protocol.StreamTtyIn {
 				lastInputNs.Store(time.Now().UnixNano())
 			}
 			forward(protocol.MsgChunk, payload)

@@ -465,6 +465,9 @@ func handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetHosts(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermSessionsListOwn) {
+		return
+	}
 	all, err := cache.get(r.Context())
 	if err != nil {
 		http.Error(w, "index error: "+err.Error(), http.StatusInternalServerError)
@@ -523,6 +526,9 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !require(w, r, store.PermSessionsListOwn) {
+		return
+	}
 
 	var from, to int64
 	if v, err := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64); err == nil {
@@ -531,7 +537,17 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64); err == nil {
 		to = v
 	}
-	report, err := buildReport(r.Context(), from, to)
+
+	// Same ownership scoping as handleListSessions: without sessions:list_all,
+	// the report is restricted to the caller's own sessions.
+	var ownerFilter string
+	if !can(r, store.PermSessionsListAll) {
+		ownerFilter = viewerFromContext(r)
+		if ownerFilter == "-" {
+			ownerFilter = "" // unauthenticated open deployment — show all
+		}
+	}
+	report, err := buildReport(r.Context(), from, to, ownerFilter)
 	if err != nil {
 		log.Printf("build report: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -543,7 +559,10 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func buildReport(ctx context.Context, from, to int64) (*ReportData, error) {
+// buildReport aggregates sessions in [from, to] into a ReportData. When
+// ownerFilter is non-empty, only sessions belonging to that user are
+// considered — used to scope the report for callers without sessions:list_all.
+func buildReport(ctx context.Context, from, to int64, ownerFilter string) (*ReportData, error) {
 	all, err := cache.get(ctx)
 	if err != nil {
 		return nil, err
@@ -551,6 +570,9 @@ func buildReport(ctx context.Context, from, to int64) (*ReportData, error) {
 
 	sessions := make([]SessionInfo, 0, len(all))
 	for _, s := range all {
+		if ownerFilter != "" && s.User != ownerFilter {
+			continue
+		}
 		if from > 0 && s.StartTime < from {
 			continue
 		}
@@ -1034,6 +1056,9 @@ func handlePutSandboxTemplates(w http.ResponseWriter, r *http.Request) {
 // handleGetSudoersHosts returns the union of hosts that have sent snapshots
 // and hosts that have recorded sessions, including their override status.
 func handleGetSudoersHosts(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	snapHosts, err := sessionStore.ListSudoersHosts(r.Context())
 	if err != nil {
 		http.Error(w, "list hosts: "+err.Error(), http.StatusInternalServerError)
@@ -1140,6 +1165,9 @@ func sha256Sum(b []byte) []byte {
 
 // handleGetSudoersSnapshots returns the most recent 20 snapshots for a host.
 func handleGetSudoersSnapshots(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	host := r.URL.Query().Get("host")
 	if host == "" {
 		http.Error(w, "host required", http.StatusBadRequest)
@@ -1171,6 +1199,9 @@ func handleGetSudoersSnapshots(w http.ResponseWriter, r *http.Request) {
 // handleGetSudoersConfig returns the staged (desired) config for a host,
 // falling back to the _default template if no host-specific config is set.
 func handleGetSudoersConfig(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigRead) {
+		return
+	}
 	host := r.URL.Query().Get("host")
 	key := "sudoers/_default"
 	isOverride := false
@@ -1205,6 +1236,9 @@ func handleGetSudoersConfig(w http.ResponseWriter, r *http.Request) {
 // handlePutSudoersConfig stores a desired sudoers config for a host (or the
 // global _default when host is empty).
 func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, int64(256*1024))
 	var body struct {
 		Content string `json:"content"`
@@ -1312,6 +1346,9 @@ func extractManagedSudoers(full string) string {
 // handleDeleteSudoersConfig removes a host-specific config override, causing
 // the agent to fall back to the _default template.
 func handleDeleteSudoersConfig(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	host := r.URL.Query().Get("host")
 	if host == "" {
 		http.Error(w, "host required for delete", http.StatusBadRequest)

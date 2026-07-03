@@ -76,7 +76,7 @@ func TestBuildReport_IncompleteAnomaly(t *testing.T) {
 	seedCache(t, []SessionInfo{
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "vim", StartTime: daytime(), Duration: 60, Incomplete: true},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestBuildReport_AfterHoursAnomaly(t *testing.T) {
 	seedCache(t, []SessionInfo{
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "vim", StartTime: night, Duration: 60},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestBuildReport_LongSessionAnomaly(t *testing.T) {
 	seedCache(t, []SessionInfo{
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "vim", StartTime: daytime(), Duration: 7201},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestBuildReport_RootShellAnomaly(t *testing.T) {
 	seedCache(t, []SessionInfo{
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "bash", Runas: "root", StartTime: daytime(), Duration: 60},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestBuildReport_RootNonShellCommandNoAnomaly(t *testing.T) {
 	seedCache(t, []SessionInfo{
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "systemctl status", Runas: "root", StartTime: daytime(), Duration: 60},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestBuildReport_HighRiskAnomaly(t *testing.T) {
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "vim", StartTime: daytime(), Duration: 60,
 			RiskScore: 60, RiskReasons: []string{"reason one", "reason two"}},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestBuildReport_CriticalCountedSeparatelyFromHighRisk(t *testing.T) {
 	seedCache(t, []SessionInfo{
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "vim", StartTime: daytime(), Duration: 60, RiskScore: 80},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestBuildReport_IncompleteHighRiskNotDoubleCounted(t *testing.T) {
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "vim", StartTime: daytime(), Duration: 60,
 			Incomplete: true, RiskScore: 60, RiskReasons: []string{"x"}},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestBuildReport_SummaryAggregation(t *testing.T) {
 		{TSID: "alice/h2_1", User: "alice", Host: "h2", Command: "vim", StartTime: 2000, Duration: 60},
 		{TSID: "bob/h1_1", User: "bob", Host: "h1", Command: "vim", StartTime: 3000, Duration: 60},
 	})
-	report, err := buildReport(t.Context(), 0, 0)
+	report, err := buildReport(t.Context(), 0, 0, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestBuildReport_TimeRangeFilter(t *testing.T) {
 		{TSID: "u/h_1", User: "alice", Host: "h1", Command: "vim", StartTime: 1000, Duration: 60},
 		{TSID: "u/h_2", User: "alice", Host: "h1", Command: "vim", StartTime: 5000, Duration: 60},
 	})
-	report, err := buildReport(t.Context(), 2000, 6000)
+	report, err := buildReport(t.Context(), 2000, 6000, "")
 	if err != nil {
 		t.Fatalf("buildReport: %v", err)
 	}
