@@ -29,6 +29,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 	var netWriteMu sync.Mutex // Protects all writes to 'w'
 
 	var sess *session
+	var diskSess atomic.Pointer[session]
 	var start *protocol.SessionStart
 
 	// ── Async ACK Coalescer ───────────────────────────────────────────────
@@ -80,17 +81,25 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				}
 			}
 
+			s := diskSess.Load()
+			var sid string
+			if s != nil {
+				sid = s.id
+			} else {
+				sid = sessionID
+			}
+
 			var lastSeq uint64
 			for _, t := range batch {
 				if t.msgType == protocol.MsgResize {
-					if sess != nil {
+					if s != nil {
 						resize, err := protocol.ParseResize(t.payload)
 						if err != nil {
-							log.Printf("[%s] disk-writer parse resize: %v", sessionID, err)
+							log.Printf("[%s] disk-writer parse resize: %v", sid, err)
 							continue
 						}
-						if err := sess.writer.WriteResize(resize.Cols, resize.Rows, resize.Timestamp); err != nil {
-							log.Printf("[%s] write resize: %v", sessionID, err)
+						if err := s.writer.WriteResize(resize.Cols, resize.Rows, resize.Timestamp); err != nil {
+							log.Printf("[%s] write resize: %v", sid, err)
 						}
 					}
 					continue
@@ -98,29 +107,29 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 				chunk, err := protocol.ParseChunk(t.payload)
 				if err != nil {
-					log.Printf("[%s] disk-writer parse chunk: %v", sessionID, err)
+					log.Printf("[%s] disk-writer parse chunk: %v", sid, err)
 					continue
 				}
 
 				// Perform actual disk/S3 I/O
-				if sess != nil {
+				if s != nil {
 					switch chunk.Stream {
 					case protocol.StreamTtyOut, protocol.StreamStdout, protocol.StreamStderr:
-						if err := sess.writer.WriteOutput(chunk.Data, chunk.Timestamp); err != nil {
-							log.Printf("[%s] write output: %v", sessionID, err)
+						if err := s.writer.WriteOutput(chunk.Data, chunk.Timestamp); err != nil {
+							log.Printf("[%s] write output: %v", sid, err)
 						}
 					case protocol.StreamTtyIn, protocol.StreamStdin:
-						if err := sess.writer.WriteInput(chunk.Data, chunk.Timestamp); err != nil {
-							log.Printf("[%s] write input: %v", sessionID, err)
+						if err := s.writer.WriteInput(chunk.Data, chunk.Timestamp); err != nil {
+							log.Printf("[%s] write input: %v", sid, err)
 						}
 					}
-					sess.lastSeq = chunk.Seq
+					atomic.StoreUint64(&s.lastSeq, chunk.Seq)
 					lastSeq = chunk.Seq
 				}
 			}
 
-			if sess != nil {
-				_ = sess.writer.Flush()
+			if s != nil {
+				_ = s.writer.Flush()
 			}
 
 			// ONLY NOW that the batch is on disk, we signal the ACK coalescer
@@ -357,6 +366,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("open session %s: %v", start.SessionID, err)
 				return
 			}
+			diskSess.Store(sess)
 			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s tsid=%s",
 				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
 				sanitizeForLog(sess.command), sanitizeForLog(start.ResolvedCommand),
@@ -424,6 +434,7 @@ func (srv *server) handleConn(conn *tls.Conn) {
 				log.Printf("open session %s: %v", start.SessionID, err)
 				return
 			}
+			diskSess.Store(sess)
 			log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s tsid=%s",
 				sess.id, sess.user, sess.host, sess.runas, start.RunasUID,
 				sanitizeForLog(sess.command), sanitizeForLog(start.ResolvedCommand),

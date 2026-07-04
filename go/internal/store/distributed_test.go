@@ -287,6 +287,67 @@ func TestDistributedStore_IsBlocked(t *testing.T) {
 	}
 }
 
+// ── IsWhitelisted ─────────────────────────────────────────────────────────────
+
+func TestDistributedStore_IsWhitelisted(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if err := d.SaveWhitelistPolicy(ctx, WhitelistPolicy{
+		Users: []WhitelistedUserEntry{
+			{Username: "bob", Hosts: []string{}, Reason: "bypass JIT"},
+			{Username: "charlie", Hosts: []string{"host1"}, Reason: "bypass JIT on host1"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveWhitelistPolicy: %v", err)
+	}
+
+	// Normal whitelist lookup: bob (all hosts)
+	whitelisted, err := d.IsWhitelisted(ctx, "bob", "anyhost")
+	if err != nil {
+		t.Fatalf("IsWhitelisted(bob): %v", err)
+	}
+	if !whitelisted {
+		t.Error("IsWhitelisted(bob, anyhost) = false, want true (all hosts)")
+	}
+
+	// Normal whitelist lookup: charlie on host1 (allowed)
+	whitelisted, err = d.IsWhitelisted(ctx, "charlie", "host1")
+	if err != nil {
+		t.Fatalf("IsWhitelisted(charlie, host1): %v", err)
+	}
+	if !whitelisted {
+		t.Error("IsWhitelisted(charlie, host1) = false, want true")
+	}
+
+	// Normal whitelist lookup: charlie on host2 (not allowed)
+	whitelisted, err = d.IsWhitelisted(ctx, "charlie", "host2")
+	if err != nil {
+		t.Fatalf("IsWhitelisted(charlie, host2): %v", err)
+	}
+	if whitelisted {
+		t.Error("IsWhitelisted(charlie, host2) = true, want false")
+	}
+
+	// Normal whitelist lookup: alice (never whitelisted)
+	whitelisted, err = d.IsWhitelisted(ctx, "alice", "anyhost")
+	if err != nil {
+		t.Fatalf("IsWhitelisted(alice): %v", err)
+	}
+	if whitelisted {
+		t.Error("IsWhitelisted(alice) = true, want false")
+	}
+
+	// Test canceled context behavior
+	cancelCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = d.IsWhitelisted(cancelCtx, "bob", "anyhost")
+	if err == nil {
+		t.Error("IsWhitelisted with canceled context should return a non-nil error")
+	}
+}
+
+
 // ── RBAC: Users / Roles / AuthConfig ──────────────────────────────────────────
 
 func TestDistributedStore_RBAC(t *testing.T) {
