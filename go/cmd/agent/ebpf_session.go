@@ -111,6 +111,9 @@ func (s *ebpfSession) sendChunk(tsNS int64, stream uint8, data []byte) {
 	}
 	s.seq++
 	payload := encodeEBPFChunk(s.seq, tsNS, stream, data)
+	if s.conn != nil {
+		_ = s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	}
 	if err := protocol.WriteMessage(s.bw, protocol.MsgChunk, payload); err != nil {
 		log.Printf("ebpf [%s]: send chunk: %v", s.id, err)
 		s.done = true
@@ -162,7 +165,6 @@ func (s *ebpfSession) drainACKs(ctx context.Context, verifyKey []byte) {
 		return
 	}
 	br := bufio.NewReader(conn)
-	lastACK := time.Now()
 
 	for {
 		// Check context before blocking on read.
@@ -194,15 +196,9 @@ func (s *ebpfSession) drainACKs(ctx context.Context, verifyKey []byte) {
 					continue
 				}
 			}
-			lastACK = time.Now()
 		case protocol.MsgHeartbeatAck:
-			lastACK = time.Now()
 		}
 
-		if time.Since(lastACK) > 5*time.Second {
-			log.Printf("ebpf [%s]: no ACK from server for >5s", s.id)
-			lastACK = time.Now()
-		}
 	}
 }
 

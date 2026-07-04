@@ -1,5 +1,4 @@
 // cgroup.go — per-session cgroup management for sudo-logger-agent.
-// Identical logic to sudo-logger-agent/cgroup.go; moved here as part of the merge.
 package main
 
 import (
@@ -342,8 +341,11 @@ func (cg *cgroupSession) hasPids() bool {
 	}
 	data, err := os.ReadFile(filepath.Join(cg.path, "cgroup.procs"))
 	if err != nil {
-		log.Printf("cgroup %s: hasPids read error: %v", cg.cgName, err)
-		return false
+		if os.IsNotExist(err) {
+			return false
+		}
+		log.Printf("cgroup %s: hasPids read error: %v (retaining)", cg.cgName, err)
+		return true
 	}
 	for _, pidStr := range strings.Fields(string(data)) {
 		pid, err := strconv.Atoi(pidStr)
