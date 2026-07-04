@@ -263,7 +263,16 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			// ── Block policy check BEFORE creating the session directory ──────
 			// Checking first avoids leaving an empty session.cast on disk for
 			// every denied attempt (which clutters the replay index).
-			if blocked, msg, _ := srv.sessionStore.IsBlocked(context.Background(), start.User, start.Host); blocked {
+			blocked, msg, err := srv.sessionStore.IsBlocked(context.Background(), start.User, start.Host)
+			if err != nil {
+				log.Printf("SECURITY: [%s] block policy check failed for user=%s host=%s: %v",
+					start.SessionID, start.User, start.Host, err)
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionError, []byte("internal block check error"))
+				netWriteMu.Unlock()
+				return
+			}
+			if blocked {
 				log.Printf("SECURITY: [%s] user=%s host=%s denied by block policy",
 					start.SessionID, start.User, start.Host)
 				netWriteMu.Lock()
@@ -274,7 +283,16 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 			// ── JIT approval check ─────────────────────────────────────────────
 			var result CheckResult
-			if whitelisted, _ := srv.sessionStore.IsWhitelisted(context.Background(), start.User, start.Host); whitelisted {
+			whitelisted, err := srv.sessionStore.IsWhitelisted(context.Background(), start.User, start.Host)
+			if err != nil {
+				log.Printf("SECURITY: [%s] whitelist check failed for user=%s host=%s: %v",
+					start.SessionID, start.User, start.Host, err)
+				netWriteMu.Lock()
+				_ = protocol.WriteMessage(w, protocol.MsgSessionError, []byte("internal whitelist check error"))
+				netWriteMu.Unlock()
+				return
+			}
+			if whitelisted {
 				log.Printf("[%s] whitelist: user=%s host=%s — bypassing JIT approval", start.SessionID, start.User, start.Host)
 			} else {
 				result = srv.approvalMgr.Check(start.User, start.Host, start.RunasUser, start.Command,

@@ -592,7 +592,10 @@ LIMIT 1`,
 		user, host,
 	).Scan(&reason)
 	if err != nil {
-		return false, "", nil // no match
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, "", nil // no match
+		}
+		return false, "", err
 	}
 	return true, reason, nil
 }
@@ -1273,7 +1276,10 @@ SELECT 1 FROM sudo_whitelisted_users
 WHERE username=$1 AND (host=$2 OR host IS NULL)
 LIMIT 1`, user, host).Scan(&dummy)
 	if err != nil {
-		return false, nil // no match
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil // no match
+		}
+		return false, err
 	}
 	return true, nil
 }

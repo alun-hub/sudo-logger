@@ -11,6 +11,7 @@ package store
 // runtime is reachable — see newTestPostgresDSN in distributed_infra_test.go.
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -275,6 +276,14 @@ func TestDistributedStore_IsBlocked(t *testing.T) {
 	}
 	if blocked {
 		t.Error("IsBlocked(alice) should be false — alice was never blocked")
+	}
+
+	// Test canceled context behavior
+	cancelCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, _, err = d.IsBlocked(cancelCtx, "mallory", "anyhost")
+	if err == nil {
+		t.Error("IsBlocked with canceled context should return a non-nil error")
 	}
 }
 
