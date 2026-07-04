@@ -242,6 +242,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 
 		switch msgType {
 		case protocol.MsgSessionStart:
+			if sess != nil {
+				log.Printf("SECURITY: duplicate session start attempt from %s — dropping connection", remote)
+				return
+			}
 			var err error
 			start, err = protocol.ParseSessionStart(payload)
 			if err != nil {
@@ -388,6 +392,10 @@ func (srv *server) handleConn(conn *tls.Conn) {
 			sendMu.Unlock()
 
 		case protocol.MsgSessionChallengeResponse:
+			if sess != nil {
+				log.Printf("SECURITY: duplicate session start attempt from %s — dropping connection", remote)
+				return
+			}
 			if start == nil {
 				log.Printf("challenge response before session_start from %s", remote)
 				return

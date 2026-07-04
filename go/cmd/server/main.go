@@ -165,7 +165,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("approval token: %v", err)
 		}
-		srv.approvalMgr.RegisterApprovalAPI(healthMux, approvalToken)
+		if srv.approvalMgr != nil {
+			srv.approvalMgr.RegisterApprovalAPI(healthMux, approvalToken)
+		}
 
 		// DELETE /api/sessions/<tsid> — permanent GDPR/audit deletion.
 		// Only registered when an approval token is configured; no token = endpoint disabled.
@@ -220,7 +222,12 @@ func main() {
 			fmt.Fprintf(w, "sudologger_sessions_incomplete_total %d\n", srv.sessionsIncomplete.Load())
 		})
 		go func() {
-			if err := http.ListenAndServe(*flagHealthListen, healthMux); err != nil {
+			healthServer := &http.Server{
+				Addr:              *flagHealthListen,
+				Handler:           healthMux,
+				ReadHeaderTimeout: 5 * time.Second,
+			}
+			if err := healthServer.ListenAndServe(); err != nil {
 				log.Printf("health/metrics listener: %v", err)
 			}
 		}()

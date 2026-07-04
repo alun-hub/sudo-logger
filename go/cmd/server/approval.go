@@ -162,8 +162,10 @@ func (m *ApprovalManager) loadPolicy() error {
 	if err == nil && cfgStr != "" {
 		data = []byte(cfgStr)
 		source = "store"
+	} else if err != nil {
+		return fmt.Errorf("read approval policy from store: %w", err)
 	} else {
-		// Fallback to local file.
+		// Fallback to local file (err == nil && cfgStr == "").
 		data, err = os.ReadFile(m.policyPath)
 		if os.IsNotExist(err) {
 			m.mu.Lock()
@@ -726,11 +728,12 @@ func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// Internal struct for JSON roundtrip because time.Duration in JSON is nanoseconds (int64)
 	// whereas UI and YAML want strings like "30m".
 	type policyJSON struct {
-		Enabled       bool   `json:"enabled"`
-		DefaultWindow string `json:"default_window"`
-		PendingTTL    string `json:"pending_ttl"`
-		Exempt        []exemptRule      `json:"exempt"`
-		Notifications approvalNotifyCfg `json:"notifications"`
+		Enabled            bool              `json:"enabled"`
+		DefaultWindow      string            `json:"default_window"`
+		PendingTTL         string            `json:"pending_ttl"`
+		MaxSessionDuration string            `json:"max_session_duration"`
+		Exempt             []exemptRule      `json:"exempt"`
+		Notifications      approvalNotifyCfg `json:"notifications"`
 	}
 
 	switch r.Method {
@@ -746,11 +749,12 @@ func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
 			notif.WebhookSecret = "***"
 		}
 		pj := policyJSON{
-			Enabled:       p.Enabled,
-			DefaultWindow: p.DefaultWindow.String(),
-			PendingTTL:    p.PendingTTL.String(),
-			Exempt:        p.Exempt,
-			Notifications: notif,
+			Enabled:            p.Enabled,
+			DefaultWindow:      p.DefaultWindow.String(),
+			PendingTTL:         p.PendingTTL.String(),
+			MaxSessionDuration: p.MaxSessionDuration.String(),
+			Exempt:             p.Exempt,
+			Notifications:      notif,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -794,6 +798,13 @@ func (m *ApprovalManager) handleConfig(w http.ResponseWriter, r *http.Request) {
 			p.PendingTTL, err = time.ParseDuration(req.Config.PendingTTL)
 			if err != nil {
 				http.Error(w, "invalid pending_ttl: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if req.Config.MaxSessionDuration != "" {
+			p.MaxSessionDuration, err = time.ParseDuration(req.Config.MaxSessionDuration)
+			if err != nil {
+				http.Error(w, "invalid max_session_duration: "+err.Error(), http.StatusBadRequest)
 				return
 			}
 		}
@@ -1027,7 +1038,9 @@ func (m *ApprovalManager) handleJITPolicy(w http.ResponseWriter, r *http.Request
 
 func newRequestID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return strings.ToUpper(hex.EncodeToString(b))
 }
 

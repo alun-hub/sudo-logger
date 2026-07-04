@@ -112,3 +112,4 @@ scripts/full_audit.py
 scripts/portal-screencast-test.py
 scripts/audit_parity.py
 contrib/launch/
+review/
