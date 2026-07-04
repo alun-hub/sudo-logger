@@ -1487,6 +1487,9 @@ func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 // The file must contain at least one PEM block and be ≤ 64 KB.
 // Saved with mode 0640 (root:sudologger) so the log server can read it.
 func handleUploadSiemCert(w http.ResponseWriter, r *http.Request) {
+	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
 	if *flagStorage == "distributed" {
 		http.Error(w,
 			"cert upload is not supported in distributed mode; "+

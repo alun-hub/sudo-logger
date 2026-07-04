@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -83,6 +84,7 @@ func withLocalStorage(t *testing.T) {
 }
 
 func TestHandleUploadSiemCert_DistributedModeNotImplemented(t *testing.T) {
+	initTestStore(t)
 	orig := *flagStorage
 	*flagStorage = "distributed"
 	t.Cleanup(func() { *flagStorage = orig })
@@ -97,6 +99,7 @@ func TestHandleUploadSiemCert_DistributedModeNotImplemented(t *testing.T) {
 }
 
 func TestHandleUploadSiemCert_Valid(t *testing.T) {
+	initTestStore(t)
 	withLocalStorage(t)
 	dir := withSiemConfigDir(t)
 
@@ -126,6 +129,7 @@ func TestHandleUploadSiemCert_Valid(t *testing.T) {
 }
 
 func TestHandleUploadSiemCert_InvalidFilename(t *testing.T) {
+	initTestStore(t)
 	withLocalStorage(t)
 	withSiemConfigDir(t)
 
@@ -152,6 +156,7 @@ func TestHandleUploadSiemCert_InvalidFilename(t *testing.T) {
 // the regex check and the destDir containment check, so it cannot escape
 // destDir — it just lands under a different (but still safe) plain name.
 func TestHandleUploadSiemCert_PathTraversalFilenameIsBasenamed(t *testing.T) {
+	initTestStore(t)
 	withLocalStorage(t)
 	dir := withSiemConfigDir(t)
 
@@ -168,6 +173,7 @@ func TestHandleUploadSiemCert_PathTraversalFilenameIsBasenamed(t *testing.T) {
 }
 
 func TestHandleUploadSiemCert_MissingPEMBlock(t *testing.T) {
+	initTestStore(t)
 	withLocalStorage(t)
 	withSiemConfigDir(t)
 
@@ -180,6 +186,7 @@ func TestHandleUploadSiemCert_MissingPEMBlock(t *testing.T) {
 }
 
 func TestHandleUploadSiemCert_MissingFileField(t *testing.T) {
+	initTestStore(t)
 	withLocalStorage(t)
 	withSiemConfigDir(t)
 
@@ -198,6 +205,7 @@ func TestHandleUploadSiemCert_MissingFileField(t *testing.T) {
 }
 
 func TestHandleUploadSiemCert_TooLarge(t *testing.T) {
+	initTestStore(t)
 	withLocalStorage(t)
 	withSiemConfigDir(t)
 
@@ -213,5 +221,30 @@ func TestHandleUploadSiemCert_TooLarge(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "-----BEGIN") {
 		t.Error("oversized-file rejection response should not echo file content")
+	}
+}
+func TestHandleUploadSiemCert_ForbiddenForNonAdmin(t *testing.T) {
+	initTestStore(t)
+	withLocalStorage(t)
+	withSiemConfigDir(t)
+
+	u := newUserWithPassword(t, "viewer-user", "Correct-Horse1!", RoleViewer)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+
+	content := []byte("-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n")
+	req := multipartCertRequest(t, "ca.pem", content)
+
+	perms := resolveRolePerms(req, RoleViewer)
+	ctx := context.WithValue(req.Context(), ctxRole, RoleViewer)
+	ctx = context.WithValue(ctx, ctxPermissions, perms)
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	handleUploadSiemCert(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("viewer without PermConfigWrite: got %d, want 403; body: %s", rr.Code, rr.Body.String())
 	}
 }
