@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -462,208 +463,97 @@ func (s *sandboxSubsystem) start(configPath string) error {
 		}
 	}
 
-	lsmFile, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxFilePermission})
-	if err != nil {
-		objs.Close()
-		return fmt.Errorf("attach lsm/file_permission: %w", err)
-	}
-	lsmUnlink, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeUnlink})
-	if err != nil {
-		lsmFile.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_unlink: %w", err)
-	}
-	lsmRename, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeRename})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_rename: %w", err)
-	}
-	lsmKill, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxTaskKill})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/task_kill: %w", err)
-	}
-	lsmMkdir, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeMkdir})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_mkdir: %w", err)
-	}
-	lsmCreate, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeCreate})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_create: %w", err)
-	}
-	lsmMknod, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeMknod})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		lsmCreate.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_mknod: %w", err)
-	}
-	lsmSymlink, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeSymlink})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		lsmCreate.Close()
-		lsmMknod.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_symlink: %w", err)
-	}
-	lsmSetattr, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxInodeSetattr})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		lsmCreate.Close()
-		lsmMknod.Close()
-		lsmSymlink.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/inode_setattr: %w", err)
-	}
-	lsmOpen, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxFileOpen})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		lsmCreate.Close()
-		lsmMknod.Close()
-		lsmSymlink.Close()
-		lsmSetattr.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/file_open: %w", err)
-	}
-	lsmTrunc, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxPathTruncate})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		lsmCreate.Close()
-		lsmMknod.Close()
-		lsmSymlink.Close()
-		lsmSetattr.Close()
-		lsmOpen.Close()
-		objs.Close()
-		return fmt.Errorf("attach lsm/path_truncate: %w", err)
-	}
-	tpFork, err := link.AttachTracing(link.TracingOptions{Program: objs.SandboxProcessFork})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		lsmCreate.Close()
-		lsmMknod.Close()
-		lsmSymlink.Close()
-		lsmSetattr.Close()
-		lsmOpen.Close()
-		lsmTrunc.Close()
-		objs.Close()
-		return fmt.Errorf("attach tp/sched_process_fork: %w", err)
-	}
-	tpExit, err := link.AttachTracing(link.TracingOptions{Program: objs.SandboxProcessExit})
-	if err != nil {
-		lsmFile.Close()
-		lsmUnlink.Close()
-		lsmRename.Close()
-		lsmKill.Close()
-		lsmMkdir.Close()
-		lsmCreate.Close()
-		lsmMknod.Close()
-		lsmSymlink.Close()
-		lsmSetattr.Close()
-		lsmOpen.Close()
-		lsmTrunc.Close()
-		tpFork.Close()
-		objs.Close()
-		return fmt.Errorf("attach tp/sched_process_exit: %w", err)
-	}
-	applyFeatures(objs, res.Features)
-
-	// Collect existing links; use closer helper to avoid repetitive cleanup below.
-	attached := []link.Link{lsmFile, lsmUnlink, lsmRename, lsmKill, lsmMkdir, lsmCreate, lsmMknod, lsmSymlink, lsmSetattr, lsmOpen, lsmTrunc, tpFork, tpExit}
+	var attached []link.Link
 	closeAttached := func() {
 		for _, l := range attached {
-			l.Close()
+			_ = l.Close()
 		}
 		objs.Close()
 	}
 
-	lsmBpf, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxBpf})
-	if err != nil {
-		closeAttached()
-		return fmt.Errorf("attach lsm/bpf: %w", err)
+	attachLSM := func(prog *ebpf.Program, name string) error {
+		l, err := link.AttachLSM(link.LSMOptions{Program: prog})
+		if err != nil {
+			closeAttached()
+			return fmt.Errorf("attach lsm/%s: %w", name, err)
+		}
+		attached = append(attached, l)
+		return nil
 	}
-	attached = append(attached, lsmBpf)
 
-	lsmSocket, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxSocketCreate})
-	if err != nil {
-		closeAttached()
-		return fmt.Errorf("attach lsm/socket_create: %w", err)
+	attachTracepoint := func(prog *ebpf.Program, name string) error {
+		l, err := link.AttachTracing(link.TracingOptions{Program: prog})
+		if err != nil {
+			closeAttached()
+			return fmt.Errorf("attach tp/%s: %w", name, err)
+		}
+		attached = append(attached, l)
+		return nil
 	}
-	attached = append(attached, lsmSocket)
 
-	lsmPtrace, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxPtraceAccessCheck})
-	if err != nil {
-		closeAttached()
-		return fmt.Errorf("attach lsm/ptrace_access_check: %w", err)
+	if err := attachLSM(objs.SandboxFilePermission, "file_permission"); err != nil {
+		return err
 	}
-	attached = append(attached, lsmPtrace)
+	if err := attachLSM(objs.SandboxInodeUnlink, "inode_unlink"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxInodeRename, "inode_rename"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxTaskKill, "task_kill"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxInodeMkdir, "inode_mkdir"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxInodeCreate, "inode_create"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxInodeMknod, "inode_mknod"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxInodeSymlink, "inode_symlink"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxInodeSetattr, "inode_setattr"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxFileOpen, "file_open"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxPathTruncate, "path_truncate"); err != nil {
+		return err
+	}
+	if err := attachTracepoint(objs.SandboxProcessFork, "sched_process_fork"); err != nil {
+		return err
+	}
+	if err := attachTracepoint(objs.SandboxProcessExit, "sched_process_exit"); err != nil {
+		return err
+	}
 
-	lsmMount, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxSbMount})
-	if err != nil {
-		closeAttached()
-		return fmt.Errorf("attach lsm/sb_mount: %w", err)
-	}
-	attached = append(attached, lsmMount)
+	applyFeatures(objs, res.Features)
 
-	lsmCapable, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxCapable})
-	if err != nil {
-		closeAttached()
-		return fmt.Errorf("attach lsm/capable: %w", err)
+	if err := attachLSM(objs.SandboxBpf, "bpf"); err != nil {
+		return err
 	}
-	attached = append(attached, lsmCapable)
-
-	lsmUnixConn, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxUnixConnect})
-	if err != nil {
-		closeAttached()
-		return fmt.Errorf("attach lsm/unix_stream_connect: %w", err)
+	if err := attachLSM(objs.SandboxSocketCreate, "socket_create"); err != nil {
+		return err
 	}
-	attached = append(attached, lsmUnixConn)
-
-	lsmBprm, err := link.AttachLSM(link.LSMOptions{Program: objs.SandboxBprmCheckSecurity})
-	if err != nil {
-		closeAttached()
-		return fmt.Errorf("attach lsm/bprm_check_security: %w", err)
+	if err := attachLSM(objs.SandboxPtraceAccessCheck, "ptrace_access_check"); err != nil {
+		return err
 	}
-	attached = append(attached, lsmBprm)
+	if err := attachLSM(objs.SandboxSbMount, "sb_mount"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxCapable, "capable"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxUnixConnect, "unix_stream_connect"); err != nil {
+		return err
+	}
+	if err := attachLSM(objs.SandboxBprmCheckSecurity, "bprm_check_security"); err != nil {
+		return err
+	}
 
 	s.links = attached
 
@@ -727,32 +617,61 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 
 	marker := uint8(1)
 
-	// Collect then delete all existing protected inodes.
-	var inodeKeys []SandboxInodeKey
+	// 1. Write/insert all new inodes from the new configuration first.
+	newInodes := make(map[SandboxInodeKey]bool)
+	for _, key := range res.Inodes {
+		newInodes[key] = true
+		if err := s.objs.ProtectedInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	// 2. Iterate over active keys in the map, find and delete obsolete ones.
+	var obsoleteInodes []SandboxInodeKey
 	{
 		var k SandboxInodeKey
 		var v uint8
 		iter := s.objs.ProtectedInodes.Iterate()
 		for iter.Next(&k, &v) {
-			inodeKeys = append(inodeKeys, k)
+			if !newInodes[k] {
+				obsoleteInodes = append(obsoleteInodes, k)
+			}
 		}
 	}
-	for _, k := range inodeKeys {
-		_ = s.objs.ProtectedInodes.Delete(k)
+	for _, k := range obsoleteInodes {
+		if err := s.objs.ProtectedInodes.Delete(k); err != nil {
+			log.Printf("sandbox reload: delete obsolete inode {ino=%d dev=%d}: %v", k.Ino, k.Dev, err)
+		}
 	}
 
-	// Collect then delete all existing protected process names.
-	var procKeys [][16]byte
+	// 1. Write/insert all new processes from the new configuration first.
+	newProcs := make(map[[16]byte]bool)
+	for _, name := range res.Processes {
+		var key [16]byte
+		copy(key[:], name)
+		newProcs[key] = true
+		if err := s.objs.ProtectedProcs.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert proc %q: %v", name, err)
+		}
+	}
+
+	// 2. Iterate over active keys in the map, find and delete obsolete ones.
+	var obsoleteProcs [][16]byte
 	{
 		var k [16]byte
 		var v uint8
 		iter := s.objs.ProtectedProcs.Iterate()
 		for iter.Next(&k, &v) {
-			procKeys = append(procKeys, k)
+			if !newProcs[k] {
+				obsoleteProcs = append(obsoleteProcs, k)
+			}
 		}
 	}
-	for _, k := range procKeys {
-		_ = s.objs.ProtectedProcs.Delete(k)
+	for _, k := range obsoleteProcs {
+		name := strings.TrimRight(string(k[:]), "\x00")
+		if err := s.objs.ProtectedProcs.Delete(k); err != nil {
+			log.Printf("sandbox reload: delete obsolete proc %q: %v", name, err)
+		}
 	}
 
 	// Collect then delete all existing systemd-ipc inodes.
@@ -799,13 +718,6 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 
 	applyFeatures(s.objs, res.Features)
 
-	// Insert the new inode set.
-	for _, key := range res.Inodes {
-		if err := s.objs.ProtectedInodes.Put(key, marker); err != nil {
-			log.Printf("sandbox reload: insert inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
-		}
-	}
-
 	// Insert the new forbidden binary set.
 	for _, key := range res.Forbidden {
 		if err := s.objs.ForbiddenBinaries.Put(key, marker); err != nil {
@@ -824,15 +736,6 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 	for _, key := range res.IPCInodes {
 		if err := s.objs.SystemdIpcInodes.Put(key, marker); err != nil {
 			log.Printf("sandbox reload: insert systemd-ipc inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
-		}
-	}
-
-	// Insert the new process set.
-	for _, name := range res.Processes {
-		var key [16]byte
-		copy(key[:], name)
-		if err := s.objs.ProtectedProcs.Put(key, marker); err != nil {
-			log.Printf("sandbox reload: insert proc %q: %v", name, err)
 		}
 	}
 

@@ -249,6 +249,9 @@ func (s *ebpfSubsystem) handleIO(raw []byte) {
 	if !ok {
 		return
 	}
+	if ev.DataLen > uint32(len(ev.Data)) {
+		ev.DataLen = uint32(len(ev.Data))
+	}
 	data := ev.Data[:ev.DataLen]
 	// Use Go reception time rather than BPF ktime (CLOCK_MONOTONIC).
 	// bpf_ktime_get_ns() excludes suspend time but /proc/uptime includes it,

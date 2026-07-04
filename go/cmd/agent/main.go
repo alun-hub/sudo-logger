@@ -61,17 +61,6 @@ func main() {
 	}
 
 	configPath := *flagConfig
-	// Backward compatibility: if agent.conf is missing but the legacy
-	// agent.conf exists, use it automatically.
-	if configPath == defaultConfigPath {
-		if _, serr := os.Stat(configPath); os.IsNotExist(serr) {
-			legacy := "/etc/sudo-logger/agent.conf"
-			if _, lerr := os.Stat(legacy); lerr == nil {
-				log.Printf("config: %s not found, using legacy %s (rename to agent.conf to silence this warning)", configPath, legacy)
-				configPath = legacy
-			}
-		}
-	}
 
 	var err error
 	cfg, err = loadConfig(configPath)

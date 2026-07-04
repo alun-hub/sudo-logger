@@ -659,7 +659,13 @@ readHandshake:
 				return
 			case <-ticker.C:
 			}
-			prioQueue <- outMsg{msgType: protocol.MsgHeartbeat}
+			select {
+			case prioQueue <- outMsg{msgType: protocol.MsgHeartbeat}:
+			case <-done:
+				return
+			default:
+				// queue is full, drop heartbeat to prevent block
+			}
 			lastServerMsgMu.Lock()
 			age := time.Since(lastServerMsg)
 			lastServerMsgMu.Unlock()
