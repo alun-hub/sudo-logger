@@ -36,6 +36,9 @@ jobs:
           go-version: ${{ matrix.go }}
           cache-dependency-path: go/go.sum
 
+      - name: Build and test C plugin
+        run: make -C plugin test
+
       - name: Build
         working-directory: go
         run: go build ./...

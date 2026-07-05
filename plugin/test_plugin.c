@@ -74,13 +74,15 @@ int mock_open(const char *pathname, int flags, ...) {
     return 100; /* dummy fd for /dev/tty or /dev/urandom */
 }
 
+static uid_t mock_uid = 0;
+
 int mock_getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen) {
     (void)sockfd;
     (void)level;
     (void)optname;
     if (optval && optlen && *optlen >= sizeof(struct ucred)) {
         struct ucred *cred = (struct ucred *)optval;
-        cred->uid = 0;
+        cred->uid = mock_uid;
         cred->gid = 0;
         cred->pid = 1234;
         *optlen = sizeof(struct ucred);
@@ -145,9 +147,6 @@ void test_ship_chunk(void) {
     printf("Running test_ship_chunk...\n");
 
     mock_write_len = 0;
-    g_agent_fd = mock_agent_fd;
-    g_seq = 0;
-
     ship_chunk(STREAM_TTYOUT, "test data", 9);
 
     /* Verify MSG_CHUNK (0x02) was written */
@@ -164,12 +163,74 @@ void test_ship_chunk(void) {
     assert(be64toh(seq) == 1);
 }
 
+void test_safe_write_tty(void) {
+    printf("Running test_safe_write_tty...\n");
+
+    // Test SGR code color code (should pass through)
+    mock_write_len = 0;
+    const char *color_str = "\x1b[31;1mHello\x1b[0m";
+    size_t color_len = strlen(color_str);
+    safe_write_tty(mock_agent_fd, color_str, color_len);
+    assert(mock_write_len == color_len);
+    assert(memcmp(mock_write_buf, color_str, color_len) == 0);
+
+    // Test unsafe ESC code (should be escaped to literal ^[)
+    mock_write_len = 0;
+    safe_write_tty(mock_agent_fd, "Esc\x1b]8;;http://evil.com\x1b\\Evil", 31);
+    assert(mock_write_len > 0);
+    // Let's verify it contains "^["
+    assert(strstr((char*)mock_write_buf, "^[") != NULL);
+}
+
+void test_sanitize_id_part(void) {
+    printf("Running test_sanitize_id_part...\n");
+    char dst[32];
+
+    sanitize_id_part(dst, "user.name_1-2", sizeof(dst));
+    assert(strcmp(dst, "user.name_1-2") == 0);
+
+    sanitize_id_part(dst, "user/../../traversal", sizeof(dst));
+    assert(strcmp(dst, "user-..-..-traversal") == 0);
+
+    // Test maxlen limit
+    sanitize_id_part(dst, "longusername12345", 5);
+    assert(strcmp(dst, "long") == 0);
+
+    // Test maxlen 0 safety
+    char short_dst[4] = "abc";
+    sanitize_id_part(short_dst, "xyz", 0);
+    assert(strcmp(short_dst, "abc") == 0); // unchanged
+}
+
+void test_plugin_open_non_root_uid(void) {
+    printf("Running test_plugin_open_non_root_uid...\n");
+
+    mock_uid = 1000; // non-root
+    mock_write_len = 0;
+    mock_read_pos = 0;
+
+    char *settings[] = {NULL};
+    char *user_info[] = {"user=alice", "host=myhost", NULL};
+    char *command_info[] = {"command=/bin/ls", NULL};
+    char *argv[] = {"ls", NULL};
+    const char *errstr = NULL;
+
+    int rc = plugin_open(SUDO_API_VERSION, NULL, NULL, settings, user_info, command_info, 1, argv, NULL, NULL, &errstr);
+
+    // Should fail (return -1 or 0/error) because connect_agent() returns -1
+    assert(rc == -1 || rc == 0);
+    mock_uid = 0; // reset
+}
+
 int main(void) {
     printf("--- STARTING C PLUGIN UNIT TESTS (WITH MOCKS) ---\n");
 
     test_json_logic();
     test_plugin_open_success();
     test_ship_chunk();
+    test_safe_write_tty();
+    test_sanitize_id_part();
+    test_plugin_open_non_root_uid();
 
     printf("--- ALL C PLUGIN UNIT TESTS PASSED ---\n");
     return 0;

@@ -252,6 +252,7 @@ static void safe_write_tty(int fd, const char *buf, size_t len)
 
 static void sanitize_id_part(char *dst, const char *src, size_t maxlen)
 {
+    if (maxlen == 0) return;
     size_t i = 0;
     for (i = 0; src[i] != '\0' && i < maxlen - 1; i++) {
         char c = src[i];
@@ -525,7 +526,7 @@ static int ack_is_fresh(void)
 
 /*
  * Thread-safe wrapper around ack_is_fresh().
- * Both log_ttyin and the monitor thread call this; the mutex ensures
+ * The monitor thread calls this; the mutex ensures
  * the shared agent socket is not used concurrently.
  */
 static int ack_is_fresh_locked(void)
@@ -1445,7 +1446,11 @@ static int log_stderr(const char *buf, unsigned int len, const char **errstr)
 static int show_version(int verbose)
 {
     (void)verbose;
-    g_printf(SUDO_CONV_INFO_MSG, "sudo-logger plugin v1.0\n");
+    if (g_printf != NULL) {
+        g_printf(SUDO_CONV_INFO_MSG, "sudo-logger plugin v1.0\n");
+    } else {
+        printf("sudo-logger plugin v1.0\n");
+    }
     return 1;
 }
 
