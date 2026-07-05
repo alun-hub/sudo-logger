@@ -41,6 +41,7 @@ type sessionConn struct {
 	diskQueue        chan diskTask
 	diskDone         chan struct{}
 	diskWg           sync.WaitGroup
+	overflowWg       sync.WaitGroup
 	overflowCount    atomic.Int32
 	diskCloseOnce    sync.Once
 }
@@ -52,6 +53,8 @@ func (s *sessionConn) closeDisk() {
 		// diskDone unblocks them without triggering a "send on closed
 		// channel" panic that would crash the server.
 		close(s.diskDone)
+		// Wait for all overflow goroutines to exit cleanly before closing diskQueue.
+		s.overflowWg.Wait()
 		close(s.diskQueue)
 		s.diskWg.Wait()
 	})
@@ -148,12 +151,11 @@ func (s *sessionConn) startDiskWriter() {
 			}
 
 			ds := s.diskSess.Load()
-			var sid string
-			if ds != nil {
-				sid = ds.id
-			} else {
-				sid = s.sessionID
+			if ds == nil {
+				// No session opened yet; discard tasks
+				continue
 			}
+			sid := ds.id
 
 			var lastSeq uint64
 			for _, t := range batch {
@@ -476,9 +478,9 @@ func (s *sessionConn) processChunk(payload []byte) error {
 		// Primary queue is full. Check if we can spawn an overflow goroutine.
 		if s.overflowCount.Load() < maxOverflow {
 			s.overflowCount.Add(1)
-			s.diskWg.Add(1)
+			s.overflowWg.Add(1)
 			go func(t diskTask) {
-				defer s.diskWg.Done()
+				defer s.overflowWg.Done()
 				defer s.overflowCount.Add(-1)
 				// Use select so that closing diskDone (shutdown) unblocks
 				// the goroutine instead of panicking on a closed channel.
