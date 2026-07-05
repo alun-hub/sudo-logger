@@ -4,6 +4,8 @@ go/sudo-logserver
 go/shipper
 go/server
 plugin/sudo_logger_plugin.so
+plugin/plugin.so
+plugin/test_plugin
 
 # Source tarballs
 *.tar.gz
