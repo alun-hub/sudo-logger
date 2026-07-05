@@ -133,6 +133,10 @@ func (s *sandboxSubsystem) pollAlerts() {
 }
 
 // pathForInode returns the protected path for an inode key, or "" if unknown.
+// Only called once per reported violation (not a per-syscall hot path), so a
+// linear scan is fine for realistic protected-path-set sizes; if that set
+// grows large, maintain a reverse ino/dev→path map instead, kept in sync in
+// reloadConfig.
 func (s *sandboxSubsystem) pathForInode(ino uint64, dev uint32) string {
 	if ino == 0 {
 		return ""
@@ -674,69 +678,79 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 		}
 	}
 
-	// Collect then delete all existing systemd-ipc inodes.
-	var ipcKeys []SandboxInodeKey
+	applyFeatures(s.objs, res.Features)
+
+	// Insert new, then delete obsolete — for each set below, same diff-based
+	// approach as ProtectedInodes/ProtectedProcs above, so there is never a
+	// window where a map is empty and the corresponding check is unenforced.
+
+	// systemd-ipc inodes.
+	newIPCInodes := make(map[SandboxInodeKey]bool)
+	for _, key := range res.IPCInodes {
+		newIPCInodes[key] = true
+		if err := s.objs.SystemdIpcInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert systemd-ipc inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+	var obsoleteIPCInodes []SandboxInodeKey
 	{
 		var k SandboxInodeKey
 		var v uint8
 		iter := s.objs.SystemdIpcInodes.Iterate()
 		for iter.Next(&k, &v) {
-			ipcKeys = append(ipcKeys, k)
+			if !newIPCInodes[k] {
+				obsoleteIPCInodes = append(obsoleteIPCInodes, k)
+			}
 		}
 	}
-	for _, k := range ipcKeys {
+	for _, k := range obsoleteIPCInodes {
 		_ = s.objs.SystemdIpcInodes.Delete(k)
 	}
 
-	// Collect then delete all existing forbidden binary inodes.
-	var forbiddenKeys []SandboxInodeKey
+	// Forbidden binary inodes.
+	newForbidden := make(map[SandboxInodeKey]bool)
+	for _, key := range res.Forbidden {
+		newForbidden[key] = true
+		if err := s.objs.ForbiddenBinaries.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert forbidden binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+	var obsoleteForbidden []SandboxInodeKey
 	{
 		var k SandboxInodeKey
 		var v uint8
 		iter := s.objs.ForbiddenBinaries.Iterate()
 		for iter.Next(&k, &v) {
-			forbiddenKeys = append(forbiddenKeys, k)
+			if !newForbidden[k] {
+				obsoleteForbidden = append(obsoleteForbidden, k)
+			}
 		}
 	}
-	for _, k := range forbiddenKeys {
+	for _, k := range obsoleteForbidden {
 		_ = s.objs.ForbiddenBinaries.Delete(k)
 	}
 
-	// Collect then delete all existing noexec directory inodes.
-	var noexecKeys []SandboxInodeKey
+	// Noexec directory inodes.
+	newNoexec := make(map[SandboxInodeKey]bool)
+	for _, key := range res.Noexec {
+		newNoexec[key] = true
+		if err := s.objs.NoexecInodes.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert noexec inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+	var obsoleteNoexec []SandboxInodeKey
 	{
 		var k SandboxInodeKey
 		var v uint8
 		iter := s.objs.NoexecInodes.Iterate()
 		for iter.Next(&k, &v) {
-			noexecKeys = append(noexecKeys, k)
+			if !newNoexec[k] {
+				obsoleteNoexec = append(obsoleteNoexec, k)
+			}
 		}
 	}
-	for _, k := range noexecKeys {
+	for _, k := range obsoleteNoexec {
 		_ = s.objs.NoexecInodes.Delete(k)
-	}
-
-	applyFeatures(s.objs, res.Features)
-
-	// Insert the new forbidden binary set.
-	for _, key := range res.Forbidden {
-		if err := s.objs.ForbiddenBinaries.Put(key, marker); err != nil {
-			log.Printf("sandbox reload: insert forbidden binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
-		}
-	}
-
-	// Insert the new noexec directory set.
-	for _, key := range res.Noexec {
-		if err := s.objs.NoexecInodes.Put(key, marker); err != nil {
-			log.Printf("sandbox reload: insert noexec inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
-		}
-	}
-
-	// Insert the new systemd-ipc set.
-	for _, key := range res.IPCInodes {
-		if err := s.objs.SystemdIpcInodes.Put(key, marker); err != nil {
-			log.Printf("sandbox reload: insert systemd-ipc inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
-		}
 	}
 
 	// Restart the inotify watcher for the new set of parent directories.

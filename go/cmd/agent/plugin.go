@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -219,7 +220,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 		unregisterCg(cg)
 		if cg.hasPids() || cg.hasEscapedRunning() {
-			go lingerCgroup(cg, cfg.Server, tlsCfg)
+			go lingerCgroup(cg, cfg.Server)
 		} else {
 			cg.stopTracking()
 			cg.remove()
@@ -240,7 +241,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	)
 	var frozenSince time.Time
 
-	updateAck := func(ts int64, seq uint64) {
+	updateAck := func(seq uint64) {
 		sessionAckMu.Lock()
 		sessionAckSeq = seq
 		ackDebtStartNs = 0
@@ -308,6 +309,17 @@ func handlePluginConn(pluginConn net.Conn) {
 	markAlive := func() {
 		sessionAckMu.Lock()
 		wasAlive := serverConnAlive
+		// serverConnAlive flips to true before deadBuf is requeued below, so a
+		// forward() call that races this unlock can push a live chunk onto
+		// bulkQueue ahead of these buffered ones — the server disk-writer
+		// appends to the cast file in dequeue order, not by seq, so a chunk
+		// reordering here would show up as out-of-order events on replay.
+		// This is a narrow window (a handful of goroutine-scheduling
+		// instructions) right at reconnect, not sustained reordering.
+		// Deliberately not fixed by holding sessionAckMu across the channel
+		// sends below: bulkQueue can be full, and blocking here while holding
+		// the lock would stall forward()/readAck/markDead for every other
+		// chunk on this session, which is worse than the rare reorder.
 		serverConnAlive = true
 		ackDebtStartNs = 0
 		buf := deadBuf
@@ -431,6 +443,12 @@ func handlePluginConn(pluginConn net.Conn) {
 	if cg != nil {
 		cg.serverW = sw
 	}
+	// The SESSION_START and CHALLENGE_RESPONSE writes below go straight to
+	// serverBuf, bypassing sw/serverWriteMu. That's safe only because they
+	// happen here, before the sender goroutine (which also writes to
+	// serverBuf, via sw) is started further down. If a write is ever added
+	// to this handshake section after the sender goroutine starts, it must
+	// go through sw instead.
 
 	start.Command = redactor.RedactString(start.Command)
 	start.ResolvedCommand = redactor.RedactString(start.ResolvedCommand)
@@ -641,7 +659,7 @@ readHandshake:
 					continue
 				}
 				touchServerMsg()
-				updateAck(time.Now().UnixNano(), ack.Seq)
+				updateAck(ack.Seq)
 			case protocol.MsgHeartbeatAck:
 				touchServerMsg()
 			}
@@ -814,12 +832,17 @@ loop:
 	serverConn.Close()
 }
 
-func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
+func lingerCgroup(cg *cgroupSession, server string) {
 	defer cg.stopTracking()
 	defer cg.remove()
 	log.Printf("cgroup %s: lingering (GUI processes remain)", cg.path)
 	const pollInterval = 2 * time.Second
 	const dialTimeout = 2 * time.Second
+	// Bound how long we track a lingering session: a GUI process that never
+	// exits would otherwise keep this goroutine (and its periodic dial probe)
+	// running for the lifetime of the agent.
+	const maxLinger = 24 * time.Hour
+	deadline := time.Now().Add(maxLinger)
 	serverReachable := func() bool {
 		conn, err := net.DialTimeout("tcp", server, dialTimeout)
 		if err != nil {
@@ -831,6 +854,10 @@ func lingerCgroup(cg *cgroupSession, server string, tlsCfg *tls.Config) {
 	for {
 		time.Sleep(pollInterval)
 		if !cg.hasPids() && !cg.hasEscapedRunning() {
+			return
+		}
+		if time.Now().After(deadline) {
+			log.Printf("cgroup %s: linger exceeded %s, stopping tracking", cg.path, maxLinger)
 			return
 		}
 		if serverReachable() {
@@ -909,11 +936,20 @@ func reportSessionMsg(server string, tlsCfg *tls.Config, sessionID string, msgTy
 		log.Printf("[%s] %s: write: %v", sessionID, label, err)
 		return
 	}
+	// Give the TLS close_notify a brief window to reach the server before the
+	// deferred Close() tears down the connection, instead of racing it.
+	tlsConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	_, _ = tlsConn.Read(make([]byte, 1))
 	log.Printf("[%s] %s sent to server", sessionID, label)
 }
 
 func isSudoConn(conn net.Conn) bool {
-	if os.Getenv("SUDO_LOGGER_INSECURE_TEST") == "1" {
+	// Bypass gated on running inside `go test` (flag.Lookup("test.v") is only
+	// non-nil in a test binary, since only the testing package registers it)
+	// as well as the env var, so it cannot be triggered in a production
+	// binary even if the env var leaks into the unit file. Same idiom as
+	// siem/sender.go's test-only loopback allowance.
+	if flag.Lookup("test.v") != nil && os.Getenv("SUDO_LOGGER_INSECURE_TEST") == "1" {
 		return true
 	}
 	uc, ok := conn.(*net.UnixConn)

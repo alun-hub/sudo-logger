@@ -16,12 +16,16 @@ type redactPattern struct {
 type Redactor struct {
 	patterns      []redactPattern
 	custom        []*regexp.Regexp
+	// maskingActive and pemBufs are mutated on every Redact call and are NOT
+	// safe for concurrent use; callers must ensure single-goroutine access
+	// (the plugin path does this by calling Redact only from the connection's
+	// single reader goroutine) or hold an external mutex (the eBPF path does
+	// this via s.mu).
 	maskingActive bool
 	promptRegex   *regexp.Regexp
 	triggerRegex  *regexp.Regexp // Fast-path: checks if ANY pattern might match
 	// pemBufs accumulates cross-chunk PEM blocks per stream until -----END
-	// arrives. Not safe for concurrent use; callers must ensure single-goroutine
-	// access or hold an external mutex (the eBPF path does this via s.mu).
+	// arrives.
 	pemBufs map[uint8][]byte
 }
 
@@ -253,7 +257,11 @@ func (r *Redactor) FlushPEM(stream uint8) []byte {
 	return bytes.Repeat([]byte("*"), len(buf))
 }
 
-// applyPatterns runs the full regex substitution suite against data.
+// applyPatterns runs the full regex substitution suite against data. Each
+// pattern re-copies the whole buffer via ReplaceAllFunc, so cost is
+// O(len(patterns) * len(data)); this is fine for TTY chunk sizes (a few KB,
+// gated by the triggerRegex fast path above) but would need a single-pass
+// combined matcher if chunk sizes ever grow substantially.
 func (r *Redactor) applyPatterns(data []byte) []byte {
 	res := make([]byte, len(data))
 	copy(res, data)

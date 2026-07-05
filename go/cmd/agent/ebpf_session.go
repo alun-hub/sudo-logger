@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -110,7 +109,7 @@ func (s *ebpfSession) sendChunk(tsNS int64, stream uint8, data []byte) {
 		}
 	}
 	s.seq++
-	payload := encodeEBPFChunk(s.seq, tsNS, stream, data)
+	payload := protocol.EncodeChunk(s.seq, tsNS, stream, data)
 	if s.conn != nil {
 		_ = s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	}
@@ -133,7 +132,7 @@ func (s *ebpfSession) close(exitCode int32) {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	payload := encodeEBPFSessionEnd(s.seq, exitCode)
+	payload := protocol.EncodeSessionEnd(s.seq, exitCode)
 	_ = protocol.WriteMessage(s.bw, protocol.MsgSessionEnd, payload)
 	s.conn.Close()
 }
@@ -221,21 +220,4 @@ func generateEBPFSessionID(hostname, username, sessionNum string) string {
 		id = id[:200]
 	}
 	return id
-}
-
-func encodeEBPFChunk(seq uint64, tsNS int64, stream uint8, data []byte) []byte {
-	buf := make([]byte, 21+len(data))
-	binary.BigEndian.PutUint64(buf[0:], seq)
-	binary.BigEndian.PutUint64(buf[8:], uint64(tsNS))
-	buf[16] = stream
-	binary.BigEndian.PutUint32(buf[17:], uint32(len(data)))
-	copy(buf[21:], data)
-	return buf
-}
-
-func encodeEBPFSessionEnd(finalSeq uint64, exitCode int32) []byte {
-	buf := make([]byte, 12)
-	binary.BigEndian.PutUint64(buf[0:], finalSeq)
-	binary.BigEndian.PutUint32(buf[8:], uint32(exitCode))
-	return buf
 }

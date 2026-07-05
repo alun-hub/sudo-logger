@@ -20,9 +20,20 @@
 //	0x0b  SERVER_READY    server→agent          empty — session accepted, agent may send SESSION_READY
 //	0x0c  SESSION_DENIED  server→agent,         string block message — policy denial, sudo blocked
 //	                      agent→plugin
+//	0x0d  FREEZE_TIMEOUT  agent→plugin          empty — server unreachable too long, session will be terminated
+//	0x0e  SESSION_ABANDON agent→server (new conn) UTF-8 session_id — freeze-timeout fired
+//	0x0f  SESSION_FREEZING agent→server (new conn) UTF-8 session_id — session frozen due to network loss
+//	0x10  DIVERGENCE_ALERT agent→server         JSON — execve seen but no plugin SESSION_START within 30s
+//	0x11  SANDBOX_ALERT   agent→server          JSON — sandbox violation blocked by kernel LSM
 //	0x12  FETCH_CONFIG    agent→server          UTF-8 config key (e.g. "sandbox.yaml")
 //	0x13  CONFIG_DATA     server→agent          UTF-8 YAML content (empty = not found)
+//	0x14  SESSION_CHALLENGE server→agent→plugin JSON payload (SessionChallenge) — justification required
+//	0x15  SESSION_CHALLENGE_RESPONSE plugin→agent→server JSON payload (SessionChallengeResponse)
+//	0x16  SESSION_EXPIRED agent→plugin          empty — approval window expired, session is being terminated
+//	0x17  SESSION_WARNING agent→plugin          UTF-8 seconds left — session will be terminated soon
 //	0x18  SUDOERS_SNAPSHOT agent→server         JSON payload (SudoersSnapshot)
+//	0x19  SUDOERS_ERROR   agent→server          JSON payload (SudoersError) — failed to apply config
+//	0x1a  HEARTBEAT_AGENT agent→server          UTF-8 host — periodic liveness signal
 //	0x1b  RESIZE          plugin→agent→server  binary: ts_ns(8BE)+cols(2BE)+rows(2BE); writes asciinema "r" event
 //
 // CHUNK stream types map to sudo's iolog event types (see iolog/iolog.go):
@@ -336,6 +347,15 @@ func EncodeChunk(seq uint64, ts int64, stream uint8, data []byte) []byte {
 	payload[16] = stream
 	binary.BigEndian.PutUint32(payload[17:21], dlen)
 	copy(payload[21:], data)
+	return payload
+}
+
+// EncodeSessionEnd encodes a SESSION_END payload.
+// Layout: [8 final_seq][4 exit_code]
+func EncodeSessionEnd(finalSeq uint64, exitCode int32) []byte {
+	payload := make([]byte, 12)
+	binary.BigEndian.PutUint64(payload[0:8], finalSeq)
+	binary.BigEndian.PutUint32(payload[8:12], uint32(exitCode))
 	return payload
 }
 

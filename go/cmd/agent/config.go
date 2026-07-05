@@ -73,6 +73,10 @@ func loadConfig(path string) (agentConfig, error) {
 		}
 		k := strings.TrimSpace(line[:idx])
 		v := strings.TrimSpace(line[idx+1:])
+		// Inline comments require a literal space before '#' (" #"); a value
+		// ending in e.g. "\t#comment" or "value#comment" keeps the comment
+		// as part of the value. Document this rather than guessing at intent
+		// with a fancier delimiter rule.
 		if ci := strings.Index(v, " #"); ci >= 0 {
 			v = strings.TrimSpace(v[:ci])
 		}

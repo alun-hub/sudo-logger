@@ -199,6 +199,9 @@ func (s *ebpfSubsystem) stop() {
 	if s.objs != nil {
 		s.objs.Close()
 	}
+	// sess.close() only tears down the session's TLS connection to the
+	// server, not any BPF object — so its ordering relative to
+	// s.objs.Close() above is not safety-critical either way.
 	for _, sess := range sessions {
 		sess.close(0)
 	}
@@ -227,6 +230,9 @@ func (s *ebpfSubsystem) readLoop(ctx context.Context) {
 			debugLog("ebpf: unknown event type %d", eventType)
 		}
 
+		// Belt-and-suspenders: the loop actually exits via s.rd.Close()
+		// unblocking the Read() above (which returns an error), not via this
+		// check — ctx cancellation alone won't interrupt a blocked Read().
 		select {
 		case <-ctx.Done():
 			return
@@ -289,6 +295,12 @@ func (s *ebpfSubsystem) handleExecve(raw []byte) {
 // parentRealUID returns the real uid of the parent of pid by reading
 // /proc/<pid>/status (PPid line) and then /proc/<ppid>/status (Uid line).
 // Falls back to 0 on any read error (treated as root — still safe for alerting).
+// TOCTOU note: pid/ppid may have exited and been reused between the BPF
+// event firing and this read, which could misattribute the alert to the
+// wrong (recycled) PID's parent. Low risk in practice and no worse than the
+// existing error fallback, since PID reuse is rare within the resolution
+// window and misattribution here only affects an informational alert, not
+// an enforcement decision.
 func parentRealUID(pid uint32) uint32 {
 	readStatus := func(p uint32) map[string]string {
 		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", p))
@@ -978,7 +990,7 @@ type sessionMeta struct {
 }
 
 func loginctlSession(num string) (sessionMeta, error) {
-	props := []string{"Name", "RemoteHost", "Type", "Class"}
+	props := []string{"Name", "RemoteHost", "Type"}
 	args := []string{"show-session", "--value", "--property=" + strings.Join(props, ","), num}
 	out, err := exec.Command("loginctl", args...).Output()
 	if err != nil {
