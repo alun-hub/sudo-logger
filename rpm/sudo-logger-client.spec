@@ -41,6 +41,7 @@ gcc -Wall -Wextra -O2 -fPIC -shared \
     -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
     -fstack-clash-protection -fcf-protection \
     -Wformat -Werror=format-security \
+    -DPLUGIN_VERSION=\"%{version}\" \
     -o sudo_logger_plugin.so \
     plugin.c -lpthread \
     -Wl,-z,relro -Wl,-z,now

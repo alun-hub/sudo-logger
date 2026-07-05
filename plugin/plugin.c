@@ -38,6 +38,12 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+
+/* Set by the Makefile/RPM spec via -DPLUGIN_VERSION="X.Y.Z"; falls back to
+ * "dev" for ad-hoc builds (e.g. `gcc plugin.c` outside the build system). */
+#ifndef PLUGIN_VERSION
+#define PLUGIN_VERSION "dev"
+#endif
 #include <sys/syscall.h>
 #include <syslog.h>
 
@@ -121,7 +127,10 @@ static uint64_t      g_seq        = 0;
 static time_t g_last_ack_time  = 0;  /* when we last received a valid ACK */
 static time_t g_last_ack_query = 0;  /* when we last queried the agent */
 
-/* Terminal dimensions — updated by TIOCGWINSZ polling in the monitor thread */
+/* Terminal dimensions — updated by TIOCGWINSZ polling in the monitor thread.
+ * Ownership handoff: written once by the main thread in plugin_open() before
+ * the monitor thread is started, then owned exclusively by the monitor
+ * thread afterwards. No concurrent access; no lock needed. */
 static int g_term_cols = 0;
 static int g_term_rows = 0;
 
@@ -513,6 +522,9 @@ static int ack_is_fresh(void)
 {
     time_t now = now_sec();
 
+    /* ACK_REFRESH_SECS is 0 by design (re-query on every check), so this
+     * condition is always true and g_last_ack_query only records the time
+     * of the last query for diagnostics — it does not throttle anything. */
     if (now - g_last_ack_query >= ACK_REFRESH_SECS)
         refresh_ack_cache();
 
@@ -1139,21 +1151,21 @@ static int plugin_open(unsigned int        version,
 read_agent:
     if (read_exact(g_agent_fd, hdr, 5) < 0) {
         *errstr = "sudo-logger: no response from agent";
+        close(g_agent_fd);
+        g_agent_fd = -1;
         return -1;
     }
 
     if (hdr[0] == MSG_SESSION_CHALLENGE) {
         /* Server requires a justification. Prompt the user now. */
+        /* Challenge body is not consumed by the plugin (justification is
+         * collected below via the conversation API) — drain it unconditionally
+         * so the next read_agent iteration starts on a real header instead of
+         * leftover challenge bytes. */
         uint32_t clen;
         memcpy(&clen, hdr + 1, 4);
         clen = be32toh(clen);
-        if (clen > 0 && clen < 4096) {
-            char cbuf[4096] = {0};
-            read_exact(g_agent_fd, cbuf, clen);
-            /* challenge body consumed; content unused */
-        } else if (clen >= 4096) {
-            /* Oversized payload — drain it so the next read_agent iteration
-             * starts on a real header instead of leftover challenge bytes. */
+        if (clen > 0) {
             drain_payload(g_agent_fd, clen);
         }
 
@@ -1182,6 +1194,16 @@ read_agent:
 
         if (rplen > 0 && rplen < (int)sizeof(rpayload)) {
             send_msg(g_agent_fd, MSG_SESSION_CHALLENGE_RESPONSE, rpayload, (uint32_t)rplen);
+        }
+
+        /* The 30 s handshake timeout set before SESSION_START must not apply
+         * to the JIT-approval wait: an approver can take much longer than
+         * 30 s to act. Disable the receive timeout now; the initial
+         * handshake (up to this point) is the only phase it should guard. */
+        {
+            struct timeval no_timeout = { .tv_sec = 0, .tv_usec = 0 };
+            setsockopt(g_agent_fd, SOL_SOCKET, SO_RCVTIMEO,
+                       &no_timeout, sizeof(no_timeout));
         }
 
         /* Inform the user their request has been submitted. */
@@ -1264,6 +1286,8 @@ read_agent:
 
     if (hdr[0] != MSG_SESSION_READY) {
         *errstr = "sudo-logger: unexpected response from agent";
+        close(g_agent_fd);
+        g_agent_fd = -1;
         return -1;
     }
 
@@ -1447,9 +1471,9 @@ static int show_version(int verbose)
 {
     (void)verbose;
     if (g_printf != NULL) {
-        g_printf(SUDO_CONV_INFO_MSG, "sudo-logger plugin v1.0\n");
+        g_printf(SUDO_CONV_INFO_MSG, "sudo-logger plugin v%s\n", PLUGIN_VERSION);
     } else {
-        printf("sudo-logger plugin v1.0\n");
+        printf("sudo-logger plugin v%s\n", PLUGIN_VERSION);
     }
     return 1;
 }
