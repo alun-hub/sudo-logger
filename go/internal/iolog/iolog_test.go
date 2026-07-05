@@ -244,3 +244,129 @@ func TestPathConfinement(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// readLastEventPayload flushes w, reads the cast file, and decodes the
+// "data" field of the last event line.
+func readLastEventPayload(t *testing.T, w *iolog.Writer, dir string) string {
+	t.Helper()
+	w.Flush() //nolint:errcheck
+	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
+	if err != nil {
+		t.Fatalf("read cast: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines (header + event), got %d", len(lines))
+	}
+	var event []json.RawMessage
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &event); err != nil {
+		t.Fatalf("last event line is not valid JSON: %v (line: %s)", err, lines[len(lines)-1])
+	}
+	if len(event) != 3 {
+		t.Fatalf("event has %d elements, want 3", len(event))
+	}
+	var payload string
+	if err := json.Unmarshal(event[2], &payload); err != nil {
+		t.Fatalf("event payload is not a valid JSON string: %v", err)
+	}
+	return payload
+}
+
+// TestWriteOutputSplitUTF8Boundary verifies that a multi-byte UTF-8 character
+// split across two separate WriteOutput calls (as would happen if a chunk
+// boundary lands mid-character) is reassembled correctly instead of
+// producing replacement characters at the split point.
+func TestWriteOutputSplitUTF8Boundary(t *testing.T) {
+	euro := "€" // 3-byte UTF-8 sequence: 0xE2 0x82 0xAC
+	full := []byte("price: " + euro + " done")
+
+	for _, split := range []int{8, 9, 10, 7} { // mid-sequence and non-mid-sequence splits
+		t.Run("", func(t *testing.T) {
+			w, dir := newTestWriter(t)
+			defer w.Close()
+			ts := time.Now().UnixNano()
+			if err := w.WriteOutput(full[:split], ts); err != nil {
+				t.Fatalf("WriteOutput part1: %v", err)
+			}
+			if err := w.WriteOutput(full[split:], ts+1); err != nil {
+				t.Fatalf("WriteOutput part2: %v", err)
+			}
+			w.Flush() //nolint:errcheck
+			data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
+			if err != nil {
+				t.Fatalf("read cast: %v", err)
+			}
+			lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+			var got strings.Builder
+			for _, line := range lines[1:] {
+				var event []json.RawMessage
+				if err := json.Unmarshal([]byte(line), &event); err != nil {
+					t.Fatalf("event line is not valid JSON: %v", err)
+				}
+				var payload string
+				json.Unmarshal(event[2], &payload) //nolint:errcheck
+				got.WriteString(payload)
+			}
+			if got.String() != string(full) {
+				t.Errorf("split at %d: reassembled %q, want %q", split, got.String(), string(full))
+			}
+		})
+	}
+}
+
+// TestCloseFlushesIncompleteUTF8Tail verifies that a truncated multi-byte
+// sequence that never gets completed (session ends mid-character) is still
+// written out on Close, rather than silently dropped.
+func TestCloseFlushesIncompleteUTF8Tail(t *testing.T) {
+	w, dir := newTestWriter(t)
+	ts := time.Now().UnixNano()
+	// 0xE2 0x82 is the truncated 2-byte prefix of the 3-byte "€" sequence;
+	// it never gets completed before Close.
+	if err := w.WriteOutput([]byte{'x', 0xE2, 0x82}, ts); err != nil {
+		t.Fatalf("WriteOutput: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "session.cast"))
+	if err != nil {
+		t.Fatalf("read cast: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected header + 2 events (partial 'x' + flushed tail on close), got %d lines", len(lines))
+	}
+	// The flushed tail must decode as valid JSON and must not be empty —
+	// the two truncated bytes must show up as raw-byte escapes.
+	var event []json.RawMessage
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &event); err != nil {
+		t.Fatalf("flushed-tail event line is not valid JSON: %v (line: %s)", err, lines[len(lines)-1])
+	}
+	var payload string
+	json.Unmarshal(event[2], &payload) //nolint:errcheck
+	if len(payload) == 0 {
+		t.Errorf("expected the truncated tail bytes to be flushed on Close, got empty payload")
+	}
+}
+
+// TestWriteOutputInvalidByteEscaped verifies that a byte which is not valid
+// UTF-8 anywhere in the stream (not just at a chunk boundary) is preserved
+// as a \u00XX escape of its raw value instead of being collapsed into a
+// U+FFFD replacement character that loses the original byte.
+func TestWriteOutputInvalidByteEscaped(t *testing.T) {
+	w, dir := newTestWriter(t)
+	defer w.Close()
+
+	ts := time.Now().UnixNano()
+	// 0xFF is not a valid UTF-8 lead or continuation byte anywhere.
+	input := []byte{'a', 0xFF, 'b'}
+	if err := w.WriteOutput(input, ts); err != nil {
+		t.Fatalf("WriteOutput: %v", err)
+	}
+
+	payload := readLastEventPayload(t, w, dir)
+	want := "aÿb"
+	if payload != want {
+		t.Errorf("got %q (bytes %v), want %q (bytes %v)", payload, []byte(payload), want, []byte(want))
+	}
+}

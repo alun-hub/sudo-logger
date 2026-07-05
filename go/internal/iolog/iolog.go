@@ -17,11 +17,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // SessionMeta holds the per-session metadata written into the cast header.
@@ -62,6 +64,13 @@ type Writer struct {
 	castF     *os.File
 	castBuf   *bufio.Writer
 	startTime time.Time
+	// pendingUTF8 holds, per event kind ("o"/"i"), trailing bytes that look
+	// like the start of a multi-byte UTF-8 sequence but were cut off at the
+	// end of the chunk — held back until the next chunk of the same kind
+	// completes them (or Close flushes them as raw bytes if none ever
+	// arrives), so a character split across a chunk boundary is not
+	// corrupted into replacement characters.
+	pendingUTF8 map[string][]byte
 }
 
 // castHeader is the first line of an asciinema v2 file.
@@ -214,40 +223,113 @@ func (w *Writer) writeEvent(kind string, data []byte, tsNs int64) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if pending := w.pendingUTF8[kind]; len(pending) > 0 {
+		combined := make([]byte, 0, len(pending)+len(data))
+		combined = append(combined, pending...)
+		combined = append(combined, data...)
+		data = combined
+	}
+
+	complete, pending := splitIncompleteUTF8Suffix(data)
+	if len(pending) > 0 {
+		if w.pendingUTF8 == nil {
+			w.pendingUTF8 = make(map[string][]byte)
+		}
+		w.pendingUTF8[kind] = append([]byte(nil), pending...)
+	} else {
+		delete(w.pendingUTF8, kind)
+	}
+	if len(complete) == 0 {
+		// Entire chunk is a not-yet-complete multi-byte sequence; wait for
+		// the rest to arrive in a later chunk of the same kind.
+		return nil
+	}
+
+	return w.writeEventBytes(kind, complete, tsNs)
+}
+
+// splitIncompleteUTF8Suffix returns data split into a leading part that is
+// safe to encode now and a trailing part that looks like the truncated
+// start of a multi-byte UTF-8 sequence (fewer bytes present than the lead
+// byte requires). The trailing part should be held back and prepended to
+// the next chunk of the same stream.
+func splitIncompleteUTF8Suffix(data []byte) (complete, pending []byte) {
+	n := len(data)
+	for i := 1; i <= 3 && i <= n; i++ {
+		b := data[n-i]
+		if b < 0x80 {
+			break // ASCII byte: no truncated lead byte precedes it
+		}
+		if b >= 0xc0 {
+			var want int
+			switch {
+			case b&0xe0 == 0xc0:
+				want = 2
+			case b&0xf0 == 0xe0:
+				want = 3
+			case b&0xf8 == 0xf0:
+				want = 4
+			default:
+				want = 1 // not a valid lead byte; nothing to hold back
+			}
+			if want > i {
+				return data[:n-i], data[n-i:]
+			}
+			break
+		}
+		// 0x80-0xbf: continuation byte, keep scanning backward.
+	}
+	return data, nil
+}
+
+// writeEventBytes encodes data (which must not itself be split mid-sequence)
+// as a cast event line: [elapsed_seconds, "o"/"i", "data"]. Built manually
+// (not via encoding/json) to escape bytes that are not valid UTF-8 as
+// \u00XX from their raw value, instead of collapsing them to U+FFFD and
+// losing the original byte -- this is a forensic recording, so a corrupt or
+// binary byte in the stream must survive intact.
+func (w *Writer) writeEventBytes(kind string, data []byte, tsNs int64) error {
 	elapsed := time.Unix(0, tsNs).Sub(w.startTime).Seconds()
 	if elapsed < 0 {
 		elapsed = 0
 	}
 
-	// Event: [elapsed_seconds, "o"/"i", "data"]
-	// We build the JSON manually to ensure 100% binary integrity of ANSI sequences
-	// while remaining UTF-8 friendly for characters like ÅÄÖ.
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "[%f, %q, \"", elapsed, kind)
 
-	// Convert data to string and range over it to handle UTF-8 correctly while
-	// escaping raw bytes that are part of ANSI sequences or invalid UTF-8.
-	for _, r := range string(data) {
+	for i := 0; i < len(data); {
+		r, size := utf8.DecodeRune(data[i:])
+		if r == utf8.RuneError && size <= 1 {
+			// Genuinely invalid byte (not a valid encoding of anything,
+			// including a real U+FFFD) -- escape the raw byte value so it's
+			// still recoverable from the recording.
+			fmt.Fprintf(&buf, "\\u%04x", data[i])
+			i++
+			continue
+		}
 		switch r {
-		case '"':  buf.WriteString(`\"`)
-		case '\\': buf.WriteString(`\\`)
-		case '\b': buf.WriteString(`\b`)
-		case '\f': buf.WriteString(`\f`)
-		case '\n': buf.WriteString(`\n`)
-		case '\r': buf.WriteString(`\r`)
-		case '\t': buf.WriteString(`\t`)
+		case '"':
+			buf.WriteString(`\"`)
+		case '\\':
+			buf.WriteString(`\\`)
+		case '\b':
+			buf.WriteString(`\b`)
+		case '\f':
+			buf.WriteString(`\f`)
+		case '\n':
+			buf.WriteString(`\n`)
+		case '\r':
+			buf.WriteString(`\r`)
+		case '\t':
+			buf.WriteString(`\t`)
 		default:
 			if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
-				// Escape control characters and DEL
 				fmt.Fprintf(&buf, "\\u%04x", r)
-			} else if r == '\ufffd' {
-				// If we encounter the replacement char, it means the original byte was invalid UTF-8.
-				// We find the original byte if possible, but for simplicity we keep it.
-				buf.WriteRune(r)
 			} else {
 				buf.WriteRune(r)
 			}
 		}
+		i += size
 	}
 	buf.WriteString("\"]\n")
 	_, err := w.castBuf.Write(buf.Bytes())
@@ -277,6 +359,20 @@ func (w *Writer) CastPath() string {
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	// Flush any trailing bytes still held back as a possibly-incomplete
+	// multi-byte UTF-8 sequence — no more chunks are coming to complete
+	// them, so write them out now (as raw-byte escapes if still invalid)
+	// rather than silently dropping them from the recording.
+	now := time.Now().UnixNano()
+	for kind, pending := range w.pendingUTF8 {
+		if len(pending) == 0 {
+			continue
+		}
+		if err := w.writeEventBytes(kind, pending, now); err != nil {
+			log.Printf("iolog: flush pending %q bytes on close: %v", kind, err)
+		}
+	}
+	w.pendingUTF8 = nil
 	if err := w.castBuf.Flush(); err != nil {
 		return err
 	}
