@@ -74,13 +74,29 @@ int mock_open(const char *pathname, int flags, ...) {
     return 100; /* dummy fd for /dev/tty or /dev/urandom */
 }
 
+int mock_getsockopt(int sockfd, int level, int optname, void *optval, socklen_t *optlen) {
+    (void)sockfd;
+    (void)level;
+    (void)optname;
+    if (optval && optlen && *optlen >= sizeof(struct ucred)) {
+        struct ucred *cred = (struct ucred *)optval;
+        cred->uid = 0;
+        cred->gid = 0;
+        cred->pid = 1234;
+        *optlen = sizeof(struct ucred);
+        return 0;
+    }
+    return -1;
+}
+
 /* Omdirigera systemanrop i plugin.c */
-#define socket  mock_socket
-#define connect mock_connect
-#define close   mock_close
-#define read    mock_read
-#define write   mock_write
-#define open    mock_open
+#define socket     mock_socket
+#define connect    mock_connect
+#define close      mock_close
+#define read       mock_read
+#define write      mock_write
+#define open       mock_open
+#define getsockopt mock_getsockopt
 
 /* Define TEST_MODE before including plugin.c */
 #define TEST_MODE

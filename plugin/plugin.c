@@ -225,6 +225,48 @@ static int drain_payload(int fd, uint32_t n)
     return 0;
 }
 
+static void safe_write_tty(int fd, const char *buf, size_t len)
+{
+    size_t i = 0;
+    while (i < len) {
+        if (buf[i] == 0x1b) { // ESC
+            if (i + 1 < len && buf[i+1] == '[') {
+                size_t j = i + 2;
+                while (j < len && ((buf[j] >= '0' && buf[j] <= '9') || buf[j] == ';')) {
+                    j++;
+                }
+                if (j < len && buf[j] == 'm') {
+                    write(fd, &buf[i], j - i + 1);
+                    i = j + 1;
+                    continue;
+                }
+            }
+            write(fd, "^[", 2);
+            i++;
+        } else {
+            write(fd, &buf[i], 1);
+            i++;
+        }
+    }
+}
+
+static void sanitize_id_part(char *dst, const char *src, size_t maxlen)
+{
+    size_t i = 0;
+    for (i = 0; src[i] != '\0' && i < maxlen - 1; i++) {
+        char c = src[i];
+        if ((c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-') {
+            dst[i] = c;
+        } else {
+            dst[i] = '-';
+        }
+    }
+    dst[i] = '\0';
+}
+
 /*
  * Connect to agent Unix socket. Returns fd or -1.
  */
@@ -243,6 +285,20 @@ static int connect_agent(void)
         close(fd);
         return -1;
     }
+
+#ifdef __linux__
+    struct ucred cred;
+    socklen_t len = sizeof(struct ucred);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) < 0) {
+        close(fd);
+        return -1;
+    }
+    if (cred.uid != 0) {
+        close(fd);
+        return -1;
+    }
+#endif
+
     return fd;
 }
 
@@ -295,7 +351,7 @@ static void refresh_ack_cache(void)
                         uint8_t buf[64];
                         uint32_t n = rem < (uint32_t)sizeof(buf) ? rem : (uint32_t)sizeof(buf);
                         if (read_exact(g_agent_fd, buf, n) < 0) return;
-                        write(g_tty_fd, buf, n);
+                        safe_write_tty(g_tty_fd, (const char *)buf, n);
                         rem -= n;
                     }
                     write(g_tty_fd, WARN_MSG_END, sizeof(WARN_MSG_END) - 1);
@@ -328,29 +384,91 @@ static void refresh_ack_cache(void)
     if (_rc < 0)
         return;
 
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(g_agent_fd, &rfds);
-    struct timeval tv = {
-        .tv_sec  = 0,
-        .tv_usec = ACK_QUERY_TIMEOUT_MS * 1000,
-    };
-
-    if (select(g_agent_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
-        return;
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_nsec += ACK_QUERY_TIMEOUT_MS * 1000000;
+    if (deadline.tv_nsec >= 1000000000) {
+        deadline.tv_sec += deadline.tv_nsec / 1000000000;
+        deadline.tv_nsec %= 1000000000;
+    }
 
     uint8_t hdr[5];
-    if (read_exact(g_agent_fd, hdr, 5) < 0)
-        return;
-    if (hdr[0] != MSG_ACK_RESPONSE)
-        return;
+    uint32_t plen = 0;
+    for (;;) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
 
-    uint32_t plen;
-    memcpy(&plen, hdr + 1, 4);
-    plen = be32toh(plen);
-    if (plen > MAX_MSG_PAYLOAD) {
-        atomic_store(&g_agent_dead, 1);
-        return;
+        long long diff_us = (long long)(deadline.tv_sec - now.tv_sec) * 1000000LL +
+                            (deadline.tv_nsec - now.tv_nsec) / 1000LL;
+        if (diff_us <= 0) {
+            /* Timeout reached */
+            return;
+        }
+
+        struct timeval tv;
+        tv.tv_sec  = diff_us / 1000000LL;
+        tv.tv_usec = diff_us % 1000000LL;
+
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(g_agent_fd, &rfds);
+
+        int s = select(g_agent_fd + 1, &rfds, NULL, NULL, &tv);
+        if (s <= 0) {
+            /* Timeout or select error */
+            return;
+        }
+
+        if (read_exact(g_agent_fd, hdr, 5) < 0)
+            return;
+
+        memcpy(&plen, hdr + 1, 4);
+        plen = be32toh(plen);
+        if (plen > MAX_MSG_PAYLOAD) {
+            atomic_store(&g_agent_dead, 1);
+            return;
+        }
+
+        if (hdr[0] == MSG_ACK_RESPONSE) {
+            break;
+        }
+
+        /* Process non-ACK_RESPONSE frame */
+        if (hdr[0] == MSG_FREEZE_TIMEOUT)
+            atomic_store(&g_freeze_timeout, 1);
+        if (hdr[0] == MSG_SESSION_EXPIRED)
+            atomic_store(&g_session_expired, 1);
+
+        if (hdr[0] == MSG_SESSION_WARNING) {
+            if (g_tty_fd >= 0) {
+                write(g_tty_fd, WARN_MSG_START, sizeof(WARN_MSG_START) - 1);
+                for (uint32_t rem = plen; rem > 0; ) {
+                    uint8_t buf[64];
+                    uint32_t n = rem < (uint32_t)sizeof(buf) ? rem : (uint32_t)sizeof(buf);
+                    if (read_exact(g_agent_fd, buf, n) < 0) return;
+                    safe_write_tty(g_tty_fd, (const char *)buf, n);
+                    rem -= n;
+                }
+                write(g_tty_fd, WARN_MSG_END, sizeof(WARN_MSG_END) - 1);
+            } else {
+                for (uint32_t rem = plen; rem > 0; ) {
+                    uint8_t discard[64];
+                    uint32_t n = rem < (uint32_t)sizeof(discard) ? rem : (uint32_t)sizeof(discard);
+                    if (read_exact(g_agent_fd, discard, n) < 0) return;
+                    rem -= n;
+                }
+            }
+            continue;
+        }
+
+        /* Drain payload for any other message type */
+        for (uint32_t rem = plen; rem > 0; ) {
+            uint8_t drain[64];
+            uint32_t n = rem < (uint32_t)sizeof(drain) ? rem : (uint32_t)sizeof(drain);
+            if (read_exact(g_agent_fd, drain, n) < 0)
+                return;
+            rem -= n;
+        }
     }
     if (plen < 16) {
         /* Drain undersized payload to keep the socket in sync. */
@@ -957,9 +1075,13 @@ static int plugin_open(unsigned int        version,
         (void)read(rfd, rnd, sizeof(rnd));
         close(rfd);
     }
+    char sanitized_host[128];
+    char sanitized_user[128];
+    sanitize_id_part(sanitized_host, host, sizeof(sanitized_host));
+    sanitize_id_part(sanitized_user, user, sizeof(sanitized_user));
     snprintf(g_session_id, sizeof(g_session_id),
              "%s-%s-%d-%lld-%02x%02x%02x%02x",
-             host, user, (int)getpid(), (long long)now_ns(),
+             sanitized_host, sanitized_user, (int)getpid(), (long long)now_ns(),
              rnd[0], rnd[1], rnd[2], rnd[3]);
 
     char session_id_j[640];
@@ -1077,7 +1199,17 @@ read_agent:
         uint32_t dlen;
         memcpy(&dlen, hdr + 1, 4);
         dlen = be32toh(dlen);
-        if (dlen > 0 && dlen < 512) {
+        if (dlen >= 512) {
+            /* Oversized payload — drain it */
+            drain_payload(g_agent_fd, dlen);
+            if (g_tty_fd >= 0) {
+                write(g_tty_fd, DENIED_HDR,   sizeof(DENIED_HDR)   - 1);
+                write(g_tty_fd, BLOCKED_TAIL, sizeof(BLOCKED_TAIL) - 1);
+            } else {
+                g_printf(SUDO_CONV_ERROR_MSG,
+                    "sudo-logger: access blocked by security policy\n");
+            }
+        } else if (dlen > 0) {
             char msgbuf[512] = {0};
             read_exact(g_agent_fd, msgbuf, dlen);
             if (g_tty_fd >= 0) {
@@ -1087,6 +1219,15 @@ read_agent:
             } else {
                 g_printf(SUDO_CONV_ERROR_MSG,
                     "sudo-logger: access blocked by security policy: %s\n", msgbuf);
+            }
+        } else {
+            /* Empty payload */
+            if (g_tty_fd >= 0) {
+                write(g_tty_fd, DENIED_HDR,   sizeof(DENIED_HDR)   - 1);
+                write(g_tty_fd, BLOCKED_TAIL, sizeof(BLOCKED_TAIL) - 1);
+            } else {
+                g_printf(SUDO_CONV_ERROR_MSG,
+                    "sudo-logger: access blocked by security policy\n");
             }
         }
         /* _exit bypasses sudo's own error path so it cannot print
@@ -1101,7 +1242,10 @@ read_agent:
         uint32_t elen;
         memcpy(&elen, hdr + 1, 4);
         elen = be32toh(elen);
-        if (elen > 0 && elen < 512) {
+        if (elen >= 512) {
+            /* Oversized payload — drain it */
+            drain_payload(g_agent_fd, elen);
+        } else if (elen > 0) {
             char errbuf[512] = {0};
             read_exact(g_agent_fd, errbuf, elen);
         }
@@ -1150,7 +1294,7 @@ read_agent:
                         size_t dlen = json_unescape_into(decoded, sizeof(decoded),
                                                          dp, (size_t)(dend - dp));
                         if (g_tty_fd >= 0) {
-                            write(g_tty_fd, decoded, dlen);
+                            safe_write_tty(g_tty_fd, decoded, dlen);
                             write(g_tty_fd, "\r\n", 2);
                         } else {
                             g_printf(SUDO_CONV_INFO_MSG, "%s\n", decoded);
