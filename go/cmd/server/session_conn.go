@@ -137,16 +137,16 @@ func (s *sessionConn) startDiskWriter() {
 
 			// Collect a batch of up to 100 available tasks to reduce I/O overhead
 			batch := []diskTask{task}
+		collect:
 			for i := 0; i < 99; i++ {
 				select {
 				case t, ok := <-s.diskQueue:
 					if !ok {
-						i = 100
-						break
+						break collect
 					}
 					batch = append(batch, t)
 				default:
-					i = 100 // No more immediately available
+					break collect // No more immediately available
 				}
 			}
 

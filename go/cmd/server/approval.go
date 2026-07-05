@@ -25,10 +25,12 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -368,7 +370,7 @@ func (m *ApprovalManager) Check(user, host, runas, command string, groups []stri
 		log.Printf("approval: CreateApprovalRequest: %v", err)
 	}
 
-	go m.sendWebhook("requested", &req, "", pol.Notifications)
+	go m.sendWebhookRequested(&req, pol.Notifications)
 	return CheckResult{Result: ApprovalResultPending, RequestID: id, HasWebhook: pol.Notifications.WebhookURL != ""}
 }
 
@@ -453,6 +455,10 @@ func (m *ApprovalManager) RetryMessage(user, host string) string {
 // ── Approve / Deny ────────────────────────────────────────────────────────────
 
 // Approve grants a time window for user@host and removes the pending request.
+// errApprovalNotFound distinguishes "no such pending request" (404) from a
+// backend failure (500) for handleDecision's callers.
+var errApprovalNotFound = errors.New("approval request not found")
+
 func (m *ApprovalManager) Approve(id, decidedBy string, window time.Duration) error {
 	ctx := context.Background()
 	req, err := m.backend.DeleteApprovalRequest(ctx, id)
@@ -460,7 +466,7 @@ func (m *ApprovalManager) Approve(id, decidedBy string, window time.Duration) er
 		return fmt.Errorf("delete request: %w", err)
 	}
 	if req == nil {
-		return fmt.Errorf("request %s not found", id)
+		return fmt.Errorf("request %s not found: %w", id, errApprovalNotFound)
 	}
 
 	m.mu.RLock()
@@ -489,7 +495,7 @@ func (m *ApprovalManager) Deny(id, decidedBy, reason string) error {
 		return fmt.Errorf("delete request: %w", err)
 	}
 	if req == nil {
-		return fmt.Errorf("request %s not found", id)
+		return fmt.Errorf("request %s not found: %w", id, errApprovalNotFound)
 	}
 
 	m.mu.RLock()
@@ -545,70 +551,61 @@ type slackField struct {
 	Short bool   `json:"short"`
 }
 
-func (m *ApprovalManager) sendWebhook(event string, req *store.ApprovalRequest, decidedBy string, cfg approvalNotifyCfg) {
+func (m *ApprovalManager) sendWebhookRequested(req *store.ApprovalRequest, cfg approvalNotifyCfg) {
 	if cfg.WebhookURL == "" {
 		return
 	}
-	var color, header, footer, channel string
-	var fields []slackField
+	mention := req.User
+	if cfg.MentionUser {
+		mention = "@" + req.User
+	}
+	fields := []slackField{
+		{Title: "User", Value: mention, Short: true},
+		{Title: "Host", Value: req.Host, Short: true},
+		{Title: "Command", Value: "`" + req.Command + "`"},
+		{Title: "Reason", Value: req.Justification},
+		{Title: "Request ID", Value: req.ID, Short: true},
+		{Title: "Expires", Value: req.ExpiresAt.Format("2006-01-02 15:04:05"), Short: true},
+	}
+	footer := "Approve or deny in sudo-logger UI"
+	if cfg.ReplayWebAppURL != "" {
+		footer = fmt.Sprintf("[Approve or deny in sudo-logger UI](%s/approvals)", strings.TrimSuffix(cfg.ReplayWebAppURL, "/"))
+	}
+
 	var actions []slackAction
-
-	switch event {
-	case "requested":
-		color = "#ff9900"
-		header = ":lock: *Sudo approval request*"
-		mention := req.User
-		if cfg.MentionUser {
-			mention = "@" + req.User
-		}
-		fields = []slackField{
-			{Title: "User", Value: mention, Short: true},
-			{Title: "Host", Value: req.Host, Short: true},
-			{Title: "Command", Value: "`" + req.Command + "`"},
-			{Title: "Reason", Value: req.Justification},
-			{Title: "Request ID", Value: req.ID, Short: true},
-			{Title: "Expires", Value: req.ExpiresAt.Format("2006-01-02 15:04:05"), Short: true},
-		}
-		footer = "Approve or deny in sudo-logger UI"
-		if cfg.ReplayWebAppURL != "" {
-			footer = fmt.Sprintf("[Approve or deny in sudo-logger UI](%s/approvals)", strings.TrimSuffix(cfg.ReplayWebAppURL, "/"))
-		}
-		channel = cfg.RequestChannel
-
-		if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" && cfg.WebhookSecret != "" {
-			callbackURL := strings.TrimSuffix(cfg.ReplayWebAppURL, "/") + "/api/approvals/callback"
-			log.Printf("approval: generated callback URL: %s", callbackURL)
-			actions = []slackAction{
-				{
-					ID:   "approve",
-					Type: "button",
-					Name: "Approve",
-					Integration: slackIntegration{
-						URL: callbackURL,
-						Context: map[string]string{
-							"action":     "approve",
-							"request_id": req.ID,
-							"token":      m.generateActionToken(req.ID, "approve", cfg.WebhookSecret),
-						},
+	if cfg.WebhookURL != "" && cfg.ReplayWebAppURL != "" && cfg.WebhookSecret != "" {
+		callbackURL := strings.TrimSuffix(cfg.ReplayWebAppURL, "/") + "/api/approvals/callback"
+		log.Printf("approval: generated callback URL: %s", callbackURL)
+		actions = []slackAction{
+			{
+				ID:   "approve",
+				Type: "button",
+				Name: "Approve",
+				Integration: slackIntegration{
+					URL: callbackURL,
+					Context: map[string]string{
+						"action":     "approve",
+						"request_id": req.ID,
+						"token":      m.generateActionToken(req.ID, "approve", cfg.WebhookSecret),
 					},
 				},
-				{
-					ID:   "deny",
-					Type: "button",
-					Name: "Deny",
-					Integration: slackIntegration{
-						URL: callbackURL,
-						Context: map[string]string{
-							"action":     "deny",
-							"request_id": req.ID,
-							"token":      m.generateActionToken(req.ID, "deny", cfg.WebhookSecret),
-						},
+			},
+			{
+				ID:   "deny",
+				Type: "button",
+				Name: "Deny",
+				Integration: slackIntegration{
+					URL: callbackURL,
+					Context: map[string]string{
+						"action":     "deny",
+						"request_id": req.ID,
+						"token":      m.generateActionToken(req.ID, "deny", cfg.WebhookSecret),
 					},
 				},
-			}
+			},
 		}
 	}
-	m.postSlack(cfg, channel, header, color, fields, footer, actions)
+	m.postSlack(cfg, cfg.RequestChannel, ":lock: *Sudo approval request*", "#ff9900", fields, footer, actions)
 }
 
 func (m *ApprovalManager) sendWebhookApproved(req *store.ApprovalRequest, decidedBy string, window time.Duration, expiresAt time.Time, cfg approvalNotifyCfg) {
@@ -854,6 +851,17 @@ func (m *ApprovalManager) handleList(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
+// writeApprovalDecisionError maps an Approve/Deny error to the right status:
+// "not found" is a client error (404), anything else is a backend failure
+// (500) — a DB outage should not look like a missing request to the caller.
+func writeApprovalDecisionError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errApprovalNotFound) {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
 func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -901,7 +909,7 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		if err := m.Approve(id, decidedBy, window); err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			writeApprovalDecisionError(w, err)
 			return
 		}
 	case "deny":
@@ -913,7 +921,7 @@ func (m *ApprovalManager) handleDecision(w http.ResponseWriter, r *http.Request)
 			reason = body.Reason
 		}
 		if err := m.Deny(id, decidedBy, reason); err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			writeApprovalDecisionError(w, err)
 			return
 		}
 	default:
@@ -1053,13 +1061,17 @@ func (m *ApprovalManager) generateActionToken(requestID, action, secret string) 
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// matchGlob matches a host against an exemption-policy glob pattern. Uses
+// path.Match for full glob support (multiple "*", "?", "[...]") instead of a
+// single-wildcard-only implementation; hostnames never contain "/", so
+// path.Match's segment-boundary behavior for "*" does not affect matching
+// here. A malformed pattern (e.g. unbalanced "[") is treated as no match
+// rather than granting the exemption it was meant to scope.
 func matchGlob(pattern, s string) bool {
-	if pattern == "*" {
-		return true
+	ok, err := path.Match(pattern, s)
+	if err != nil {
+		log.Printf("approval: invalid exemption host pattern %q: %v", pattern, err)
+		return false
 	}
-	if !strings.Contains(pattern, "*") {
-		return pattern == s
-	}
-	parts := strings.SplitN(pattern, "*", 2)
-	return strings.HasPrefix(s, parts[0]) && strings.HasSuffix(s, parts[1])
+	return ok
 }
