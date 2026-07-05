@@ -41,8 +41,8 @@ type DistributedStore struct {
 	db   *pgxpool.Pool
 	s3   *s3.Client
 
-	stopOnce sync.Once
-	stopCh   chan struct{}
+	stopOnce   sync.Once
+	stopCancel context.CancelFunc
 }
 
 func newDistributedStore(cfg Config) (*DistributedStore, error) {
@@ -83,13 +83,14 @@ func newDistributedStore(cfg Config) (*DistributedStore, error) {
 		return nil, fmt.Errorf("build s3 client: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	d := &DistributedStore{
-		cfg:    cfg,
-		db:     pool,
-		s3:     s3Client,
-		stopCh: make(chan struct{}),
+		cfg:        cfg,
+		db:         pool,
+		s3:         s3Client,
+		stopCancel: cancel,
 	}
-	go d.runCleanupWorker(context.Background())
+	go d.runCleanupWorker(ctx)
 	return d, nil
 }
 
@@ -400,7 +401,7 @@ func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.Session
 	if ttyR <= 0 {
 		ttyR = 50
 	}
-	_, err = d.db.Exec(ctx, `
+	tag, err := d.db.Exec(ctx, `
 INSERT INTO sudo_sessions
   (tsid, session_id, "user", host, runas, runas_uid, runas_gid,
    command, resolved_command, cwd, flags, start_time, in_progress,
@@ -418,6 +419,15 @@ ON CONFLICT (tsid) DO NOTHING`,
 	if err != nil {
 		_ = w.Close()
 		return nil, fmt.Errorf("insert session row: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// ON CONFLICT DO NOTHING means a row with this tsid already exists —
+		// the cast file we just created would otherwise be attributed to
+		// that other row's metadata. tsid includes a random suffix from
+		// iolog.NewWriter, so this should never happen in practice; treat it
+		// as a hard error rather than silently continuing.
+		_ = w.Close()
+		return nil, fmt.Errorf("insert session row: tsid %q already exists", tsid)
 	}
 
 	return &distributedWriter{w: w, tsid: tsid, d: d, startTime: startTime}, nil
@@ -644,6 +654,15 @@ func (d *DistributedStore) doCleanup(ctx context.Context, lockID int64) {
 		_, _ = d.db.Exec(ctx, "SELECT pg_advisory_unlock($1)", lockID)
 	}()
 
+	// Expired approval requests are independent of the session retention
+	// policy below, so purge them unconditionally on every cleanup pass.
+	if tag, err := d.db.Exec(ctx, "DELETE FROM sudo_approval_requests WHERE expires_at < $1",
+		time.Now().Unix()); err != nil {
+		log.Printf("store/distributed: cleanup: delete expired approval requests: %v", err)
+	} else if n := tag.RowsAffected(); n > 0 {
+		log.Printf("store/distributed: cleanup: removed %d expired approval request(s)", n)
+	}
+
 	// Fetch retention policy from config.
 	cfgStr, err := d.GetConfig(ctx, "retention_policy")
 	if err != nil || cfgStr == "" {
@@ -733,9 +752,11 @@ func (d *DistributedStore) deleteS3Session(ctx context.Context, tsid string) {
 }
 
 // DeleteSession implements SessionStore.
-// Removes the S3 objects and database row for tsid, then records an audit
-// entry in sudo_deletion_log. Returns an error if the session is still in
-// progress or does not exist.
+// Removes the S3 objects, then records the audit entry in sudo_deletion_log
+// and deletes the database row in a single transaction — a session must
+// never disappear from the DB without a matching audit record, so if the
+// audit insert fails the row delete is rolled back too. Returns an error if
+// the session is still in progress or does not exist.
 func (d *DistributedStore) DeleteSession(ctx context.Context, tsid, reason, deletedBy string) error {
 	var inProgress bool
 	err := d.db.QueryRow(ctx, `SELECT in_progress FROM sudo_sessions WHERE tsid = $1`, tsid).Scan(&inProgress)
@@ -748,14 +769,23 @@ func (d *DistributedStore) DeleteSession(ctx context.Context, tsid, reason, dele
 
 	d.deleteS3Session(ctx, tsid)
 
-	if _, err := d.db.Exec(ctx, `DELETE FROM sudo_sessions WHERE tsid = $1`, tsid); err != nil {
-		return fmt.Errorf("delete session row: %w", err)
+	tx, err := d.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin deletion transaction: %w", err)
 	}
-	if _, err := d.db.Exec(ctx,
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
 		`INSERT INTO sudo_deletion_log (tsid, reason, deleted_by) VALUES ($1, $2, $3)`,
 		tsid, reason, deletedBy,
 	); err != nil {
-		log.Printf("store/distributed: deletion audit write for %s: %v", tsid, err)
+		return fmt.Errorf("deletion audit write: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM sudo_sessions WHERE tsid = $1`, tsid); err != nil {
+		return fmt.Errorf("delete session row: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit deletion: %w", err)
 	}
 	return nil
 }
@@ -1078,7 +1108,7 @@ func (d *DistributedStore) RecordView(ctx context.Context, tsid, viewer, replayU
 // ListAccessLog implements SessionStore.
 // Returns entries from sudo_access_log, newest first, filtered by viewer.
 func (d *DistributedStore) ListAccessLog(ctx context.Context, viewer string, limit int) ([]AccessLogEntry, error) {
-	var rows interface{ Next() bool; Scan(...any) error; Close() }
+	var rows pgx.Rows
 	var err error
 	if viewer != "" {
 		rows, err = d.db.Query(ctx, `
@@ -1107,6 +1137,9 @@ LIMIT $1`, limit)
 		}
 		result = append(result, e)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	if result == nil {
 		result = []AccessLogEntry{}
 	}
@@ -1116,7 +1149,7 @@ LIMIT $1`, limit)
 // Close implements SessionStore.
 func (d *DistributedStore) Close() error {
 	d.stopOnce.Do(func() {
-		close(d.stopCh)
+		d.stopCancel()
 		d.db.Close()
 	})
 	return nil

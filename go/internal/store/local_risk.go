@@ -9,7 +9,10 @@ import (
 
 // GetRiskCache implements SessionStore.
 func (ls *LocalStore) GetRiskCache(_ context.Context, tsid, rulesHash string) (*RiskCache, error) {
-	sessDir := filepath.Join(ls.cfg.LogDir, tsid)
+	sessDir, err := ls.resolveSessionDir(tsid)
+	if err != nil {
+		return nil, err
+	}
 	rc := localLoadRiskCache(sessDir, rulesHash)
 	if rc == nil {
 		return nil, nil
@@ -19,7 +22,10 @@ func (ls *LocalStore) GetRiskCache(_ context.Context, tsid, rulesHash string) (*
 
 // SaveRiskCache implements SessionStore.
 func (ls *LocalStore) SaveRiskCache(_ context.Context, tsid, rulesHash string, score int, reasons []string) error {
-	sessDir := filepath.Join(ls.cfg.LogDir, tsid)
+	sessDir, err := ls.resolveSessionDir(tsid)
+	if err != nil {
+		return err
+	}
 	localSaveRiskCache(sessDir, rulesHash, score, reasons)
 	return nil
 }

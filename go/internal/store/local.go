@@ -400,6 +400,9 @@ func (ls *LocalStore) loadRoles() error {
 	data, err := os.ReadFile(ls.cfg.RolesPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			ls.rolesMu.Lock()
+			ls.rolesCfg = nil
+			ls.rolesMu.Unlock()
 			return nil
 		}
 		return err
@@ -753,7 +756,15 @@ func (ls *LocalStore) RecordView(_ context.Context, tsid, viewer, replayURL stri
 
 // ListAccessLog implements SessionStore.
 // Returns entries from the ring buffer, newest first, filtered by viewer.
+// defaultAccessLogLimit matches the replay-server handler's own default so
+// a limit<=0 (e.g. from a caller that forgets to guard it) behaves the same
+// as omitting the query parameter, instead of returning a single entry.
+const defaultAccessLogLimit = 200
+
 func (ls *LocalStore) ListAccessLog(_ context.Context, viewer string, limit int) ([]AccessLogEntry, error) {
+	if limit <= 0 {
+		limit = defaultAccessLogLimit
+	}
 	ls.viewMu.Lock()
 	snap := make([]AccessLogEntry, len(ls.viewLog))
 	copy(snap, ls.viewLog)
@@ -778,9 +789,10 @@ func (ls *LocalStore) ListAccessLog(_ context.Context, viewer string, limit int)
 }
 
 // DeleteSession implements SessionStore.
-// It removes the session directory and appends an audit entry to
-// <logdir>/.deletion-log.jsonl. Returns an error if the session is still
-// active or cannot be found.
+// It appends an audit entry to <logdir>/.deletion-log.jsonl BEFORE removing
+// the session directory, and aborts without deleting anything if the audit
+// write fails — a deletion must always leave a trace. Returns an error if
+// the session is still active or cannot be found.
 func (ls *LocalStore) DeleteSession(_ context.Context, tsid, reason, deletedBy string) error {
 	sessDir, err := ls.resolveSessionDir(tsid)
 	if err != nil {
@@ -789,19 +801,41 @@ func (ls *LocalStore) DeleteSession(_ context.Context, tsid, reason, deletedBy s
 	if _, err := os.Stat(filepath.Join(sessDir, "ACTIVE")); err == nil {
 		return fmt.Errorf("session %q is still in progress", tsid)
 	}
-	if err := os.RemoveAll(sessDir); err != nil {
-		return fmt.Errorf("remove session: %w", err)
-	}
-	// Append JSON audit entry.
+
+	// Append JSON audit entry before removing anything.
 	entry := fmt.Sprintf(`{"time":%q,"event":"session_deleted","tsid":%q,"reason":%q,"deleted_by":%q}`+"\n",
 		time.Now().UTC().Format(time.RFC3339), tsid, reason, deletedBy)
 	logPath := filepath.Join(ls.cfg.LogDir, ".deletion-log.jsonl")
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err == nil {
-		_, _ = f.WriteString(entry)
-		f.Close()
-	} else {
-		log.Printf("store/local: deletion audit write: %v", err)
+	if err != nil {
+		return fmt.Errorf("deletion audit write: %w", err)
+	}
+	_, writeErr := f.WriteString(entry)
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	if writeErr != nil {
+		return fmt.Errorf("deletion audit write: %w", writeErr)
+	}
+	if syncErr != nil {
+		return fmt.Errorf("deletion audit sync: %w", syncErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("deletion audit close: %w", closeErr)
+	}
+
+	if err := os.RemoveAll(sessDir); err != nil {
+		// The audit entry above is now inaccurate (it says the session was
+		// deleted, but removal failed) — append a correction so the trail
+		// stays truthful rather than silently under- or over-reporting.
+		correction := fmt.Sprintf(`{"time":%q,"event":"session_delete_failed","tsid":%q,"error":%q}`+"\n",
+			time.Now().UTC().Format(time.RFC3339), tsid, err.Error())
+		if cf, cerr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); cerr == nil {
+			_, _ = cf.WriteString(correction)
+			cf.Close()
+		} else {
+			log.Printf("store/local: deletion-failure audit write: %v", cerr)
+		}
+		return fmt.Errorf("remove session: %w", err)
 	}
 	return nil
 }
@@ -943,7 +977,15 @@ func (ls *LocalStore) SaveBlockedPolicy(_ context.Context, policy BlockedPolicy)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ls.cfg.BlockedUsersPath, append([]byte(localBlockedUsersHeader), data...), 0o640)
+	full := append([]byte(localBlockedUsersHeader), data...)
+	tmp := ls.cfg.BlockedUsersPath + ".tmp"
+	if err := os.WriteFile(tmp, full, 0o640); err != nil {
+		return fmt.Errorf("write tmp blocked-users: %w", err)
+	}
+	if err := os.Rename(tmp, ls.cfg.BlockedUsersPath); err != nil {
+		return fmt.Errorf("rename tmp blocked-users: %w", err)
+	}
+	return nil
 }
 
 // ── Whitelisted-users policy API ─────────────────────────────────────────────
@@ -1050,7 +1092,15 @@ func (ls *LocalStore) SaveWhitelistPolicy(_ context.Context, policy WhitelistPol
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ls.cfg.WhitelistedUsersPath, append([]byte(localWhitelistedUsersHeader), data...), 0o640)
+	full := append([]byte(localWhitelistedUsersHeader), data...)
+	tmp := ls.cfg.WhitelistedUsersPath + ".tmp"
+	if err := os.WriteFile(tmp, full, 0o640); err != nil {
+		return fmt.Errorf("write tmp whitelisted-users: %w", err)
+	}
+	if err := os.Rename(tmp, ls.cfg.WhitelistedUsersPath); err != nil {
+		return fmt.Errorf("rename tmp whitelisted-users: %w", err)
+	}
+	return nil
 }
 
 // MarkSessionNetworkOutage implements SessionStore.
@@ -1099,7 +1149,10 @@ func (ls *LocalStore) HasSandboxViolation(_ context.Context, tsid string) (bool,
 	if err == nil {
 		return true, nil
 	}
-	return false, nil
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 // resolveSessionDir converts tsid to an absolute directory path and checks
