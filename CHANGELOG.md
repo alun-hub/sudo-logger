@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.0] - 2026-07-05
+
+### Added
+- **plugin**: Unit tests for getsockopt verification, safe TTY writing, and string sanitization.
+- **plugin**: Auto-build and test execution in GitHub Actions CI workflow.
+- **agent**: Unit tests for raw BPF event bounds checks and handleIO clamping.
+
+### Changed
+- **refactoring**: Structural modularization of the TCP session connection, local storage, replay handlers, and eBPF session streaming.
+
+### Fixed
+- **plugin**: Crash on `sudo -V` when convo/printf pointer is not initialized.
+- **plugin**: Hardened peer verification via `getsockopt` `SO_PEERCRED` to verify agent is root.
+- **plugin**: Safe ANSI SGR formatting sanitizer for TTY writes, escaping all other ESC sequences.
+- **plugin**: Sanitized hostname and username before formatting session ID to prevent path traversal.
+- **plugin**: Drained unsolicited warning and freeze socket frames to prevent framing desync.
+- **agent**: Non-blocking heartbeat priority queue sends to prevent agent freezing on clogged socket.
+- **agent**: Raw BPF event bounds check clamping in `handleIO` to prevent out-of-bounds panics.
+- **agent**: Atomic sandboxes reloading with diff-based insert-then-delete map updates.
+- **agent**: Refactored attach ladder using link helper slice.
+- **agent**: Linger robust reading of `cgroup.procs` to prevent premature termination.
+- **server**: Fail-closed database query error propagation in block policy and whitelist checks.
+- **server**: Solved session data race in disk writer using atomic session pointer.
+- **server**: JIT policy reload fail-closed recovery for database errors.
+- **server**: Supported `max_session_duration` validation and Settings UI configuration.
+- **server**: Prevented duplicate session start memory leaks and Slowloris resource exhaustion on health ports.
+
 ## [1.25.5] - 2026-07-03
 
 ### Fixed
