@@ -274,6 +274,13 @@ func TestStripANSI(t *testing.T) {
 		{"OSC title terminated by BEL stripped", "a\x1b]0;window title\x07b", "ab"},
 		{"OSC hyperlink terminated by ST stripped", "a\x1b]8;;http://example.com\x1b\\link text\x1b]8;;\x1b\\b", "alink textb"},
 		{"DCS terminated by ST stripped", "a\x1bPsome dcs payload\x1b\\b", "ab"},
+		// Regression: an unterminated OSC/CSI must not silently drop the
+		// rest of the string — that would blind content-based risk rules
+		// for an entire session from one throwaway command like
+		// `printf '\033]0;'`. The unterminated sequence is passed through
+		// as literal text instead of being discarded.
+		{"unterminated OSC preserves trailing content", "before\x1b]0;sensitive command output", "before\x1b]0;sensitive command output"},
+		{"unterminated CSI at end of string preserves content", "before\x1b[31;5", "before\x1b[31;5"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

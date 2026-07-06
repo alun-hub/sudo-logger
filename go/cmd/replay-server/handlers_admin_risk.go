@@ -180,29 +180,49 @@ func stripANSI(s string) string {
 	i := 0
 	for i < len(s) {
 		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			// CSI: ESC [ ... final byte in 0x40-0x7e
+			// CSI: ESC [ ... final byte in 0x40-0x7e. If never terminated
+			// (truncated at end of buffer), fall through to plain text below
+			// instead of silently discarding it — this is risk-scoring
+			// input, not a terminal renderer, so losing unbounded trailing
+			// content to a single malformed/truncated escape is worse than
+			// leaving a few raw escape bytes in the matched text.
+			start := i
 			i += 2
 			for i < len(s) && (s[i] < 0x40 || s[i] > 0x7e) {
 				i++
 			}
 			if i < len(s) {
 				i++ // consume the final command byte
+			} else {
+				out = append(out, s[start:]...)
 			}
 		} else if s[i] == '\x1b' && i+1 < len(s) && (s[i+1] == ']' || s[i+1] == 'P') {
 			// OSC (]) / DCS (P): ESC <type> ... terminated by BEL or ST (ESC \)
 			// so title-setting/hyperlink/etc. payloads (which can carry
-			// arbitrary text) don't leak into risk-rule matching.
+			// arbitrary text) don't leak into risk-rule matching. Unlike
+			// CSI, BEL/ST termination is not implied by ordinary output, so
+			// a single unterminated opener (e.g. `printf '\033]0;'`) would
+			// otherwise blind content-based risk rules for the rest of the
+			// session — same "don't silently drop on no terminator" fallback
+			// as CSI above.
+			start := i
 			i += 2
+			terminated := false
 			for i < len(s) {
 				if s[i] == '\x07' {
 					i++
+					terminated = true
 					break
 				}
 				if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
 					i += 2
+					terminated = true
 					break
 				}
 				i++
+			}
+			if !terminated {
+				out = append(out, s[start:]...)
 			}
 		} else {
 			out = append(out, s[i])
