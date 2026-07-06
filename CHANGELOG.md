@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.0] - 2026-07-06
+
+### Changed
+- **server**: Extracted the duplicated session-open tail (open session, log, send `SERVER_READY`) shared by the session-start and challenge-response paths into a single helper.
+- **server, replay**: Deduplicated agent-host validation and log-string sanitization into a shared `internal/util` package; unified the session divergence-status default.
+- **agent**: Split the 693-line plugin-connection handler into a `sessionConn` type with focused methods (freeze/idle/TTL watches, sender, reader-ack, heartbeat, handshake) instead of one large closure-heavy function.
+- **agent**: Split `ebpf.go` into `ebpf.go` (subsystem lifecycle), `ebpf_events.go` (ring-buffer event handling), `ebpf_pkexec.go` (polkit session tracking), and `ebpf_watch.go` (cgroup/inotify watch loop).
+- **plugin**: Split `plugin_open` into `parse_user_info`, `parse_command_info`, `parse_settings`, `build_session_start_json`, and `run_handshake` helpers.
+- **store**: Split `distributed.go` and `local.go` into per-domain files (sessions, policy, users/roles, approval, sudoers) instead of one large file per backend.
+
+No functional or behavioral changes — this release is a structural refactor for readability and maintainability, verified with the full test suite (including the race detector) and symbol-level diffs confirming no code was lost or duplicated.
+
 ## [1.27.0] - 2026-07-06
 
 ### Security
