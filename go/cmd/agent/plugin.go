@@ -138,31 +138,546 @@ func cleanupAllCgs() {
 	}
 }
 
+type outMsg struct {
+	msgType uint8
+	payload []byte
+}
+
+const sessionAckLagLimit = int64(5 * time.Second)
+const maxDeadBuf = 500 // max chunks buffered while server unreachable
+
+// sessionConn holds all per-connection state for one plugin<->agent<->server
+// session: the socket handles, the shared ack/liveness bookkeeping guarded by
+// sessionAckMu, and the queues/synchronization used by the sender, reader,
+// heartbeat, idle-watch, and freeze-watch goroutines. Extracted from what was
+// previously ~670 lines of closures inside handlePluginConn (review T1-1) so
+// the concurrency model — which mutex guards what, which goroutine owns
+// which field — is explicit instead of implicit in closure captures.
+type sessionConn struct {
+	pluginConn net.Conn
+	pr         *bufio.Reader
+	pw         *bufio.Writer
+
+	start    *protocol.SessionStart
+	cg       *cgroupSession
+	redactor *iolog.Redactor
+	ttyPath  string
+
+	serverConn *tls.Conn
+	serverBuf  *bufio.Writer
+	sw         *protocol.Writer
+
+	done       chan struct{}
+	closeOnce  sync.Once
+	stopSender chan struct{}
+	senderWg   sync.WaitGroup
+
+	prioQueue chan outMsg
+	bulkQueue chan outMsg
+
+	pluginWriteMu   sync.Mutex
+	serverWriteMu   sync.Mutex
+	lastServerMsgMu sync.Mutex
+	lastServerMsg   time.Time
+
+	// sessionAckMu guards the fields below: liveness bookkeeping shared
+	// between the reader goroutine (updateAck), the heartbeat goroutine
+	// (markDead/markAlive/resetFrozenStatus), forward() (deadBuf, called
+	// from the main read loop), and the freeze-watch goroutine (frozenSince).
+	sessionAckMu    sync.Mutex
+	sessionAckSeq   uint64
+	serverConnAlive bool
+	ackDebtStartNs  int64
+	deadBuf         []outMsg
+	frozenSince     time.Time
+
+	lastInputNs atomic.Int64
+}
+
+func (sc *sessionConn) close() {
+	sc.closeOnce.Do(func() { close(sc.done) })
+}
+
+func (sc *sessionConn) updateAck(seq uint64) {
+	sc.sessionAckMu.Lock()
+	sc.sessionAckSeq = seq
+	sc.ackDebtStartNs = 0
+	sc.sessionAckMu.Unlock()
+}
+
+func (sc *sessionConn) readAck() (int64, uint64) {
+	sc.sessionAckMu.Lock()
+	defer sc.sessionAckMu.Unlock()
+	if !sc.serverConnAlive {
+		return 0, sc.sessionAckSeq
+	}
+	if sc.ackDebtStartNs > 0 && time.Now().UnixNano()-sc.ackDebtStartNs > sessionAckLagLimit {
+		return 0, sc.sessionAckSeq
+	}
+	return time.Now().UnixNano(), sc.sessionAckSeq
+}
+
+func (sc *sessionConn) markDead() {
+	sc.sessionAckMu.Lock()
+	firstFreeze := sc.serverConnAlive && sc.frozenSince.IsZero()
+	if sc.serverConnAlive {
+		sc.frozenSince = time.Now()
+	}
+	sc.serverConnAlive = false
+	sc.ackDebtStartNs = 0
+	sc.sessionAckMu.Unlock()
+	sc.cg.freeze()
+	if firstFreeze {
+		go writeTTYFreezeMsg(sc.ttyPath, cfg.FreezeTimeout)
+		go reportSessionFreezing(cfg.Server, tlsCfg, sc.start.SessionID)
+	}
+}
+
+func (sc *sessionConn) markAlive() {
+	sc.sessionAckMu.Lock()
+	wasAlive := sc.serverConnAlive
+	// serverConnAlive flips to true before deadBuf is requeued below, so a
+	// forward() call that races this unlock can push a live chunk onto
+	// bulkQueue ahead of these buffered ones — the server disk-writer
+	// appends to the cast file in dequeue order, not by seq, so a chunk
+	// reordering here would show up as out-of-order events on replay.
+	// This is a narrow window (a handful of goroutine-scheduling
+	// instructions) right at reconnect, not sustained reordering.
+	// Deliberately not fixed by holding sessionAckMu across the channel
+	// sends below: bulkQueue can be full, and blocking here while holding
+	// the lock would stall forward()/readAck/markDead for every other
+	// chunk on this session, which is worse than the rare reorder.
+	sc.serverConnAlive = true
+	sc.ackDebtStartNs = 0
+	buf := sc.deadBuf
+	sc.deadBuf = nil
+	sc.sessionAckMu.Unlock()
+	if !wasAlive {
+		sc.cg.unfreeze()
+		for i, m := range buf {
+			select {
+			case sc.bulkQueue <- m:
+			case <-sc.done:
+				log.Printf("markAlive: session closed mid-drain, dropping %d buffered chunks", len(buf)-i)
+				return
+			}
+		}
+	}
+}
+
+func (sc *sessionConn) resetFrozenStatus() {
+	sc.sessionAckMu.Lock()
+	sc.frozenSince = time.Time{}
+	sc.sessionAckMu.Unlock()
+}
+
+func (sc *sessionConn) touchServerMsg() {
+	sc.lastServerMsgMu.Lock()
+	sc.lastServerMsg = time.Now()
+	sc.lastServerMsgMu.Unlock()
+}
+
+func (sc *sessionConn) forward(msgType uint8, payload []byte) {
+	sc.sessionAckMu.Lock()
+	alive := sc.serverConnAlive
+	if !alive && msgType == protocol.MsgChunk {
+		if len(sc.deadBuf) < maxDeadBuf {
+			sc.deadBuf = append(sc.deadBuf, outMsg{msgType: msgType, payload: payload})
+		}
+		sc.sessionAckMu.Unlock()
+		return
+	}
+	sc.sessionAckMu.Unlock()
+	if !alive {
+		return
+	}
+	msg := outMsg{msgType: msgType, payload: payload}
+	isPrio := msgType == protocol.MsgSessionEnd || msgType == protocol.MsgSessionAbandon || msgType == protocol.MsgSessionFreezing
+	if !isPrio && msgType == protocol.MsgChunk && len(payload) > 16 {
+		stream := payload[16]
+		if stream == protocol.StreamStdin || stream == protocol.StreamTtyIn {
+			isPrio = true
+		}
+	}
+	if isPrio {
+		select {
+		case sc.prioQueue <- msg:
+		case <-sc.done:
+		}
+	} else {
+		select {
+		case sc.bulkQueue <- msg:
+		case <-sc.done:
+		}
+	}
+	if msgType == protocol.MsgChunk {
+		sc.sessionAckMu.Lock()
+		if sc.ackDebtStartNs == 0 {
+			sc.ackDebtStartNs = time.Now().UnixNano()
+		}
+		sc.sessionAckMu.Unlock()
+	}
+}
+
+// runFreezeWatch terminates the session if the server connection has been
+// dead (frozen) for longer than cfg.FreezeTimeout. Caller only starts this
+// goroutine when FreezeTimeout > 0.
+func (sc *sessionConn) runFreezeWatch() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-sc.done:
+			return
+		case <-ticker.C:
+		}
+		sc.sessionAckMu.Lock()
+		since := sc.frozenSince
+		sc.sessionAckMu.Unlock()
+		if since.IsZero() {
+			continue
+		}
+		if time.Since(since) < cfg.FreezeTimeout {
+			continue
+		}
+		log.Printf("[%s] server unreachable for >%v — terminating frozen session",
+			sc.start.SessionID, cfg.FreezeTimeout)
+		sc.cg.unfreeze()
+		sc.pluginWriteMu.Lock()
+		_ = protocol.WriteMessage(sc.pw, protocol.MsgFreezeTimeout, nil)
+		sc.pluginWriteMu.Unlock()
+		time.Sleep(200 * time.Millisecond)
+		sc.pluginConn.Close()
+		go reportSessionAbandon(cfg.Server, tlsCfg, sc.start.SessionID)
+		return
+	}
+}
+
+// runIdleWatch terminates the session if no stdin/tty-in has been seen for
+// cfg.IdleTimeout, warning the user shortly before. Caller only starts this
+// goroutine when IdleTimeout > 0.
+func (sc *sessionConn) runIdleWatch() {
+	warnBefore := 60 * time.Second
+	if warnBefore > cfg.IdleTimeout/2 {
+		warnBefore = cfg.IdleTimeout / 2
+	}
+	tickerInterval := 10 * time.Second
+	if cfg.IdleTimeout < tickerInterval {
+		tickerInterval = cfg.IdleTimeout / 2
+		if tickerInterval < 100*time.Millisecond {
+			tickerInterval = 100 * time.Millisecond
+		}
+	}
+	ticker := time.NewTicker(tickerInterval)
+	defer ticker.Stop()
+	warned := false
+	for {
+		select {
+		case <-sc.done:
+			return
+		case <-ticker.C:
+		}
+		since := time.Since(time.Unix(0, sc.lastInputNs.Load()))
+		if since >= cfg.IdleTimeout {
+			log.Printf("[%s] no input for %v — terminating idle session (pid %d)",
+				sc.start.SessionID, since.Round(time.Second), sc.start.Pid)
+			go writeTTYIdleMsg(sc.ttyPath, cfg.IdleTimeout)
+			time.Sleep(200 * time.Millisecond)
+			syscall.Kill(sc.start.Pid, syscall.SIGHUP)
+			time.Sleep(1 * time.Second)
+			sc.pluginConn.Close()
+			return
+		}
+		if !warned && since >= cfg.IdleTimeout-warnBefore {
+			remaining := cfg.IdleTimeout - since
+			writeTTYIdleWarnMsg(sc.ttyPath, remaining)
+			warned = true
+		} else if warned && since < cfg.IdleTimeout-warnBefore {
+			warned = false
+		}
+	}
+}
+
+// runTTLWatch warns the user shortly before, then terminates the session
+// when, the server-granted JIT approval window (sessionTTL seconds) expires.
+// Caller only starts this goroutine when sessionTTL > 0.
+func (sc *sessionConn) runTTLWatch(sessionTTL int64) {
+	// Calculate when to show the 60s warning.
+	warnAfter := time.Duration(sessionTTL-60) * time.Second
+	if sessionTTL <= 60 {
+		// If window is very short, warn immediately or skip?
+		// Let's warn at 10s if window is <= 60s.
+		warnAfter = time.Duration(sessionTTL-10) * time.Second
+	}
+	if warnAfter < 0 {
+		warnAfter = 0
+	}
+
+	select {
+	case <-sc.done:
+		return
+	case <-time.After(warnAfter):
+		timeLeft := sessionTTL - int64(warnAfter.Seconds())
+		log.Printf("[%s] session will expire in %ds — warning user", sc.start.SessionID, timeLeft)
+		sc.pluginWriteMu.Lock()
+		_ = protocol.WriteMessage(sc.pw, protocol.MsgSessionWarning, []byte(fmt.Sprintf("%d", timeLeft)))
+		sc.pluginWriteMu.Unlock()
+	}
+
+	select {
+	case <-sc.done:
+		return
+	case <-time.After(time.Duration(sessionTTL)*time.Second - warnAfter):
+	}
+
+	log.Printf("[%s] session TTL expired (%ds) — terminating", sc.start.SessionID, sessionTTL)
+	sc.cg.unfreeze()
+	sc.pluginWriteMu.Lock()
+	_ = protocol.WriteMessage(sc.pw, protocol.MsgSessionExpired, nil)
+	sc.pluginWriteMu.Unlock()
+	time.Sleep(200 * time.Millisecond)
+	sc.pluginConn.Close()
+}
+
+// runSender drains prioQueue/bulkQueue (priority first) and writes each
+// message to the server, flushing after priority messages or when both
+// queues are empty. On stopSender it drains whatever remains before
+// returning so no already-queued data is lost.
+func (sc *sessionConn) runSender() {
+	defer sc.senderWg.Done()
+	drainAndExit := func() {
+		sc.serverWriteMu.Lock()
+		defer sc.serverWriteMu.Unlock()
+		sc.serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		for len(sc.prioQueue) > 0 {
+			m := <-sc.prioQueue
+			protocol.WriteMessageNoFlush(sc.serverBuf, m.msgType, m.payload)
+		}
+		for len(sc.bulkQueue) > 0 {
+			m := <-sc.bulkQueue
+			protocol.WriteMessageNoFlush(sc.serverBuf, m.msgType, m.payload)
+		}
+		sc.serverBuf.Flush()
+		sc.serverConn.SetWriteDeadline(time.Time{})
+	}
+	for {
+		var msg outMsg
+		var ok bool
+		select {
+		case <-sc.stopSender:
+			drainAndExit()
+			return
+		case <-sc.done:
+			return
+		case msg, ok = <-sc.prioQueue:
+		default:
+			select {
+			case <-sc.stopSender:
+				drainAndExit()
+				return
+			case <-sc.done:
+				return
+			case msg, ok = <-sc.prioQueue:
+			case msg, ok = <-sc.bulkQueue:
+			}
+		}
+		if !ok {
+			return
+		}
+		sc.serverWriteMu.Lock()
+		werr := protocol.WriteMessageNoFlush(sc.serverBuf, msg.msgType, msg.payload)
+		isPrio := msg.msgType != protocol.MsgChunk
+		if !isPrio && len(msg.payload) > 16 {
+			stream := msg.payload[16]
+			isPrio = stream == protocol.StreamStdin || stream == protocol.StreamTtyIn
+		}
+		if werr == nil && (isPrio || (len(sc.prioQueue) == 0 && len(sc.bulkQueue) == 0)) {
+			sc.serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			werr = sc.serverBuf.Flush()
+			sc.serverConn.SetWriteDeadline(time.Time{})
+		}
+		sc.serverWriteMu.Unlock()
+		if werr != nil {
+			log.Printf("[%s] forward to server: %v", sc.start.SessionID, werr)
+			sc.markDead()
+			return
+		}
+	}
+}
+
+// runReaderACK reads ACK/HEARTBEAT_ACK messages from the server connection
+// (via sr) until it errors or the connection closes, verifying each ACK's
+// signature and updating liveness bookkeeping. The deferred close+markDead
+// is what unblocks runSender/runHeartbeat when the server connection drops
+// out from under them.
+func (sc *sessionConn) runReaderACK(sr *bufio.Reader) {
+	defer func() {
+		sc.serverConn.Close()
+		sc.markDead()
+	}()
+	for {
+		msgType, plen, err := protocol.ReadHeader(sr)
+		if err != nil {
+			return
+		}
+		payload, err := protocol.ReadPayload(sr, plen)
+		if err != nil {
+			return
+		}
+		switch msgType {
+		case protocol.MsgAck:
+			ack, err := protocol.ParseAck(payload)
+			if err != nil {
+				log.Printf("parse ack: %v", err)
+				continue
+			}
+			if !verifyAckSig(ack, sc.start.SessionID, verifyKey) {
+				log.Printf("ack signature invalid seq=%d — ignoring", ack.Seq)
+				continue
+			}
+			sc.touchServerMsg()
+			sc.updateAck(ack.Seq)
+		case protocol.MsgHeartbeatAck:
+			sc.touchServerMsg()
+		}
+	}
+}
+
+// runHeartbeat sends a HEARTBEAT every hbInterval and, based on how long
+// it's been since the server last spoke (touchServerMsg), decides whether
+// to markDead/markAlive/resetFrozenStatus.
+func (sc *sessionConn) runHeartbeat() {
+	const hbInterval = 400 * time.Millisecond
+	ticker := time.NewTicker(hbInterval)
+	defer ticker.Stop()
+	consecutiveOK := 0
+	for {
+		select {
+		case <-sc.done:
+			return
+		case <-ticker.C:
+		}
+		select {
+		case sc.prioQueue <- outMsg{msgType: protocol.MsgHeartbeat}:
+		case <-sc.done:
+			return
+		default:
+			// queue is full, drop heartbeat to prevent block
+		}
+		sc.lastServerMsgMu.Lock()
+		age := time.Since(sc.lastServerMsg)
+		sc.lastServerMsgMu.Unlock()
+		if age > 15*hbInterval {
+			consecutiveOK = 0
+			sc.markDead()
+		} else {
+			consecutiveOK++
+			if consecutiveOK >= 2 {
+				sc.markAlive()
+			}
+			if consecutiveOK >= 25 {
+				sc.resetFrozenStatus()
+			}
+		}
+	}
+}
+
+// doHandshake performs the SESSION_START -> {Denied,Challenge,ServerReady}
+// exchange with the server, forwarding challenge/response between the
+// plugin and the server as needed. Returns an error (already reported to
+// the plugin and/or logged) if the caller should stop and return; nil once
+// SESSION_READY has been sent to the plugin and it's safe to start the
+// sender/reader/heartbeat goroutines.
+func (sc *sessionConn) doHandshake(sr *bufio.Reader) error {
+	sc.serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+readHandshake:
+	hsType, hsPlen, hsErr := protocol.ReadHeader(sr)
+	sc.serverConn.SetReadDeadline(time.Time{})
+
+	if hsErr != nil {
+		log.Printf("[%s] server handshake: %v", sc.start.SessionID, hsErr)
+		sc.markDead()
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionError, []byte(hsErr.Error()))
+		return hsErr
+	}
+	switch hsType {
+	case protocol.MsgSessionDenied:
+		denyPayload, _ := protocol.ReadPayload(sr, hsPlen)
+		log.Printf("[%s] session denied by server policy for user=%s host=%s",
+			sc.start.SessionID, sc.start.User, sc.start.Host)
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionDenied, denyPayload)
+		sc.serverConn.Close()
+		return fmt.Errorf("session denied")
+
+	case protocol.MsgSessionChallenge:
+		challengePayload, _ := protocol.ReadPayload(sr, hsPlen)
+		log.Printf("[%s] session challenge from server", sc.start.SessionID)
+		// Forward challenge to plugin
+		if err := protocol.WriteMessage(sc.pw, protocol.MsgSessionChallenge, challengePayload); err != nil {
+			log.Printf("[%s] forward challenge: %v", sc.start.SessionID, err)
+			return err
+		}
+		// Wait for response from plugin
+		sc.pluginConn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		respType, respPlen, respErr := protocol.ReadHeader(sc.pr)
+		sc.pluginConn.SetReadDeadline(time.Time{})
+		if respErr != nil {
+			log.Printf("[%s] read challenge response from plugin: %v", sc.start.SessionID, respErr)
+			return respErr
+		}
+		if respType != protocol.MsgSessionChallengeResponse {
+			log.Printf("[%s] expected challenge response, got 0x%02x", sc.start.SessionID, respType)
+			return fmt.Errorf("unexpected response type 0x%02x", respType)
+		}
+		respPayload, _ := protocol.ReadPayload(sc.pr, respPlen)
+		// Forward response to server
+		if err := protocol.WriteMessage(sc.serverBuf, protocol.MsgSessionChallengeResponse, respPayload); err != nil {
+			log.Printf("[%s] forward challenge response: %v", sc.start.SessionID, err)
+			return err
+		}
+		// Wait for next server response (Denied or ServerReady)
+		sc.serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		goto readHandshake
+
+	case protocol.MsgServerReady:
+		srPayload, _ := protocol.ReadPayload(sr, hsPlen)
+		var serverReady protocol.ServerReadyBody
+		_ = json.Unmarshal(srPayload, &serverReady)
+		sessionTTL := serverReady.SessionTTL
+		sc.cg.SetReady()
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionReady, sessionReadyBody(cfg.Disclaimer, sessionTTL))
+		if sessionTTL > 0 {
+			go sc.runTTLWatch(sessionTTL)
+		}
+		return nil
+
+	default:
+		log.Printf("[%s] unexpected server handshake type 0x%02x", sc.start.SessionID, hsType)
+		sc.markDead()
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionError,
+			[]byte(fmt.Sprintf("unexpected server handshake 0x%02x", hsType)))
+		return fmt.Errorf("unexpected handshake type 0x%02x", hsType)
+	}
+}
+
 // handlePluginConn manages one sudo session end-to-end.
 func handlePluginConn(pluginConn net.Conn) {
-	defer pluginConn.Close()
-
-	done := make(chan struct{})
-	var closeOnce sync.Once
-	closeDone := func() { closeOnce.Do(func() { close(done) }) }
-	defer closeDone()
-
-	type outMsg struct {
-		msgType uint8
-		payload []byte
+	sc := &sessionConn{
+		pluginConn: pluginConn,
+		done:       make(chan struct{}),
+		stopSender: make(chan struct{}),
+		prioQueue:  make(chan outMsg, 100),
+		bulkQueue:  make(chan outMsg, 10000),
 	}
-	prioQueue := make(chan outMsg, 100)
-	bulkQueue := make(chan outMsg, 10000)
+	defer pluginConn.Close()
+	defer sc.close()
 
-	stopSender := make(chan struct{})
-	var senderWg sync.WaitGroup
-	senderWg.Add(1)
-
-	pr := bufio.NewReader(pluginConn)
-	pw := bufio.NewWriter(pluginConn)
+	sc.pr = bufio.NewReader(pluginConn)
+	sc.pw = bufio.NewWriter(pluginConn)
 
 	pluginConn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	msgType, plen, err := protocol.ReadHeader(pr)
+	msgType, plen, err := protocol.ReadHeader(sc.pr)
 	pluginConn.SetReadDeadline(time.Time{})
 	if err != nil {
 		log.Printf("read first message: %v", err)
@@ -176,7 +691,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		log.Printf("SESSION_START payload too large (%d bytes, max %d) — dropping", plen, protocol.MaxSessionStartPayload)
 		return
 	}
-	startPayload, err := protocol.ReadPayload(pr, plen)
+	startPayload, err := protocol.ReadPayload(sc.pr, plen)
 	if err != nil {
 		log.Printf("read SESSION_START payload: %v", err)
 		return
@@ -186,6 +701,7 @@ func handlePluginConn(pluginConn net.Conn) {
 		log.Printf("parse SESSION_START: %v", err)
 		return
 	}
+	sc.start = start
 
 	// Notify the divergence tracker that the plugin logged this sudo session.
 	// witnessed=true means eBPF saw the execve — the session is fully confirmed.
@@ -198,6 +714,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	}
 
 	cg := newCgroupSession(start.SessionID, start.Pid)
+	sc.cg = cg
 	registerCg(cg)
 	// Register the sudo PID in the BPF tracked_sudo_pids map so the execve hook
 	// suppresses the child execve sudo fires when running the target command.
@@ -227,55 +744,24 @@ func handlePluginConn(pluginConn net.Conn) {
 		}
 	}()
 
-	const ackLagLimit = int64(5 * time.Second)
-	redactor := iolog.MustNewRedactor(getEffectiveMaskPatterns())
-
-	const maxDeadBuf = 500 // max chunks buffered while server unreachable
-
-	var (
-		sessionAckMu    sync.Mutex
-		sessionAckSeq   uint64
-		serverConnAlive bool
-		ackDebtStartNs  int64
-		deadBuf         []outMsg // chunks buffered during server outage
-	)
-	var frozenSince time.Time
-
-	updateAck := func(seq uint64) {
-		sessionAckMu.Lock()
-		sessionAckSeq = seq
-		ackDebtStartNs = 0
-		sessionAckMu.Unlock()
-	}
-
-	readAck := func() (int64, uint64) {
-		sessionAckMu.Lock()
-		defer sessionAckMu.Unlock()
-		if !serverConnAlive {
-			return 0, sessionAckSeq
-		}
-		if ackDebtStartNs > 0 && time.Now().UnixNano()-ackDebtStartNs > ackLagLimit {
-			return 0, sessionAckSeq
-		}
-		return time.Now().UnixNano(), sessionAckSeq
-	}
+	sc.redactor = iolog.MustNewRedactor(getEffectiveMaskPatterns())
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", cfg.Server)
 	if err != nil {
 		log.Printf("resolve server addr: %v", err)
-		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(err.Error()))
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionError, []byte(err.Error()))
 		return
 	}
 	rawTCP, err := net.DialTCP("tcp", nil, tcpAddr)
 	if err != nil {
 		log.Printf("dial server: %v", err)
-		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(err.Error()))
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionError, []byte(err.Error()))
 		return
 	}
 	rawTCP.SetKeepAlive(true)
 	rawTCP.SetKeepAlivePeriod(1 * time.Second)
-	if sc, scErr := rawTCP.SyscallConn(); scErr == nil {
-		sc.Control(func(fd uintptr) {
+	if scc, sccErr := rawTCP.SyscallConn(); sccErr == nil {
+		scc.Control(func(fd uintptr) {
 			syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, 1)
 			syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, 1)
 		})
@@ -284,164 +770,32 @@ func handlePluginConn(pluginConn net.Conn) {
 	if err := serverConn.Handshake(); err != nil {
 		log.Printf("tls handshake: %v", err)
 		rawTCP.Close()
-		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(err.Error()))
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionError, []byte(err.Error()))
 		return
 	}
+	sc.serverConn = serverConn
 
-	ttyPath := resolveTTYPath(start.TtyPath, start.Pid)
-
-	markDead := func() {
-		sessionAckMu.Lock()
-		firstFreeze := serverConnAlive && frozenSince.IsZero()
-		if serverConnAlive {
-			frozenSince = time.Now()
-		}
-		serverConnAlive = false
-		ackDebtStartNs = 0
-		sessionAckMu.Unlock()
-		cg.freeze()
-		if firstFreeze {
-			go writeTTYFreezeMsg(ttyPath, cfg.FreezeTimeout)
-			go reportSessionFreezing(cfg.Server, tlsCfg, start.SessionID)
-		}
-	}
-
-	markAlive := func() {
-		sessionAckMu.Lock()
-		wasAlive := serverConnAlive
-		// serverConnAlive flips to true before deadBuf is requeued below, so a
-		// forward() call that races this unlock can push a live chunk onto
-		// bulkQueue ahead of these buffered ones — the server disk-writer
-		// appends to the cast file in dequeue order, not by seq, so a chunk
-		// reordering here would show up as out-of-order events on replay.
-		// This is a narrow window (a handful of goroutine-scheduling
-		// instructions) right at reconnect, not sustained reordering.
-		// Deliberately not fixed by holding sessionAckMu across the channel
-		// sends below: bulkQueue can be full, and blocking here while holding
-		// the lock would stall forward()/readAck/markDead for every other
-		// chunk on this session, which is worse than the rare reorder.
-		serverConnAlive = true
-		ackDebtStartNs = 0
-		buf := deadBuf
-		deadBuf = nil
-		sessionAckMu.Unlock()
-		if !wasAlive {
-			cg.unfreeze()
-			for i, m := range buf {
-				select {
-				case bulkQueue <- m:
-				case <-done:
-					log.Printf("markAlive: session closed mid-drain, dropping %d buffered chunks", len(buf)-i)
-					return
-				}
-			}
-		}
-	}
-
-	resetFrozenStatus := func() {
-		sessionAckMu.Lock()
-		frozenSince = time.Time{}
-		sessionAckMu.Unlock()
-	}
-
-	var pluginWriteMu sync.Mutex
+	sc.ttyPath = resolveTTYPath(start.TtyPath, start.Pid)
 
 	if cfg.FreezeTimeout > 0 {
-		go func() {
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-done:
-					return
-				case <-ticker.C:
-				}
-				sessionAckMu.Lock()
-				since := frozenSince
-				sessionAckMu.Unlock()
-				if since.IsZero() {
-					continue
-				}
-				if time.Since(since) < cfg.FreezeTimeout {
-					continue
-				}
-				log.Printf("[%s] server unreachable for >%v — terminating frozen session",
-					start.SessionID, cfg.FreezeTimeout)
-				cg.unfreeze()
-				pluginWriteMu.Lock()
-				_ = protocol.WriteMessage(pw, protocol.MsgFreezeTimeout, nil)
-				pluginWriteMu.Unlock()
-				time.Sleep(200 * time.Millisecond)
-				pluginConn.Close()
-				go reportSessionAbandon(cfg.Server, tlsCfg, start.SessionID)
-				return
-			}
-		}()
+		go sc.runFreezeWatch()
 	}
 
-	var lastInputNs atomic.Int64
-	lastInputNs.Store(time.Now().UnixNano())
+	sc.lastInputNs.Store(time.Now().UnixNano())
 	if cfg.IdleTimeout > 0 {
-		warnBefore := 60 * time.Second
-		if warnBefore > cfg.IdleTimeout/2 {
-			warnBefore = cfg.IdleTimeout / 2
-		}
-		tickerInterval := 10 * time.Second
-		if cfg.IdleTimeout < tickerInterval {
-			tickerInterval = cfg.IdleTimeout / 2
-			if tickerInterval < 100*time.Millisecond {
-				tickerInterval = 100 * time.Millisecond
-			}
-		}
-		go func() {
-			ticker := time.NewTicker(tickerInterval)
-			defer ticker.Stop()
-			warned := false
-			for {
-				select {
-				case <-done:
-					return
-				case <-ticker.C:
-				}
-				since := time.Since(time.Unix(0, lastInputNs.Load()))
-				if since >= cfg.IdleTimeout {
-					log.Printf("[%s] no input for %v — terminating idle session (pid %d)",
-						start.SessionID, since.Round(time.Second), start.Pid)
-					go writeTTYIdleMsg(ttyPath, cfg.IdleTimeout)
-					time.Sleep(200 * time.Millisecond)
-					syscall.Kill(start.Pid, syscall.SIGHUP)
-					time.Sleep(1 * time.Second)
-					pluginConn.Close()
-					return
-				}
-				if !warned && since >= cfg.IdleTimeout-warnBefore {
-					remaining := cfg.IdleTimeout - since
-					writeTTYIdleWarnMsg(ttyPath, remaining)
-					warned = true
-				} else if warned && since < cfg.IdleTimeout-warnBefore {
-					warned = false
-				}
-			}
-		}()
+		go sc.runIdleWatch()
 	}
 
-	var serverWriteMu sync.Mutex
-	var lastServerMsgMu sync.Mutex
-	lastServerMsg := time.Now()
-	touchServerMsg := func() {
-		lastServerMsgMu.Lock()
-		lastServerMsg = time.Now()
-		lastServerMsgMu.Unlock()
-	}
+	sc.lastServerMsg = time.Now()
 
-	sessionAckMu.Lock()
-	serverConnAlive = true
-	sessionAckMu.Unlock()
+	sc.sessionAckMu.Lock()
+	sc.serverConnAlive = true
+	sc.sessionAckMu.Unlock()
 
-	serverBuf := bufio.NewWriterSize(serverConn, 8*1024)
-	sw := protocol.NewWriter(serverBuf, &serverWriteMu)
+	sc.serverBuf = bufio.NewWriterSize(serverConn, 8*1024)
+	sc.sw = protocol.NewWriter(sc.serverBuf, &sc.serverWriteMu)
 	if cg != nil {
-		cg.serverW = sw
+		cg.serverW = sc.sw
 	}
 	// The SESSION_START and CHALLENGE_RESPONSE writes below go straight to
 	// serverBuf, bypassing sw/serverWriteMu. That's safe only because they
@@ -450,318 +804,50 @@ func handlePluginConn(pluginConn net.Conn) {
 	// to this handshake section after the sender goroutine starts, it must
 	// go through sw instead.
 
-	start.Command = redactor.RedactString(start.Command)
-	start.ResolvedCommand = redactor.RedactString(start.ResolvedCommand)
+	start.Command = sc.redactor.RedactString(start.Command)
+	start.ResolvedCommand = sc.redactor.RedactString(start.ResolvedCommand)
 	start.Source = "plugin"
 	start.Groups = resolveUserGroups(start.User)
 	startPayload, _ = json.Marshal(start)
 
 	log.Printf("[%s] start user=%s host=%s pid=%d cmd=%s cgroup=%v tty=%s",
 		start.SessionID, start.User, start.Host, start.Pid,
-		truncate(start.Command, 60), cg != nil, ttyPath)
-	if err := protocol.WriteMessage(serverBuf, protocol.MsgSessionStart, startPayload); err != nil {
+		truncate(start.Command, 60), cg != nil, sc.ttyPath)
+	if err := protocol.WriteMessage(sc.serverBuf, protocol.MsgSessionStart, startPayload); err != nil {
 		log.Printf("[%s] forward SESSION_START: %v", start.SessionID, err)
-		markDead()
-		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(err.Error()))
+		sc.markDead()
+		protocol.WriteMessage(sc.pw, protocol.MsgSessionError, []byte(err.Error()))
 		return
 	}
 
-	serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	sr := bufio.NewReader(serverConn)
-
-readHandshake:
-	hsType, hsPlen, hsErr := protocol.ReadHeader(sr)
-	serverConn.SetReadDeadline(time.Time{})
-
-	if hsErr != nil {
-		log.Printf("[%s] server handshake: %v", start.SessionID, hsErr)
-		markDead()
-		protocol.WriteMessage(pw, protocol.MsgSessionError, []byte(hsErr.Error()))
-		return
-	}
-	switch hsType {
-	case protocol.MsgSessionDenied:
-		denyPayload, _ := protocol.ReadPayload(sr, hsPlen)
-		log.Printf("[%s] session denied by server policy for user=%s host=%s",
-			start.SessionID, start.User, start.Host)
-		protocol.WriteMessage(pw, protocol.MsgSessionDenied, denyPayload)
-		serverConn.Close()
-		return
-	case protocol.MsgSessionChallenge:
-		challengePayload, _ := protocol.ReadPayload(sr, hsPlen)
-		log.Printf("[%s] session challenge from server", start.SessionID)
-		// Forward challenge to plugin
-		if err := protocol.WriteMessage(pw, protocol.MsgSessionChallenge, challengePayload); err != nil {
-			log.Printf("[%s] forward challenge: %v", start.SessionID, err)
-			return
-		}
-		// Wait for response from plugin
-		pluginConn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		respType, respPlen, respErr := protocol.ReadHeader(pr)
-		pluginConn.SetReadDeadline(time.Time{})
-		if respErr != nil {
-			log.Printf("[%s] read challenge response from plugin: %v", start.SessionID, respErr)
-			return
-		}
-		if respType != protocol.MsgSessionChallengeResponse {
-			log.Printf("[%s] expected challenge response, got 0x%02x", start.SessionID, respType)
-			return
-		}
-		respPayload, _ := protocol.ReadPayload(pr, respPlen)
-		// Forward response to server
-		if err := protocol.WriteMessage(serverBuf, protocol.MsgSessionChallengeResponse, respPayload); err != nil {
-			log.Printf("[%s] forward challenge response: %v", start.SessionID, err)
-			return
-		}
-		// Wait for next server response (Denied or ServerReady)
-		serverConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		goto readHandshake
-
-	case protocol.MsgServerReady:
-		srPayload, _ := protocol.ReadPayload(sr, hsPlen)
-		var serverReady protocol.ServerReadyBody
-		_ = json.Unmarshal(srPayload, &serverReady)
-		sessionTTL := serverReady.SessionTTL
-		cg.SetReady()
-		protocol.WriteMessage(pw, protocol.MsgSessionReady, sessionReadyBody(cfg.Disclaimer, sessionTTL))
-		if sessionTTL > 0 {
-			go func() {
-				// Calculate when to show the 60s warning.
-				warnAfter := time.Duration(sessionTTL-60) * time.Second
-				if sessionTTL <= 60 {
-					// If window is very short, warn immediately or skip?
-					// Let's warn at 10s if window is <= 60s.
-					warnAfter = time.Duration(sessionTTL-10) * time.Second
-				}
-				if warnAfter < 0 {
-					warnAfter = 0
-				}
-
-				select {
-				case <-done:
-					return
-				case <-time.After(warnAfter):
-					timeLeft := sessionTTL - int64(warnAfter.Seconds())
-					log.Printf("[%s] session will expire in %ds — warning user", start.SessionID, timeLeft)
-					pluginWriteMu.Lock()
-					_ = protocol.WriteMessage(pw, protocol.MsgSessionWarning, []byte(fmt.Sprintf("%d", timeLeft)))
-					pluginWriteMu.Unlock()
-				}
-
-				select {
-				case <-done:
-					return
-				case <-time.After(time.Duration(sessionTTL)*time.Second - warnAfter):
-				}
-
-				log.Printf("[%s] session TTL expired (%ds) — terminating", start.SessionID, sessionTTL)
-				cg.unfreeze()
-				pluginWriteMu.Lock()
-				_ = protocol.WriteMessage(pw, protocol.MsgSessionExpired, nil)
-				pluginWriteMu.Unlock()
-				time.Sleep(200 * time.Millisecond)
-				pluginConn.Close()
-			}()
-		}
-	default:
-		log.Printf("[%s] unexpected server handshake type 0x%02x", start.SessionID, hsType)
-		markDead()
-		protocol.WriteMessage(pw, protocol.MsgSessionError,
-			[]byte(fmt.Sprintf("unexpected server handshake 0x%02x", hsType)))
+	if err := sc.doHandshake(sr); err != nil {
 		return
 	}
 
-	go func() {
-		defer senderWg.Done()
-		drainAndExit := func() {
-			serverWriteMu.Lock()
-			defer serverWriteMu.Unlock()
-			serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			for len(prioQueue) > 0 {
-				m := <-prioQueue
-				protocol.WriteMessageNoFlush(serverBuf, m.msgType, m.payload)
-			}
-			for len(bulkQueue) > 0 {
-				m := <-bulkQueue
-				protocol.WriteMessageNoFlush(serverBuf, m.msgType, m.payload)
-			}
-			serverBuf.Flush()
-			serverConn.SetWriteDeadline(time.Time{})
-		}
-		for {
-			var msg outMsg
-			var ok bool
-			select {
-			case <-stopSender:
-				drainAndExit()
-				return
-			case <-done:
-				return
-			case msg, ok = <-prioQueue:
-			default:
-				select {
-				case <-stopSender:
-					drainAndExit()
-					return
-				case <-done:
-					return
-				case msg, ok = <-prioQueue:
-				case msg, ok = <-bulkQueue:
-				}
-			}
-			if !ok {
-				return
-			}
-			serverWriteMu.Lock()
-			werr := protocol.WriteMessageNoFlush(serverBuf, msg.msgType, msg.payload)
-			isPrio := msg.msgType != protocol.MsgChunk
-			if !isPrio && len(msg.payload) > 16 {
-				stream := msg.payload[16]
-				isPrio = stream == protocol.StreamStdin || stream == protocol.StreamTtyIn
-			}
-			if werr == nil && (isPrio || (len(prioQueue) == 0 && len(bulkQueue) == 0)) {
-				serverConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-				werr = serverBuf.Flush()
-				serverConn.SetWriteDeadline(time.Time{})
-			}
-			serverWriteMu.Unlock()
-			if werr != nil {
-				log.Printf("[%s] forward to server: %v", start.SessionID, werr)
-				markDead()
-				return
-			}
-		}
-	}()
-
-	go func() {
-		defer func() {
-			serverConn.Close()
-			markDead()
-		}()
-		for {
-			msgType, plen, err := protocol.ReadHeader(sr)
-			if err != nil {
-				return
-			}
-			payload, err := protocol.ReadPayload(sr, plen)
-			if err != nil {
-				return
-			}
-			switch msgType {
-			case protocol.MsgAck:
-				ack, err := protocol.ParseAck(payload)
-				if err != nil {
-					log.Printf("parse ack: %v", err)
-					continue
-				}
-				if !verifyAckSig(ack, start.SessionID, verifyKey) {
-					log.Printf("ack signature invalid seq=%d — ignoring", ack.Seq)
-					continue
-				}
-				touchServerMsg()
-				updateAck(ack.Seq)
-			case protocol.MsgHeartbeatAck:
-				touchServerMsg()
-			}
-		}
-	}()
-
-	const hbInterval = 400 * time.Millisecond
-	go func() {
-		ticker := time.NewTicker(hbInterval)
-		defer ticker.Stop()
-		consecutiveOK := 0
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-			}
-			select {
-			case prioQueue <- outMsg{msgType: protocol.MsgHeartbeat}:
-			case <-done:
-				return
-			default:
-				// queue is full, drop heartbeat to prevent block
-			}
-			lastServerMsgMu.Lock()
-			age := time.Since(lastServerMsg)
-			lastServerMsgMu.Unlock()
-			if age > 15*hbInterval {
-				consecutiveOK = 0
-				markDead()
-			} else {
-				consecutiveOK++
-				if consecutiveOK >= 2 {
-					markAlive()
-				}
-				if consecutiveOK >= 25 {
-					resetFrozenStatus()
-				}
-			}
-		}
-	}()
-
-	forward := func(msgType uint8, payload []byte) {
-		sessionAckMu.Lock()
-		alive := serverConnAlive
-		if !alive && msgType == protocol.MsgChunk {
-			if len(deadBuf) < maxDeadBuf {
-				deadBuf = append(deadBuf, outMsg{msgType: msgType, payload: payload})
-			}
-			sessionAckMu.Unlock()
-			return
-		}
-		sessionAckMu.Unlock()
-		if !alive {
-			return
-		}
-		msg := outMsg{msgType: msgType, payload: payload}
-		isPrio := msgType == protocol.MsgSessionEnd || msgType == protocol.MsgSessionAbandon || msgType == protocol.MsgSessionFreezing
-		if !isPrio && msgType == protocol.MsgChunk && len(payload) > 16 {
-			stream := payload[16]
-			if stream == protocol.StreamStdin || stream == protocol.StreamTtyIn {
-				isPrio = true
-			}
-		}
-		if isPrio {
-			select {
-			case prioQueue <- msg:
-			case <-done:
-			}
-		} else {
-			select {
-			case bulkQueue <- msg:
-			case <-done:
-			}
-		}
-		if msgType == protocol.MsgChunk {
-			sessionAckMu.Lock()
-			if ackDebtStartNs == 0 {
-				ackDebtStartNs = time.Now().UnixNano()
-			}
-			sessionAckMu.Unlock()
-		}
-	}
+	sc.senderWg.Add(1)
+	go sc.runSender()
+	go sc.runReaderACK(sr)
+	go sc.runHeartbeat()
 
 	var savedSessionEnd []byte
 loop:
 	for {
-		msgType, plen, err := protocol.ReadHeader(pr)
+		msgType, plen, err := protocol.ReadHeader(sc.pr)
 		if err != nil {
 			break loop
 		}
-		payload, err := protocol.ReadPayload(pr, plen)
+		payload, err := protocol.ReadPayload(sc.pr, plen)
 		if err != nil {
 			break loop
 		}
 		switch msgType {
 		case protocol.MsgAckQuery:
-			ts, seq := readAck()
+			ts, seq := sc.readAck()
 			resp := protocol.EncodeAckResponse(ts, seq)
-			pluginWriteMu.Lock()
-			err := protocol.WriteMessage(pw, protocol.MsgAckResponse, resp)
-			pluginWriteMu.Unlock()
+			sc.pluginWriteMu.Lock()
+			err := protocol.WriteMessage(sc.pw, protocol.MsgAckResponse, resp)
+			sc.pluginWriteMu.Unlock()
 			if err != nil {
 				log.Printf("write ack response: %v", err)
 				break loop
@@ -776,7 +862,7 @@ loop:
 				continue loop
 			}
 			if chunk.Stream <= protocol.StreamTtyOut {
-				data, buffering := redactor.Redact(chunk.Data, chunk.Stream)
+				data, buffering := sc.redactor.Redact(chunk.Data, chunk.Stream)
 				if buffering {
 					continue loop
 				}
@@ -784,11 +870,11 @@ loop:
 				payload = protocol.EncodeChunk(chunk.Seq, chunk.Timestamp, chunk.Stream, chunk.Data)
 			}
 			if chunk.Stream == protocol.StreamStdin || chunk.Stream == protocol.StreamTtyIn {
-				lastInputNs.Store(time.Now().UnixNano())
+				sc.lastInputNs.Store(time.Now().UnixNano())
 			}
-			forward(protocol.MsgChunk, payload)
+			sc.forward(protocol.MsgChunk, payload)
 		case protocol.MsgResize:
-			forward(protocol.MsgResize, payload)
+			sc.forward(protocol.MsgResize, payload)
 		case protocol.MsgSessionEnd:
 			savedSessionEnd = payload
 			break loop
@@ -813,25 +899,24 @@ loop:
 	// Flush any PEM blocks still open when the session ended (e.g. -----END
 	// never arrived due to kill/truncation). Best-effort redaction on partial data.
 	for _, stream := range []uint8{protocol.StreamStdout, protocol.StreamTtyOut, protocol.StreamStderr} {
-		if flushed := redactor.FlushPEM(stream); flushed != nil {
+		if flushed := sc.redactor.FlushPEM(stream); flushed != nil {
 			p := protocol.EncodeChunk(0, time.Now().UnixNano(), stream, flushed)
-			forward(protocol.MsgChunk, p)
+			sc.forward(protocol.MsgChunk, p)
 		}
 	}
 
 	if savedSessionEnd != nil {
-		forward(protocol.MsgSessionEnd, savedSessionEnd)
+		sc.forward(protocol.MsgSessionEnd, savedSessionEnd)
 	}
 
-	close(stopSender)
-	senderWg.Wait()
-	closeDone()
-	sessionAckMu.Lock()
-	serverConnAlive = false
-	sessionAckMu.Unlock()
+	close(sc.stopSender)
+	sc.senderWg.Wait()
+	sc.close()
+	sc.sessionAckMu.Lock()
+	sc.serverConnAlive = false
+	sc.sessionAckMu.Unlock()
 	serverConn.Close()
 }
-
 func lingerCgroup(cg *cgroupSession, server string) {
 	defer cg.stopTracking()
 	defer cg.remove()
