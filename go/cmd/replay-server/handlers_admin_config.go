@@ -20,6 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"sudo-logger/internal/iolog"
+	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 	"sudo-logger/internal/util"
 )
@@ -587,10 +588,19 @@ func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	oldContent, _ := sessionStore.GetConfig(r.Context(), "sandbox.yaml")
 	if err := sessionStore.SetConfig(r.Context(), "sandbox.yaml", body.Content); err != nil {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	added, removed := summarizeLineDiff(oldContent, body.Content)
+	viewer := viewerFromContext(r)
+	log.Printf("sandbox: config updated by %s (+%d/-%d lines)", viewer, added, removed)
+	go siem.SendAudit("sandbox_config_push", map[string]any{
+		"actor":         viewer,
+		"lines_added":   added,
+		"lines_removed": removed,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -868,13 +878,57 @@ func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
 	if host != "" {
 		key = "sudoers/" + host
 	}
+	oldContent, _ := sessionStore.GetConfig(r.Context(), key)
 	if err := sessionStore.SetConfig(r.Context(), key, body.Content); err != nil {
 		http.Error(w, "set config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("sudoers: config updated key=%s by %s", key, viewerFromContext(r))
+	added, removed := summarizeLineDiff(oldContent, body.Content)
+	viewer := viewerFromContext(r)
+	log.Printf("sudoers: config updated key=%s by %s (+%d/-%d lines)", key, viewer, added, removed)
+	go siem.SendAudit("sudoers_config_push", map[string]any{
+		"key":           key,
+		"actor":         viewer,
+		"lines_added":   added,
+		"lines_removed": removed,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// summarizeLineDiff returns a coarse (added, removed) line-count summary
+// between old and new content — not a real diff, just enough for an audit
+// trail/notification to say "how big was this change" without needing a
+// diff library. Lines present in new but not old count as added; lines
+// present in old but not new count as removed. A line that moved (same
+// text, different position) is not counted either way.
+func summarizeLineDiff(oldContent, newContent string) (added, removed int) {
+	count := func(s string) map[string]int {
+		m := make(map[string]int)
+		if s == "" {
+			return m
+		}
+		// Trim exactly one trailing newline first, so a trailing "\n" (the
+		// common case for these files) doesn't produce a phantom empty last
+		// "line" that gets counted as added/removed on its own.
+		for _, line := range strings.Split(strings.TrimSuffix(s, "\n"), "\n") {
+			m[line]++
+		}
+		return m
+	}
+	oldLines := count(oldContent)
+	newLines := count(newContent)
+	for line, n := range newLines {
+		if d := n - oldLines[line]; d > 0 {
+			added += d
+		}
+	}
+	for line, n := range oldLines {
+		if d := n - newLines[line]; d > 0 {
+			removed += d
+		}
+	}
+	return added, removed
 }
 
 // validateSudoers checks the syntax of content using visudo -c.

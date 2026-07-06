@@ -135,12 +135,6 @@ func TestValidateSudoers_ErrorHidesTempFilename(t *testing.T) {
 
 // ── handlePutSudoersConfig ────────────────────────────────────────────────────
 
-// NOTE: unlike every other config-write endpoint in this file (rules, siem,
-// retention, sandbox, etc.), handlePutSudoersConfig has no require()
-// permission check at all — any authenticated caller who can reach this
-// route can write sudoers config. This is a pre-existing gap, documented
-// here rather than silently fixed as part of a test-coverage pass.
-
 func putSudoersReq(host, content string) *http.Request {
 	body := `{"content":` + strconv.Quote(content) + `}`
 	url := "/api/sudoers/config"
@@ -321,5 +315,33 @@ func TestHandleGetSudoersConfig_HostOverride(t *testing.T) {
 	}
 	if !strings.Contains(getRR.Body.String(), `"is_override":true`) {
 		t.Errorf("host with an override should report is_override=true, body: %s", getRR.Body.String())
+	}
+}
+
+// ── summarizeLineDiff ────────────────────────────────────────────────────────
+
+func TestSummarizeLineDiff(t *testing.T) {
+	cases := []struct {
+		name           string
+		old, new       string
+		added, removed int
+	}{
+		{"no change", "a\nb\n", "a\nb\n", 0, 0},
+		{"pure addition", "a\n", "a\nb\n", 1, 0},
+		{"pure removal", "a\nb\n", "a\n", 0, 1},
+		{"replace one line", "a\nb\nc\n", "a\nx\nc\n", 1, 1},
+		{"from empty", "", "a\nb\n", 2, 0},
+		{"to empty", "a\nb\n", "", 0, 2},
+		{"both empty", "", "", 0, 0},
+		{"duplicate line added", "a\n", "a\na\n", 1, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			added, removed := summarizeLineDiff(c.old, c.new)
+			if added != c.added || removed != c.removed {
+				t.Errorf("summarizeLineDiff(%q, %q) = (+%d/-%d), want (+%d/-%d)",
+					c.old, c.new, added, removed, c.added, c.removed)
+			}
+		})
 	}
 }
