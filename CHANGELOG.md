@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **iolog**: Invalid UTF-8 bytes in recorded session data are now escaped from their raw byte value instead of being replaced with U+FFFD, preserving forensic byte-for-byte fidelity; a multi-byte character split across a chunk boundary is also reassembled correctly instead of being corrupted.
 - **plugin**: Cleared the 30s socket receive timeout after a JIT-approval challenge response, so a long-running approval no longer aborts sudo with a spurious "no response from agent" error.
 - **agent**: Gated the `SUDO_LOGGER_INSECURE_TEST` root-check bypass to test binaries only, so it can never fire in a production build even if the environment variable leaks into the unit file.
+- **replay**: Fixed a risk-scoring bypass where an unterminated terminal title/hyperlink escape sequence anywhere in a session's output silently blinded content-based risk rules for the rest of that session (the raw session recording itself was never affected).
 
 ### Fixed
 - **server**: The approval decision API now distinguishes a missing request (404) from a backend failure (500).
