@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.0] - 2026-07-06
+
+### Security
+- **replay**: Fail closed instead of open when the auth-config store errors, rather than falling back to "no local passwords configured" behavior.
+- **replay**: Removed `'unsafe-inline'` from the `script-src` CSP directive — the built UI has no inline scripts, so it was unnecessary XSS-defense weakening.
+- **siem**: Replaced a substring-based SSRF denylist with resolved-IP range checks (blocks loopback/link-local/cloud-metadata addresses) applied to both the HTTPS and syslog transports; syslog previously had no destination check at all, and the old denylist missed addresses like `127.0.0.2` and DNS names that resolve to a blocked range.
+- **store**: `DeleteSession` now writes (and fsyncs) the audit-log entry before removing a session, instead of treating the audit write as best-effort after deletion, so a failed audit write can no longer leave an untraceable deletion.
+- **iolog**: Invalid UTF-8 bytes in recorded session data are now escaped from their raw byte value instead of being replaced with U+FFFD, preserving forensic byte-for-byte fidelity; a multi-byte character split across a chunk boundary is also reassembled correctly instead of being corrupted.
+- **plugin**: Cleared the 30s socket receive timeout after a JIT-approval challenge response, so a long-running approval no longer aborts sudo with a spurious "no response from agent" error.
+- **agent**: Gated the `SUDO_LOGGER_INSECURE_TEST` root-check bypass to test binaries only, so it can never fire in a production build even if the environment variable leaks into the unit file.
+
+### Fixed
+- **server**: The approval decision API now distinguishes a missing request (404) from a backend failure (500).
+- **server**: Exemption host patterns support multiple wildcards instead of only a single `*`.
+- **store**: The cleanup worker now actually stops when the store is closed; expired approval requests are purged on every cleanup pass regardless of retention-policy configuration.
+- **store**: Session creation fails loudly on a tsid collision instead of silently continuing.
+- **replay**: Consolidated cache invalidation so a rules/SIEM-config change no longer leaves the sudoers-hosts API serving stale data for up to a minute.
+- **replay**: Session duration display no longer rounds a 0-second session up to "1m".
+- **agent**: Extended the sandbox's insert-before-delete config-reload pattern to the remaining protected-inode sets, closing the last empty-map windows.
+
+### Changed
+- **agent**: Deduplicated the eBPF chunk/session-end wire encoders into the shared protocol package.
+- **replay**: Extracted the duplicated viewer-ownership check into a shared helper.
+- **replay**: Terminal-output sanitization for risk scoring now also strips OSC/DCS escape sequences, not just cursor/color codes.
+
 ## [1.26.0] - 2026-07-05
 
 ### Added
