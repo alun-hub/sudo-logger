@@ -360,6 +360,16 @@ func (s *sessionConn) processSessionStart(payload []byte) error {
 		}
 	}
 
+	return s.openApprovedSession(result)
+}
+
+// openApprovedSession opens the session and replies SERVER_READY once
+// approval checking has concluded with ApprovalResultAllow (or the session
+// is whitelisted). Shared by processSessionStart and
+// processChallengeResponse — the two paths converge here once a session is
+// cleared to start, regardless of which one did the clearing.
+func (s *sessionConn) openApprovedSession(result CheckResult) error {
+	var err error
 	s.sess, err = s.srv.openSession(s.start)
 	if err != nil {
 		log.Printf("open session %s: %v", s.start.SessionID, err)
@@ -433,34 +443,7 @@ func (s *sessionConn) processChallengeResponse(payload []byte) error {
 		// Approved or exempt — continue normally.
 	}
 
-	var err error
-	s.sess, err = s.srv.openSession(s.start)
-	if err != nil {
-		log.Printf("open session %s: %v", s.start.SessionID, err)
-		return err
-	}
-	s.diskSess.Store(s.sess)
-	log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s tsid=%s",
-		s.sess.id, s.sess.user, s.sess.host, s.sess.runas, s.start.RunasUID,
-		sanitizeForLog(s.sess.command), sanitizeForLog(s.start.ResolvedCommand),
-		sanitizeForLog(s.sess.cwd), s.sess.writer.TSID())
-
-	readyBody2, _ := json.Marshal(protocol.ServerReadyBody{SessionTTL: result.SessionTTL})
-	s.netWriteMu.Lock()
-	err = protocol.WriteMessage(s.w, protocol.MsgServerReady, readyBody2)
-	s.netWriteMu.Unlock()
-	if err != nil {
-		log.Printf("[%s] write SERVER_READY: %v", s.start.SessionID, err)
-		s.srv.closeSession(s.sess)
-		s.sess = nil
-		return err
-	}
-
-	s.sendMu.Lock()
-	s.sessionID = s.start.SessionID
-	s.sendMu.Unlock()
-
-	return nil
+	return s.openApprovedSession(result)
 }
 
 func (s *sessionConn) processChunk(payload []byte) error {
