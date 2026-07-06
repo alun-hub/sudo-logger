@@ -1,10 +1,12 @@
 import { useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { BookOpen } from 'lucide-react'
-import { InputDialog } from '@/components/ui/confirm-dialog'
+import { ConfirmDialog, InputDialog } from '@/components/ui/confirm-dialog'
+import { DiffPreview } from '@/components/ui/diff-preview'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchSandbox, saveSandbox, fetchSandboxTemplates, saveSandboxTemplates } from '@/api/config'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { summarizeLineDiff } from '@/lib/diff'
 
 // ── Feature definitions ───────────────────────────────────────────────────────
 
@@ -214,6 +216,7 @@ export function SandboxTab() {
   const [status, setStatus] = useState<{ msg: string; err: boolean } | null>(null)
   const [templateSel, setTemplateSel] = useState('')
   const [tmplNameOpen, setTmplNameOpen] = useState(false)
+  const [saveConfirm, setSaveConfirm] = useState(false)
 
   const current: SandboxState = state ?? (raw ? parseYaml(raw.content) : defaultState())
 
@@ -258,6 +261,7 @@ export function SandboxTab() {
   if (isError)   return <div className="p-6 text-red font-mono text-[13px]">Failed to load sandbox config</div>
 
   const isDirty = state !== null
+  const pendingDiff = summarizeLineDiff(raw?.content ?? '', buildYaml(current))
 
   return (
     <div className="p-6 space-y-6 max-w-6xl animate-in fade-in duration-200">
@@ -288,8 +292,8 @@ export function SandboxTab() {
             className="h-8 px-3 bg-card border border-border rounded-[4px] text-[12px] text-text-dim hover:border-border-mid hover:text-text transition-colors"
           >Save as template</button>
           <button
-            onClick={() => save.mutate()}
-            disabled={save.isPending}
+            onClick={() => setSaveConfirm(true)}
+            disabled={save.isPending || !isDirty}
             className={cn(
               'h-8 px-5 rounded-[4px] text-[13px] font-bold transition-colors',
               isDirty
@@ -387,6 +391,19 @@ export function SandboxTab() {
         confirmLabel="Save"
         onConfirm={name => { saveTmpl.mutate(name); setTmplNameOpen(false) }}
         onCancel={() => setTmplNameOpen(false)}
+      />
+      <ConfirmDialog
+        open={saveConfirm}
+        title="Confirm sandbox change"
+        message={
+          <div>
+            <p>This changes sandbox enforcement pushed to every agent within 60 seconds.</p>
+            <DiffPreview diff={pendingDiff} />
+          </div>
+        }
+        confirmLabel="Push change"
+        onConfirm={() => { save.mutate(); setSaveConfirm(false) }}
+        onCancel={() => setSaveConfirm(false)}
       />
     </div>
   )

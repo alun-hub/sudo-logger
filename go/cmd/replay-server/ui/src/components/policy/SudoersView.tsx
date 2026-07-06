@@ -8,11 +8,13 @@ import {
   fetchSudoersSnapshots,
 } from '@/api/sudoers'
 import { parseSudoers, serializeSudoers, type SudoersRule } from '@/lib/sudoers'
+import { summarizeLineDiff } from '@/lib/diff'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Shield, Clock, AlertTriangle, CheckCircle2, Save, Trash2, RotateCcw, Plus, X, BookOpen } from 'lucide-react'
 import { fmtDate } from '@/lib/date'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { DiffPreview } from '@/components/ui/diff-preview'
 
 type Mode = 'visual' | 'raw'
 
@@ -117,6 +119,7 @@ function EditorPanel({ host }: { host: string }) {
   const [cmdInput, setCmdInput] = useState('')
   const cmdInputRef = useRef<HTMLInputElement>(null)
   const [revertConfirm, setRevertConfirm] = useState(false)
+  const [saveConfirm, setSaveConfirm] = useState(false)
 
   const save = useMutation({
     mutationFn: (c: string) => saveSudoersConfig(host, c),
@@ -211,6 +214,7 @@ function EditorPanel({ host }: { host: string }) {
   }
 
   const handleSave = () => save.mutate(getCurrentContent())
+  const pendingDiff = summarizeLineDiff(serverContent, getCurrentContent())
 
   const filteredRules = currentRules
     .map((r, i) => ({ r, i }))
@@ -249,7 +253,7 @@ function EditorPanel({ host }: { host: string }) {
               <Trash2 size={13} className="mr-1" /> Revert
             </Button>
           )}
-          <Button size="sm" disabled={!isDirty || save.isPending} onClick={handleSave}
+          <Button size="sm" disabled={!isDirty || save.isPending} onClick={() => setSaveConfirm(true)}
             className="h-7 bg-green hover:bg-green/90 text-black font-bold px-4 rounded-[4px] text-[12px]"
           >
             <Save size={13} className="mr-1" /> {save.isPending ? 'Saving…' : 'Save Changes'}
@@ -431,6 +435,24 @@ function EditorPanel({ host }: { host: string }) {
         danger
         onConfirm={() => { remove.mutate(); setRevertConfirm(false) }}
         onCancel={() => setRevertConfirm(false)}
+      />
+      <ConfirmDialog
+        open={saveConfirm}
+        title="Confirm sudoers change"
+        message={
+          <div>
+            <p>
+              {isGlobal
+                ? 'This changes the global sudoers template inherited by every host.'
+                : `This changes the sudoers override for "${host}".`}
+              {' '}Applied to agents within 15 seconds of saving.
+            </p>
+            <DiffPreview diff={pendingDiff} />
+          </div>
+        }
+        confirmLabel="Push change"
+        onConfirm={() => { handleSave(); setSaveConfirm(false) }}
+        onCancel={() => setSaveConfirm(false)}
       />
     </div>
   )

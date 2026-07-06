@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './dialog'
 import { Button } from './button'
 
 interface ConfirmDialogProps {
   open: boolean
   title?: string
-  message: string
+  message: ReactNode
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
