@@ -321,6 +321,7 @@ type sandboxSubsystem struct {
 	pathInodes    map[string]SandboxInodeKey // protected path → inode key currently in BPF map
 	watcher       *fsnotify.Watcher
 	selfCgroupID  uint64                     // agent's own cgroup ID, excluded from sandbox
+	lastFeatures  resolvedFeatures           // feature flags as of the last reload, for weakening detection
 }
 
 var sandboxSys *sandboxSubsystem
@@ -678,6 +679,7 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 		}
 	}
 
+	oldFeatures := s.lastFeatures
 	applyFeatures(s.objs, res.Features)
 
 	// Insert new, then delete obsolete — for each set below, same diff-based
@@ -760,11 +762,67 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 	}
 	s.startWatcher(res.PathInodes)
 
+	// Detect and flag a config push that removes protection the previous
+	// config had (A-3: a compromised or careless server-pushed sandbox.yaml
+	// can silently defeat enforcement fleet-wide). This does not block the
+	// reload — it only makes a weakening reload loud instead of silent.
+	logSandboxWeakening(oldFeatures, res.Features, len(obsoleteInodes), len(obsoleteProcs),
+		len(obsoleteIPCInodes), len(obsoleteForbidden), len(obsoleteNoexec))
+	s.lastFeatures = res.Features
+
 	if logChange {
 		log.Printf("sandbox: config reloaded (%d protected inodes, %d protected processes)",
 			len(res.Inodes), len(res.Processes))
 	} else {
 		debugLog("sandbox: configuration refreshed (periodic)")
+	}
+}
+
+// logSandboxWeakening compares a reload's old and new feature flags and
+// obsolete-entry counts, and logs a loud, distinctly-marked warning if the
+// new config removes any protection the old one had — whether a feature
+// flag flipped from enabled to disabled, or a previously-protected
+// inode/process/systemd-ipc-socket/forbidden-binary/noexec-dir is no longer
+// covered. A reload that only adds protections, or swaps one set of paths
+// for another without a net loss, does not trigger this.
+func logSandboxWeakening(oldF, newF resolvedFeatures, removedInodes, removedProcs, removedIPC, removedForbidden, removedNoexec int) {
+	var reasons []string
+
+	disabled := func(name string, old, new bool) {
+		if old && !new {
+			reasons = append(reasons, name+" disabled")
+		}
+	}
+	disabled("deny_netlink", oldF.DenyNetlink, newF.DenyNetlink)
+	disabled("deny_mount", oldF.DenyMount, newF.DenyMount)
+	disabled("deny_ptrace", oldF.DenyPtrace, newF.DenyPtrace)
+	disabled("deny_cap_audit_control", oldF.DenyCapAuditControl, newF.DenyCapAuditControl)
+	disabled("deny_cap_net_admin", oldF.DenyCapNetAdmin, newF.DenyCapNetAdmin)
+	disabled("deny_cap_sys_module", oldF.DenyCapSysModule, newF.DenyCapSysModule)
+	disabled("deny_cap_mac_admin", oldF.DenyCapMacAdmin, newF.DenyCapMacAdmin)
+	disabled("deny_cap_sys_rawio", oldF.DenyCapSysRawio, newF.DenyCapSysRawio)
+	disabled("deny_cap_sys_boot", oldF.DenyCapSysBoot, newF.DenyCapSysBoot)
+	disabled("deny_systemd_ipc", oldF.DenySystemdIPC, newF.DenySystemdIPC)
+
+	if removedInodes > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d protected path(s) no longer protected", removedInodes))
+	}
+	if removedProcs > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d protected process(es) no longer protected", removedProcs))
+	}
+	if removedIPC > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d systemd-ipc socket(s) no longer blocked", removedIPC))
+	}
+	if removedForbidden > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d forbidden-binary rule(s) removed", removedForbidden))
+	}
+	if removedNoexec > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d noexec rule(s) removed", removedNoexec))
+	}
+
+	if len(reasons) > 0 {
+		log.Printf("sandbox: SECURITY WARNING: protection reduced by config reload — %s",
+			strings.Join(reasons, "; "))
 	}
 }
 
