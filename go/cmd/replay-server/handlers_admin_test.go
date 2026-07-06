@@ -271,6 +271,9 @@ func TestStripANSI(t *testing.T) {
 		{"color codes stripped", "\x1b[31mred\x1b[0m text", "red text"},
 		{"cursor movement stripped", "a\x1b[2Kb", "ab"},
 		{"multiple sequences", "\x1b[1;31mbold red\x1b[0m normal", "bold red normal"},
+		{"OSC title terminated by BEL stripped", "a\x1b]0;window title\x07b", "ab"},
+		{"OSC hyperlink terminated by ST stripped", "a\x1b]8;;http://example.com\x1b\\link text\x1b]8;;\x1b\\b", "alink textb"},
+		{"DCS terminated by ST stripped", "a\x1bPsome dcs payload\x1b\\b", "ab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

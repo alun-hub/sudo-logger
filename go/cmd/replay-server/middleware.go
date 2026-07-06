@@ -42,8 +42,12 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
-		// CSP: allow local scripts, inline styles, data images, and WASM for terminal player
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';")
+		// CSP: local scripts only (the built UI has no inline <script> or
+		// dangerouslySetInnerHTML-injected script, and index.html is served
+		// statically with no server-side templating, so 'unsafe-inline' is
+		// not needed for script-src); inline styles, data images, and WASM
+		// for the terminal player remain allowed.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';")
 
 		// Add HSTS if TLS is enabled or we are behind a proxy that terminated TLS
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
@@ -61,7 +65,12 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		user := "-"
 		role := RoleViewer
 
-		cfg, _ := sessionStore.GetAuthConfig(r.Context())
+		cfg, err := sessionStore.GetAuthConfig(r.Context())
+		if err != nil {
+			// Logging-only path (not an auth gate) — proceed with the
+			// zero-value config, but note the failure so it isn't silent.
+			log.Printf("accessLogMiddleware: GetAuthConfig: %v", err)
+		}
 
 		if cfg.Source == "proxy" {
 			header := cfg.Proxy.UserHeader
@@ -203,7 +212,15 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		cfg, _ := sessionStore.GetAuthConfig(r.Context())
+		cfg, err := sessionStore.GetAuthConfig(r.Context())
+		if err != nil {
+			// Fail closed: a store error must never be interpreted as "no
+			// auth config" (Source == ""), which the local-mode branch below
+			// would otherwise treat as an open deployment.
+			log.Printf("SECURITY: GetAuthConfig failed, denying request: %v", err)
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
 
 		// Auto-detect legacy proxy config if source is not yet saved
 		if cfg.Source == "" || cfg.Source == "local" {
@@ -247,7 +264,14 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// If no one has a password, we treat it as an open deployment.
 		hasLocalPasswords := *flagHTPasswd != "" // pragma: allowlist secret
 		if !hasLocalPasswords {
-			users, _ := sessionStore.ListUsers(r.Context())
+			users, err := sessionStore.ListUsers(r.Context())
+			if err != nil {
+				// Fail closed: a store error must not be interpreted as
+				// "no local users have passwords" (open deployment).
+				log.Printf("SECURITY: ListUsers failed, denying request: %v", err)
+				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			for _, u := range users {
 				if u.PasswordHash != "" { // pragma: allowlist secret
 					hasLocalPasswords = true // pragma: allowlist secret

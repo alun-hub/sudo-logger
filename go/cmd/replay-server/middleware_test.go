@@ -83,8 +83,17 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 			t.Errorf("header %s = %q, want %q", k, got, v)
 		}
 	}
-	if rr.Header().Get("Content-Security-Policy") == "" {
+	csp := rr.Header().Get("Content-Security-Policy")
+	if csp == "" {
 		t.Error("Content-Security-Policy header not set")
+	}
+	// script-src must not allow 'unsafe-inline' — the built UI has no
+	// inline scripts, and allowing it would materially weaken XSS defenses.
+	for _, part := range strings.Split(csp, ";") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "script-src") && strings.Contains(part, "'unsafe-inline'") {
+			t.Errorf("script-src allows 'unsafe-inline': %q", part)
+		}
 	}
 	if rr.Header().Get("Strict-Transport-Security") != "" {
 		t.Error("HSTS should not be set for a plain HTTP request")

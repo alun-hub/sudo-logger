@@ -386,7 +386,7 @@ func fmtDur(secs float64) string {
 	if h > 0 {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
-	return fmt.Sprintf("%dm", m+1)
+	return fmt.Sprintf("%dm", m)
 }
 
 // ── Rules API ─────────────────────────────────────────────────────────────────

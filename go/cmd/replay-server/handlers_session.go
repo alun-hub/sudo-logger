@@ -260,6 +260,29 @@ func handleListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// enforceOwnership checks that the request's viewer is allowed to access
+// tsid: viewers without PermSessionsReplayAll may only access their own
+// sessions. Writes the appropriate error response and returns false if
+// access is denied; callers must return immediately when it does.
+func enforceOwnership(w http.ResponseWriter, r *http.Request, tsid string) bool {
+	viewer := viewerFromContext(r)
+	if can(r, store.PermSessionsReplayAll) || viewer == "-" {
+		return true
+	}
+	all := cachedListSessions(r.Context())
+	for _, s := range all {
+		if s.TSID == tsid {
+			if s.User != viewer {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return false
+			}
+			return true
+		}
+	}
+	http.Error(w, "session not found", http.StatusNotFound)
+	return false
+}
+
 func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -275,28 +298,12 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce viewer-role ownership: users without replay_all may only replay their own sessions.
-	viewer := viewerFromContext(r)
-	if !can(r, store.PermSessionsReplayAll) && viewer != "-" {
-		all := cachedListSessions(r.Context())
-		found := false
-		for _, s := range all {
-			if s.TSID == tsid {
-				found = true
-				if s.User != viewer {
-					http.Error(w, "forbidden", http.StatusForbidden)
-					return
-				}
-				break
-			}
-		}
-		if !found {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
+	if !enforceOwnership(w, r, tsid) {
+		return
 	}
 
 	// Record who viewed this session before streaming the response.
+	viewer := viewerFromContext(r)
 	var replayURL string
 	if base := strings.TrimRight(siem.Get().ReplayURLBase, "/"); base != "" {
 		replayURL = base + "/?tsid=" + url.QueryEscape(tsid)
@@ -401,28 +408,12 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce viewer-role ownership
-	viewer := viewerFromContext(r)
-	if !can(r, store.PermSessionsReplayAll) && viewer != "-" {
-		all := cachedListSessions(r.Context())
-		found := false
-		for _, s := range all {
-			if s.TSID == tsid {
-				found = true
-				if s.User != viewer {
-					http.Error(w, "forbidden", http.StatusForbidden)
-					return
-				}
-				break
-			}
-		}
-		if !found {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
+	if !enforceOwnership(w, r, tsid) {
+		return
 	}
 
 	// Record who viewed this session before streaming the response.
+	viewer := viewerFromContext(r)
 	var replayURL string
 	if base := strings.TrimRight(siem.Get().ReplayURLBase, "/"); base != "" {
 		replayURL = base + "/?tsid=" + url.QueryEscape(tsid)

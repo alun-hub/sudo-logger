@@ -180,12 +180,29 @@ func stripANSI(s string) string {
 	i := 0
 	for i < len(s) {
 		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			// CSI: ESC [ ... final byte in 0x40-0x7e
 			i += 2
 			for i < len(s) && (s[i] < 0x40 || s[i] > 0x7e) {
 				i++
 			}
 			if i < len(s) {
 				i++ // consume the final command byte
+			}
+		} else if s[i] == '\x1b' && i+1 < len(s) && (s[i+1] == ']' || s[i+1] == 'P') {
+			// OSC (]) / DCS (P): ESC <type> ... terminated by BEL or ST (ESC \)
+			// so title-setting/hyperlink/etc. payloads (which can carry
+			// arbitrary text) don't leak into risk-rule matching.
+			i += 2
+			for i < len(s) {
+				if s[i] == '\x07' {
+					i++
+					break
+				}
+				if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
+					i += 2
+					break
+				}
+				i++
 			}
 		} else {
 			out = append(out, s[i])

@@ -95,7 +95,11 @@ func getOIDCConfig(ctx context.Context, r *http.Request) (store.AuthConfig, *oid
 // generateState creates a random state parameter for CSRF protection.
 func generateState() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failing is a systemic problem, not something to
+		// paper over with a predictable (all-zero) CSRF state.
+		panic(fmt.Sprintf("generateState: crypto/rand.Read: %v", err))
+	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
@@ -195,6 +199,18 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		Name:     "sudo_session",
 		Value:    sid,
 		MaxAge:   3600 * 24, // 24 hours
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(oauthConf.RedirectURL, "https://"),
+		SameSite: http.SameSiteLaxMode,
+		Path:     "/",
+	})
+
+	// The state cookie has served its purpose — clear it now instead of
+	// leaving it to expire on its own after 5 minutes.
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oidc_state",
+		Value:    "",
+		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   strings.HasPrefix(oauthConf.RedirectURL, "https://"),
 		SameSite: http.SameSiteLaxMode,

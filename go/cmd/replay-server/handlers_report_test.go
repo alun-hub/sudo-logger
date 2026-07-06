@@ -16,15 +16,12 @@ func TestFmtDur(t *testing.T) {
 		secs float64
 		want string
 	}{
-		// Sub-minute durations round UP to "1m" (the +1 in the else branch),
-		// so even a 0-second duration displays as "1m", not "0m".
-		{0, "1m"},
-		{30, "1m"},
-		{59, "1m"},
-		// A full 60-second duration still takes the h==0 branch (m+1), so it
-		// displays as "2m" rather than "1m" — a real quirk of the rounding,
-		// documented here rather than silently "corrected".
-		{60, "2m"},
+		// Sub-minute durations floor to whole minutes, same as the h>0
+		// branch below — a 0-59 second duration displays as "0m".
+		{0, "0m"},
+		{30, "0m"},
+		{59, "0m"},
+		{60, "1m"},
 		{3600, "1h 0m"},
 		{3661, "1h 1m"},
 		{7199, "1h 59m"},

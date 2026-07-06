@@ -116,11 +116,19 @@ func (c *sessionCache) rebuild(ctx context.Context) ([]SessionInfo, error) {
 	return snap, nil
 }
 
-// invalidate forces the next get() to rebuild from the store.
+// invalidate forces the next get() to rebuild from the store. Also clears
+// sessionsCache (handlers_session.go) — a separate cache over the same
+// underlying ListSessions data used by /api/sudoers/hosts and ownership
+// checks — so a config change doesn't leave that endpoint serving stale
+// data for up to its own TTL after this cache was invalidated.
 func (c *sessionCache) invalidate() {
 	c.mu.Lock()
 	c.built = false
 	c.mu.Unlock()
+
+	sessionsCache.mu.Lock()
+	sessionsCache.expiry = time.Time{}
+	sessionsCache.mu.Unlock()
 }
 
 // recordToInfo converts a store.SessionRecord to a SessionInfo (without risk fields).
