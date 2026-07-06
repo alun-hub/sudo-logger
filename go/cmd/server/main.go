@@ -272,12 +272,3 @@ func main() {
 	}
 	log.Printf("sudo-logserver: shutdown complete")
 }
-
-func sanitizeForLog(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 32 || r == 127 {
-			return '_'
-		}
-		return r
-	}, s)
-}

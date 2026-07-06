@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"sudo-logger/internal/store"
+	"sudo-logger/internal/util"
 )
 
 // ctxKey is the unexported type for context keys in this package.
@@ -139,7 +140,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		ctx = context.WithValue(ctx, ctxPermissions, perms)
 		next.ServeHTTP(lrw, r.WithContext(ctx))
 		log.Printf("access identity=%s role=%s addr=%s method=%s path=%s status=%d",
-			"***", role, r.RemoteAddr, r.Method, sanitizeForLog(r.URL.Path), lrw.status)
+			"***", role, r.RemoteAddr, r.Method, util.SanitizeForLog(r.URL.Path), lrw.status)
 	})
 }
 
@@ -162,16 +163,6 @@ func resolveRoleFromGroups(groups []string, cfg store.AuthConfig) Role {
 		}
 	}
 	return RoleViewer
-}
-
-// sanitizeForLog replaces ASCII control characters with '_' to prevent log injection.
-func sanitizeForLog(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 32 || r == 127 {
-			return '_'
-		}
-		return r
-	}, s)
 }
 
 // basicAuthMiddleware enforces HTTP Basic Auth using the SessionStore.

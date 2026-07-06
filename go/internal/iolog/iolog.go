@@ -56,6 +56,18 @@ type SessionMeta struct {
 	CallerProcess string
 }
 
+// EffectiveDivergenceStatus returns DivergenceStatus, defaulting an empty
+// value to "unwitnessed" — but only for plugin-sourced sessions (Source ==
+// "" or "plugin"). eBPF-sourced sessions (ebpf-tty, ebpf-pkexec) have no
+// plugin counterpart to diverge from, so divergence tracking does not apply
+// and an empty status is left as-is.
+func (m SessionMeta) EffectiveDivergenceStatus() string {
+	if m.DivergenceStatus == "" && (m.Source == "" || m.Source == "plugin") {
+		return "unwitnessed"
+	}
+	return m.DivergenceStatus
+}
+
 // Writer appends events to an asciinema v2 cast file.
 // Safe for concurrent use.
 type Writer struct {

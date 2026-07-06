@@ -20,6 +20,7 @@ import (
 
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
+	"sudo-logger/internal/util"
 )
 
 // sessionsCache caches the result of ListSessions to avoid an expensive
@@ -315,7 +316,7 @@ func handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		replayURL = scheme + "://" + r.Host + "/?tsid=" + url.QueryEscape(tsid)
 	}
 	recordView(r, tsid, replayURL)
-	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", sanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
+	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", util.SanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
 
 	rc, err := sessionStore.OpenCast(r.Context(), tsid)
 	if err != nil {
@@ -425,7 +426,7 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 		replayURL = scheme + "://" + r.Host + "/?tsid=" + url.QueryEscape(tsid)
 	}
 	recordView(r, tsid, replayURL)
-	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", sanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
+	log.Printf("session-view user=%s addr=%s tsid=%s url=%s", util.SanitizeForLog(viewer), r.RemoteAddr, tsid, replayURL)
 
 	rc, err := sessionStore.OpenCast(r.Context(), tsid)
 	if err != nil {

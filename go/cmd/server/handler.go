@@ -57,36 +57,27 @@ func (srv *server) openSession(start *protocol.SessionStart) (*session, error) {
 		cwd = "/"
 	}
 
-	divStatus := start.DivergenceStatus
-	// Only default to "unwitnessed" for plugin sessions (or old clients that
-	// don't set Source).  eBPF-sourced sessions (ebpf-pkexec, ebpf-tty) have no
-	// plugin counterpart by design, so divergence is not applicable.
-	if divStatus == "" && (start.Source == "" || start.Source == "plugin") {
-		divStatus = "unwitnessed"
+	meta := iolog.SessionMeta{
+		SessionID:        start.SessionID,
+		User:             user,
+		Host:             host,
+		RunasUser:        runasUser,
+		RunasUID:         start.RunasUID,
+		RunasGID:         start.RunasGID,
+		Cwd:              cwd,
+		Command:          start.Command,
+		ResolvedCommand:  start.ResolvedCommand,
+		Flags:            start.Flags,
+		Rows:             start.Rows,
+		Cols:             start.Cols,
+		Source:           start.Source,
+		ParentSessionID:  start.ParentSessionID,
+		HasIO:            start.HasIO,
+		DivergenceStatus: start.DivergenceStatus,
+		CallerProcess:    start.CallerProcess,
 	}
-	w, err := srv.sessionStore.CreateSession(
-		context.Background(),
-		iolog.SessionMeta{
-			SessionID:        start.SessionID,
-			User:             user,
-			Host:             host,
-			RunasUser:        runasUser,
-			RunasUID:         start.RunasUID,
-			RunasGID:         start.RunasGID,
-			Cwd:              cwd,
-			Command:          start.Command,
-			ResolvedCommand:  start.ResolvedCommand,
-			Flags:            start.Flags,
-			Rows:             start.Rows,
-			Cols:             start.Cols,
-			Source:           start.Source,
-			ParentSessionID:  start.ParentSessionID,
-			HasIO:            start.HasIO,
-			DivergenceStatus: divStatus,
-			CallerProcess:    start.CallerProcess,
-		},
-		startTime,
-	)
+	meta.DivergenceStatus = meta.EffectiveDivergenceStatus()
+	w, err := srv.sessionStore.CreateSession(context.Background(), meta, startTime)
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}

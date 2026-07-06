@@ -45,25 +45,6 @@ func TestResolveRoleFromGroups(t *testing.T) {
 	}
 }
 
-// ── sanitizeForLog ───────────────────────────────────────────────────────────
-
-func TestSanitizeForLog(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"/api/sessions", "/api/sessions"},
-		{"/api/sessions\nX-Injected: evil", "/api/sessions_X-Injected: evil"},
-		{"tab\there", "tab_here"},
-		{"del\x7fchar", "del_char"},
-	}
-	for _, tt := range tests {
-		if got := sanitizeForLog(tt.in); got != tt.want {
-			t.Errorf("sanitizeForLog(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 // ── securityHeadersMiddleware ────────────────────────────────────────────────
 
 func TestSecurityHeadersMiddleware(t *testing.T) {

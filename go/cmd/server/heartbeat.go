@@ -3,14 +3,14 @@ package main
 import (
 	"context"
 	"log"
-	"strings"
+
+	"sudo-logger/internal/util"
 )
 
 // handleAgentHeartbeat processes a MsgHeartbeatAgent message.
 func (srv *server) handleAgentHeartbeat(remote string, payload []byte) {
 	host := string(payload)
-	if host == "" || len(host) > 255 || host[0] == '.' ||
-		strings.ContainsAny(host, "/\\") || strings.Contains(host, "..") {
+	if !util.ValidAgentHost(host) {
 		log.Printf("SECURITY: MsgHeartbeatAgent invalid host %q from %s — dropping", host, remote)
 		return
 	}

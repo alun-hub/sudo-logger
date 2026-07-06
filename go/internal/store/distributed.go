@@ -387,10 +387,7 @@ func (d *DistributedStore) CreateSession(ctx context.Context, meta iolog.Session
 	}
 	tsid := filepath.ToSlash(rel)
 
-	divStatus := meta.DivergenceStatus
-	if divStatus == "" && (meta.Source == "" || meta.Source == "plugin") {
-		divStatus = "unwitnessed"
-	}
+	divStatus := meta.EffectiveDivergenceStatus()
 	// Apply the same defaults as iolog.NewWriter so the stored values match
 	// the cast file header (which defaults to 220x50 when sudo provides no PTY).
 	ttyC := meta.Cols

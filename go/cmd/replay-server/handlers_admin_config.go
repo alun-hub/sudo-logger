@@ -21,6 +21,7 @@ import (
 
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/store"
+	"sudo-logger/internal/util"
 )
 
 // ReportSummary holds aggregate statistics for a time period.
@@ -859,8 +860,7 @@ func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	host := r.URL.Query().Get("host")
-	if host != "" && (len(host) > 255 || host[0] == '.' ||
-		strings.ContainsAny(host, "/\\") || strings.Contains(host, "..")) {
+	if host != "" && !util.ValidAgentHost(host) {
 		http.Error(w, "invalid host", http.StatusBadRequest)
 		return
 	}
@@ -956,8 +956,7 @@ func handleDeleteSudoersConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "host required for delete", http.StatusBadRequest)
 		return
 	}
-	if len(host) > 255 || host[0] == '.' ||
-		strings.ContainsAny(host, "/\\") || strings.Contains(host, "..") {
+	if !util.ValidAgentHost(host) {
 		http.Error(w, "invalid host", http.StatusBadRequest)
 		return
 	}

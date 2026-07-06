@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"sudo-logger/internal/protocol"
+	"sudo-logger/internal/util"
 )
 
 const maxOverflow = 1000
@@ -263,8 +264,8 @@ func (s *sessionConn) processSessionStart(payload []byte) error {
 		log.Printf("parse session start from %s: %v", s.remote, err)
 		return err
 	}
-	s.start.User = sanitizeForLog(s.start.User)
-	s.start.Host = sanitizeForLog(s.start.Host)
+	s.start.User = util.SanitizeForLog(s.start.User)
+	s.start.Host = util.SanitizeForLog(s.start.Host)
 
 	certs := s.conn.ConnectionState().PeerCertificates
 	if len(certs) > 0 && !certMatchesHost(certs[0], s.start.Host) {
@@ -378,8 +379,8 @@ func (s *sessionConn) openApprovedSession(result CheckResult) error {
 	s.diskSess.Store(s.sess)
 	log.Printf("[%s] start user=%s host=%s runas=%s uid=%d cmd=%q resolved=%q cwd=%s tsid=%s",
 		s.sess.id, s.sess.user, s.sess.host, s.sess.runas, s.start.RunasUID,
-		sanitizeForLog(s.sess.command), sanitizeForLog(s.start.ResolvedCommand),
-		sanitizeForLog(s.sess.cwd), s.sess.writer.TSID())
+		util.SanitizeForLog(s.sess.command), util.SanitizeForLog(s.start.ResolvedCommand),
+		util.SanitizeForLog(s.sess.cwd), s.sess.writer.TSID())
 
 	readyBody, _ := json.Marshal(protocol.ServerReadyBody{SessionTTL: result.SessionTTL})
 	s.netWriteMu.Lock()
@@ -602,8 +603,7 @@ func (s *sessionConn) handleMessage(mType uint8, payload []byte) error {
 			log.Printf("parse MsgSudoersSnapshot from %s: %v", s.remote, err)
 			return err
 		}
-		if snap.Host == "" || len(snap.Host) > 255 || snap.Host[0] == '.' ||
-			strings.ContainsAny(snap.Host, "/\\") || strings.Contains(snap.Host, "..") {
+		if !util.ValidAgentHost(snap.Host) {
 			log.Printf("SECURITY: MsgSudoersSnapshot invalid host %q from %s — dropping", snap.Host, s.remote)
 			return fmt.Errorf("invalid host in sudoers snapshot")
 		}
@@ -618,8 +618,7 @@ func (s *sessionConn) handleMessage(mType uint8, payload []byte) error {
 			log.Printf("parse MsgSudoersError from %s: %v", s.remote, err)
 			return err
 		}
-		if serr.Host == "" || len(serr.Host) > 255 || serr.Host[0] == '.' ||
-			strings.ContainsAny(serr.Host, "/\\") || strings.Contains(serr.Host, "..") {
+		if !util.ValidAgentHost(serr.Host) {
 			log.Printf("SECURITY: MsgSudoersError invalid host %q from %s — dropping", serr.Host, s.remote)
 			return fmt.Errorf("invalid host in sudoers error")
 		}
