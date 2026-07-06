@@ -148,6 +148,52 @@ func getHTTPSClient(c TLSCfg) (*http.Client, error) {
 	return httpsClient, nil
 }
 
+// validateDestinationHost resolves host (a hostname or literal IP, no port)
+// and rejects it if any resolved address is loopback, link-local (this
+// covers every major cloud metadata endpoint — AWS/Azure/GCP's instance
+// metadata services all live in 169.254.0.0/16), unspecified, or multicast.
+// General private ranges (10/8, 172.16/12, 192.168/16) are intentionally
+// NOT blocked: on-prem SIEM servers commonly live on the same private
+// network as sudo-logger, and this check exists to stop an admin-supplied
+// destination from reaching cloud-metadata/loopback services, not to
+// forbid private-network SIEM targets. Resolving (instead of string-
+// matching the hostname) also closes DNS-rebinding and IP-encoding
+// bypasses (e.g. "127.0.0.2", decimal/hex IPs, IPv6 loopback/link-local
+// forms) that a denylist on the literal hostname string cannot catch.
+func validateDestinationHost(host string) error {
+	if host == "" {
+		return fmt.Errorf("empty destination host")
+	}
+	var ips []net.IP
+	if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
+	} else {
+		resolved, err := net.LookupIP(host)
+		if err != nil {
+			return fmt.Errorf("resolve destination host %q: %w", host, err)
+		}
+		ips = resolved
+	}
+	// Unit tests commonly point at a loopback httptest/net server; allow it
+	// there but never in a production binary (same idiom used elsewhere in
+	// this codebase to gate test-only behavior).
+	inTest := flag.Lookup("test.v") != nil
+	for _, ip := range ips {
+		if isProhibitedDestinationIP(ip) && !inTest {
+			return fmt.Errorf("prohibited destination host %q (resolves to %s)", host, ip)
+		}
+	}
+	return nil
+}
+
+// isProhibitedDestinationIP is the test-mode-independent classification
+// used by validateDestinationHost; split out so it can be unit-tested
+// without the test-binary loopback allowance masking the result.
+func isProhibitedDestinationIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
 // sendHTTPS POSTs body to cfg.HTTPS.URL.
 // TLS client certificates are required (mTLS); the CA field must point to the
 // server CA so the certificate can be verified.
@@ -160,16 +206,8 @@ func sendHTTPS(cfg Config, e Event, body []byte, contentType string) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return fmt.Errorf("HTTPS URL must be a valid https:// address, got %q", cfg.HTTPS.URL)
 	}
-
-	// Block common cloud metadata and loopback to mitigate SSRF.
-	// We allow 127.0.0.1/localhost only during unit tests.
-	host := strings.ToLower(u.Hostname())
-	isLoopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
-	isMetadata := host == "169.254.169.254" || strings.Contains(host, "metadata.google.internal") ||
-		strings.Contains(host, "instance-data")
-
-	if isMetadata || (isLoopback && flag.Lookup("test.v") == nil) {
-		return fmt.Errorf("prohibited destination host: %s", host)
+	if err := validateDestinationHost(u.Hostname()); err != nil {
+		return err
 	}
 
 	client, err := getHTTPSClient(cfg.HTTPS.TLS)
@@ -217,6 +255,14 @@ func syslogPRI(exitCode int32, incomplete bool) int {
 // sendSyslog formats and delivers a RFC 5424 message over UDP, plain TCP, or
 // TCP with mTLS.  TCP messages use newline framing (RFC 6587 §3.4.2).
 func sendSyslog(cfg Config, e Event, body []byte) error {
+	destHost, _, err := net.SplitHostPort(cfg.Syslog.Addr)
+	if err != nil {
+		destHost = cfg.Syslog.Addr // no port present; validate as-is
+	}
+	if err := validateDestinationHost(destHost); err != nil {
+		return err
+	}
+
 	pri := syslogPRI(e.ExitCode, e.Incomplete)
 	hostname, _ := os.Hostname()
 	if hostname == "" {

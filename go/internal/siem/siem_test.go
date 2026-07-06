@@ -556,3 +556,61 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// ── isProhibitedDestinationIP / validateDestinationHost (SSRF guard) ──────────
+
+func TestIsProhibitedDestinationIP(t *testing.T) {
+	tests := []struct {
+		name string
+		ip   string
+		want bool
+	}{
+		{"loopback 127.0.0.1", "127.0.0.1", true},
+		// Any 127.x.x.x is loopback, not just the canonical address — this is
+		// exactly the denylist bypass ("127.0.0.2") the old string-match
+		// implementation missed.
+		{"loopback 127.0.0.2", "127.0.0.2", true},
+		{"loopback IPv6 ::1", "::1", true},
+		// 169.254.169.254 is the AWS/Azure/GCP instance-metadata address on
+		// all three major clouds; it's covered by the broader link-local
+		// range check rather than a hostname/IP string match.
+		{"link-local metadata 169.254.169.254", "169.254.169.254", true},
+		{"link-local 169.254.1.1", "169.254.1.1", true},
+		{"link-local IPv6 fe80::1", "fe80::1", true},
+		{"unspecified 0.0.0.0", "0.0.0.0", true},
+		// On-prem SIEM servers commonly live on a private network — these
+		// must NOT be blocked.
+		{"private 10.0.0.5", "10.0.0.5", false},
+		{"private 172.16.0.5", "172.16.0.5", false},
+		{"private 192.168.1.5", "192.168.1.5", false},
+		{"public 8.8.8.8", "8.8.8.8", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if ip == nil {
+				t.Fatalf("net.ParseIP(%q) failed", tt.ip)
+			}
+			if got := isProhibitedDestinationIP(ip); got != tt.want {
+				t.Errorf("isProhibitedDestinationIP(%s) = %v, want %v", tt.ip, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateDestinationHost(t *testing.T) {
+	// Private/public IPs must be allowed regardless of test mode — only the
+	// prohibited-IP rejection itself is gated by the test-binary loopback
+	// allowance (see TestIsProhibitedDestinationIP for that classification).
+	for _, host := range []string{"10.1.2.3", "192.168.0.1", "8.8.8.8"} {
+		if err := validateDestinationHost(host); err != nil {
+			t.Errorf("validateDestinationHost(%q) = %v, want nil", host, err)
+		}
+	}
+	if err := validateDestinationHost(""); err == nil {
+		t.Error("validateDestinationHost(\"\") = nil, want an error")
+	}
+	if err := validateDestinationHost("this-hostname-should-not-resolve.invalid"); err == nil {
+		t.Error("validateDestinationHost(unresolvable host) = nil, want a resolution error")
+	}
+}
