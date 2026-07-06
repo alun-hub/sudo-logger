@@ -952,113 +952,113 @@ static void build_cmdline_json(char *buf, size_t bufsz,
  * Thread safety: called in the sudo main thread before any child is forked;
  *   no concurrent access to globals at this point.
  */
-static int plugin_open(unsigned int        version,
-                       sudo_conv_t         conversation,
-                       sudo_printf_t       sudo_plugin_printf,
-                       char * const        settings[],
-                       char * const        user_info[],
-                       char * const        command_info[],
-                       int                 argc,
-                       char * const        argv[],
-                       char * const        user_env[],
-                       char * const        plugin_options[],
-                       const char        **errstr)
+/* parse_user_info extracts user/host/cwd/uid/gid from sudo's user_info[]
+ * array (each entry is "key=value"). Unset fields keep their defaults:
+ * "unknown"/"unknown"/"/" for user/host/cwd, -1 for the uid/gid. */
+static void parse_user_info(char * const user_info[],
+                             const char **user, const char **host,
+                             const char **raw_cwd, int *user_uid, int *user_gid)
 {
-    (void)version;
-    (void)user_env;
-
-    g_printf  = sudo_plugin_printf;
-    g_seq     = 0;
-    g_last_ack_time  = 0;
-    g_last_ack_query = 0;
-    atomic_store(&g_agent_dead, 0);
-
-    g_tty_fd = open("/dev/tty", O_WRONLY | O_NOCTTY | O_CLOEXEC);
-    if (g_tty_fd >= 0) {
-        const char *tn = ttyname(g_tty_fd);
-        if (tn)
-            strncpy(g_tty_path, tn, sizeof(g_tty_path) - 1);
-    }
-
-    const char *user    = "unknown";
-    const char *host    = "unknown";
-    const char *raw_cwd = "/";   /* user_info[cwd] = the invoking user's cwd */
-    int user_uid = -1;
-    int user_gid = -1;
+    *user = "unknown";
+    *host = "unknown";
+    *raw_cwd = "/";
+    *user_uid = -1;
+    *user_gid = -1;
     for (int i = 0; user_info[i] != NULL; i++) {
         if      (strncmp(user_info[i], "user=", 5) == 0)
-            user = user_info[i] + 5;
+            *user = user_info[i] + 5;
         else if (strncmp(user_info[i], "host=", 5) == 0)
-            host = user_info[i] + 5;
+            *host = user_info[i] + 5;
         else if (strncmp(user_info[i], "cwd=",  4) == 0)
-            raw_cwd = user_info[i] + 4;
+            *raw_cwd = user_info[i] + 4;
         else if (strncmp(user_info[i], "uid=",  4) == 0)
-            user_uid = (int)strtol(user_info[i] + 4, NULL, 10);
+            *user_uid = (int)strtol(user_info[i] + 4, NULL, 10);
         else if (strncmp(user_info[i], "gid=",  4) == 0)
-            user_gid = (int)strtol(user_info[i] + 4, NULL, 10);
+            *user_gid = (int)strtol(user_info[i] + 4, NULL, 10);
     }
+}
 
-    /* ── Extract metadata from command_info[] ─────────────────────────── */
-    const char *raw_resolved = "";
-    int         runas_uid    = 0;
-    int         runas_gid    = 0;
-    int         term_cols    = 0;
-    int         term_rows    = 0;
+/* parse_command_info extracts the resolved command, runas uid/gid, and
+ * terminal dimensions from sudo's command_info[] array. If sudo didn't
+ * supply terminal dimensions (non-interactive session, or an older sudo),
+ * falls back to querying the PTY directly via TIOCGWINSZ. Updates the
+ * g_term_rows/g_term_cols globals (read by the monitor thread on resize). */
+static void parse_command_info(char * const command_info[],
+                                const char **raw_resolved,
+                                int *runas_uid, int *runas_gid,
+                                int *term_cols, int *term_rows)
+{
+    *raw_resolved = "";
+    *runas_uid    = 0;
+    *runas_gid    = 0;
+    *term_cols    = 0;
+    *term_rows    = 0;
     for (int i = 0; command_info[i] != NULL; i++) {
         if      (strncmp(command_info[i], "command=",   8) == 0)
-            raw_resolved = command_info[i] + 8;
+            *raw_resolved = command_info[i] + 8;
         else if (strncmp(command_info[i], "runas_uid=", 10) == 0)
-            runas_uid = (int)strtol(command_info[i] + 10, NULL, 10);
+            *runas_uid = (int)strtol(command_info[i] + 10, NULL, 10);
         else if (strncmp(command_info[i], "runas_gid=", 10) == 0)
-            runas_gid = (int)strtol(command_info[i] + 10, NULL, 10);
+            *runas_gid = (int)strtol(command_info[i] + 10, NULL, 10);
         else if (strncmp(command_info[i], "cols=",      5) == 0)
-            term_cols = (int)strtol(command_info[i] + 5,  NULL, 10);
+            *term_cols = (int)strtol(command_info[i] + 5,  NULL, 10);
         else if (strncmp(command_info[i], "lines=",     6) == 0)
-            term_rows = (int)strtol(command_info[i] + 6,  NULL, 10);
+            *term_rows = (int)strtol(command_info[i] + 6,  NULL, 10);
     }
 
     /* If sudo didn't provide terminal dimensions (non-interactive or older sudo),
      * fall back to querying the PTY directly via TIOCGWINSZ. */
-    if (g_tty_fd >= 0 && (term_rows <= 0 || term_cols <= 0)) {
+    if (g_tty_fd >= 0 && (*term_rows <= 0 || *term_cols <= 0)) {
         struct winsize ws;
         if (ioctl(g_tty_fd, TIOCGWINSZ, &ws) == 0) {
-            if (term_rows <= 0 && ws.ws_row > 0) term_rows = (int)ws.ws_row;
-            if (term_cols <= 0 && ws.ws_col > 0) term_cols = (int)ws.ws_col;
+            if (*term_rows <= 0 && ws.ws_row > 0) *term_rows = (int)ws.ws_row;
+            if (*term_cols <= 0 && ws.ws_col > 0) *term_cols = (int)ws.ws_col;
         }
     }
-    g_term_rows = term_rows;
-    g_term_cols = term_cols;
+    g_term_rows = *term_rows;
+    g_term_cols = *term_cols;
+}
 
-    /* ── Extract metadata from settings[] ───────────────────────────────
-     * runas_user is only present when -u was given; defaults to "root".
-     * Boolean flags are accumulated into a comma-separated string.        */
-    const char *runas_user = "root";
-    char        flags[128] = "";
+/* parse_settings extracts runas_user (defaults to "root") and accumulates
+ * boolean flags (login_shell, preserve_env, implied_shell) from sudo's
+ * settings[] array into a comma-separated string in flags (of size
+ * flags_len; no trailing comma). */
+static void parse_settings(char * const settings[], const char **runas_user,
+                            char *flags, size_t flags_len)
+{
+    *runas_user = "root";
+    flags[0] = '\0';
     for (int i = 0; settings[i] != NULL; i++) {
         if      (strncmp(settings[i], "runas_user=",  11) == 0)
-            runas_user = settings[i] + 11;
+            *runas_user = settings[i] + 11;
         else if (strcmp(settings[i],  "login_shell=true")          == 0)
-            strncat(flags, "login_shell,",   sizeof(flags) - strlen(flags) - 1);
+            strncat(flags, "login_shell,",   flags_len - strlen(flags) - 1);
         else if (strcmp(settings[i],  "preserve_environment=true") == 0)
-            strncat(flags, "preserve_env,",  sizeof(flags) - strlen(flags) - 1);
+            strncat(flags, "preserve_env,",  flags_len - strlen(flags) - 1);
         else if (strcmp(settings[i],  "implied_shell=true")        == 0)
-            strncat(flags, "implied_shell,", sizeof(flags) - strlen(flags) - 1);
+            strncat(flags, "implied_shell,", flags_len - strlen(flags) - 1);
     }
     /* Strip trailing comma */
     size_t flen = strlen(flags);
     if (flen > 0 && flags[flen - 1] == ',')
         flags[flen - 1] = '\0';
+}
 
-    /* ── Justification prompt ─────────────────────────────────────────────
-     * Enabled via plugin option in /etc/sudo.conf:
-     *   Plugin sudo_logger sudo_logger_plugin.so require_justification=1
-     * Skipped automatically for non-interactive sessions (no TTY).        */
-    /* ── JIT Approval ─────────────────────────────────────────────────────
-     * We no longer prompt by default. We send an empty justification and
-     * only prompt if the server challenges us. */
-    char g_justification[512] = "";
-
-    /* JSON-escape fields that may contain backslashes, quotes, or spaces */
+/* build_session_start_json generates g_session_id (host-user-pid-timestamp-
+ * random, so two simultaneous sudo invocations from the same user on the
+ * same host within the same nanosecond still get distinct IDs), JSON-
+ * escapes every field that may contain untrusted characters, and formats
+ * the MSG_SESSION_START payload into payload (of size payload_len).
+ * Returns the payload length, or a negative/oversized value if payload_len
+ * was too small — the caller must check this before sending. */
+static int build_session_start_json(char *payload, size_t payload_len,
+                                     const char *user, const char *host,
+                                     const char *raw_cwd, int user_uid, int user_gid,
+                                     const char *cmd, const char *raw_resolved,
+                                     const char *runas_user, int runas_uid, int runas_gid,
+                                     const char *flags, int term_rows, int term_cols,
+                                     const char *justification)
+{
     char resolved_j[512];
     char cwd_j[512];
     char runas_user_j[128];
@@ -1072,13 +1072,7 @@ static int plugin_open(unsigned int        version,
     json_escape_into(user_j,          sizeof(user_j),          user);
     json_escape_into(host_j,          sizeof(host_j),          host);
     json_escape_into(ttypath_j,       sizeof(ttypath_j),       g_tty_path);
-    json_escape_into(justification_j, sizeof(justification_j), g_justification);
-
-    char cmd[256];
-    if (argc > 0)
-        build_cmdline_json(cmd, sizeof(cmd), argc, argv);
-    else
-        strncpy(cmd, "unknown", sizeof(cmd));
+    json_escape_into(justification_j, sizeof(justification_j), justification);
 
     /* Add 4 random bytes so two simultaneous sudo invocations from the same
      * user on the same host within the same nanosecond still get distinct IDs. */
@@ -1100,22 +1094,7 @@ static int plugin_open(unsigned int        version,
     char session_id_j[640];
     json_escape_into(session_id_j, sizeof(session_id_j), g_session_id);
 
-    g_agent_fd = connect_agent();
-    if (g_agent_fd < 0) {
-        *errstr = "sudo-logger: cannot connect to agent daemon "
-                  "(is sudo-logger-agent running?)";
-        return -1;
-    }
-
-    /* Prevent sudo from hanging indefinitely if the agent stalls during
-     * the TLS handshake with the remote server.  30 s is generous; the
-     * agent normally responds within a few hundred milliseconds. */
-    struct timeval rcv_timeout = { .tv_sec = 30, .tv_usec = 0 };
-    setsockopt(g_agent_fd, SOL_SOCKET, SO_RCVTIMEO,
-               &rcv_timeout, sizeof(rcv_timeout));
-
-    char payload[16384];
-    int plen = snprintf(payload, sizeof(payload),
+    return snprintf(payload, payload_len,
         "{\"session_id\":\"%s\",\"user\":\"%s\",\"host\":\"%s\","
         "\"command\":\"%s\","
         "\"resolved_command\":\"%s\",\"runas_user\":\"%s\","
@@ -1135,19 +1114,39 @@ static int plugin_open(unsigned int        version,
         user_uid, user_gid,
         (long long)now_sec(), (int)getpid(),
         justification_j);
+}
 
-    /* Prevent sending malformed/truncated JSON if the buffer was too small. */
-    if (plen < 0 || plen >= (int)sizeof(payload)) {
-        *errstr = "sudo-logger: session metadata too large (truncated)";
-        close(g_agent_fd);
-        g_agent_fd = -1;
+/* run_handshake connects to the agent, sends SESSION_START (payload/plen,
+ * already built by build_session_start_json), and processes the agent's
+ * response: loops on MSG_SESSION_CHALLENGE (prompting for and forwarding a
+ * justification via the conversation API, which may be NULL for a non-
+ * interactive sudo invocation), handles MSG_SESSION_DENIED/MSG_SESSION_ERROR
+ * by printing the appropriate banner and _exit(1), and on MSG_SESSION_READY
+ * prints any disclaimer, seeds the ACK cache, isolates the session in a
+ * cgroup namespace, and starts the monitor thread. Returns 1 on success
+ * (matching plugin_open's return convention) or -1 with *errstr set. */
+static int run_handshake(sudo_conv_t conversation, const char *payload, int plen,
+                          const char **errstr)
+{
+    g_agent_fd = connect_agent();
+    if (g_agent_fd < 0) {
+        *errstr = "sudo-logger: cannot connect to agent daemon "
+                  "(is sudo-logger-agent running?)";
         return -1;
     }
+
+    /* Prevent sudo from hanging indefinitely if the agent stalls during
+     * the TLS handshake with the remote server.  30 s is generous; the
+     * agent normally responds within a few hundred milliseconds. */
+    struct timeval rcv_timeout = { .tv_sec = 30, .tv_usec = 0 };
+    setsockopt(g_agent_fd, SOL_SOCKET, SO_RCVTIMEO,
+               &rcv_timeout, sizeof(rcv_timeout));
 
     send_msg(g_agent_fd, MSG_SESSION_START, payload, (uint32_t)plen);
 
     /* Wait for agent to confirm server connection before allowing sudo */
     uint8_t hdr[5];
+    char g_justification[512] = "";
 read_agent:
     if (read_exact(g_agent_fd, hdr, 5) < 0) {
         *errstr = "sudo-logger: no response from agent";
@@ -1368,14 +1367,76 @@ read_agent:
     return 1;
 }
 
-/*
- * plugin_close — called by sudo when the session ends (command exits or
- *   is killed).
- *
- * Stops the monitor thread (pthread_join guarantees it has exited before
- * g_tty_fd is closed — no race on the tty fd), sends SESSION_END with the
- * exit code, and closes the agent socket and /dev/tty.
- */
+static int plugin_open(unsigned int        version,
+                       sudo_conv_t         conversation,
+                       sudo_printf_t       sudo_plugin_printf,
+                       char * const        settings[],
+                       char * const        user_info[],
+                       char * const        command_info[],
+                       int                 argc,
+                       char * const        argv[],
+                       char * const        user_env[],
+                       char * const        plugin_options[],
+                       const char        **errstr)
+{
+    (void)version;
+    (void)user_env;
+
+    g_printf  = sudo_plugin_printf;
+    g_seq     = 0;
+    g_last_ack_time  = 0;
+    g_last_ack_query = 0;
+    atomic_store(&g_agent_dead, 0);
+
+    g_tty_fd = open("/dev/tty", O_WRONLY | O_NOCTTY | O_CLOEXEC);
+    if (g_tty_fd >= 0) {
+        const char *tn = ttyname(g_tty_fd);
+        if (tn)
+            strncpy(g_tty_path, tn, sizeof(g_tty_path) - 1);
+    }
+
+    const char *user, *host, *raw_cwd;
+    int user_uid, user_gid;
+    parse_user_info(user_info, &user, &host, &raw_cwd, &user_uid, &user_gid);
+
+    const char *raw_resolved;
+    int runas_uid, runas_gid, term_cols, term_rows;
+    parse_command_info(command_info, &raw_resolved, &runas_uid, &runas_gid,
+                        &term_cols, &term_rows);
+
+    /* ── Justification prompt ─────────────────────────────────────────────
+     * Enabled via plugin option in /etc/sudo.conf:
+     *   Plugin sudo_logger sudo_logger_plugin.so require_justification=1
+     * Skipped automatically for non-interactive sessions (no TTY).        */
+    /* ── JIT Approval ─────────────────────────────────────────────────────
+     * We no longer prompt by default. We send an empty justification and
+     * only prompt if the server challenges us. */
+    const char *runas_user;
+    char        flags[128];
+    parse_settings(settings, &runas_user, flags, sizeof(flags));
+
+    char cmd[256];
+    if (argc > 0)
+        build_cmdline_json(cmd, sizeof(cmd), argc, argv);
+    else
+        strncpy(cmd, "unknown", sizeof(cmd));
+
+    char payload[16384];
+    int plen = build_session_start_json(payload, sizeof(payload),
+        user, host, raw_cwd, user_uid, user_gid,
+        cmd, raw_resolved,
+        runas_user, runas_uid, runas_gid,
+        flags, term_rows, term_cols,
+        "" /* justification is always empty at initial SESSION_START */);
+
+    /* Prevent sending malformed/truncated JSON if the buffer was too small. */
+    if (plen < 0 || plen >= (int)sizeof(payload)) {
+        *errstr = "sudo-logger: session metadata too large (truncated)";
+        return -1;
+    }
+
+    return run_handshake(conversation, payload, plen, errstr);
+}
 static void plugin_close(int exit_status, int error)
 {
     (void)error;
