@@ -235,7 +235,7 @@ export function SandboxTab() {
       const stepUp = parseStepUpRequired(e)
       if (stepUp) {
         if (stepUp.authSource === 'oidc') {
-          window.location.href = '/api/oidc/login?stepup=1'
+          window.location.href = `/api/oidc/login?stepup=1&return=${encodeURIComponent(window.location.pathname)}`
           return
         }
         setStepUpOpen(true)

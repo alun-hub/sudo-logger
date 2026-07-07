@@ -103,12 +103,29 @@ func generateState() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// isSafeReturnPath reports whether p is a same-origin relative path safe to
+// redirect to after the OIDC step-up round trip. Rejects absolute URLs and
+// protocol-relative paths ("//evil.com", which browsers treat as pointing
+// at a different host) to avoid turning the step-up return flow into an
+// open redirect -- the value arrives via a query param under the caller's
+// control.
+func isSafeReturnPath(p string) bool {
+	if p == "" || p[0] != '/' || strings.HasPrefix(p, "//") || strings.Contains(p, "\\") {
+		return false
+	}
+	u, err := url.Parse(p)
+	return err == nil && !u.IsAbs() && u.Host == ""
+}
+
 // handleOIDCLogin redirects the user to the OIDC provider's login page.
 // A "?stepup=1" query param (used for the sudoers/sandbox-push step-up flow,
 // see requireStepUp in rbac.go) forces prompt=login so the IdP re-collects
 // credentials even if it has its own active session for this user, and sets
 // a short-lived marker cookie so the callback knows to mark the *existing*
-// sudo_session as step-up-verified instead of creating a new one.
+// sudo_session as step-up-verified instead of creating a new one. An
+// optional "?return=/some/path" is carried through the same cookie so the
+// callback can send the user back to the page they stepped up from instead
+// of always landing on "/".
 func handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	_, _, _, oauthConf, err := getOIDCConfig(r.Context(), r)
 	if err != nil {
@@ -132,9 +149,13 @@ func handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOnline}
 	if r.URL.Query().Get("stepup") == "1" {
 		opts = append(opts, oauth2.SetAuthURLParam("prompt", "login"))
+		returnPath := r.URL.Query().Get("return")
+		if !isSafeReturnPath(returnPath) {
+			returnPath = "/"
+		}
 		http.SetCookie(w, &http.Cookie{
 			Name:     "oidc_stepup",
-			Value:    "1",
+			Value:    returnPath,
 			MaxAge:   300, // 5 minutes -- matches oidc_state's window
 			HttpOnly: true,
 			Secure:   secure,
@@ -193,14 +214,18 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// just re-collected the user's credentials (prompt=login), which is the
 	// re-proof we need -- but this is not a fresh login, so mark the
 	// *existing* sudo_session's step-up timestamp instead of creating a new
-	// session (which would needlessly churn role/permissions state).
-	if c, err := r.Cookie("oidc_stepup"); err == nil && c.Value == "1" {
+	// session (which would needlessly churn role/permissions state). The
+	// cookie's value is the page to return to (set by handleOIDCLogin),
+	// re-validated here since cookie values are still attacker-influenceable
+	// input.
+	if c, err := r.Cookie("oidc_stepup"); err == nil && isSafeReturnPath(c.Value) {
+		returnPath := c.Value
 		clearCookie("oidc_stepup")
 		clearCookie("oidc_state")
 		if existing, err := r.Cookie("sudo_session"); err == nil {
 			loginSessions.markStepUp(existing.Value)
 		}
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, returnPath, http.StatusFound)
 		return
 	}
 

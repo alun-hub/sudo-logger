@@ -136,7 +136,7 @@ function EditorPanel({ host }: { host: string }) {
       const stepUp = parseStepUpRequired(err)
       if (!stepUp) return
       if (stepUp.authSource === 'oidc') {
-        window.location.href = '/api/oidc/login?stepup=1'
+        window.location.href = `/api/oidc/login?stepup=1&return=${encodeURIComponent(window.location.pathname)}`
         return
       }
       setStepUpOpen(true)
