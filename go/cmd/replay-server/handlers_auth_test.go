@@ -6,6 +6,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -331,5 +332,137 @@ func TestHandleLogout_NoSessionCookie(t *testing.T) {
 	// not error.
 	if rr.Code != http.StatusFound {
 		t.Errorf("logout without cookie: got %d, want 302", rr.Code)
+	}
+}
+
+// ── loginSessionStore step-up ────────────────────────────────────────────────
+
+func TestLoginSessionStore_StepUp(t *testing.T) {
+	sid := loginSessions.create("alice", RoleAdmin, "")
+	defer loginSessions.delete(sid)
+
+	if loginSessions.stepUpValid(sid, time.Minute) {
+		t.Error("a fresh session should not be step-up-valid before markStepUp")
+	}
+	loginSessions.markStepUp(sid)
+	if !loginSessions.stepUpValid(sid, time.Minute) {
+		t.Error("stepUpValid should be true immediately after markStepUp")
+	}
+	if loginSessions.stepUpValid(sid, -time.Second) {
+		t.Error("stepUpValid should be false once the ttl has elapsed")
+	}
+}
+
+func TestLoginSessionStore_StepUp_UnknownOrEmptySid(t *testing.T) {
+	if loginSessions.stepUpValid("", time.Hour) {
+		t.Error("stepUpValid(\"\") should be false")
+	}
+	if loginSessions.stepUpValid("no-such-session", time.Hour) {
+		t.Error("stepUpValid for an unknown sid should be false")
+	}
+	// markStepUp on an unknown sid must not panic or create an entry.
+	loginSessions.markStepUp("no-such-session")
+	if loginSessions.lookup("no-such-session") != nil {
+		t.Error("markStepUp must not create a session entry for an unknown sid")
+	}
+}
+
+func TestLoginSessionStore_StepUp_ExpiredSession(t *testing.T) {
+	sid := loginSessions.create("bob", RoleViewer, "")
+	loginSessions.mu.Lock()
+	loginSessions.data[sid].expiresAt = time.Now().Add(-time.Minute)
+	loginSessions.mu.Unlock()
+	loginSessions.markStepUp(sid) // no-op: session already expired
+	if loginSessions.stepUpValid(sid, time.Hour) {
+		t.Error("an expired session must never report stepUpValid=true")
+	}
+}
+
+// ── handleStepUp ──────────────────────────────────────────────────────────────
+
+func stepUpReq(cookieValue, password string) *http.Request {
+	body := `{"password":` + strconv.Quote(password) + `}`
+	req := httptest.NewRequest(http.MethodPost, "/api/stepup", strings.NewReader(body))
+	if cookieValue != "" {
+		req.AddCookie(&http.Cookie{Name: "sudo_session", Value: cookieValue})
+	}
+	return req
+}
+
+func TestHandleStepUp_WrongMethod(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/stepup", nil)
+	rr := httptest.NewRecorder()
+	handleStepUp(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET stepup: got %d, want 405", rr.Code)
+	}
+}
+
+func TestHandleStepUp_NoSessionCookie(t *testing.T) {
+	initTestStore(t)
+	rr := httptest.NewRecorder()
+	handleStepUp(rr, stepUpReq("", "whatever"))
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("no session cookie: got %d, want 401", rr.Code)
+	}
+}
+
+func TestHandleStepUp_UnknownSessionCookie(t *testing.T) {
+	initTestStore(t)
+	rr := httptest.NewRecorder()
+	handleStepUp(rr, stepUpReq("bogus-sid", "whatever"))
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("unknown session cookie: got %d, want 401", rr.Code)
+	}
+}
+
+func TestHandleStepUp_InvalidJSON(t *testing.T) {
+	initTestStore(t)
+	sid := loginSessions.create("alice", RoleAdmin, "")
+	defer loginSessions.delete(sid)
+	req := httptest.NewRequest(http.MethodPost, "/api/stepup", strings.NewReader("{bad"))
+	req.AddCookie(&http.Cookie{Name: "sudo_session", Value: sid})
+	rr := httptest.NewRecorder()
+	handleStepUp(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("invalid JSON: got %d, want 400", rr.Code)
+	}
+}
+
+func TestHandleStepUp_WrongPassword(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "correct-horse", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	sid := loginSessions.create("alice", RoleAdmin, "")
+	defer loginSessions.delete(sid)
+
+	rr := httptest.NewRecorder()
+	handleStepUp(rr, stepUpReq(sid, "wrong-password"))
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("wrong password: got %d, want 401", rr.Code)
+	}
+	if loginSessions.stepUpValid(sid, time.Hour) {
+		t.Error("a failed step-up attempt must not mark the session as step-up-valid")
+	}
+}
+
+func TestHandleStepUp_Success(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "correct-horse", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	sid := loginSessions.create("alice", RoleAdmin, "")
+	defer loginSessions.delete(sid)
+
+	rr := httptest.NewRecorder()
+	handleStepUp(rr, stepUpReq(sid, "correct-horse"))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("correct password: got %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+	if !loginSessions.stepUpValid(sid, time.Hour) {
+		t.Error("a successful step-up must mark the session as step-up-valid")
 	}
 }

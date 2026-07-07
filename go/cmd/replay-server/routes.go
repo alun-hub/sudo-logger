@@ -374,6 +374,7 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/oidc/callback", handleOIDCCallback)
 	mux.HandleFunc("/api/oidc/logout", handleLogout) // Redirect to unified logout
 	mux.HandleFunc("/api/login", handleLocalLogin)
+	mux.HandleFunc("/api/stepup", handleStepUp)
 	mux.HandleFunc("/logout", handleLogout)
 	mux.HandleFunc("/api/me", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

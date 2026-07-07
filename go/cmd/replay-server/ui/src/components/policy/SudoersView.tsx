@@ -9,12 +9,14 @@ import {
 } from '@/api/sudoers'
 import { parseSudoers, serializeSudoers, type SudoersRule } from '@/lib/sudoers'
 import { summarizeLineDiff } from '@/lib/diff'
+import { parseStepUpRequired } from '@/api/stepup'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Shield, Clock, AlertTriangle, CheckCircle2, Save, Trash2, RotateCcw, Plus, X, BookOpen } from 'lucide-react'
 import { fmtDate } from '@/lib/date'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { DiffPreview } from '@/components/ui/diff-preview'
+import { StepUpDialog } from '@/components/ui/stepup-dialog'
 
 type Mode = 'visual' | 'raw'
 
@@ -120,6 +122,7 @@ function EditorPanel({ host }: { host: string }) {
   const cmdInputRef = useRef<HTMLInputElement>(null)
   const [revertConfirm, setRevertConfirm] = useState(false)
   const [saveConfirm, setSaveConfirm] = useState(false)
+  const [stepUpOpen, setStepUpOpen] = useState(false)
 
   const save = useMutation({
     mutationFn: (c: string) => saveSudoersConfig(host, c),
@@ -128,7 +131,16 @@ function EditorPanel({ host }: { host: string }) {
       qc.invalidateQueries({ queryKey: ['sudoers-hosts'] })
       setRawContent(null)
       setRules(null)
-    }
+    },
+    onError: (err) => {
+      const stepUp = parseStepUpRequired(err)
+      if (!stepUp) return
+      if (stepUp.authSource === 'oidc') {
+        window.location.href = '/api/oidc/login?stepup=1'
+        return
+      }
+      setStepUpOpen(true)
+    },
   })
 
   const remove = useMutation({
@@ -453,6 +465,11 @@ function EditorPanel({ host }: { host: string }) {
         confirmLabel="Push change"
         onConfirm={() => { handleSave(); setSaveConfirm(false) }}
         onCancel={() => setSaveConfirm(false)}
+      />
+      <StepUpDialog
+        open={stepUpOpen}
+        onVerified={() => { setStepUpOpen(false); save.mutate(getCurrentContent()) }}
+        onCancel={() => setStepUpOpen(false)}
       />
     </div>
   )

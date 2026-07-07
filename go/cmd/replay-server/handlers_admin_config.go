@@ -570,6 +570,9 @@ func handlePutSandbox(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, store.PermConfigWrite) {
 		return
 	}
+	if !requireStepUp(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxSandboxConfigSize)
 	var body struct {
 		Content string `json:"content"`
@@ -850,6 +853,9 @@ func handleGetSudoersConfig(w http.ResponseWriter, r *http.Request) {
 // global _default when host is empty).
 func handlePutSudoersConfig(w http.ResponseWriter, r *http.Request) {
 	if !require(w, r, store.PermConfigWrite) {
+		return
+	}
+	if !requireStepUp(w, r) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, int64(256*1024))

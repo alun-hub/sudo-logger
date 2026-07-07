@@ -24,6 +24,7 @@ type loginSession struct {
 	role      Role
 	idToken   string // OIDC id_token kept for RP-Initiated Logout; empty for local auth
 	expiresAt time.Time
+	stepUpAt  time.Time // last successful step-up re-authentication; zero if none yet
 }
 
 type loginSessionStore struct {
@@ -70,6 +71,34 @@ func (s *loginSessionStore) delete(sid string) {
 	s.mu.Lock()
 	delete(s.data, sid)
 	s.mu.Unlock()
+}
+
+// markStepUp records a successful step-up re-authentication for sid.
+// No-op if the session no longer exists (e.g. expired between the check and
+// the re-auth completing).
+func (s *loginSessionStore) markStepUp(sid string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess, ok := s.data[sid]; ok {
+		sess.stepUpAt = time.Now()
+	}
+}
+
+// stepUpValid reports whether sid has a non-expired session with a step-up
+// re-authentication younger than ttl. Reading stepUpAt only through this
+// locked method (never via a pointer returned by lookup) avoids racing
+// against a concurrent markStepUp call.
+func (s *loginSessionStore) stepUpValid(sid string, ttl time.Duration) bool {
+	if sid == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.data[sid]
+	if !ok || time.Now().After(sess.expiresAt) {
+		return false
+	}
+	return !sess.stepUpAt.IsZero() && time.Since(sess.stepUpAt) < ttl
 }
 
 func (s *loginSessionStore) purgeExpired() {
@@ -221,4 +250,39 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+// handleStepUp re-verifies the current local-mode session's password and, on
+// success, marks the session as recently step-up-verified (see
+// requireStepUp in rbac.go). Requires an existing valid sudo_session — it
+// re-checks the already-authenticated user's own password, it does not
+// accept a username in the request body.
+func handleStepUp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	c, err := r.Cookie("sudo_session")
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	sess := loginSessions.lookup(c.Value)
+	if sess == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if !authenticate(r.Context(), sess.username, req.Password) {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	loginSessions.markStepUp(c.Value)
+	w.WriteHeader(http.StatusNoContent)
 }

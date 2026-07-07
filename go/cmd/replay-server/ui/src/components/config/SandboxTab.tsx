@@ -2,11 +2,13 @@ import { useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { BookOpen } from 'lucide-react'
 import { ConfirmDialog, InputDialog } from '@/components/ui/confirm-dialog'
 import { DiffPreview } from '@/components/ui/diff-preview'
+import { StepUpDialog } from '@/components/ui/stepup-dialog'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchSandbox, saveSandbox, fetchSandboxTemplates, saveSandboxTemplates } from '@/api/config'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { summarizeLineDiff } from '@/lib/diff'
+import { parseStepUpRequired } from '@/api/stepup'
 
 // ── Feature definitions ───────────────────────────────────────────────────────
 
@@ -217,6 +219,7 @@ export function SandboxTab() {
   const [templateSel, setTemplateSel] = useState('')
   const [tmplNameOpen, setTmplNameOpen] = useState(false)
   const [saveConfirm, setSaveConfirm] = useState(false)
+  const [stepUpOpen, setStepUpOpen] = useState(false)
 
   const current: SandboxState = state ?? (raw ? parseYaml(raw.content) : defaultState())
 
@@ -228,7 +231,18 @@ export function SandboxTab() {
   const save = useMutation({
     mutationFn: () => saveSandbox(buildYaml(current)),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['sandbox'] }); setState(null); showStatus('Saved — agents will reload within 60 s') },
-    onError: (e: any) => showStatus('Save failed: ' + e.message, true),
+    onError: (e: any) => {
+      const stepUp = parseStepUpRequired(e)
+      if (stepUp) {
+        if (stepUp.authSource === 'oidc') {
+          window.location.href = '/api/oidc/login?stepup=1'
+          return
+        }
+        setStepUpOpen(true)
+        return
+      }
+      showStatus('Save failed: ' + e.message, true)
+    },
   })
 
   const saveTmpl = useMutation({
@@ -404,6 +418,11 @@ export function SandboxTab() {
         confirmLabel="Push change"
         onConfirm={() => { save.mutate(); setSaveConfirm(false) }}
         onCancel={() => setSaveConfirm(false)}
+      />
+      <StepUpDialog
+        open={stepUpOpen}
+        onVerified={() => { setStepUpOpen(false); save.mutate() }}
+        onCancel={() => setStepUpOpen(false)}
       />
     </div>
   )

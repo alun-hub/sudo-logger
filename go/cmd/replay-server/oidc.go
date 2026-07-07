@@ -104,6 +104,11 @@ func generateState() string {
 }
 
 // handleOIDCLogin redirects the user to the OIDC provider's login page.
+// A "?stepup=1" query param (used for the sudoers/sandbox-push step-up flow,
+// see requireStepUp in rbac.go) forces prompt=login so the IdP re-collects
+// credentials even if it has its own active session for this user, and sets
+// a short-lived marker cookie so the callback knows to mark the *existing*
+// sudo_session as step-up-verified instead of creating a new one.
 func handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	_, _, _, oauthConf, err := getOIDCConfig(r.Context(), r)
 	if err != nil {
@@ -111,6 +116,7 @@ func handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	secure := strings.HasPrefix(oauthConf.RedirectURL, "https://")
 	state := generateState()
 	// Store state with a short expiry in a cookie
 	http.SetCookie(w, &http.Cookie{
@@ -118,12 +124,26 @@ func handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    state,
 		MaxAge:   300, // 5 minutes
 		HttpOnly: true,
-		Secure:   strings.HasPrefix(oauthConf.RedirectURL, "https://"),
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",
 	})
 
-	url := oauthConf.AuthCodeURL(state, oauth2.AccessTypeOnline)
+	opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOnline}
+	if r.URL.Query().Get("stepup") == "1" {
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", "login"))
+		http.SetCookie(w, &http.Cookie{
+			Name:     "oidc_stepup",
+			Value:    "1",
+			MaxAge:   300, // 5 minutes -- matches oidc_state's window
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteLaxMode,
+			Path:     "/",
+		})
+	}
+
+	url := oauthConf.AuthCodeURL(state, opts...)
 	http.Redirect(w, r, url, http.StatusFound)
 }
 
@@ -161,6 +181,26 @@ func handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	idToken, err := verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
 		http.Error(w, "failed to verify ID Token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	secure := strings.HasPrefix(oauthConf.RedirectURL, "https://")
+	clearCookie := func(name string) {
+		http.SetCookie(w, &http.Cookie{Name: name, Value: "", MaxAge: -1, HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, Path: "/"})
+	}
+
+	// Step-up re-authentication (see requireStepUp in rbac.go): the IdP has
+	// just re-collected the user's credentials (prompt=login), which is the
+	// re-proof we need -- but this is not a fresh login, so mark the
+	// *existing* sudo_session's step-up timestamp instead of creating a new
+	// session (which would needlessly churn role/permissions state).
+	if c, err := r.Cookie("oidc_stepup"); err == nil && c.Value == "1" {
+		clearCookie("oidc_stepup")
+		clearCookie("oidc_state")
+		if existing, err := r.Cookie("sudo_session"); err == nil {
+			loginSessions.markStepUp(existing.Value)
+		}
+		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 
