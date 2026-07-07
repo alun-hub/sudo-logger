@@ -119,16 +119,20 @@ var dummyHash = func() []byte {
 	return h
 }()
 
-// authenticate returns true if username and password match a stored entry.
-// Always runs bcrypt even for unknown users to prevent timing-based
-// username enumeration.
+// authenticate returns true if username and password match a stored entry —
+// either a "local" user in the store, or (falling back, so both mechanisms
+// can be used at once) an entry in the legacy -htpasswd file. Always runs
+// bcrypt even for unknown users to prevent timing-based username enumeration.
 func authenticate(ctx context.Context, username, password string) bool {
 	u, err := sessionStore.GetUser(ctx, username)
-	if err != nil || u == nil || u.Source != "local" || u.PasswordHash == "" {
-		bcrypt.CompareHashAndPassword(dummyHash, []byte(password)) //nolint:errcheck
-		return false
+	if err == nil && u != nil && u.Source == "local" && u.PasswordHash != "" {
+		return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil
 	}
-	return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil
+	if *flagHTPasswd != "" { // pragma: allowlist secret
+		return authenticateHTPasswd(username, password)
+	}
+	bcrypt.CompareHashAndPassword(dummyHash, []byte(password)) //nolint:errcheck
+	return false
 }
 
 func validatePassword(password string) error {

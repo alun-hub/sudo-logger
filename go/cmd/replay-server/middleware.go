@@ -120,6 +120,11 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		if user != "-" && role == RoleViewer {
 			if u, err := sessionStore.GetUser(r.Context(), user); err == nil && u != nil {
 				role = u.Role
+			} else if *flagHTPasswd != "" && isHTPasswdUser(user) { // pragma: allowlist secret
+				// The legacy -htpasswd file predates per-user roles and has
+				// always been a single flat auth tier — anyone in it gets
+				// full access, matching that mode's historical behavior.
+				role = RoleAdmin
 			}
 		}
 

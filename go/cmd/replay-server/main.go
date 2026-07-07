@@ -210,6 +210,15 @@ func main() {
 	}
 	defer sessionStore.Close()
 
+	// -htpasswd is an explicitly-set, non-default path, so a load failure
+	// here is a real misconfiguration — fail loudly rather than silently
+	// starting with an auth mode the admin thinks is active but isn't.
+	if *flagHTPasswd != "" { // pragma: allowlist secret
+		if err := loadHTPasswd(*flagHTPasswd); err != nil {
+			log.Fatalf("load htpasswd file %s: %v", *flagHTPasswd, err)
+		}
+	}
+
 	// Load risk rules from store (file for local, DB for distributed).
 	rulesText, err := sessionStore.GetConfig(context.Background(), "risk-rules.yaml")
 	if err != nil {
@@ -335,11 +344,20 @@ func main() {
 		httpSrv = &http.Server{Addr: *flagListen, Handler: handler}
 	}
 
-	// Signal handling: SIGTERM/SIGINT triggers graceful shutdown.
+	// Signal handling: SIGTERM/SIGINT triggers graceful shutdown; SIGHUP
+	// reloads the htpasswd file (documented in -htpasswd's flag description).
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
 		for sig := range sigCh {
+			if sig == syscall.SIGHUP {
+				if *flagHTPasswd != "" { // pragma: allowlist secret
+					if err := loadHTPasswd(*flagHTPasswd); err != nil {
+						log.Printf("htpasswd: reload failed, keeping previous user set: %v", err)
+					}
+				}
+				continue
+			}
 			log.Printf("sudo-replay-server: received %v — shutting down", sig)
 			shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := httpSrv.Shutdown(shutCtx); err != nil {

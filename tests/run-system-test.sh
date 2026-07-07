@@ -401,18 +401,25 @@ sleep 2
 SUDO_FREEZE_PID=$(podman exec sudo-client-test cat /tmp/sudo_freeze_pid 2>/dev/null || echo "0")
 [ "$SUDO_FREEZE_PID" != "0" ] || fail "TEST 14" "session did not start"
 
-# Stop the logserver to trigger network outage
+# Stop the logserver to trigger network outage. podman stop itself can take
+# up to its own stop-timeout (default 10s) to SIGKILL a container that
+# doesn't exit on SIGTERM, and runFreezeWatch only polls every 10s on top of
+# that — so the worst case before termination is noticeably more than 15s.
+# Poll instead of a single fixed sleep: fast on the common case, still
+# correct in the slow one.
 podman stop sudo-logserver-test >/dev/null
 
-# Wait 15 seconds: agent checks freeze timeouts every 10 seconds.
-sleep 15
-
-# The sudo session should now be killed by the agent due to freeze_timeout
-PROC_STATE=$(podman exec sudo-client-test \
-    sh -c "grep '^State:' /proc/$SUDO_FREEZE_PID/status 2>/dev/null || echo 'State: gone'")
-if echo "$PROC_STATE" | grep -qE "^State:[[:space:]]+(R|S|D)"; then
-    fail "TEST 14" "sudo (PID $SUDO_FREEZE_PID) still running ($PROC_STATE) after freeze timeout"
-fi
+SUDO_FREEZE_GONE=0
+for _ in $(seq 1 35); do
+    PROC_STATE=$(podman exec sudo-client-test \
+        sh -c "grep '^State:' /proc/$SUDO_FREEZE_PID/status 2>/dev/null || echo 'State: gone'")
+    if ! echo "$PROC_STATE" | grep -qE "^State:[[:space:]]+(R|S|D)"; then
+        SUDO_FREEZE_GONE=1
+        break
+    fi
+    sleep 1
+done
+[ "$SUDO_FREEZE_GONE" = "1" ] || fail "TEST 14" "sudo (PID $SUDO_FREEZE_PID) still running ($PROC_STATE) after freeze timeout"
 pass "TEST 14"
 
 echo ""

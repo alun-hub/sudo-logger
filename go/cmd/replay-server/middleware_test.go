@@ -263,6 +263,44 @@ func TestAccessLogMiddleware_BootstrapForcesAdmin(t *testing.T) {
 	}
 }
 
+// TestAccessLogMiddleware_HTPasswdUserGetsAdmin verifies that a user
+// authenticated via the legacy -htpasswd file (not present in the store)
+// gets full access, matching that flag's historical behavior — it predates
+// per-user roles and was always a single flat auth tier. Seeds an unrelated
+// store user first so this isn't just exercising bootstrap mode.
+func TestAccessLogMiddleware_HTPasswdUserGetsAdmin(t *testing.T) {
+	initTestStore(t)
+	resetHTPasswdUsers(t)
+	u := newUserWithPassword(t, "someone-else", "Correct-Horse1!", RoleViewer)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+
+	path := writeHTPasswdFile(t, map[string]string{"htp-admin": "htp-pass"})
+	old := *flagHTPasswd // pragma: allowlist secret
+	*flagHTPasswd = path // pragma: allowlist secret
+	defer func() { *flagHTPasswd = old }() // pragma: allowlist secret
+	if err := loadHTPasswd(path); err != nil {
+		t.Fatalf("loadHTPasswd: %v", err)
+	}
+
+	var gotRole Role
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRole = roleFromContext(r)
+		w.WriteHeader(http.StatusOK)
+	})
+	h := accessLogMiddleware(inner, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	req.SetBasicAuth("htp-admin", "htp-pass")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if gotRole != RoleAdmin {
+		t.Errorf("htpasswd user role = %q, want admin", gotRole)
+	}
+}
+
 // ── basicAuthMiddleware: /login in OIDC mode ────────────────────────────────
 
 func TestBasicAuthMiddleware_LoginRedirectsToOIDCWhenNoSession(t *testing.T) {

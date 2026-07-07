@@ -76,7 +76,18 @@ func isAdmin(r *http.Request) bool {
 
 // isBootstrapMode returns true if no users exist in the store and local auth is used,
 // allowing the creation of the first admin account via the UI.
+//
+// Deliberately false whenever the legacy -htpasswd flag is set: that flag is
+// its own independent local-auth mechanism (checked separately in
+// basicAuthMiddleware/requireStepUp), and ListUsers()==0 there just means no
+// "modern" store user has been created yet — not that the deployment is
+// unauthenticated. Without this check, any -htpasswd deployment that hasn't
+// also created a store user would be treated as bootstrap and left wide open
+// as admin, regardless of the htpasswd file's contents.
 func isBootstrapMode(r *http.Request) bool {
+	if *flagHTPasswd != "" { // pragma: allowlist secret
+		return false
+	}
 	cfg, _ := sessionStore.GetAuthConfig(r.Context())
 	if cfg.Source != "local" && cfg.Source != "" {
 		return false

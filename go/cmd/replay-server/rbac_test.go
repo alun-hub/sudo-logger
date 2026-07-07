@@ -28,6 +28,25 @@ func TestRequireStepUp_BootstrapMode(t *testing.T) {
 	}
 }
 
+// TestIsBootstrapMode_HTPasswdConfiguredIsNotBootstrap reproduces a bug found
+// via the system-test suite: a deployment using the legacy -htpasswd flag,
+// with zero users created through the newer store-based user system, was
+// treated as "bootstrap mode" (no auth required, requests served as admin)
+// even though -htpasswd was explicitly configured. ListUsers()==0 there
+// means "no modern store user yet", not "no auth configured at all".
+func TestIsBootstrapMode_HTPasswdConfiguredIsNotBootstrap(t *testing.T) {
+	initTestStore(t) // no store users at all
+
+	old := *flagHTPasswd // pragma: allowlist secret
+	*flagHTPasswd = "/tmp/does-not-need-to-exist-for-this-check.htpasswd" // pragma: allowlist secret
+	defer func() { *flagHTPasswd = old }() // pragma: allowlist secret
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	if isBootstrapMode(req) {
+		t.Error("isBootstrapMode must be false when -htpasswd is configured, even with zero store users")
+	}
+}
+
 func TestRequireStepUp_ProxyMode(t *testing.T) {
 	initTestStore(t)
 	// A user must exist for isBootstrapMode to be false.

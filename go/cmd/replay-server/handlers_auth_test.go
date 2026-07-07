@@ -106,6 +106,31 @@ func TestAuthenticate_NonLocalSource(t *testing.T) {
 	}
 }
 
+// TestAuthenticate_HTPasswdFallback verifies that authenticate() falls back
+// to the legacy -htpasswd file when the store has no matching local user —
+// the two auth sources can be used together, restoring a mode that had
+// silently stopped working (authenticate previously only ever consulted the
+// store; -htpasswd only gated whether auth was required at all).
+func TestAuthenticate_HTPasswdFallback(t *testing.T) {
+	initTestStore(t)
+	resetHTPasswdUsers(t)
+	path := writeHTPasswdFile(t, map[string]string{"htp-user": "htp-pass"})
+
+	old := *flagHTPasswd // pragma: allowlist secret
+	*flagHTPasswd = path // pragma: allowlist secret
+	defer func() { *flagHTPasswd = old }() // pragma: allowlist secret
+
+	if err := loadHTPasswd(path); err != nil {
+		t.Fatalf("loadHTPasswd: %v", err)
+	}
+	if !authenticate(t.Context(), "htp-user", "htp-pass") {
+		t.Error("expected authenticate to succeed via htpasswd fallback")
+	}
+	if authenticate(t.Context(), "htp-user", "wrong-pass") {
+		t.Error("expected authenticate to fail with wrong htpasswd password")
+	}
+}
+
 // ── loginSessionStore ───────────────────────────────────────────────────────
 
 func TestLoginSessionStore_CreateLookup(t *testing.T) {
