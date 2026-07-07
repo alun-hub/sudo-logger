@@ -8,9 +8,10 @@ import (
 	"sudo-logger/internal/store"
 )
 
-// stepUpTTL is how long a step-up re-authentication remains valid before the
-// next sensitive action requires it again.
-const stepUpTTL = 10 * time.Minute
+// defaultStepUpTTLMinutes is used when AuthConfig.StepUpTTLMinutes is unset
+// (zero) -- either because the admin hasn't changed it, or because the
+// config predates this setting.
+const defaultStepUpTTLMinutes = 10
 
 // Role is the name of a role assigned to a user or derived from group membership.
 type Role = string
@@ -140,7 +141,11 @@ func requireStepUp(w http.ResponseWriter, r *http.Request) bool {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return false
 	}
-	if loginSessions.stepUpValid(c.Value, stepUpTTL) {
+	ttlMinutes := cfg.StepUpTTLMinutes
+	if ttlMinutes <= 0 {
+		ttlMinutes = defaultStepUpTTLMinutes
+	}
+	if loginSessions.stepUpValid(c.Value, time.Duration(ttlMinutes)*time.Minute) {
 		return true
 	}
 	w.Header().Set("Content-Type", "application/json")

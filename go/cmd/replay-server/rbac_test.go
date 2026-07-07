@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"sudo-logger/internal/store"
 )
@@ -108,5 +109,54 @@ func TestRequireStepUp_ValidAfterMarkStepUp(t *testing.T) {
 	rr := httptest.NewRecorder()
 	if !requireStepUp(rr, stepUpGateReq(sid)) {
 		t.Errorf("a recently step-up-verified session should pass requireStepUp, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRequireStepUp_CustomTTL(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "correct-horse", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	if err := sessionStore.SetAuthConfig(t.Context(), store.AuthConfig{Source: "local", StepUpTTLMinutes: 1}); err != nil {
+		t.Fatalf("SetAuthConfig: %v", err)
+	}
+	sid := loginSessions.create("alice", RoleAdmin, "")
+	defer loginSessions.delete(sid)
+
+	// Backdate the step-up to 2 minutes ago -- within the old 10-minute
+	// default, but past a configured 1-minute TTL.
+	loginSessions.markStepUp(sid)
+	loginSessions.mu.Lock()
+	loginSessions.data[sid].stepUpAt = time.Now().Add(-2 * time.Minute)
+	loginSessions.mu.Unlock()
+
+	rr := httptest.NewRecorder()
+	if requireStepUp(rr, stepUpGateReq(sid)) {
+		t.Error("a step-up older than the configured 1-minute TTL should require re-auth again")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("got %d, want 403", rr.Code)
+	}
+}
+
+func TestRequireStepUp_ZeroTTLUsesDefault(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "correct-horse", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	// StepUpTTLMinutes left at its zero value -- must fall back to the
+	// 10-minute default, not treat 0 as "always expired".
+	if err := sessionStore.SetAuthConfig(t.Context(), store.AuthConfig{Source: "local"}); err != nil {
+		t.Fatalf("SetAuthConfig: %v", err)
+	}
+	sid := loginSessions.create("alice", RoleAdmin, "")
+	defer loginSessions.delete(sid)
+	loginSessions.markStepUp(sid)
+
+	rr := httptest.NewRecorder()
+	if !requireStepUp(rr, stepUpGateReq(sid)) {
+		t.Errorf("zero StepUpTTLMinutes should fall back to the default TTL, got %d body=%s", rr.Code, rr.Body.String())
 	}
 }

@@ -164,6 +164,29 @@ export function AuthTab() {
             )}
           </div>
 
+          {current.source !== 'proxy' && (
+            <div className="space-y-1.5 px-1 pt-4 border-t border-border/50">
+              <label className="text-[12px] font-medium text-text-sub uppercase tracking-wider">
+                Step-up Re-authentication TTL
+              </label>
+              <Input
+                type="number"
+                min={1}
+                value={current.step_up_ttl_minutes || ''}
+                onChange={e => set({ step_up_ttl_minutes: e.target.value ? parseInt(e.target.value, 10) : undefined })}
+                placeholder="10"
+                className="bg-card border-border text-text h-10 focus:border-green font-mono text-[12px] max-w-[140px]"
+              />
+              <p className="text-[11px] text-text-dim leading-relaxed">
+                Pushing sudoers/sandbox config requires re-proving your identity (password re-entry, or
+                re-login at the IdP for OIDC) before it takes effect. Once verified, that proof stays valid
+                for this many minutes, so editing several rules in one sitting doesn't re-prompt every time.
+                Leave blank for the default (10 minutes). Has no effect in proxy mode, where there is no
+                independent credential to re-check.
+              </p>
+            </div>
+          )}
+
           {showMapping && (
             <div className="space-y-3 pt-4 border-t border-border/50">
               <div className="flex items-center justify-between">

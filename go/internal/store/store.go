@@ -261,6 +261,13 @@ type AuthConfig struct {
 	AdminGroups []string `json:"admin_groups" yaml:"admin_groups"`
 	// GroupMappings maps group names (from proxy/OIDC) to role names. First match wins.
 	GroupMappings []GroupRoleMapping `json:"group_mappings,omitempty" yaml:"group_mappings,omitempty"`
+	// StepUpTTLMinutes is how long a step-up re-authentication for a sensitive
+	// action (sudoers/sandbox config push, see requireStepUp) stays valid
+	// before the next one requires re-auth again. Zero/unset means "use the
+	// default" (10 minutes) -- see defaultStepUpTTLMinutes in rbac.go. Has no
+	// effect in proxy mode or an open deployment (no local passwords
+	// configured), where step-up is a documented no-op.
+	StepUpTTLMinutes int `json:"step_up_ttl_minutes,omitempty" yaml:"step_up_ttl_minutes,omitempty"`
 }
 
 // GroupRoleMapping maps a group name (from proxy headers or OIDC claims) to a role name.

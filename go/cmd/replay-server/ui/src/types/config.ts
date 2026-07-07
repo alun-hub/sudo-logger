@@ -39,6 +39,8 @@ export interface AuthConfig {
   }
   admin_groups: string[]
   group_mappings: GroupRoleMapping[]
+  /** Minutes a step-up re-authentication (sudoers/sandbox push) stays valid. 0/unset = server default (10 min). */
+  step_up_ttl_minutes?: number
 }
 
 export interface UserInfo {
