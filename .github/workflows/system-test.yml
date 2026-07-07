@@ -1,0 +1,32 @@
+name: System Test
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  system-test:
+    name: Container-based end-to-end system test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Run system test suite
+        run: bash tests/run-system-test.sh
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          echo "== sudo-logserver-test logs =="
+          podman logs sudo-logserver-test 2>&1 || true
+          echo "== sudo-client-test logs =="
+          podman logs sudo-client-test 2>&1 || true
