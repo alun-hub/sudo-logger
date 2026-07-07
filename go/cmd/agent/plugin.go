@@ -342,6 +342,7 @@ func (sc *sessionConn) runFreezeWatch() {
 		}
 		log.Printf("[%s] server unreachable for >%v — terminating frozen session",
 			sc.start.SessionID, cfg.FreezeTimeout)
+		sc.cg.markTerminating()
 		sc.cg.unfreeze()
 		sc.pluginWriteMu.Lock()
 		_ = protocol.WriteMessage(sc.pw, protocol.MsgFreezeTimeout, nil)
@@ -431,6 +432,7 @@ func (sc *sessionConn) runTTLWatch(sessionTTL int64) {
 	}
 
 	log.Printf("[%s] session TTL expired (%ds) — terminating", sc.start.SessionID, sessionTTL)
+	sc.cg.markTerminating()
 	sc.cg.unfreeze()
 	sc.pluginWriteMu.Lock()
 	_ = protocol.WriteMessage(sc.pw, protocol.MsgSessionExpired, nil)

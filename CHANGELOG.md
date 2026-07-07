@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.32.0] - 2026-07-07
+
+### Fixed
+- **agent**: A session ending via TTL expiry or the freeze-timeout watcher could be left permanently stuck in a frozen cgroup — unkillable by Ctrl-C or a plain `kill`, since a frozen cgroup delivers no signal until thawed — if a concurrent server-connection-lost freeze (`markDead`) or the post-session lingering-process watcher (`lingerCgroup`) re-froze the cgroup after the watcher's own unfreeze but before the terminating signal was actually processed. Both termination watchers now mark the cgroup as terminating before unfreezing, which permanently disarms any later freeze attempt for that session.
+
 ## [1.31.0] - 2026-07-07
 
 ### Fixed

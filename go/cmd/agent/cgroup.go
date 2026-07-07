@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -47,6 +48,15 @@ type cgroupSession struct {
 	mu          sync.Mutex
 	frozen      bool
 	readyToFork bool // Set to true when plugin sends SESSION_READY
+
+	// terminating is set once a watcher (TTL/freeze-timeout expiry) has
+	// decided to end the session and called unfreeze() to let its signal
+	// land. It permanently disarms freeze(): without it, a late markDead()
+	// (server conn tearing down as part of the same shutdown) or lingerCgroup
+	// (still seeing the not-yet-dead pid) can refreeze the cgroup after the
+	// signal was sent but before the process acted on it, and nothing is left
+	// running to ever thaw it again — the process hangs frozen forever.
+	terminating atomic.Bool
 
 	serverW *protocol.Writer // Used to send sandbox/divergence alerts
 
@@ -381,8 +391,19 @@ func (cg *cgroupSession) hasEscapedRunning() bool {
 	return running
 }
 
-func (cg *cgroupSession) freeze() {
+// markTerminating permanently disarms freeze() for this cgroup — called by a
+// watcher (TTL/freeze-timeout expiry) right before it unfreezes and signals
+// the session, so a late markDead() or lingerCgroup tick can't refreeze it
+// out from under the pending signal.
+func (cg *cgroupSession) markTerminating() {
 	if cg == nil {
+		return
+	}
+	cg.terminating.Store(true)
+}
+
+func (cg *cgroupSession) freeze() {
+	if cg == nil || cg.terminating.Load() {
 		return
 	}
 	cg.mu.Lock()
