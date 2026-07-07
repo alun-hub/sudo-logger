@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] - 2026-07-07
+
+### Changed
+- **replay**: The OIDC step-up re-authentication flow (sudoers/sandbox push) now returns to the page you stepped up from (e.g. `/config/sandbox`) instead of always landing on the session list.
+- **replay**: The step-up re-authentication TTL is now admin-configurable — **Config → System Auth → "Step-up Re-authentication TTL"** — instead of a fixed 10 minutes.
+
+### Documentation
+- Documented the A-1/A-3 push protections (diff confirmation, step-up re-authentication, audit/SIEM notifications, sandbox-weakening detection) across the README, configuration guide, API reference, and troubleshooting chapter.
+- Fixed several stale documentation entries found in the process: the `/api/sudoers/config` API reference described an endpoint shape that no longer exists, a claim that config writes are never separately audit-logged, and a frontend API/test-file inventory in the developer guide that predated several files being split out.
+
 ## [1.29.0] - 2026-07-07
 
 ### Security
