@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.31.0] - 2026-07-07
+
+### Fixed
+- **replay**: A session whose cast has a header but no playback events (a genuinely I/O-less command, or a stale in-progress placeholder that never got a real recording) showed the terminal player's generic crash icon instead of the session content. Now shows "No output was recorded for this session."
+
 ## [1.30.0] - 2026-07-07
 
 ### Changed
