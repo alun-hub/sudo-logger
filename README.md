@@ -1597,6 +1597,27 @@ Emitted when a session is deleted via the GDPR deletion API. Sent through the co
 }
 ```
 
+#### `sudoers_config_push` / `sandbox_config_push`
+
+Emitted on every successful sudoers or sandbox policy push from the replay
+UI (`PUT /api/sudoers/config` / `PUT /api/sandbox` — see [Sudoers
+management](#sudoers-management)), regardless of `format`. Sent through the
+configured SIEM transport.
+
+```json
+{
+  "event": "sudoers_config_push",
+  "time": "2026-07-07T08:50:03Z",
+  "key": "sudoers/fedora",
+  "actor": "alice",
+  "lines_added": 2,
+  "lines_removed": 1
+}
+```
+
+`sandbox_config_push` has the same shape without `key` (sandbox policy is
+global, not per-host).
+
 #### `config_reload` (log server stdout)
 
 Emitted by the log server to stdout whenever a watched config file changes content (detected by SHA256 comparison on each 30-second reload). Suitable for capture by Fluentd, Promtail, or Vector.
@@ -1887,6 +1908,36 @@ up within one 15-second poll cycle.
 - Agent leaves the existing file untouched if it cannot reach the server (network error).
 - Host names are validated server-side against a strict allowlist to prevent path traversal.
 - The managed file is separate from `/etc/sudoers` — the system sudoers is never touched.
+
+### Push protections (replay UI side)
+
+Because pushing here is a fleet-wide privilege change, saving a sudoers (or
+[sandbox](#process-sandbox)) config in the replay UI has more friction than
+an ordinary settings save:
+
+- **Diff confirmation** — before the `PUT` fires, the UI shows a line diff
+  of what's about to change and requires an explicit confirm click.
+- **Step-up re-authentication** — a recent password re-entry (local auth)
+  or fresh IdP login (OIDC) is required in addition to the standing
+  `config:write` permission; a request without one gets `403
+  stepup_required` instead of being applied. How long a step-up stays valid
+  is configurable: **Config → System Auth → "Step-up Re-authentication
+  TTL"** (default 10 minutes). No-op in proxy auth mode or an open
+  deployment (no local user has a password set) — there's no independent
+  credential to re-check there, so the diff confirmation above is the only
+  friction in those cases.
+- **Audit log + SIEM notification** — every push logs the actor and a
+  line-count diff, and forwards a `sudoers_config_push` /
+  `sandbox_config_push` event through whatever SIEM/webhook forwarding is
+  configured (see [Audit events](#audit-events)).
+- **Sandbox-weakening detection** (sandbox only) — if a pushed policy
+  removes protection the previous one had, the agent logs a
+  `SECURITY WARNING: protection reduced` line on reload instead of applying
+  silently.
+
+None of this prevents a fully compromised replay-server, or an
+already-stepped-up admin session, from pushing a malicious config — that's
+an accepted residual risk, not a gap these were meant to close.
 
 ---
 

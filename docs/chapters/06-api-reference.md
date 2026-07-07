@@ -333,6 +333,16 @@ Read or replace the sandbox policy YAML.
 
 **PUT request body:** same shape — `content` is the raw YAML string.
 
+**PUT** requires a recent **step-up re-authentication**, same as
+`PUT /api/sudoers/config` above — see
+[Step-up re-authentication](04-configuration.md#step-up-re-authentication-for-sudoerssandbox-pushes)
+in Chapter 4. A push also writes an audit-log line and forwards a
+`sandbox_config_push` SIEM event. If the new policy removes protection the
+previous one had (a feature disabled, or a previously-protected
+path/process/socket/binary no longer covered), the agent logs a distinct
+`SECURITY WARNING: protection reduced` line when it reloads — this is
+detection only, the reload still applies.
+
 ---
 
 #### `GET /api/sandbox/templates`
@@ -394,12 +404,18 @@ Read or replace the authentication configuration.
     "group_mappings": [
       { "group": "ops-team", "role": "admin" },
       { "group": "dev-team", "role": "viewer" }
-    ]
+    ],
+    "step_up_ttl_minutes": 10
   }
 }
 ```
 
 `source` values: `"local"` (htpasswd), `"oidc"`, `"proxy"`.
+
+`step_up_ttl_minutes` — how long a step-up re-authentication for a sudoers/
+sandbox push stays valid (see [Step-up re-authentication](04-configuration.md#step-up-re-authentication-for-sudoerssandbox-pushes)
+in Chapter 4). Omitted or `0` means the server default (10 minutes). Has no
+effect in `"proxy"` mode.
 
 > **Note:** `client_secret` is masked (`"***"`) in GET responses.
 
@@ -732,19 +748,41 @@ Read or replace the OPA Rego policy used for JIT decisions.
 
 ### Sudoers
 
+Two distinct things live under `/api/sudoers/*`: **snapshots** (a read-only,
+historical record of what `/etc/sudoers` actually contained on each host,
+uploaded periodically by the agent) and **config** (the admin-authored
+*desired* sudoers policy, staged centrally and pushed out to agents — see
+[Sudoers policy management](07-features.md#sudoers-policy-management) in
+Chapter 7 for the full push/confirm/step-up workflow).
+
 #### `GET /api/sudoers/hosts`
 
-List hosts that have at least one stored sudoers snapshot.
+List every host with a sudoers snapshot, a session, or a staged override —
+enriched with staging/sync status so the UI can show it without a second
+round trip.
 
 **Required permission:** `config:read`
 
-**Response:** `{ "hosts": ["web01", "db01"] }`
+**Response:**
+
+```json
+[
+  { "name": "web01", "isOverride": true, "inSync": true, "isOffline": false },
+  { "name": "db01", "isOverride": false, "inSync": false, "isOffline": true, "error": "visudo: syntax error" }
+]
+```
+
+`isOverride` — host has its own staged config, distinct from `sudoers/_default`.
+`inSync` — the host's last-reported applied config matches what's staged.
+`isOffline` — no heartbeat from this host recently.
+`error` — the agent's last reported apply error for this host, if any.
 
 ---
 
 #### `GET /api/sudoers/snapshots`
 
-List all snapshots for a host.
+List recent (up to 20) historical snapshots of what `/etc/sudoers` actually
+contained on a host, as reported by the agent.
 
 **Required permission:** `config:read`
 
@@ -754,8 +792,8 @@ List all snapshots for a host.
 
 ```json
 [
-  { "host": "web01", "timestamp": "2026-06-15T00:00:00Z", "hash": "sha256:abc..." },
-  { "host": "web01", "timestamp": "2026-06-14T00:00:00Z", "hash": "sha256:def..." }
+  { "sha256": "abc...", "uploaded_at": 1750000000, "content": "alice ALL=(ALL) ALL\n" },
+  { "sha256": "def...", "uploaded_at": 1749900000, "content": "..." }
 ]
 ```
 
@@ -763,13 +801,59 @@ List all snapshots for a host.
 
 #### `GET /api/sudoers/config`
 
-Fetch the raw sudoers content for a specific host and timestamp.
+Fetch the *staged* (desired) sudoers config for a host — not a historical
+snapshot. Falls back to the `_default` template when the host has no
+override of its own.
 
 **Required permission:** `config:read`
 
-**Query parameters:** `host` (required), `timestamp` (RFC 3339, required)
+**Query parameters:** `host` (optional — omitted or empty means the global `_default` template)
 
-**Response:** `Content-Type: text/plain` — raw sudoers file content.
+**Response:**
+
+```json
+{ "host": "web01", "content": "alice ALL=(ALL) ALL\n", "is_override": true }
+```
+
+`is_override` is `true` only when `host` was given and that host has its own
+staged config distinct from `_default`.
+
+---
+
+#### `PUT /api/sudoers/config`
+
+Stage a sudoers config for a host (or the global `_default` when `host` is
+omitted). Validated with `visudo -c` before being stored — invalid syntax is
+rejected with `400`, it never reaches a host.
+
+**Required permission:** `config:write`, plus a recent **step-up
+re-authentication** (see [Step-up re-authentication](04-configuration.md#step-up-re-authentication-for-sudoerssandbox-pushes)
+in Chapter 4) — a request without one gets `403` with
+`{"error":"stepup_required","auth_source":"local"|"oidc"|"proxy"}` instead of
+being applied. `auth_source` tells the client which re-auth flow to run.
+
+**Query parameters:** `host` (optional)
+
+**Request body:** `{ "content": "alice ALL=(ALL) ALL\n" }`
+
+**Response:** `{ "ok": true }`
+
+Every successful push writes an audit-log line (actor, host/key, a coarse
++/- line-count diff) and forwards a `sudoers_config_push` event through
+whatever SIEM/webhook forwarding is configured (`internal/siem.SendAudit`) —
+see [Configuration writes](07-features.md#configuration-writes) in Chapter 7.
+
+---
+
+#### `DELETE /api/sudoers/config`
+
+Remove a host's staged override, reverting it to inherit `_default`.
+
+**Required permission:** `config:write`
+
+**Query parameters:** `host` (required)
+
+**Response:** `{ "ok": true }`
 
 ---
 
@@ -781,7 +865,23 @@ Start the OIDC Authorization Code Flow.
 
 **No auth required.**
 
-Redirects to the OIDC provider's authorization endpoint. The `state` parameter encodes the original request URL for post-login redirect.
+Redirects to the OIDC provider's authorization endpoint. `state` is a random
+CSRF token (not an encoded URL) stored server-side in the `oidc_state`
+cookie and checked on callback.
+
+**Query parameters:**
+- `stepup=1` — step-up re-authentication for a sudoers/sandbox push (see
+  [Step-up re-authentication](04-configuration.md#step-up-re-authentication-for-sudoerssandbox-pushes)
+  in Chapter 4) instead of a fresh login: adds `prompt=login` so the IdP
+  re-collects credentials even with its own active session, and marks the
+  *existing* `sudo_session` step-up-valid on return rather than creating a
+  new session.
+- `return=/some/path` — same-origin path to redirect back to after a
+  `stepup=1` round trip (used so the user lands back on the tab they
+  stepped up from, e.g. `/config/sandbox`). Ignored for a plain login,
+  which always lands on `/`. Rejected (falls back to `/`) if it's not a
+  same-origin relative path — this endpoint guards against open redirects
+  since the value is caller-controlled.
 
 ---
 
@@ -791,7 +891,35 @@ OIDC provider redirect target after user authentication.
 
 **No auth required.**
 
-Exchanges the authorization code for tokens, verifies the ID token, sets a session cookie, and redirects to `/`. Configured via `--oidc-redirect-url` (must match this URL).
+Exchanges the authorization code for tokens, verifies the ID token. For a
+plain login: sets a session cookie and redirects to `/`. For a `stepup=1`
+login (detected via the `oidc_stepup` cookie set by `/api/oidc/login`):
+marks the existing session step-up-valid instead, and redirects to the
+`return` path from that flow. Configured via `--oidc-redirect-url` (must
+match this URL).
+
+---
+
+#### `POST /api/stepup`
+
+Re-verify the current session's password for **local auth mode only** —
+the OIDC equivalent is `GET /api/oidc/login?stepup=1` above; this endpoint
+is a no-op path for OIDC/proxy sessions (there's no local password to
+check).
+
+**Requires an existing valid `sudo_session` cookie** — re-checks that
+session's own username's password, does not accept a username in the body.
+
+**Request body:** `{ "password": "..." }`
+
+**Response:** `204 No Content` on success; `401` on a missing/invalid
+session or wrong password.
+
+On success, marks the session step-up-valid for
+[the configured TTL](04-configuration.md#step-up-re-authentication-for-sudoerssandbox-pushes)
+(default 10 minutes), so a subsequent `PUT /api/sudoers/config` or
+`PUT /api/sandbox` within that window won't get another `403
+stepup_required`.
 
 ---
 

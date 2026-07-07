@@ -351,6 +351,43 @@ semanage permissive -a sudo_agent_t
 
 ---
 
+## Sudoers/sandbox push: unexpected re-auth prompt, or no prompt at all
+
+**Symptoms:** Saving a sudoers or sandbox policy change sometimes asks you
+to re-enter your password (or redirects to the IdP for a fresh login), and
+sometimes doesn't — even for the same user in the same session.
+
+**This is expected**, not a bug — see [Step-up
+re-authentication](04-configuration.md#step-up-re-authentication-for-sudoerssandbox-pushes)
+in Chapter 4. A push requires a step-up re-authentication, but a recent one
+carries over for a configurable window (10 minutes by default) so editing
+several rules in one sitting doesn't re-prompt every time.
+
+**Diagnosis, if the timing looks wrong:**
+
+1. Check the replay server's access log around the push — look for a `403`
+   on the `PUT` immediately followed by `GET /api/oidc/login` and
+   `GET /api/oidc/callback` (OIDC) or `POST /api/stepup` (local auth); that
+   sequence marks exactly when the session last stepped up:
+
+   ```bash
+   kubectl logs deployment/sudo-replay-server -n sudo-logger | grep -i "stepup\|oidc/login\|oidc/callback\|status=403"
+   ```
+
+2. Compare the timestamp of that step-up against the current push. If it's
+   within the configured TTL (**Config → System Auth → "Step-up
+   Re-authentication TTL"**, default 10 minutes), no new prompt is expected
+   — this is the TTL window working as designed.
+
+3. If a prompt never appears at all, even on the first push after logging
+   in: check the auth mode. Step-up is a **documented no-op** in proxy mode
+   and in an open deployment (no local user has a password configured) —
+   in both cases there is no independent credential for replay-server to
+   re-check. The diff-confirmation dialog shown before every push is the
+   only friction in those two cases.
+
+---
+
 ## Verifying session file integrity
 
 The `scripts/verify-integrity.sh` script performs a syntax check on source files. It is intended for validating Go and C files during development:

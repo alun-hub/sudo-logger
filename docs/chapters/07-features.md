@@ -632,10 +632,12 @@ Each entry (`AccessLogEntry`) has exactly four fields: `time`, `viewer`,
   (check the running UI — this is not guaranteed to be a fixed "Audit Log" tab
   name).
 
-Configuration writes (rules, SIEM, sandbox, approval policy, auth config,
-users, roles, blocked/whitelisted users) are **not** separately logged with an
-action/resource/detail record. Session deletion has its own on-disk log (see
-GDPR section above), independent of this API.
+Most configuration writes (rules, SIEM, approval policy, auth config, users,
+roles, blocked/whitelisted users) are **not** separately logged with an
+action/resource/detail record. **Sudoers and sandbox config pushes are the
+exception** — see [Sudoers policy management](#sudoers-policy-management)
+below. Session deletion has its own on-disk log (see GDPR section above),
+independent of this API.
 
 ---
 
@@ -643,7 +645,7 @@ GDPR section above), independent of this API.
 
 ### Overview
 
-The replay server can store periodic snapshots of `/etc/sudoers` (and sudoers include files) per host. This provides an audit trail of privilege grants: who had what sudo privileges at which point in time.
+The replay server can store periodic snapshots of `/etc/sudoers` (and sudoers include files) per host. This provides an audit trail of privilege grants: who had what sudo privileges at which point in time. This is a read-only historical record of what a host's sudoers file *actually contained* — for the admin-authored *desired* config that gets pushed out to agents, see [Sudoers policy management](#sudoers-policy-management) below.
 
 ### How agents deliver snapshots
 
@@ -654,12 +656,62 @@ The agent periodically reads `/etc/sudoers` and its includes, hashes the content
 **Via API:**
 
 ```
-GET /api/sudoers/hosts                        → list of hosts
-GET /api/sudoers/snapshots?host=web01         → list of timestamped snapshots
-GET /api/sudoers/config?host=web01&timestamp= → raw sudoers content
+GET /api/sudoers/hosts                → hosts with a snapshot, session, or staged override
+GET /api/sudoers/snapshots?host=web01 → list of timestamped snapshots (includes content)
 ```
 
-**Via UI:** Admin → Sudoers section (where available in the current navigation).
+**Via UI:** Policy → Sudoers, snapshots sidebar (raw-edit mode).
+
+---
+
+## Sudoers policy management
+
+### Overview
+
+Distinct from the read-only snapshots above: admins author a *desired*
+sudoers policy per host (or a global `_default` template inherited by every
+host) in the replay UI (Policy → Sudoers) or via `PUT /api/sudoers/config`.
+Agents poll for their host's staged config and apply it — see [Sudoers
+management](02-architecture.md) in Chapter 2 for the agent-side apply/verify
+flow.
+
+Sandbox policy (`PUT /api/sandbox`, eBPF LSM enforcement rules) is staged
+and pushed the same way, and gets the same protections below.
+
+### Protections around a push
+
+Because a push here is a fleet-wide privilege change — not just a setting
+for the replay server itself — it has more friction than an ordinary config
+write:
+
+1. **Syntax validation** — sudoers content is checked with `visudo -c`
+   before being stored; invalid syntax is rejected with `400` and never
+   reaches a host.
+2. **Diff confirmation** — the UI shows a line diff of what's about to
+   change and requires an explicit confirm click before the push is sent.
+3. **Step-up re-authentication** — a recent password re-entry (local auth)
+   or fresh IdP login (OIDC) is required in addition to the standing
+   `config:write` permission; see [Step-up
+   re-authentication](04-configuration.md#step-up-re-authentication-for-sudoerssandbox-pushes)
+   in Chapter 4 for the full flow and how to change the re-auth window.
+4. **Audit log + SIEM notification** — every push logs the actor and a
+   line-count diff, and forwards a `sudoers_config_push` /
+   `sandbox_config_push` event through whatever SIEM/webhook forwarding is
+   configured (see Chapter 6, API reference).
+5. **Sandbox-weakening detection** (sandbox only) — if a pushed policy
+   removes protection the previous one had (a feature disabled, or a
+   previously-protected path/process/socket/binary no longer covered), the
+   agent logs a distinct `SECURITY WARNING: protection reduced` line when it
+   reloads. This is detection only — the reload still applies; it's meant to
+   make an accidental or malicious weakening loud instead of silent.
+
+None of this prevents a fully compromised replay-server, or an
+already-stepped-up admin session, from pushing a malicious config — that
+residual risk is an accepted trade-off, not a gap these protections were
+meant to close (config signing and per-push multi-person approval were
+considered and rejected as disproportionate for this product; see the
+commit history around the `A-1`/`A-3` findings if you need the full
+reasoning).
 
 ---
 

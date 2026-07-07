@@ -382,6 +382,28 @@ The replay server accepts the token from three sources, in priority order:
 2. `--logserver-admin-token` (flag value)
 3. Environment variable `SUDO_LOGGER_ADMIN_TOKEN`
 
+### Step-up re-authentication for sudoers/sandbox pushes
+
+Pushing a sudoers or sandbox policy change (`PUT /api/sudoers/config`,
+`PUT /api/sandbox`) requires a recent step-up re-authentication in addition
+to the standing `config:write` permission — a passively stolen session
+cookie is not enough on its own to push a fleet-wide config change. In
+practice: the first push in a while prompts for your password again (local
+auth) or a fresh IdP login (OIDC); a `PUT` without one gets `403` with
+`{"error":"stepup_required"}` instead of being applied.
+
+Once verified, that proof stays valid for a configurable window — **Config →
+System Auth → "Step-up Re-authentication TTL"** in the UI, or the
+`step_up_ttl_minutes` field via `PUT /api/auth-config` — so editing several
+rules in one sitting doesn't re-prompt every time. Leave it unset for the
+10-minute default.
+
+This has **no effect** in proxy auth mode or an open deployment (no local
+user has a password configured) — in both cases replay-server doesn't own
+the authentication decision, so there is no independent credential to
+re-check. The diff-confirmation dialog shown before every push is the only
+extra friction in those two cases.
+
 ---
 
 ## /etc/sudo.conf
