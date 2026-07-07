@@ -449,8 +449,11 @@ Each file in `api/` wraps a group of backend endpoints. All functions use
 | `client.ts` | Base `apiFetch` wrapper; `ApiError` class |
 | `sessions.ts` | `GET /api/sessions`, `GET /api/session/events`, `DELETE /api/sessions/{tsid}` (note: plural, proxied to the log server's admin API when `--logserver-admin` is configured), `GET /api/session/cast` |
 | `reports.ts` | `GET /api/report`, `GET /api/access-log` |
-| `policy.ts` | `GET/PUT /api/risk-rules`, `GET/PUT /api/blocked-users`, `GET/PUT /api/whitelisted-users`, `GET /api/sudoers` |
-| `config.ts` | `GET/PUT /api/siem-config`, `GET/PUT /api/auth-config`, `PUT /api/auth-mapping` (legacy `admin_groups` only), `GET/POST/DELETE /api/users`, `GET/POST/PUT/DELETE /api/roles`, `GET/PUT /api/retention`, `GET/PUT /api/sandbox`, `GET/PUT /api/jit-policy` |
+| `policy.ts` | `GET/PUT /api/rules` (risk rules) |
+| `opa.ts` | `GET/PUT /api/jit-policy`, `GET/PUT /api/blocked-users`, `GET/PUT /api/whitelisted-users` |
+| `sudoers.ts` | `GET /api/sudoers/hosts`, `GET/PUT/DELETE /api/sudoers/config`, `GET /api/sudoers/snapshots` |
+| `stepup.ts` | `POST /api/stepup` (local-auth step-up re-authentication); `parseStepUpRequired()` helper for the `403 stepup_required` response shape shared by `PUT /api/sudoers/config` and `PUT /api/sandbox` |
+| `config.ts` | `GET /api/me`, `POST /api/login`, `GET/PUT /api/siem-config`, `POST /api/siem-cert`, `GET/PUT /api/auth-config`, `GET/PUT /api/users`, `GET/POST /api/roles`, `GET /api/hosts`, `GET/PUT /api/retention`, `GET/PUT /api/sandbox`, `GET/PUT /api/sandbox/templates`, `GET/PUT /api/approval-config`, `GET/PUT /api/redaction-config` |
 | `approvals.ts` | `GET /api/approvals`, `POST /api/approvals/:id/approve`, `POST /api/approvals/:id/deny` |
 
 ### Adding a new UI page
@@ -506,14 +509,14 @@ The replay server must be running separately:
 cd go && go test ./...
 ```
 
-Test coverage spans most of the tree (~29 `_test.go` files at last count) —
+Test coverage spans most of the tree (~36 `_test.go` files at last count) —
 this list was previously limited to a single file and badly understated it:
 
 | Package | Test files | Coverage area |
 |---|---|---|
-| `go/cmd/agent` | `config_test.go`, `plugin_auth_test.go`, `plugin_test.go`, `sandbox_config_test.go`, `sandbox_test.go`, `tls_config_test.go` | Config parsing, plugin socket auth/protocol, sandbox config + LSM behavior, TLS setup |
+| `go/cmd/agent` | `config_test.go`, `plugin_auth_test.go`, `plugin_test.go`, `sandbox_config_test.go`, `sandbox_test.go`, `tls_config_test.go` | Config parsing, plugin socket auth/protocol, sandbox config + LSM behavior (including the weakening-detection logging in `logSandboxWeakening`), TLS setup |
 | `go/cmd/server` | `approval_test.go`, `approval_api_test.go`, `callback_test.go`, `main_test.go` | JIT approval manager, approval REST API, webhook callback handling, connection handling |
-| `go/cmd/replay-server` | `handlers_admin_test.go`, `handlers_auth_test.go`, `handlers_report_test.go`, `handlers_siem_cert_test.go`, `handlers_sudoers_test.go`, `handlers_test.go`, `middleware_test.go` | Admin/config endpoints, auth flows, reporting, SIEM cert upload, sudoers endpoints, RBAC middleware/group mapping |
+| `go/cmd/replay-server` | `handlers_admin_test.go`, `handlers_auth_test.go`, `handlers_report_test.go`, `handlers_siem_cert_test.go`, `handlers_sudoers_test.go`, `handlers_test.go`, `middleware_test.go`, `oidc_test.go`, `rbac_test.go` | Admin/config endpoints, auth flows, reporting, SIEM cert upload, sudoers endpoints, RBAC middleware/group mapping, OIDC open-redirect guard (`isSafeReturnPath`), step-up re-authentication (`requireStepUp`) |
 | `go/internal/store` | `local_test.go`, `local_approval_test.go`, `local_internal_test.go`, `local_rbac_test.go`, `local_session_audit_test.go`, `cleanup_test.go`, `distributed_test.go`, `distributed_infra_test.go` | LocalStore session CRUD, asciicast parsing, path traversal rejection, concurrent writes, RBAC/roles, retention cleanup, distributed (S3+Postgres) backend |
 | `go/internal/protocol` | `protocol_test.go` | Wire frame encode/decode, size-limit guards |
 | `go/internal/siem` | `siem_test.go`, `dispatch_test.go` | JSON/CEF/OCSF formatting, transport dispatch |

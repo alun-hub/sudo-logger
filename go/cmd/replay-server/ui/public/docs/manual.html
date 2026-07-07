@@ -10683,20 +10683,38 @@ configured), <code>GET /api/session/cast</code></td>
 </tr>
 <tr>
 <td><code>policy.ts</code></td>
-<td><code>GET/PUT /api/risk-rules</code>,
+<td><code>GET/PUT /api/rules</code> (risk rules)</td>
+</tr>
+<tr>
+<td><code>opa.ts</code></td>
+<td><code>GET/PUT /api/jit-policy</code>,
 <code>GET/PUT /api/blocked-users</code>,
-<code>GET/PUT /api/whitelisted-users</code>,
-<code>GET /api/sudoers</code></td>
+<code>GET/PUT /api/whitelisted-users</code></td>
+</tr>
+<tr>
+<td><code>sudoers.ts</code></td>
+<td><code>GET /api/sudoers/hosts</code>,
+<code>GET/PUT/DELETE /api/sudoers/config</code>,
+<code>GET /api/sudoers/snapshots</code></td>
+</tr>
+<tr>
+<td><code>stepup.ts</code></td>
+<td><code>POST /api/stepup</code> (local-auth step-up
+re-authentication); <code>parseStepUpRequired()</code> helper for the
+<code>403 stepup_required</code> response shape shared by
+<code>PUT /api/sudoers/config</code> and
+<code>PUT /api/sandbox</code></td>
 </tr>
 <tr>
 <td><code>config.ts</code></td>
-<td><code>GET/PUT /api/siem-config</code>,
-<code>GET/PUT /api/auth-config</code>,
-<code>PUT /api/auth-mapping</code> (legacy <code>admin_groups</code>
-only), <code>GET/POST/DELETE /api/users</code>,
-<code>GET/POST/PUT/DELETE /api/roles</code>,
+<td><code>GET /api/me</code>, <code>POST /api/login</code>,
+<code>GET/PUT /api/siem-config</code>, <code>POST /api/siem-cert</code>,
+<code>GET/PUT /api/auth-config</code>, <code>GET/PUT /api/users</code>,
+<code>GET/POST /api/roles</code>, <code>GET /api/hosts</code>,
 <code>GET/PUT /api/retention</code>, <code>GET/PUT /api/sandbox</code>,
-<code>GET/PUT /api/jit-policy</code></td>
+<code>GET/PUT /api/sandbox/templates</code>,
+<code>GET/PUT /api/approval-config</code>,
+<code>GET/PUT /api/redaction-config</code></td>
 </tr>
 <tr>
 <td><code>approvals.ts</code></td>
@@ -10743,7 +10761,7 @@ server must be running separately:</p>
 <hr />
 <h2 id="running-tests">Running tests</h2>
 <div class="sourceCode" id="cb242"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb242-1"><a href="#cb242-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go <span class="kw">&amp;&amp;</span> <span class="ex">go</span> test ./...</span></code></pre></div>
-<p>Test coverage spans most of the tree (~29 <code>_test.go</code> files
+<p>Test coverage spans most of the tree (~36 <code>_test.go</code> files
 at last count) — this list was previously limited to a single file and
 badly understated it:</p>
 <table>
@@ -10766,7 +10784,8 @@ badly understated it:</p>
 <code>plugin_test.go</code>, <code>sandbox_config_test.go</code>,
 <code>sandbox_test.go</code>, <code>tls_config_test.go</code></td>
 <td>Config parsing, plugin socket auth/protocol, sandbox config + LSM
-behavior, TLS setup</td>
+behavior (including the weakening-detection logging in
+<code>logSandboxWeakening</code>), TLS setup</td>
 </tr>
 <tr>
 <td><code>go/cmd/server</code></td>
@@ -10782,9 +10801,12 @@ connection handling</td>
 <code>handlers_report_test.go</code>,
 <code>handlers_siem_cert_test.go</code>,
 <code>handlers_sudoers_test.go</code>, <code>handlers_test.go</code>,
-<code>middleware_test.go</code></td>
+<code>middleware_test.go</code>, <code>oidc_test.go</code>,
+<code>rbac_test.go</code></td>
 <td>Admin/config endpoints, auth flows, reporting, SIEM cert upload,
-sudoers endpoints, RBAC middleware/group mapping</td>
+sudoers endpoints, RBAC middleware/group mapping, OIDC open-redirect
+guard (<code>isSafeReturnPath</code>), step-up re-authentication
+(<code>requireStepUp</code>)</td>
 </tr>
 <tr>
 <td><code>go/internal/store</code></td>
