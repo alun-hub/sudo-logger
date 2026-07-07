@@ -312,6 +312,30 @@ func TestLoadSandboxConfig_ForbiddenBinary(t *testing.T) {
 	}
 }
 
+// TestLoadSandboxConfig_SamePathInFilesAndForbidden reproduces a bug where a
+// single dedup set shared across the protected/forbidden/noexec resolution
+// loops caused a path listed in more than one category to be silently
+// dropped from every list after the first.
+func TestLoadSandboxConfig_SamePathInFilesAndForbidden(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "dual-listed-binary")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 1"), 0o755); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	yaml := "protect:\n  files:\n    - " + bin + "\n  forbidden:\n    - " + bin + "\n"
+	res, err := loadSandboxConfigFromBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Inodes) == 0 {
+		t.Error("expected path to be resolved into Inodes (protected)")
+	}
+	if len(res.Forbidden) == 0 {
+		t.Error("expected the same path to ALSO be resolved into Forbidden — shared dedup set must not suppress it")
+	}
+}
+
 func TestLoadSandboxConfig_EmptyYAML(t *testing.T) {
 	res, err := loadSandboxConfigFromBytes([]byte(""))
 	if err != nil {

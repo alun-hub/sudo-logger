@@ -382,6 +382,8 @@ func (sc *sessionConn) runIdleWatch() {
 		if since >= cfg.IdleTimeout {
 			log.Printf("[%s] no input for %v — terminating idle session (pid %d)",
 				sc.start.SessionID, since.Round(time.Second), sc.start.Pid)
+			sc.cg.markTerminating()
+			sc.cg.unfreeze()
 			go writeTTYIdleMsg(sc.ttyPath, cfg.IdleTimeout)
 			time.Sleep(200 * time.Millisecond)
 			syscall.Kill(sc.start.Pid, syscall.SIGHUP)

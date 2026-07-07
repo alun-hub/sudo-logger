@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.0] - 2026-07-07
+
+### Fixed
+- **agent**: A path listed in more than one of the sandbox's `protect.files`, `protect.forbidden`, or `protect.noexec` lists was silently dropped from every list after the first, because a single dedup set was shared across all three resolution loops. Each list now has its own set.
+- **agent**: The idle-timeout session watcher could send its termination signal into an already-frozen cgroup — leaving the session stuck the same way TTL/freeze-timeout termination could before v1.32.0 — since it never called the freeze-disarming guard added in that release. It now does.
+
+### Documentation
+- Documented the sandbox's `CAP_MAC_ADMIN`/`CAP_SYS_RAWIO`/`CAP_SYS_BOOT` capability denials in the README and `sandbox.yaml(5)` (previously only the original three were listed).
+- Added the missing "Sandbox (LSM) subsystem" section to `sudo-logger-agent(8)` (the page claimed "four subsystems" but only documented three) and corrected its stale version stamp.
+
+### Removed
+- Unused `loadRules()` function and its dedicated tests (superseded by `loadRulesFromText`); abandoned AI-tool scaffolding files left over from an earlier review pass.
+
 ## [1.32.0] - 2026-07-07
 
 ### Fixed

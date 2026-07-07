@@ -1,4 +1,4 @@
-.TH SUDO\-LOGGER\-AGENT 8 "2026-05-03" "sudo-logger 1.20.26" "System Administration"
+.TH SUDO\-LOGGER\-AGENT 8 "2026-07-07" "sudo-logger 1.20.124" "System Administration"
 .SH NAME
 sudo\-logger\-agent \- audit agent for sudo session recording and privilege escalation tracking
 .SH SYNOPSIS
@@ -56,6 +56,28 @@ invocations to correlate eBPF-observed sessions with plugin-reported sessions.
 .PP
 If the kernel lacks BTF support, the eBPF subsystem is skipped and the agent
 continues in plugin-only mode (a warning is logged).
+.SS Sandbox (LSM) subsystem
+When
+.B sandbox_config
+points to a YAML deny-list, the agent loads a set of BPF LSM hooks that
+protect specific files, devices, processes, and directories from any process
+running inside a sudo-monitored session \(em independent of and in addition
+to the eBPF and plugin handler subsystems above.
+Protections include denying writes to protected inodes, blocking execution of
+forbidden binaries or binaries under
+.B noexec
+directories, preventing signals to protected processes, and optionally
+restricting specific capabilities
+.RB ( CAP_NET_ADMIN ,
+.BR CAP_AUDIT_CONTROL ,
+.BR CAP_SYS_MODULE ,
+.BR CAP_MAC_ADMIN ,
+.BR CAP_SYS_RAWIO ,
+.BR CAP_SYS_BOOT )
+or D-Bus/systemd control-socket access.
+See
+.BR sandbox.yaml (5)
+for the full hook list and configuration format.
 .SS Divergence detector
 Correlates eBPF-observed
 .BR sudo (8)
@@ -192,4 +214,5 @@ because sockets are not part of the cgroup namespace.
 .BR sudo_logger_plugin (8),
 .BR sudoreplay (8),
 .BR sudo.conf (5),
+.BR sandbox.yaml (5),
 .BR systemd.unit (5)

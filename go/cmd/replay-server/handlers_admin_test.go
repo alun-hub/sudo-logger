@@ -388,22 +388,16 @@ func seedCastWithOutput(t *testing.T, logDir, user, host, output string) {
 	}
 }
 
-// ── loadRules ─────────────────────────────────────────────────────────────────
+// ── loadRulesFromText ─────────────────────────────────────────────────────────
 
-func TestLoadRules_ReloadsOnChange(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/risk-rules.yaml"
-
+func TestLoadRulesFromText_ReloadsOnChange(t *testing.T) {
 	rulesMu.Lock()
 	globalRules = nil
 	globalRulesHash = ""
 	rulesMu.Unlock()
 
-	if err := os.WriteFile(path, []byte("rules:\n  - id: r1\n    score: 10\n    reason: test\n"), 0o644); err != nil {
-		t.Fatalf("write rules file: %v", err)
-	}
-	if err := loadRules(path); err != nil {
-		t.Fatalf("loadRules: %v", err)
+	if err := loadRulesFromText("rules:\n  - id: r1\n    score: 10\n    reason: test\n"); err != nil {
+		t.Fatalf("loadRulesFromText: %v", err)
 	}
 	rulesMu.RLock()
 	n := len(globalRules)
@@ -414,8 +408,8 @@ func TestLoadRules_ReloadsOnChange(t *testing.T) {
 	}
 
 	// Re-loading unchanged content must be a no-op (same hash).
-	if err := loadRules(path); err != nil {
-		t.Fatalf("loadRules (unchanged): %v", err)
+	if err := loadRulesFromText("rules:\n  - id: r1\n    score: 10\n    reason: test\n"); err != nil {
+		t.Fatalf("loadRulesFromText (unchanged): %v", err)
 	}
 	rulesMu.RLock()
 	hash2 := globalRulesHash
@@ -425,22 +419,13 @@ func TestLoadRules_ReloadsOnChange(t *testing.T) {
 	}
 
 	// Changing content must update the globals.
-	if err := os.WriteFile(path, []byte("rules:\n  - id: r1\n    score: 10\n    reason: test\n  - id: r2\n    score: 20\n    reason: test2\n"), 0o644); err != nil {
-		t.Fatalf("rewrite rules file: %v", err)
-	}
-	if err := loadRules(path); err != nil {
-		t.Fatalf("loadRules (changed): %v", err)
+	if err := loadRulesFromText("rules:\n  - id: r1\n    score: 10\n    reason: test\n  - id: r2\n    score: 20\n    reason: test2\n"); err != nil {
+		t.Fatalf("loadRulesFromText (changed): %v", err)
 	}
 	rulesMu.RLock()
 	n2 := len(globalRules)
 	rulesMu.RUnlock()
 	if n2 != 2 {
 		t.Errorf("expected 2 rules after reload, got %d", n2)
-	}
-}
-
-func TestLoadRules_MissingFile(t *testing.T) {
-	if err := loadRules("/nonexistent/path/risk-rules.yaml"); err == nil {
-		t.Error("expected error for missing rules file")
 	}
 }

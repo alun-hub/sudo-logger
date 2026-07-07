@@ -8,7 +8,6 @@ import (
 	"hash/fnv"
 	"io"
 	"log"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,33 +21,6 @@ func computeRulesHash(data []byte) string {
 	h := fnv.New32a()
 	h.Write(data)
 	return fmt.Sprintf("%08x", h.Sum32())
-}
-
-// loadRules reads and parses the rules YAML file, updating the globals
-// only when the content hash has changed.
-func loadRules(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read rules file %s: %w", path, err)
-	}
-	hash := computeRulesHash(data)
-	rulesMu.RLock()
-	unchanged := hash == globalRulesHash
-	rulesMu.RUnlock()
-	if unchanged {
-		return nil
-	}
-	var rs RuleSet
-	if err := yaml.Unmarshal(data, &rs); err != nil {
-		return fmt.Errorf("parse rules file: %w", err)
-	}
-	rulesMu.Lock()
-	globalRules = rs.Rules
-	globalRulesHash = hash
-	rulesMu.Unlock()
-	log.Printf(`{"time":%q,"event":"config_reload","config":"risk-rules.yaml","sha256":%q,"rules":%d}`,
-		time.Now().UTC().Format(time.RFC3339), hash, len(rs.Rules))
-	return nil
 }
 
 // loadRulesFromText parses YAML rules from an in-memory string.

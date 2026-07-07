@@ -1050,7 +1050,7 @@ Twenty hooks are then attached to the kernel:
 | `lsm/socket_create` | Creating `AF_NETLINK` sockets (prevents firewall/route tampering) |
 | `lsm/ptrace_access_check` | Attaching to/debugging processes outside the sandbox (escapes) |
 | `lsm/sb_mount` | Mounting a filesystem over a protected inode (integrity) |
-| `lsm/capable` | Requesting specific capabilities (`CAP_NET_ADMIN`, `CAP_AUDIT_CONTROL`, `CAP_SYS_MODULE`) |
+| `lsm/capable` | Requesting specific capabilities (`CAP_NET_ADMIN`, `CAP_AUDIT_CONTROL`, `CAP_SYS_MODULE`, `CAP_MAC_ADMIN`, `CAP_SYS_RAWIO`, `CAP_SYS_BOOT`) |
 | `lsm/unix_stream_connect` | Connecting to systemd/D-Bus control sockets when `deny_systemd_ipc` is enabled (closes the `systemd-run` / `busctl StartTransientUnit` sandbox escape) |
 | `lsm/bprm_check_security` | Executing binaries in `forbidden` list or under `noexec` directories |
 | `tp_btf/sched_process_fork` | Propagates PID sandbox membership from parent to child at fork time |

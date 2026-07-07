@@ -73,9 +73,9 @@ func featureDefaultFalse(v *bool) bool {
 type resolvedSandbox struct {
 	Features   resolvedFeatures
 	Inodes     []SandboxInodeKey
-	Forbidden  []SandboxInodeKey // forbidden_binaries (bprm_check_security)
-	Noexec     []SandboxInodeKey // noexec_inodes (bprm_check_security parent dir check)
-	IPCInodes  []SandboxInodeKey // systemd/D-Bus control-socket inodes (deny_systemd_ipc)
+	Forbidden  []SandboxInodeKey          // forbidden_binaries (bprm_check_security)
+	Noexec     []SandboxInodeKey          // noexec_inodes (bprm_check_security parent dir check)
+	IPCInodes  []SandboxInodeKey          // systemd/D-Bus control-socket inodes (deny_systemd_ipc)
 	PathInodes map[string]SandboxInodeKey // protected path → its current inode key
 	Processes  []string
 }
@@ -193,7 +193,14 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 			debugLog("sandbox: systemd-ipc socket %s {ino=%d dev=%d}", p, key.Ino, key.Dev)
 		}
 	}
-	seen := make(map[SandboxInodeKey]bool)
+	// Each resolved list (protected inodes, forbidden binaries, noexec dirs)
+	// gets its own dedup set. A single shared set would silently drop an
+	// inode from every list after the first it appeared in, e.g. a path
+	// listed in both `files` and `forbidden` would never make it into
+	// res.Forbidden.
+	seenInodes := make(map[SandboxInodeKey]bool)
+	seenForbidden := make(map[SandboxInodeKey]bool)
+	seenNoexec := make(map[SandboxInodeKey]bool)
 
 	// Use a queue to implement recursive directory traversal.
 	// To prevent Denial of Service, we track depth and limit the total number
@@ -280,8 +287,8 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 		res.PathInodes[p] = key
 
-		if !seen[key] {
-			seen[key] = true
+		if !seenInodes[key] {
+			seenInodes[key] = true
 			res.Inodes = append(res.Inodes, key)
 		}
 	}
@@ -300,8 +307,8 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 			dev = uint32(st.Dev)
 		}
 		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
-		if !seen[key] {
-			seen[key] = true
+		if !seenForbidden[key] {
+			seenForbidden[key] = true
 			res.Forbidden = append(res.Forbidden, key)
 		}
 	}
@@ -328,12 +335,11 @@ func loadSandboxConfigFromBytes(data []byte) (*resolvedSandbox, error) {
 				"match the filesystem root and block ALL execution. Remove this entry unless you are on ext4/xfs.", p)
 		}
 		key := SandboxInodeKey{Ino: st.Ino, Dev: dev}
-		if !seen[key] {
-			seen[key] = true
+		if !seenNoexec[key] {
+			seenNoexec[key] = true
 			res.Noexec = append(res.Noexec, key)
 		}
 	}
-
 
 	for _, name := range cfg.Protect.Processes {
 		if len(name) > 15 {
