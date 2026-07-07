@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] - 2026-07-07
+
+### Security
+- **agent**: A server-pushed `sandbox.yaml` reload that silently removes protection the previous config had (a feature flag disabled, or a previously-protected path/process/systemd-ipc-socket/forbidden-binary/noexec-dir no longer covered) now logs a distinctly-marked warning instead of applying silently.
+- **replay**: Every sudoers/sandbox config push now writes an audit-log line with actor and a line-diff summary, and forwards a `sudoers_config_push`/`sandbox_config_push` event through the existing SIEM/audit-forwarding mechanism.
+- **replay**: The sudoers and sandbox editors now show a diff of what's about to change and require an explicit confirmation before pushing, instead of applying on click.
+- **replay**: Sudoers/sandbox pushes now require a step-up re-authentication within the last 10 minutes (password re-entry for local auth, forced IdP re-login via `prompt=login` for OIDC) — a passively stolen session cookie is no longer sufficient on its own. No-op (documented) for proxy-mode or open (no local passwords configured) deployments, where there's no independent credential to re-check.
+
 ## [1.28.0] - 2026-07-06
 
 ### Changed
