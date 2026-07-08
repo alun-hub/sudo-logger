@@ -23,19 +23,25 @@ jobs:
       # TEMPORARY — diagnosing a PAM failure inside the test containers that
       # only reproduces on GitHub-hosted runners, not locally. Remove once
       # root-caused.
-      #
-      # No secrets are available to this job (see `permissions: contents:
-      # read` above and the lack of any `secrets.*` reference in this
-      # workflow), so an unauthorized connection during the 10-minute window
-      # can read repo contents at most, not exfiltrate anything sensitive.
-      # limit-access-to-actor is intentionally NOT set: it restricts SSH
-      # access to keys registered to the triggering GitHub actor, which would
-      # block the person doing this diagnosis rather than an attacker, since
-      # this run is being triggered via `gh workflow run` / API rather than
-      # an interactive session tied to a personal SSH key.
-      - name: Debug session (tmate)
-        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3
-        timeout-minutes: 10
+      - name: Diagnose PAM/sudo environment
+        run: |
+          echo "== host =="
+          uname -a
+          podman version
+          podman info || true
+          echo "== build test client image =="
+          podman build -q -t sudo-client-test -f tests/Dockerfile.client .
+          podman run -d --name diag --privileged --cap-add=NET_ADMIN --ulimit memlock=-1:-1 sudo-client-test
+          sleep 3
+          echo "== id / passwd / shadow =="
+          podman exec diag id
+          podman exec diag sh -c "cat /proc/self/uid_map; echo ---; cat /proc/self/gid_map"
+          podman exec diag ls -la /etc/passwd /etc/shadow
+          podman exec diag getent passwd root
+          podman exec diag getent shadow root
+          echo "== sudo -D9 verbose (expect this to reproduce the failure with full PAM trace) =="
+          podman exec diag sh -c "sudo -D9 -v" || true
+          podman rm -f diag || true
 
       - name: Run system test suite
         run: bash tests/run-system-test.sh
