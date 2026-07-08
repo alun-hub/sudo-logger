@@ -11,6 +11,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,41 @@ import (
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 )
+
+// adminReq builds a request carrying full admin permissions in its context,
+// the same way accessLogMiddleware would after successfully authenticating
+// an admin — for handler tests that call the handler function directly,
+// bypassing the middleware chain.
+func adminReq(method, target string, body string) *http.Request {
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, target, nil)
+	} else {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+	}
+	ctx := context.WithValue(r.Context(), ctxRole, RoleAdmin)
+	ctx = context.WithValue(ctx, ctxPermissions, builtinAdminPerms)
+	return r.WithContext(ctx)
+}
+
+// viewerReq is like adminReq but with the default viewer permission set
+// (sessions:list_own + sessions:replay_own only) — for tests that need to
+// confirm a handler correctly refuses a low-privilege caller.
+func viewerReq(method, target string, body string) *http.Request {
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, target, nil)
+	} else {
+		r = httptest.NewRequest(method, target, strings.NewReader(body))
+	}
+	perms := map[store.Permission]bool{
+		store.PermSessionsListOwn:   true,
+		store.PermSessionsReplayOwn: true,
+	}
+	ctx := context.WithValue(r.Context(), ctxRole, RoleViewer)
+	ctx = context.WithValue(ctx, ctxPermissions, perms)
+	return r.WithContext(ctx)
+}
 
 // ── test store helper ─────────────────────────────────────────────────────────
 

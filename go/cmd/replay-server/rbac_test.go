@@ -20,6 +20,72 @@ func stepUpGateReq(cookieValue string) *http.Request {
 	return req
 }
 
+// ── isAdmin / requireAdmin ─────────────────────────────────────────────────────
+
+func TestIsAdmin(t *testing.T) {
+	if !isAdmin(adminReq(http.MethodGet, "/api/users", "")) {
+		t.Error("isAdmin(admin request) = false, want true")
+	}
+	if isAdmin(viewerReq(http.MethodGet, "/api/users", "")) {
+		t.Error("isAdmin(viewer request) = true, want false")
+	}
+}
+
+func TestRequireAdmin(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "someone", "Correct-Horse1!", RoleViewer)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	if requireAdmin(rr, viewerReq(http.MethodGet, "/api/users", "")) {
+		t.Error("requireAdmin(viewer) = true, want false")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("requireAdmin(viewer) status = %d, want 403", rr.Code)
+	}
+
+	rr2 := httptest.NewRecorder()
+	if !requireAdmin(rr2, adminReq(http.MethodGet, "/api/users", "")) {
+		t.Error("requireAdmin(admin) = false, want true")
+	}
+}
+
+// ── requirePermissionsContained ────────────────────────────────────────────────
+
+func TestRequirePermissionsContained(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "someone", "Correct-Horse1!", RoleViewer)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := viewerReq(http.MethodPut, "/api/roles/custom", "")
+	if requirePermissionsContained(rr, req, []store.Permission{store.PermConfigWrite}) {
+		t.Error("requirePermissionsContained should refuse granting a permission the viewer caller lacks")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
+	}
+
+	rr2 := httptest.NewRecorder()
+	req2 := viewerReq(http.MethodPut, "/api/roles/custom", "")
+	if !requirePermissionsContained(rr2, req2, []store.Permission{store.PermSessionsListOwn}) {
+		t.Error("requirePermissionsContained should allow granting a permission the caller already holds")
+	}
+}
+
+func TestRequirePermissionsContained_BootstrapModeAlwaysAllows(t *testing.T) {
+	initTestStore(t) // zero users -> bootstrap mode
+	rr := httptest.NewRecorder()
+	req := stepUpGateReq("")
+	if !requirePermissionsContained(rr, req, []store.Permission{store.PermConfigWrite}) {
+		t.Error("requirePermissionsContained should always allow in bootstrap mode")
+	}
+}
+
 func TestRequireStepUp_BootstrapMode(t *testing.T) {
 	initTestStore(t) // no users at all -> bootstrap mode
 	rr := httptest.NewRecorder()
