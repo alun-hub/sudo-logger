@@ -23,8 +23,18 @@ jobs:
       # TEMPORARY — diagnosing a PAM failure inside the test containers that
       # only reproduces on GitHub-hosted runners, not locally. Remove once
       # root-caused.
+      #
+      # No secrets are available to this job (see `permissions: contents:
+      # read` above and the lack of any `secrets.*` reference in this
+      # workflow), so an unauthorized connection during the 10-minute window
+      # can read repo contents at most, not exfiltrate anything sensitive.
+      # limit-access-to-actor is intentionally NOT set: it restricts SSH
+      # access to keys registered to the triggering GitHub actor, which would
+      # block the person doing this diagnosis rather than an attacker, since
+      # this run is being triggered via `gh workflow run` / API rather than
+      # an interactive session tied to a personal SSH key.
       - name: Debug session (tmate)
-        uses: mxschmitt/action-tmate@v3
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3
         timeout-minutes: 10
 
       - name: Run system test suite
