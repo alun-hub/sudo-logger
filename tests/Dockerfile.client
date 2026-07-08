@@ -19,11 +19,16 @@ COPY . .
 RUN cd plugin && make && make install
 RUN echo "Plugin sudo_logger_plugin /usr/libexec/sudo/sudo_logger_plugin.so" >> /etc/sudo.conf
 # These tests exercise the sudo-logger I/O plugin, not PAM/password
-# authentication — disable the auth requirement so the suite doesn't depend
-# on /etc/shadow being reachable via PAM, which has been observed to fail in
-# rootless-podman-on-GitHub-Actions specifically (not locally), likely a
-# podman/PAM interaction bug in the older podman version Ubuntu 24.04 ships.
+# authentication. `Defaults !authenticate` alone isn't enough: sudo still
+# runs PAM's account-management phase (pam_acct_mgmt) regardless of that
+# setting, and that phase has been observed to fail retrieving /etc/shadow
+# info in rootless-podman-on-GitHub-Actions specifically (not locally),
+# likely a podman/PAM interaction bug in the older podman version Ubuntu
+# 24.04's default apt package ships. Replace the account check itself with
+# pam_permit.so so the whole PAM stack is a no-op for this disposable test
+# image, instead of chasing that specific environment bug.
 RUN echo "Defaults !authenticate" > /etc/sudoers.d/99-no-auth && chmod 0440 /etc/sudoers.d/99-no-auth
+RUN sed -i 's/^account\s*include\s*system-auth/account required pam_permit.so/' /etc/pam.d/sudo
 COPY --from=go-builder /usr/local/bin/sudo-logger-agent /usr/local/bin/sudo-logger-agent
 RUN mkdir -p /etc/sudo-logger /run/sudo-logger && chmod 750 /run/sudo-logger
 
