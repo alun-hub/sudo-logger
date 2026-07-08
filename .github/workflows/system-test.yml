@@ -20,6 +20,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman
 
+      # TEMPORARY — diagnosing a PAM failure inside the test containers that
+      # only reproduces on GitHub-hosted runners, not locally. Remove once
+      # root-caused.
+      - name: Debug session (tmate)
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 10
+
       - name: Run system test suite
         run: bash tests/run-system-test.sh
 
