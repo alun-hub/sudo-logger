@@ -18,6 +18,12 @@ COPY . .
 
 RUN cd plugin && make && make install
 RUN echo "Plugin sudo_logger_plugin /usr/libexec/sudo/sudo_logger_plugin.so" >> /etc/sudo.conf
+# These tests exercise the sudo-logger I/O plugin, not PAM/password
+# authentication — disable the auth requirement so the suite doesn't depend
+# on /etc/shadow being reachable via PAM, which has been observed to fail in
+# rootless-podman-on-GitHub-Actions specifically (not locally), likely a
+# podman/PAM interaction bug in the older podman version Ubuntu 24.04 ships.
+RUN echo "Defaults !authenticate" > /etc/sudoers.d/99-no-auth && chmod 0440 /etc/sudoers.d/99-no-auth
 COPY --from=go-builder /usr/local/bin/sudo-logger-agent /usr/local/bin/sudo-logger-agent
 RUN mkdir -p /etc/sudo-logger /run/sudo-logger && chmod 750 /run/sudo-logger
 
