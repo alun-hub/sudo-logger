@@ -244,11 +244,19 @@ podman exec sudo-logserver-test sh -c \
     "htpasswd -nBb $REPLAY_AUTH_USER $REPLAY_AUTH_PWD > /tmp/replay.htpasswd"  # pragma: allowlist secret
 podman exec sudo-logserver-test sh -c \
     'sudo-replay-server -logdir /var/log/sudoreplay -rules /etc/sudo-logger/risk-rules.yaml -htpasswd /tmp/replay.htpasswd -listen :8080 &>/tmp/replay.log & echo $! > /tmp/replay.pid'
-sleep 4
 
-podman exec sudo-logserver-test find /var/log/sudoreplay -name risk.json \
-    | grep -q risk.json \
-    || fail "TEST 7" "no risk.json found after risk-scoring run"
+# risk.json is computed asynchronously during the replay server's startup
+# session-cache rebuild — poll instead of a single fixed sleep, since a
+# busier/shared CI runner can be slower than a dev machine.
+RISK_JSON_FOUND=0
+for _ in $(seq 1 20); do
+    if podman exec sudo-logserver-test find /var/log/sudoreplay -name risk.json | grep -q risk.json; then
+        RISK_JSON_FOUND=1
+        break
+    fi
+    sleep 1
+done
+[ "$RISK_JSON_FOUND" = "1" ] || fail "TEST 7" "no risk.json found after risk-scoring run"
 pass "TEST 7"
 
 # ── TEST 8: Replay-API autentisering ─────────────────────────────────────────
