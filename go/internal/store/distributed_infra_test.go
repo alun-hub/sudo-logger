@@ -34,13 +34,31 @@ func podmanDockerHost() string {
 	return fmt.Sprintf("unix:///run/user/%d/podman/podman.sock", os.Getuid())
 }
 
+// dockerHostOverride returns the DOCKER_HOST value to use, or "" to leave
+// testcontainers-go's own auto-detection alone. Dev machines here only run
+// rootless podman (no standard docker daemon), so we point at its socket —
+// but CI runners (and most normal dev setups) have a real Docker daemon at
+// the standard location, which testcontainers-go finds on its own and which
+// this override must not shadow.
+func dockerHostOverride() string {
+	if _, err := os.Stat("/var/run/docker.sock"); err == nil {
+		return ""
+	}
+	if _, err := os.Stat(fmt.Sprintf("/run/user/%d/podman/podman.sock", os.Getuid())); err == nil {
+		return podmanDockerHost()
+	}
+	return ""
+}
+
 // newTestPostgresDSN starts an ephemeral Postgres container and returns a
 // connection string. Skips the test (not fails) when no container runtime
 // is reachable, so `go test ./...` stays green on machines without Docker
 // or Podman.
 func newTestPostgresDSN(t *testing.T) string {
 	t.Helper()
-	t.Setenv("DOCKER_HOST", podmanDockerHost())
+	if host := dockerHostOverride(); host != "" {
+		t.Setenv("DOCKER_HOST", host)
+	}
 	t.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

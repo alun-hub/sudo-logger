@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"sudo-logger/internal/iolog"
+	"sudo-logger/internal/protocol"
 )
 
 func distTestMeta(user, host string) iolog.SessionMeta {
@@ -591,5 +592,550 @@ func TestDistributedStore_DeleteSession_RefusesInProgress(t *testing.T) {
 
 	if err := d.DeleteSession(ctx, tsid, "attempted deletion", "attacker"); err == nil {
 		t.Error("DeleteSession should refuse to delete a session with a live active writer")
+	}
+}
+
+// ── Sudoers snapshot/error/heartbeat tracking ─────────────────────────────────
+
+func TestDistributedStore_SudoersSnapshots(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if hosts, err := d.ListSudoersHosts(ctx); err != nil || len(hosts) != 0 {
+		t.Fatalf("ListSudoersHosts before any snapshot = %v, %v; want empty, nil", hosts, err)
+	}
+
+	snap1 := &protocol.SudoersSnapshot{Host: "host1", Content: "root ALL=(ALL) ALL\n", SHA256: "sha-a"}
+	if err := d.SaveSudoersSnapshot(ctx, snap1); err != nil {
+		t.Fatalf("SaveSudoersSnapshot: %v", err)
+	}
+	// Same host, different content/hash — a second snapshot, not an update.
+	snap2 := &protocol.SudoersSnapshot{Host: "host1", Content: "root ALL=(ALL) ALL\n%wheel ALL=(ALL) ALL\n", SHA256: "sha-b"}
+	if err := d.SaveSudoersSnapshot(ctx, snap2); err != nil {
+		t.Fatalf("SaveSudoersSnapshot (2nd): %v", err)
+	}
+	// Re-saving the same (host, sha256) must upsert, not duplicate.
+	if err := d.SaveSudoersSnapshot(ctx, snap1); err != nil {
+		t.Fatalf("SaveSudoersSnapshot (re-save): %v", err)
+	}
+
+	hosts, err := d.ListSudoersHosts(ctx)
+	if err != nil {
+		t.Fatalf("ListSudoersHosts: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0] != "host1" {
+		t.Errorf("ListSudoersHosts = %v, want [host1]", hosts)
+	}
+
+	snaps, err := d.ListSudoersSnapshots(ctx, "host1", 10)
+	if err != nil {
+		t.Fatalf("ListSudoersSnapshots: %v", err)
+	}
+	if len(snaps) != 2 {
+		t.Fatalf("ListSudoersSnapshots returned %d entries, want 2 (re-save must upsert, not duplicate)", len(snaps))
+	}
+	// Newest (by uploaded_at) first — the re-saved snap1 should now be most recent.
+	if snaps[0].SHA256 != "sha-a" {
+		t.Errorf("ListSudoersSnapshots[0].SHA256 = %q, want sha-a (most recently uploaded)", snaps[0].SHA256)
+	}
+}
+
+func TestDistributedStore_ListSudoersConfigs(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if err := d.SetConfig(ctx, "sudoers/host1", "config-content-1"); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+	if err := d.SetConfig(ctx, "sudoers/host2", "config-content-2"); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+	// A non-sudoers key must not appear in ListSudoersConfigs.
+	if err := d.SetConfig(ctx, "risk-rules.yaml", "irrelevant"); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+
+	configs, err := d.ListSudoersConfigs(ctx)
+	if err != nil {
+		t.Fatalf("ListSudoersConfigs: %v", err)
+	}
+	if len(configs) != 2 || !configs["host1"] || !configs["host2"] {
+		t.Errorf("ListSudoersConfigs = %v, want map with host1 and host2 only", configs)
+	}
+}
+
+func TestDistributedStore_SudoersError(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if serr, err := d.GetSudoersError(ctx, "host1"); err != nil || serr != nil {
+		t.Fatalf("GetSudoersError before any error = %v, %v; want nil, nil", serr, err)
+	}
+
+	want := protocol.SudoersError{Host: "host1", Error: "visudo: syntax error", SHA256: "sha-x", Ts: 1234567890}
+	if err := d.SaveSudoersError(ctx, want); err != nil {
+		t.Fatalf("SaveSudoersError: %v", err)
+	}
+
+	got, err := d.GetSudoersError(ctx, "host1")
+	if err != nil {
+		t.Fatalf("GetSudoersError: %v", err)
+	}
+	if got == nil || *got != want {
+		t.Errorf("GetSudoersError = %+v, want %+v", got, want)
+	}
+
+	// A different host must not see host1's error.
+	if serr, err := d.GetSudoersError(ctx, "host2"); err != nil || serr != nil {
+		t.Errorf("GetSudoersError(host2) = %v, %v; want nil, nil", serr, err)
+	}
+}
+
+func TestDistributedStore_Heartbeat(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if ts, err := d.GetLastSeen(ctx, "host1"); err != nil || ts != 0 {
+		t.Fatalf("GetLastSeen before any heartbeat = %d, %v; want 0, nil", ts, err)
+	}
+
+	before := time.Now().Unix()
+	if err := d.SaveHeartbeat(ctx, "host1"); err != nil {
+		t.Fatalf("SaveHeartbeat: %v", err)
+	}
+	after := time.Now().Unix()
+
+	ts, err := d.GetLastSeen(ctx, "host1")
+	if err != nil {
+		t.Fatalf("GetLastSeen: %v", err)
+	}
+	if ts < before || ts > after {
+		t.Errorf("GetLastSeen = %d, want between %d and %d", ts, before, after)
+	}
+
+	// A second heartbeat must update, not duplicate, the stored timestamp.
+	time.Sleep(1100 * time.Millisecond)
+	if err := d.SaveHeartbeat(ctx, "host1"); err != nil {
+		t.Fatalf("SaveHeartbeat (2nd): %v", err)
+	}
+	ts2, err := d.GetLastSeen(ctx, "host1")
+	if err != nil {
+		t.Fatalf("GetLastSeen (2nd): %v", err)
+	}
+	if ts2 <= ts {
+		t.Errorf("GetLastSeen after 2nd heartbeat = %d, want > %d", ts2, ts)
+	}
+}
+
+// ── Blocked/whitelist policy readers ──────────────────────────────────────────
+
+func TestDistributedStore_GetBlockedPolicy(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	empty, err := d.GetBlockedPolicy(ctx)
+	if err != nil {
+		t.Fatalf("GetBlockedPolicy (empty): %v", err)
+	}
+	if len(empty.Users) != 0 {
+		t.Errorf("GetBlockedPolicy (empty) = %+v, want no users", empty)
+	}
+
+	policy := BlockedPolicy{
+		BlockMessage: "contact IT",
+		Users: []BlockedUserEntry{
+			{Username: "eve", Hosts: []string{"host1", "host2"}, Reason: "compromised", BlockedAt: 1000},
+			{Username: "mallory", Hosts: nil, Reason: "all hosts", BlockedAt: 2000},
+		},
+	}
+	if err := d.SaveBlockedPolicy(ctx, policy); err != nil {
+		t.Fatalf("SaveBlockedPolicy: %v", err)
+	}
+
+	got, err := d.GetBlockedPolicy(ctx)
+	if err != nil {
+		t.Fatalf("GetBlockedPolicy: %v", err)
+	}
+	if got.BlockMessage != "contact IT" {
+		t.Errorf("GetBlockedPolicy.BlockMessage = %q, want %q", got.BlockMessage, "contact IT")
+	}
+	if len(got.Users) != 2 {
+		t.Fatalf("GetBlockedPolicy.Users = %+v, want 2 entries", got.Users)
+	}
+	byName := map[string]BlockedUserEntry{}
+	for _, u := range got.Users {
+		byName[u.Username] = u
+	}
+	if len(byName["eve"].Hosts) != 2 || byName["eve"].Reason != "compromised" {
+		t.Errorf("GetBlockedPolicy eve entry = %+v", byName["eve"])
+	}
+	if len(byName["mallory"].Hosts) != 0 {
+		t.Errorf("GetBlockedPolicy mallory entry (nil hosts = all hosts) = %+v, want empty Hosts", byName["mallory"])
+	}
+}
+
+func TestDistributedStore_GetWhitelistPolicy(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	empty, err := d.GetWhitelistPolicy(ctx)
+	if err != nil {
+		t.Fatalf("GetWhitelistPolicy (empty): %v", err)
+	}
+	if len(empty.Users) != 0 {
+		t.Errorf("GetWhitelistPolicy (empty) = %+v, want no users", empty)
+	}
+
+	policy := WhitelistPolicy{
+		Users: []WhitelistedUserEntry{
+			{Username: "trusted-svc", Hosts: []string{"host1"}, Reason: "automation"},
+		},
+	}
+	if err := d.SaveWhitelistPolicy(ctx, policy); err != nil {
+		t.Fatalf("SaveWhitelistPolicy: %v", err)
+	}
+
+	got, err := d.GetWhitelistPolicy(ctx)
+	if err != nil {
+		t.Fatalf("GetWhitelistPolicy: %v", err)
+	}
+	if len(got.Users) != 1 || got.Users[0].Username != "trusted-svc" || len(got.Users[0].Hosts) != 1 {
+		t.Errorf("GetWhitelistPolicy = %+v, want one trusted-svc entry with 1 host", got.Users)
+	}
+}
+
+// ── Session state transitions (writer methods + store-level markers) ─────────
+
+func TestDistributedStore_WriterStateTransitions(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	meta := distTestMeta("alice", "host1")
+	w, err := d.CreateSession(ctx, meta, time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tsid := w.TSID()
+	defer w.Close()
+
+	if err := w.WriteInput([]byte("ls\n"), 1); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	if err := w.WriteResize(80, 24, 2); err != nil {
+		t.Fatalf("WriteResize: %v", err)
+	}
+	if err := w.WriteExitCode(7); err != nil {
+		t.Fatalf("WriteExitCode: %v", err)
+	}
+	if err := w.MarkIncomplete(); err != nil {
+		t.Fatalf("MarkIncomplete: %v", err)
+	}
+
+	rec := findSessionRecord(t, d, ctx, tsid)
+	if rec.ExitCode != 7 {
+		t.Errorf("ExitCode = %d, want 7", rec.ExitCode)
+	}
+	if !rec.Incomplete {
+		t.Error("Incomplete = false after MarkIncomplete, want true")
+	}
+	if rec.InProgress {
+		t.Error("InProgress = true after MarkIncomplete, want false")
+	}
+}
+
+func TestDistributedStore_WriterMarkNetworkOutage(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	w, err := d.CreateSession(ctx, distTestMeta("alice", "host1"), time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tsid := w.TSID()
+	defer w.Close()
+
+	if err := w.MarkNetworkOutage(); err != nil {
+		t.Fatalf("MarkNetworkOutage: %v", err)
+	}
+
+	rec := findSessionRecord(t, d, ctx, tsid)
+	if !rec.NetworkOutage || !rec.Incomplete || rec.InProgress {
+		t.Errorf("record after MarkNetworkOutage = %+v, want NetworkOutage=true Incomplete=true InProgress=false", rec)
+	}
+}
+
+func TestDistributedStore_MarkSessionNetworkOutage(t *testing.T) {
+	// Distinct from the writer's MarkNetworkOutage above: this is the
+	// store-level path keyed by session_id, used when the server has no
+	// live writer at hand (SESSION_ABANDON arriving on a fresh connection).
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	meta := distTestMeta("alice", "host1")
+	w, err := d.CreateSession(ctx, meta, time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tsid := w.TSID()
+	defer w.Close()
+
+	if err := d.MarkSessionNetworkOutage(ctx, meta.SessionID); err != nil {
+		t.Fatalf("MarkSessionNetworkOutage: %v", err)
+	}
+
+	rec := findSessionRecord(t, d, ctx, tsid)
+	if !rec.NetworkOutage {
+		t.Errorf("NetworkOutage = false after MarkSessionNetworkOutage, want true")
+	}
+}
+
+func TestDistributedStore_UpdateDivergenceStatus(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	w, err := d.CreateSession(ctx, distTestMeta("alice", "host1"), time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tsid := w.TSID()
+	defer w.Close()
+
+	if err := d.UpdateDivergenceStatus(ctx, tsid, "confirmed", "matched-tsid-123"); err != nil {
+		t.Fatalf("UpdateDivergenceStatus: %v", err)
+	}
+
+	rec := findSessionRecord(t, d, ctx, tsid)
+	if rec.DivergenceStatus != "confirmed" || rec.MatchedSessionID != "matched-tsid-123" {
+		t.Errorf("record after UpdateDivergenceStatus = %+v, want status=confirmed matched=matched-tsid-123", rec)
+	}
+}
+
+func TestDistributedStore_SandboxViolation(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	meta := distTestMeta("alice", "host1")
+	w, err := d.CreateSession(ctx, meta, time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tsid := w.TSID()
+	defer w.Close()
+
+	if violated, err := d.HasSandboxViolation(ctx, tsid); err != nil || violated {
+		t.Fatalf("HasSandboxViolation before any alert = %v, %v; want false, nil", violated, err)
+	}
+
+	alert := protocol.SandboxAlert{SessionID: meta.SessionID, Pid: 4242, Comm: "nc", Type: 1, Ts: time.Now().Unix()}
+	if err := d.RecordSandboxViolation(ctx, meta.SessionID, alert); err != nil {
+		t.Fatalf("RecordSandboxViolation: %v", err)
+	}
+
+	violated, err := d.HasSandboxViolation(ctx, tsid)
+	if err != nil {
+		t.Fatalf("HasSandboxViolation: %v", err)
+	}
+	if !violated {
+		t.Error("HasSandboxViolation = false after RecordSandboxViolation, want true")
+	}
+}
+
+func TestDistributedStore_HasSandboxViolation_MissingSession(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if violated, err := d.HasSandboxViolation(ctx, "no-such-tsid"); err != nil || violated {
+		t.Errorf("HasSandboxViolation(missing) = %v, %v; want false, nil", violated, err)
+	}
+}
+
+// findSessionRecord is a test helper: fetches a single session by tsid via
+// ListSessions, failing the test if it isn't found.
+func findSessionRecord(t *testing.T, d *DistributedStore, ctx context.Context, tsid string) SessionRecord {
+	t.Helper()
+	records, err := d.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	for _, r := range records {
+		if r.TSID == tsid {
+			return r
+		}
+	}
+	t.Fatalf("session %s not found in ListSessions", tsid)
+	return SessionRecord{}
+}
+
+// ── WatchSessions ──────────────────────────────────────────────────────────────
+
+func TestDistributedStore_WatchSessions(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ch := make(chan string, 4)
+	go d.WatchSessions(ctx, ch)
+	// Let the goroutine acquire its advisory lock and record its starting
+	// "lastCheck" timestamp before any session exists — WatchSessions only
+	// reports sessions whose updated_at moves past that point.
+	time.Sleep(300 * time.Millisecond)
+
+	w, err := d.CreateSession(ctx, distTestMeta("alice", "host1"), time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tsid := w.TSID()
+	if err := w.MarkDone(); err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
+	defer w.Close()
+
+	select {
+	case got := <-ch:
+		if got != tsid {
+			t.Errorf("WatchSessions sent %q, want %q", got, tsid)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("WatchSessions did not report the completed session within 8s (poll interval is 5s)")
+	}
+}
+
+// ── GetConfig/SetConfig ────────────────────────────────────────────────────────
+
+func TestDistributedStore_GetSetConfig(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if v, err := d.GetConfig(ctx, "no-such-key"); err != nil || v != "" {
+		t.Fatalf("GetConfig(missing) = %q, %v; want empty, nil", v, err)
+	}
+
+	if err := d.SetConfig(ctx, "risk-rules.yaml", "rules: []"); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+	if v, err := d.GetConfig(ctx, "risk-rules.yaml"); err != nil || v != "rules: []" {
+		t.Fatalf("GetConfig = %q, %v; want %q, nil", v, err, "rules: []")
+	}
+
+	// Upsert: setting the same key again must replace, not duplicate.
+	if err := d.SetConfig(ctx, "risk-rules.yaml", "rules: [updated]"); err != nil {
+		t.Fatalf("SetConfig (update): %v", err)
+	}
+	if v, err := d.GetConfig(ctx, "risk-rules.yaml"); err != nil || v != "rules: [updated]" {
+		t.Fatalf("GetConfig after update = %q, %v; want %q, nil", v, err, "rules: [updated]")
+	}
+
+	// SetConfig with an empty value deletes the key (see SetConfig's doc comment).
+	if err := d.SetConfig(ctx, "risk-rules.yaml", ""); err != nil {
+		t.Fatalf("SetConfig (delete): %v", err)
+	}
+	if v, err := d.GetConfig(ctx, "risk-rules.yaml"); err != nil || v != "" {
+		t.Fatalf("GetConfig after delete = %q, %v; want empty, nil", v, err)
+	}
+}
+
+// ── doCleanup ────────────────────────────────────────────────────────────────
+
+func TestDistributedStore_DoCleanup_RemovesExpiredSessions(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	// An old, completed session — should be removed by cleanup.
+	oldStart := time.Now().AddDate(0, 0, -10)
+	wOld, err := d.CreateSession(ctx, distTestMeta("alice", "old-host"), oldStart)
+	if err != nil {
+		t.Fatalf("CreateSession (old): %v", err)
+	}
+	oldTSID := wOld.TSID()
+	if err := wOld.MarkDone(); err != nil {
+		t.Fatalf("MarkDone (old): %v", err)
+	}
+	wOld.Close()
+	// Backdate start_time directly: CreateSession always stamps "now", and
+	// doCleanup's query filters on start_time, not session age otherwise.
+	if _, err := d.db.Exec(ctx, `UPDATE sudo_sessions SET start_time=$1 WHERE tsid=$2`,
+		oldStart.Unix(), oldTSID); err != nil {
+		t.Fatalf("backdate old session: %v", err)
+	}
+
+	// A recent, completed session — must survive cleanup.
+	wRecent, err := d.CreateSession(ctx, distTestMeta("bob", "new-host"), time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession (recent): %v", err)
+	}
+	recentTSID := wRecent.TSID()
+	if err := wRecent.MarkDone(); err != nil {
+		t.Fatalf("MarkDone (recent): %v", err)
+	}
+	wRecent.Close()
+
+	policy := RetentionPolicy{Enabled: true, Days: 7}
+	if err := d.SetConfig(ctx, "retention_policy", string(toJSON(policy))); err != nil {
+		t.Fatalf("SetConfig retention_policy: %v", err)
+	}
+
+	// 0x434c4e50 mirrors the unexported lockID constant doCleanup uses
+	// internally; any unused advisory-lock ID works equally for the test.
+	d.doCleanup(ctx, 0x434c4e50)
+
+	records, err := d.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	var sawOld, sawRecent bool
+	for _, r := range records {
+		if r.TSID == oldTSID {
+			sawOld = true
+		}
+		if r.TSID == recentTSID {
+			sawRecent = true
+		}
+	}
+	if sawOld {
+		t.Error("doCleanup did not remove the expired session")
+	}
+	if !sawRecent {
+		t.Error("doCleanup incorrectly removed the non-expired session")
+	}
+}
+
+func TestDistributedStore_DoCleanup_PurgesExpiredApprovalRequests(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	expired := ApprovalRequest{
+		ID: "req-expired", User: "alice", Host: "host1", Command: "reboot",
+		SubmittedAt: time.Now().Add(-2 * time.Hour),
+		ExpiresAt:   time.Now().Add(-1 * time.Hour),
+	}
+	if err := d.CreateApprovalRequest(ctx, expired); err != nil {
+		t.Fatalf("CreateApprovalRequest (expired): %v", err)
+	}
+	live := ApprovalRequest{
+		ID: "req-live", User: "bob", Host: "host1", Command: "systemctl restart nginx",
+		SubmittedAt: time.Now(),
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+	}
+	if err := d.CreateApprovalRequest(ctx, live); err != nil {
+		t.Fatalf("CreateApprovalRequest (live): %v", err)
+	}
+
+	d.doCleanup(ctx, 0x434c4e51)
+
+	// ListApprovalRequests itself filters out expired rows, so it can't tell
+	// us whether doCleanup actually deleted the row vs. it just being
+	// filtered — query sudo_approval_requests directly instead.
+	var expiredCount, liveCount int
+	if err := d.db.QueryRow(ctx, `SELECT count(*) FROM sudo_approval_requests WHERE id=$1`, "req-expired").Scan(&expiredCount); err != nil {
+		t.Fatalf("query req-expired: %v", err)
+	}
+	if err := d.db.QueryRow(ctx, `SELECT count(*) FROM sudo_approval_requests WHERE id=$1`, "req-live").Scan(&liveCount); err != nil {
+		t.Fatalf("query req-live: %v", err)
+	}
+	if expiredCount != 0 {
+		t.Error("doCleanup did not purge the expired approval request")
+	}
+	if liveCount != 1 {
+		t.Error("doCleanup incorrectly purged the live approval request")
 	}
 }
