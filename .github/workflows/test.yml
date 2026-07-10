@@ -31,6 +31,18 @@ jobs:
         working-directory: go/cmd/replay-server/ui
         run: npm ci && npm run build
 
+      - name: Frontend tests
+        working-directory: go/cmd/replay-server/ui
+        run: npm run test:coverage
+
+      - name: Upload frontend coverage
+        if: matrix.go == 'stable'
+        uses: codecov/codecov-action@v5
+        with:
+          files: go/cmd/replay-server/ui/coverage/lcov.info
+          flags: frontend
+          token: ${{ secrets.CODECOV_TOKEN }}
+
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
@@ -52,4 +64,5 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           files: go/coverage.out
+          flags: go
           token: ${{ secrets.CODECOV_TOKEN }}

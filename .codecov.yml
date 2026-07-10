@@ -9,6 +9,14 @@ coverage:
         target: 50%
         threshold: 5%
 
+flags:
+  go:
+    paths:
+      - go/
+  frontend:
+    paths:
+      - go/cmd/replay-server/ui/
+
 comment:
   layout: "reach,diff,flags"
   behavior: default
