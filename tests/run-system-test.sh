@@ -373,11 +373,21 @@ if ! podman exec sudo-client-test pgrep -x sleep >/dev/null 2>&1; then
 fi
 # Kill the agent mid-session (no SESSION_END will be sent to logserver).
 podman exec sudo-client-test pkill -f sudo-logger-agent || true
-sleep 5
-# Logserver must have written an INCOMPLETE marker.
-podman exec sudo-logserver-test find /var/log/sudoreplay -name INCOMPLETE \
-    | grep -q INCOMPLETE \
-    || fail "TEST 12" "no INCOMPLETE marker found after agent was killed mid-session"
+
+# Logserver must have written an INCOMPLETE marker. Poll instead of a fixed
+# sleep: agent teardown (cgroup/eBPF cleanup before process exit) and the
+# server's connection-drop detection can occasionally take longer than a
+# fixed window under CI load — same class of flakiness as TEST 7/TEST 14.
+INCOMPLETE_FOUND=0
+for _ in $(seq 1 20); do
+    if podman exec sudo-logserver-test find /var/log/sudoreplay -name INCOMPLETE 2>/dev/null \
+        | grep -q INCOMPLETE; then
+        INCOMPLETE_FOUND=1
+        break
+    fi
+    sleep 1
+done
+[ "$INCOMPLETE_FOUND" = "1" ] || fail "TEST 12" "no INCOMPLETE marker found after agent was killed mid-session"
 pass "TEST 12"
 
 # ── TEST 13: Sandbox Violation ───────────────────────────────────────────────
@@ -393,7 +403,6 @@ pass "TEST 12"
 #podman exec sudo-logserver-test find /var/log/sudoreplay -name SANDBOX_VIOLATION \
 #    | grep -q SANDBOX_VIOLATION \
 #    || { echo "Agent logs:"; podman logs sudo-client-test; fail "TEST 13" "no SANDBOX_VIOLATION marker found on logserver"; }
-pass "TEST 12"
 
 # Restart agent for TEST 14 since TEST 12 killed it.
 echo "   Startar om agent..."
