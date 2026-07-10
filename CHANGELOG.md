@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] - 2026-07-10
+
+### Security
+- **replay**: `isBootstrapMode` treated any `-htpasswd`-configured deployment with zero "modern" store users as first-run/open, serving every request as admin with no auth at all, regardless of the htpasswd file's contents. It now returns false whenever `-htpasswd` is set.
+- **replay**: `-htpasswd` authentication had been silently non-functional — nothing parsed the htpasswd file's bcrypt hashes against a submitted password. Restored (new `htpasswd.go`, load/parse/reload), with `SIGHUP` reload wired up as the flag's help text already documented.
+- **replay**: An htpasswd-authenticated user with no matching store entry stayed at the default viewer role. `-htpasswd` predates per-user roles and was always a flat, single-tier auth mode, so such users now get admin, matching that history.
+
+### Added
+- **ci**: The existing 14-test container-based end-to-end suite (`tests/run-system-test.sh`) now runs in CI on every release tag, instead of only locally.
+
 ## [1.33.0] - 2026-07-07
 
 ### Fixed
