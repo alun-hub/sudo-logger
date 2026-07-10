@@ -4,9 +4,7 @@ Thank you for your interest in contributing to sudo-logger. This document descri
 
 ## Reporting Security Vulnerabilities
 
-**Do not open a public GitHub issue for security vulnerabilities.**
-
-Please report security vulnerabilities by emailing the maintainer directly (see the GitHub profile) or by using [GitHub's private vulnerability reporting](https://github.com/alun-hub/sudo-logger/security/advisories/new). Include a description of the issue, steps to reproduce, and potential impact.
+See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
 
 ## Getting Started
 
