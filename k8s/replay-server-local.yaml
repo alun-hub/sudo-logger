@@ -1,0 +1,102 @@
+---
+# Replay server — local storage mode. Shares the sudoreplay-logs PVC with
+# sudo-logserver (see deployment.yaml); no S3/PostgreSQL needed. This is the
+# manifest used by `kubectl apply -k k8s/`, the simplest Kubernetes install
+# path — see INSTALLATION.md section 2.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sudo-replay-server
+  namespace: sudo-logger
+  labels:
+    app: sudo-replay-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sudo-replay-server
+  template:
+    metadata:
+      labels:
+        app: sudo-replay-server
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+
+      containers:
+        - name: sudo-replay-server
+          image: localhost/sudo-logger:latest
+          imagePullPolicy: Never
+          command: [/usr/local/bin/sudo-replay-server]
+          args:
+            - -listen=:8080
+            - -logdir=/var/log/sudoreplay
+            - -rules=/etc/sudo-logger/risk-rules.yaml
+
+          env:
+            - name: TZ
+              value: Europe/Stockholm
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          volumeMounts:
+            - name: storage
+              mountPath: /var/log/sudoreplay
+            - name: tmp
+              mountPath: /tmp
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: sudoreplay-logs
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sudo-replay-server
+  namespace: sudo-logger
+spec:
+  type: NodePort
+  selector:
+    app: sudo-replay-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080

@@ -157,7 +157,82 @@ sudo systemctl enable --now sudo-logger-agent
 
 ---
 
-## 2. Distributed Storage (Kubernetes)
+## 2. Kubernetes — Local Storage
+
+Suitable for trying `sudo-logger` on a small Kubernetes cluster (k3s, kind,
+minikube) without standing up PostgreSQL/S3. Session recordings are stored on
+a single PersistentVolumeClaim, shared by the log server and replay server
+(they run as two separate Deployments/pods, each mounting the same PVC).
+
+> **Single-node clusters only.** The PVC is `ReadWriteOnce`, so both pods can
+> mount it only because they land on the same node. On a multi-node cluster
+> the scheduler could place them on different nodes, and whichever pod
+> starts second would fail to mount the volume. Use the
+> [Distributed Storage](#3-distributed-storage-kubernetes) path or the
+> [Helm chart](charts/sudo-logger/README.md) instead if your cluster has more
+> than one node.
+
+### A. Prepare TLS certificates
+
+Same requirements as the systemd install above: a CA, a server certificate/key,
+and an Ed25519 ACK-signing key, placed flat in a local directory (e.g. `./pki`):
+
+```
+ca.crt
+server.crt
+server.key
+ack-sign.key
+```
+
+If you don't have a CA yet, generate a throwaway self-signed set for testing:
+
+```bash
+mkdir -p pki && cd pki
+openssl req -x509 -newkey ed25519 -nodes -days 3650 \
+  -keyout ca.key -out ca.crt -subj "/CN=sudo-logger CA"
+openssl req -newkey ed25519 -nodes \
+  -keyout server.key -out server.csr -subj "/CN=sudo-logserver"
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+  -CAcreateserial -days 3650 -out server.crt
+openssl genpkey -algorithm ed25519 -out ack-sign.key
+cd ..
+```
+
+### B. Create the namespace and secret
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+bash k8s/create-secret.sh ./pki
+```
+
+`create-secret.sh` creates the `sudo-logger-tls` Secret from the files above.
+`k8s/secret.yaml` is a template for reference only — it holds placeholder
+values and is not meant to be applied directly (it is deliberately excluded
+from `k8s/kustomization.yaml` for that reason).
+
+### C. Deploy
+
+```bash
+cd k8s
+kubectl apply -k .
+```
+
+This creates the PVC, the `sudo-logserver` and `sudo-replay-server`
+Deployments (local-storage mode, using `k8s/deployment.yaml` and
+`k8s/replay-server-local.yaml`), and their Services.
+
+### D. Access
+
+| Service | Address |
+|---|---|
+| Replay UI | `http://<NODE_IP>:30080` |
+| Log server (agent TLS) | `<NODE_IP>:9876`, or the external IP your cluster's LoadBalancer assigns (k3s's built-in ServiceLB and cloud LBs both work out of the box; on a cluster without one, edit `k8s/service.yaml` to use `NodePort` instead) |
+
+Continue with client setup (section 1.E–F above) to point an agent at this log server.
+
+---
+
+## 3. Distributed Storage (Kubernetes)
 
 For production environments. Session metadata is stored in PostgreSQL and session
 recordings in S3 (MinIO or AWS S3). Settings changed in the UI persist to the
@@ -215,6 +290,16 @@ kubectl create secret generic sudo-logger-distributed \
   --from-literal=db-password=<your-db-password> \
   --from-literal=db-url='postgres://sudologger:<your-db-password>@postgresql:5432/sudologger?sslmode=disable'  # pragma: allowlist secret
 
+# deployment-distributed.yaml also requires an approval-token Secret and an
+# approval-policy ConfigMap (used by the JIT Approval admin API — see section
+# 4) even if you don't plan to use JIT Approval. Without them the pod is
+# stuck in ContainerCreating.
+kubectl create secret generic sudo-logger-approval-token \
+  --namespace sudo-logger \
+  --from-literal=token="$(openssl rand -hex 32)"
+
+kubectl apply -f k8s/configmap.yaml
+
 kubectl apply -f k8s/postgresql.yaml
 kubectl apply -f k8s/minio.yaml
 kubectl apply -f k8s/service.yaml
@@ -239,7 +324,7 @@ After a successful deployment:
 
 ---
 
-## 3. JIT Approval
+## 4. JIT Approval
 
 The JIT approval system blocks `sudo` until an administrator grants access via the
 Replay UI or a Mattermost/Slack interactive button. See the **Help** tab in the
@@ -283,7 +368,7 @@ notifications:
 
 ---
 
-## 4. Replay UI authentication & Bootstrap
+## 5. Replay UI authentication & Bootstrap
 
 The Replay UI requires authentication to restrict access to sensitive audit logs.
 
@@ -302,9 +387,16 @@ Once the initial administrator is created, you can navigate to **Config -> Users
 
 Additional flags (TLS, etc.) can be appended to `REPLAY_ARGS` in the same file.
 
+> **Note:** `k8s/keycloak.yaml` and `k8s/oauth2-proxy.yaml` are working
+> examples of wiring up Keycloak (OIDC) and oauth2-proxy (External Proxy) in
+> Kubernetes, but they hardcode one specific environment's IP/hostnames —
+> they are not generic manifests you can `kubectl apply` as-is. Treat them as
+> a reference to adapt, not a supported install path; edit the host/IP values
+> for your own environment before applying.
+
 ---
 
-## 5. SELinux
+## 6. SELinux
 
 On SELinux-enforcing systems the `sudo-logger-client` RPM installs and
 activates the required policy module automatically during `%post`. No manual
@@ -321,7 +413,7 @@ sudo semodule -i sudo_logger.pp
 
 ---
 
-## 6. Risk rules and SIEM
+## 7. Risk rules and SIEM
 
 Both config files are installed with defaults by the `sudo-logger-replay` RPM and
 can be edited live in **Settings → Risk Rules** / **Settings → SIEM**:
@@ -335,7 +427,7 @@ Changes saved in the UI take effect immediately — no restart required.
 
 ---
 
-## 7. Verification
+## 8. Verification
 
 1. On a monitored host, run `sudo -i` (or any sudo command).
 2. If JIT approval is enabled you will be prompted:
@@ -346,7 +438,7 @@ Changes saved in the UI take effect immediately — no restart required.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Check |
 |---|---|

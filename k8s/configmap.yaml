@@ -1,0 +1,23 @@
+---
+# Default approval-policy ConfigMap for distributed-storage deployments.
+# deployment-distributed.yaml mounts this ConfigMap — it must exist (even with
+# JIT approval disabled) or the pod will not start (stuck in
+# ContainerCreating). Content here only matters as an initial fallback: once
+# the Replay UI's Settings -> JIT Approval page is used, the effective policy
+# is stored in the database and takes precedence. See INSTALLATION.md
+# section 4 ("JIT Approval").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sudo-logger-approval-policy
+  namespace: sudo-logger
+data:
+  approval-policy.yaml: |
+    enabled: false
+    exempt: []
+    notifications:
+      webhook_url: ""
+      webhook_secret: ""
+      request_channel: ""
+      replay_web_app_url: ""
+      mention_user: false

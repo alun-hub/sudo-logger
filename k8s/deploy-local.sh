@@ -3,7 +3,7 @@
 #
 # Prerequisites:
 #   - kubectl configured and pointing to your local cluster
-#   - PKI files in ../pki/ (ca.crt, server.crt, server.key, hmac.key)
+#   - PKI files in ../pki/ (ca.crt, server.crt, server.key, ack-sign.key)
 #   - Docker image built and accessible to the cluster
 #
 # Usage:
@@ -94,6 +94,23 @@ $KUBECTL create secret generic sudo-logger-distributed \
   --save-config \
   --dry-run=client -o yaml | kubectl apply -f -
 
+# ── Approval token + policy ────────────────────────────────────────────────────
+# Required by deployment-distributed.yaml (secretKeyRef / configMap volume) —
+# without them the pod gets stuck in ContainerCreating. Generated once and
+# left alone on re-runs so a shared token isn't rotated out from under a
+# running deployment.
+if kubectl get secret sudo-logger-approval-token -n "${NAMESPACE}" >/dev/null 2>&1; then
+  log "sudo-logger-approval-token already exists, leaving it unchanged."
+else
+  log "Creating sudo-logger-approval-token secret..."
+  $KUBECTL create secret generic sudo-logger-approval-token \
+    --namespace "${NAMESPACE}" \
+    --from-literal=token="$(openssl rand -hex 32)"
+fi
+
+log "Applying default approval-policy ConfigMap (JIT approval disabled by default)..."
+$KUBECTL apply -f "${SCRIPT_DIR}/configmap.yaml"
+
 # ── MinIO + PostgreSQL ────────────────────────────────────────────────────────
 log "Deploying PostgreSQL..."
 $KUBECTL apply -f "${SCRIPT_DIR}/postgresql.yaml"
@@ -130,8 +147,12 @@ kubectl wait --for=condition=complete job/minio-create-bucket \
 patch_image() {
   local deploy="$1"
   local container="$2"
-  kubectl set image deployment/"${deploy}" "${container}=${IMAGE}" \
-    -n "${NAMESPACE}" 2>/dev/null || true
+  # Also switch imagePullPolicy to IfNotPresent: the base manifests hardcode
+  # "Never" (correct for the locally-built, k3s-imported image), which would
+  # otherwise leave a registry image (e.g. --image ghcr.io/...) stuck in
+  # ErrImageNeverPull forever.
+  kubectl patch deployment/"${deploy}" -n "${NAMESPACE}" --type=strategic -p \
+    "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"${container}\",\"image\":\"${IMAGE}\",\"imagePullPolicy\":\"IfNotPresent\"}]}}}}"
 }
 
 # ── Deploy logserver (distributed) ───────────────────────────────────────────

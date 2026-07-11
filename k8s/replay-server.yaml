@@ -16,10 +16,6 @@ spec:
       labels:
         app: sudo-replay-server
     spec:
-      hostAliases:
-        - ip: "192.168.2.163"
-          hostnames:
-            - "gnarg.alun.se"
       terminationGracePeriodSeconds: 40
       securityContext:
         runAsNonRoot: true
@@ -43,7 +39,11 @@ spec:
             - -buffer-dir=/var/lib/sudo-logger/buffer
             - -logserver-admin=http://sudo-logserver-admin:9877
             - -logserver-admin-token=$(APPROVAL_TOKEN)
-            - -admin-users=alun-hub
+            # Optional: seed the first admin user on a fresh deploy (only takes
+            # effect if the user store is empty). Without it, the Replay UI shows
+            # the Bootstrap Setup screen for interactive first-admin creation.
+            # See INSTALLATION.md section 5.
+            # - -admin-users=<your-username>
 
           env:
             - name: TZ

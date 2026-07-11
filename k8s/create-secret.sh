@@ -4,11 +4,11 @@
 # Usage:
 #   bash create-secret.sh /path/to/pki [--dry-run]
 #
-# The PKI directory must contain:
-#   ca/ca.crt
-#   server/server.crt
-#   server/server.key
-#   hmac.key  (ed25519 signing key for ACKs, passed to server via -signkey)
+# The PKI directory must contain (flat layout, same as INSTALLATION.md/pki):
+#   ca.crt
+#   server.crt
+#   server.key
+#   ack-sign.key  (ed25519 signing key for ACKs, passed to server via -signkey)
 #
 # Applies directly to the cluster unless --dry-run is passed.
 set -euo pipefail
@@ -23,10 +23,10 @@ fi
 
 kubectl create secret generic sudo-logger-tls \
     --namespace sudo-logger \
-    --from-file=ca.crt="${PKI_DIR}/ca/ca.crt" \
-    --from-file=server.crt="${PKI_DIR}/server/server.crt" \
-    --from-file=server.key="${PKI_DIR}/server/server.key" \
-    --from-file=hmac.key="${PKI_DIR}/hmac.key" \
+    --from-file=ca.crt="${PKI_DIR}/ca.crt" \
+    --from-file=server.crt="${PKI_DIR}/server.crt" \
+    --from-file=server.key="${PKI_DIR}/server.key" \
+    --from-file=ack-sign.key="${PKI_DIR}/ack-sign.key" \
     --save-config \
     $KUBECTL_ARGS
 
