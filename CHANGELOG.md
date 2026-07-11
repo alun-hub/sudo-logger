@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] - 2026-07-11
+
+### Fixed
+- **docs**: INSTALLATION.md sections 1 (RPM/DEB local storage) and 3 (Kubernetes distributed) never explained how to actually obtain a CA/server/client certificate — just "have these files ready", assuming prior PKI knowledge a true beginner wouldn't have. Added a shared "Preparing TLS Certificates and Signing Keys" section presenting bring-your-own-CA and generate-your-own as explicit, equal options, referenced from every place that used to just assume the reader already had these files.
+- **docs**: Section 2's own cert-generation snippet (added in the v1.35.0 pass) generated a server certificate with no SAN at all — would fail modern TLS clients' hostname verification in practice. Never caught because that section's own test reused a pre-existing secret rather than generating one fresh from the documented snippet. Fixed to match the SAN handling used everywhere else.
+- **docs**: `setup.sh` was written entirely in Swedish (this project's documented policy requires English), produced a nested `ca/server/client` PKI directory layout incompatible with `create-secret.sh`'s now-fixed flat convention, used RSA where everything else now uses ed25519, and hardcoded stale `v1.20.x` RPM filenames in its output. Rewritten: English, flat layout, ed25519, and points to INSTALLATION.md for the actual install steps instead of duplicating them.
+
+### Documentation
+- Consolidated installation instructions into INSTALLATION.md. README.md had accumulated three separate, partially-duplicate install walkthroughs of its own (a full "Installation" section, "Container deployment (Podman)", and "Kubernetes deployment"), several with content that had drifted from reality (stale `v1.20.x` RPM filenames, a claim that local-storage k8s has no replay-server manifest that was fixed in v1.35.0, `setup.sh` referenced as a prerequisite producing a layout `create-secret.sh` no longer accepts). Trimmed all three down to short pointers at INSTALLATION.md, keeping only genuinely non-duplicate reference content (storage-mode comparison, security notes, production-readiness checklist, the `migrate-sessions` tool).
+- Added a new "Docker Compose" section to INSTALLATION.md (previously undocumented there at all), migrating the genuinely useful, still-accurate parts of README's now-removed Container deployment walkthrough. Existing sections 4-9 renumbered to 5-10 accordingly.
+
 ## [1.36.0] - 2026-07-11
 
 ### Added
