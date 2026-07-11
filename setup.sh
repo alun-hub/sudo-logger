@@ -7,6 +7,16 @@ set -euo pipefail
 
 OUTDIR="${1:-/tmp/sudo-logger-pki}"
 SERVER_HOSTNAME="${2:-logserver.example.com}"
+
+# SERVER_HOSTNAME gets embedded in a generated OpenSSL config file below
+# (DNS.1 = $SERVER_HOSTNAME) — reject anything that isn't a plain
+# hostname/IP so it can't inject extra config directives (e.g. a value
+# containing a newline and an additional "DNS.2 = ..." line).
+if ! [[ "$SERVER_HOSTNAME" =~ ^[A-Za-z0-9.:-]+$ ]]; then
+    echo "error: invalid hostname/IP '$SERVER_HOSTNAME' — only letters, digits, '.', '-', ':' allowed" >&2
+    exit 1
+fi
+
 mkdir -p "$OUTDIR"
 echo "==> Server hostname (used as the certificate SAN): $SERVER_HOSTNAME"
 
