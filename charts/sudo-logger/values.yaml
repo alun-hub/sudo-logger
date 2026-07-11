@@ -21,27 +21,90 @@ storage:
   local:
     # -- PVC size for local storage
     size: 10Gi
+  distributed:
+    # -- Fixed name of the Secret this chart generates (random db/S3 credentials,
+    # persisted across `helm upgrade`) and also hands to the bundled postgresql/
+    # minio subcharts via their own `auth.existingSecret`. Must be a literal
+    # string (not templated) since it's referenced from values passed straight
+    # to those subcharts.
+    authSecretName: sudo-logger-distributed-auth  # pragma: allowlist secret
+    s3:
+      bucket: sudo-logs
+      # -- S3-compatible endpoint. Empty = use the bundled MinIO subchart
+      # (http://<release-name>-minio:9000).
+      endpoint: ""
+      pathStyle: true
+    # -- PostgreSQL host/port. Empty host = use the bundled postgresql subchart
+    # (<release-name>-postgresql).
+    dbHost: ""
+    dbPort: 5432
 
 tls:
-  # -- TLS mode: 'self-signed', 'provided' (manual secret), or 'cert-manager'
+  # -- TLS mode: 'self-signed' (auto-generated CA+cert, persisted across
+  # upgrades) or 'provided' (supply your own via tls.provided.*).
+  # NOTE: a documented 'cert-manager' mode was previously listed here but was
+  # never implemented — see charts/sudo-logger/README.md for status.
   mode: self-signed
-  # -- Name of an existing TLS secret to use
+  # -- Name of an existing Secret (keys: ca.crt, tls.crt, tls.key) to use
+  # instead of the chart-managed one. Overrides `mode` entirely.
   existingSecret: ""
   provided:
-    # -- Base64 encoded certificate (if mode is 'provided')
+    # -- PEM certificate (if mode is 'provided')
     cert: ""
-    # -- Base64 encoded private key (if mode is 'provided')
+    # -- PEM private key (if mode is 'provided')
     key: ""
-    # -- Base64 encoded CA certificate (if mode is 'provided')
+    # -- PEM CA certificate (if mode is 'provided')
     ca: ""
+
+signingKey:
+  # -- Name of an existing Secret (key: ack-sign.key, PEM PKCS8 ed25519) to use
+  # instead of the chart-managed, auto-generated one.
+  existingSecret: ""
 
 # -- Enable/disable bundled PostgreSQL chart (used when storage.type is 'distributed')
 postgresql:
   enabled: false
+  # Bitnami deprecated the free docker.io/bitnami/* images in 2025; the
+  # version this subchart pins (16.4.0-debian-12-r14) is gone from Docker Hub.
+  # bitnamilegacy is Bitnami's unmaintained mirror of pre-deprecation images —
+  # override to your own mirror, or to docker.io/bitnami/* if you have a
+  # Bitnami Secure Images subscription, once you have a longer-term source.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+  auth:
+    username: sudologger
+    database: sudologger
+    # No password is assigned to the "postgres" superuser — only the
+    # dedicated sudologger user/database above are used.
+    enablePostgresUser: false
+    existingSecret: sudo-logger-distributed-auth  # pragma: allowlist secret
+    secretKeys:
+      userPasswordKey: pg-password  # pragma: allowlist secret
 
 # -- Enable/disable bundled MinIO chart (used when storage.type is 'distributed')
 minio:
   enabled: false
+  # See the note on postgresql.image above — same Bitnami deprecation applies.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/minio
+  defaultBuckets: sudo-logs
+  auth:
+    existingSecret: sudo-logger-distributed-auth  # pragma: allowlist secret
+    rootUserSecretKey: root-user  # pragma: allowlist secret
+    rootPasswordSecretKey: root-password  # pragma: allowlist secret
+
+logserver:
+  service:
+    # -- Service type for the log server's agent-facing TLS port (9876).
+    # ClusterIP is only reachable from inside the cluster — monitored hosts
+    # outside it need NodePort (works everywhere) or LoadBalancer (needs a
+    # cloud LB or MetalLB; k3s's built-in ServiceLB also works).
+    type: NodePort
+    # -- Fixed NodePort to use (only when type=NodePort). Empty = let
+    # Kubernetes assign one (check with `kubectl get svc`).
+    nodePort: ""
 
 replay:
   # -- Number of replay-server replicas to run

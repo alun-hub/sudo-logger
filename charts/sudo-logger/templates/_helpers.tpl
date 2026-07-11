@@ -37,3 +37,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "sudo-logger.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
+
+{{/* Name of the Secret holding ca.crt/tls.crt/tls.key. */}}
+{{- define "sudo-logger.tlsSecretName" -}}
+{{- .Values.tls.existingSecret | default (printf "%s-tls" (include "sudo-logger.fullname" .)) -}}
+{{- end }}
+
+{{/* Name of the Secret holding ack-sign.key. */}}
+{{- define "sudo-logger.signingKeySecretName" -}}
+{{- .Values.signingKey.existingSecret | default (printf "%s-signing-key" (include "sudo-logger.fullname" .)) -}}
+{{- end }}
+
+{{/* PostgreSQL host (bundled subchart's service name, or a user-provided host). */}}
+{{- define "sudo-logger.dbHost" -}}
+{{- .Values.storage.distributed.dbHost | default (printf "%s-postgresql" .Release.Name) -}}
+{{- end }}
+
+{{/* MinIO/S3 endpoint (bundled subchart's service, or a user-provided endpoint). */}}
+{{- define "sudo-logger.s3Endpoint" -}}
+{{- .Values.storage.distributed.s3.endpoint | default (printf "http://%s-minio:9000" .Release.Name) -}}
+{{- end }}

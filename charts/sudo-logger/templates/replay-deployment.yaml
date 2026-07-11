@@ -5,7 +5,14 @@ metadata:
   labels:
     {{- include "sudo-logger.labels" . | nindent 4 }}
 spec:
+  {{- if eq .Values.storage.type "local" }}
+  replicas: 1
+  strategy:
+    # Recreate ensures the old pod releases the PVC before the new one starts.
+    type: Recreate
+  {{- else }}
   replicas: {{ .Values.replay.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "sudo-logger.selectorLabels" . | nindent 6 }}
@@ -20,15 +27,71 @@ spec:
         - name: replay
           image: "{{ .Values.replay.image.repository }}:{{ .Values.replay.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.replay.image.pullPolicy }}
+          command: ["/usr/local/bin/sudo-replay-server"]
+          args:
+            - -listen=:8080
+            {{- if eq .Values.storage.type "local" }}
+            - -logdir=/var/log/sudo-logger
+            {{- else }}
+            - -storage=distributed
+            - -s3-bucket={{ .Values.storage.distributed.s3.bucket }}
+            - -s3-endpoint={{ include "sudo-logger.s3Endpoint" . }}
+            {{- if .Values.storage.distributed.s3.pathStyle }}
+            - -s3-path-style
+            {{- end }}
+            - -s3-access-key=$(S3_ACCESS_KEY)
+            - -s3-secret-key=$(S3_SECRET_KEY)
+            - -db-url=$(DB_URL)
+            - -buffer-dir=/var/lib/sudo-logger/buffer
+            {{- end }}
+          env:
+            {{- if eq .Values.storage.type "distributed" }}
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.distributed.authSecretName }}
+                  key: root-user
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.distributed.authSecretName }}
+                  key: root-password
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.storage.distributed.authSecretName }}
+                  key: db-url
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
+          volumeMounts:
+            {{- if eq .Values.storage.type "local" }}
+            - name: logs
+              mountPath: /var/log/sudo-logger
+            {{- else }}
+            - name: buffer
+              mountPath: /var/lib/sudo-logger/buffer
+            {{- end }}
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        {{- if eq .Values.storage.type "local" }}
+        - name: logs
+          persistentVolumeClaim:
+            claimName: {{ include "sudo-logger.fullname" . }}-logs
+        {{- else }}
+        - name: buffer
+          emptyDir: {}
+        {{- end }}

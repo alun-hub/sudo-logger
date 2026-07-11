@@ -5,12 +5,15 @@ metadata:
   labels:
     {{- include "sudo-logger.labels" . | nindent 4 }}
 spec:
-  type: ClusterIP
+  type: {{ .Values.logserver.service.type }}
   ports:
     - port: 9876
       targetPort: 9876
       protocol: TCP
       name: tls
+      {{- if and (eq .Values.logserver.service.type "NodePort") .Values.logserver.service.nodePort }}
+      nodePort: {{ .Values.logserver.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "sudo-logger.selectorLabels" . | nindent 4 }}
     app: logserver
