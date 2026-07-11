@@ -29,9 +29,10 @@ RUN CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /usr/local/bin/sudo-l
 # Use debian:12-slim to provide a shell and package manager (needed for sudo/visudo).
 FROM debian:12-slim
 
-# Install sudo (for visudo validation) and ca-certificates (for S3 TLS).
+# Install sudo (for visudo validation), ca-certificates (for S3 TLS), and
+# wget (used by the HEALTHCHECK commands in docker-compose.yaml).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends sudo ca-certificates && \
+    apt-get install -y --no-install-recommends sudo ca-certificates wget && \
     rm -rf /var/lib/apt/lists/*
 
 # Create a nonroot user (UID 65532) to match distroless behavior.
