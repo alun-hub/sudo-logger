@@ -34,6 +34,8 @@ spec:
             - -key=/etc/sudo-logger/tls.key
             - -ca=/etc/sudo-logger/ca.crt
             - -signkey=/etc/sudo-logger/ack-sign.key
+            - -approval-policy=/etc/sudo-logger-approval/approval-policy.yaml
+            - -approval-token=$(APPROVAL_TOKEN)
             {{- if eq .Values.storage.type "local" }}
             - -logdir=/var/log/sudo-logger
             {{- else }}
@@ -49,6 +51,11 @@ spec:
             - -buffer-dir=/var/lib/sudo-logger/buffer
             {{- end }}
           env:
+            - name: APPROVAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sudo-logger.approvalTokenSecretName" . }}
+                  key: token
             {{- if eq .Values.storage.type "distributed" }}
             - name: S3_ACCESS_KEY
               valueFrom:
@@ -90,12 +97,21 @@ spec:
               mountPath: /etc/sudo-logger/ack-sign.key
               subPath: ack-sign.key
               readOnly: true
+            - name: approval-policy
+              mountPath: /etc/sudo-logger-approval
+              readOnly: true
             {{- if eq .Values.storage.type "local" }}
             - name: logs
               mountPath: /var/log/sudo-logger
             {{- else }}
             - name: buffer
               mountPath: /var/lib/sudo-logger/buffer
+            {{- if .Values.postgresql.enabled }}
+            - name: postgres-tls
+              mountPath: /etc/sudo-logger/postgres-ca.crt
+              subPath: ca.crt
+              readOnly: true
+            {{- end }}
             {{- end }}
           livenessProbe:
             httpGet:
@@ -116,6 +132,9 @@ spec:
         - name: signing-key
           secret:
             secretName: {{ include "sudo-logger.signingKeySecretName" . }}
+        - name: approval-policy
+          configMap:
+            name: {{ include "sudo-logger.approvalPolicyConfigMapName" . }}
         {{- if eq .Values.storage.type "local" }}
         - name: logs
           persistentVolumeClaim:
@@ -123,4 +142,9 @@ spec:
         {{- else }}
         - name: buffer
           emptyDir: {}
+        {{- if .Values.postgresql.enabled }}
+        - name: postgres-tls
+          secret:
+            secretName: {{ .Values.postgresql.tls.certificatesSecret }}
+        {{- end }}
         {{- end }}

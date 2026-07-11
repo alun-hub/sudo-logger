@@ -42,7 +42,48 @@ helm install sudo-logger ./charts/sudo-logger \
 The chart generates random PostgreSQL/MinIO credentials on first install
 (Secret `sudo-logger-distributed-auth`, persisted across upgrades) and wires
 them into both the bundled subcharts and the logserver/replay containers
-automatically.
+automatically. It also provisions a separate, independent CA/cert pair for
+PostgreSQL (Secret `sudo-logger-postgres-tls`) and connects with
+`sslmode=verify-full` — the logserver/replay containers verify PostgreSQL's
+certificate, but PostgreSQL does not require a client certificate back (see
+`values.yaml`'s comment on `postgresql.tls` for why).
+
+### JIT Approval
+
+Wired in on both local and distributed storage, disabled by default (matching
+the server's own default when no policy is configured). Enable it via values:
+
+```bash
+helm install sudo-logger ./charts/sudo-logger \
+  --set approval.policy.enabled=true \
+  --set approval.policy.notifications.webhook_url=https://your-mattermost/hooks/... \
+  --set approval.policy.notifications.webhook_secret=<a-strong-secret>
+```
+
+See `values.yaml`'s `approval.policy` block for the full field list (mirrors
+`/etc/sudo-logger/approval-policy.yaml` — INSTALLATION.md section 4). Settings
+saved later via the Replay UI's **Settings → JIT Approval** page take
+precedence over this at runtime; it only seeds the initial fallback. The
+bearer token shared between logserver and replay for the approvals REST API
+is auto-generated (Secret `<release>-approval-token`, persisted across
+upgrades) unless you set `approval.existingTokenSecret`.
+
+### cert-manager TLS mode
+
+```bash
+helm install sudo-logger ./charts/sudo-logger \
+  --set tls.mode=cert-manager \
+  --set tls.certManager.issuerRef.name=<your-issuer> \
+  --set tls.certManager.issuerRef.kind=ClusterIssuer
+```
+
+Requires cert-manager already installed with a working Issuer/ClusterIssuer.
+**The issuer must be CA-backed** (e.g. a cert-manager `CA` issuer, not an ACME
+one like Let's Encrypt) — this system needs the `ca.crt` cert-manager
+populates in the resulting Secret for a CA-typed issuer, to verify client
+certs on the agent-facing mTLS endpoint; an ACME issuer's Secret won't have
+one. Verified by rendering (`helm template`) only — no cert-manager
+installation was available to test a real issuance against.
 
 ### Connecting a monitored host (agent)
 
@@ -83,34 +124,19 @@ The following table lists the configurable parameters of the sudo-logger chart a
 | `storage.distributed.s3.endpoint` | S3 endpoint; empty = bundled MinIO | `""` |
 | `storage.distributed.dbHost` | PostgreSQL host; empty = bundled PostgreSQL | `""` |
 | `logserver.service.type` | Service type for the agent-facing TLS port — needs to be reachable from monitored hosts | `NodePort` |
-| `tls.mode` | TLS mode (`self-signed` or `provided`) | `self-signed` |
+| `tls.mode` | TLS mode (`self-signed`, `provided`, or `cert-manager`) | `self-signed` |
 | `tls.existingSecret` | Use an existing Secret (`ca.crt`/`tls.crt`/`tls.key`) instead of chart-managed | `""` |
+| `tls.certManager.issuerRef.name` | cert-manager Issuer/ClusterIssuer name (required when `tls.mode=cert-manager`) | `""` |
 | `signingKey.existingSecret` | Use an existing Secret (`ack-sign.key`) instead of chart-managed | `""` |
+| `approval.policy.enabled` | Enable JIT Approval | `false` |
+| `approval.existingTokenSecret` | Use an existing Secret (`token`) instead of chart-managed | `""` |
 | `postgresql.enabled` | Enable bundled PostgreSQL | `false` |
+| `postgresql.tls.enabled` | Encrypt the bundled PostgreSQL connection (`sslmode=verify-full`) | `true` |
 | `minio.enabled` | Enable bundled MinIO | `false` |
 | `replay.replicaCount` | Number of replay-server replicas | `1` |
 | `ingress.enabled` | Enable ingress for replay-server | `false` |
 
 Refer to [values.yaml](values.yaml) for full configuration details.
-
-### Known gaps
-
-- **The bundled PostgreSQL connection uses `sslmode=disable`** (plaintext
-  within the cluster network). This matches the same convention already used
-  by `INSTALLATION.md`'s manual distributed setup and `k8s/deploy-local.sh` —
-  not a regression specific to this chart — but it means DB traffic between
-  the logserver/replay pods and PostgreSQL isn't encrypted. Provisioning a
-  server cert for the bundled PostgreSQL StatefulSet (signed by the same CA
-  this chart generates) and switching to `sslmode=verify-full` would close
-  this; not done here to keep scope proportionate to the rest of the project.
-- **`cert-manager` TLS mode is not implemented.** Only `self-signed` and
-  `provided` work today. Use `tls.existingSecret` to point at a
-  cert-manager-issued Secret yourself as a workaround (it must contain
-  `ca.crt`/`tls.crt`/`tls.key`).
-- **JIT Approval is not wired into this chart.** It stays disabled (matching
-  the server's own default when `-approval-policy` points at a file that
-  doesn't exist). Mount a ConfigMap at `/etc/sudo-logger/approval-policy.yaml`
-  yourself if you need it — see `k8s/configmap.yaml` for a working example.
 
 ## Uninstallation
 
@@ -121,7 +147,9 @@ helm uninstall sudo-logger
 ```
 
 Note: the generated Secrets (`sudo-logger-tls`, `sudo-logger-signing-key`,
-`sudo-logger-distributed-auth`) are not owned by Helm hooks and persist after
+`sudo-logger-distributed-auth`, `sudo-logger-postgres-tls`,
+`<release>-approval-token`) are not owned by Helm hooks and persist after
 `helm uninstall` by design, so a later `helm install` reuses the same
-certs/keys/credentials rather than silently breaking every connected agent.
-Delete them manually if you want a fully clean slate.
+certs/keys/credentials rather than silently breaking every connected agent or
+disabling in-flight approvals. Delete them manually if you want a fully clean
+slate.

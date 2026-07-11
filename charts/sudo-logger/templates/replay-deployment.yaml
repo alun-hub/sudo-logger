@@ -30,6 +30,8 @@ spec:
           command: ["/usr/local/bin/sudo-replay-server"]
           args:
             - -listen=:8080
+            - -logserver-admin=http://{{ include "sudo-logger.fullname" . }}-logserver-admin:9877
+            - -logserver-admin-token=$(APPROVAL_TOKEN)
             {{- if eq .Values.storage.type "local" }}
             - -logdir=/var/log/sudo-logger
             {{- else }}
@@ -45,6 +47,11 @@ spec:
             - -buffer-dir=/var/lib/sudo-logger/buffer
             {{- end }}
           env:
+            - name: APPROVAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sudo-logger.approvalTokenSecretName" . }}
+                  key: token
             {{- if eq .Values.storage.type "distributed" }}
             - name: S3_ACCESS_KEY
               valueFrom:
@@ -73,6 +80,12 @@ spec:
             {{- else }}
             - name: buffer
               mountPath: /var/lib/sudo-logger/buffer
+            {{- if .Values.postgresql.enabled }}
+            - name: postgres-tls
+              mountPath: /etc/sudo-logger/postgres-ca.crt
+              subPath: ca.crt
+              readOnly: true
+            {{- end }}
             {{- end }}
           livenessProbe:
             httpGet:
@@ -94,4 +107,9 @@ spec:
         {{- else }}
         - name: buffer
           emptyDir: {}
+        {{- if .Values.postgresql.enabled }}
+        - name: postgres-tls
+          secret:
+            secretName: {{ .Values.postgresql.tls.certificatesSecret }}
+        {{- end }}
         {{- end }}

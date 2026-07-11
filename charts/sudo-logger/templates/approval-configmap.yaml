@@ -1,0 +1,23 @@
+{{- if not .Values.approval.existingPolicyConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sudo-logger.fullname" . }}-approval-policy
+  labels:
+    {{- include "sudo-logger.labels" . | nindent 4 }}
+data:
+  approval-policy.yaml: |
+    enabled: {{ .Values.approval.policy.enabled }}
+    exempt:
+      {{- if .Values.approval.policy.exempt }}
+      {{- toYaml .Values.approval.policy.exempt | nindent 6 }}
+      {{- else }}
+      []
+      {{- end }}
+    notifications:
+      webhook_url: {{ .Values.approval.policy.notifications.webhook_url | quote }}
+      webhook_secret: {{ .Values.approval.policy.notifications.webhook_secret | quote }}
+      request_channel: {{ .Values.approval.policy.notifications.request_channel | quote }}
+      replay_web_app_url: {{ .Values.approval.policy.notifications.replay_web_app_url | quote }}
+      mention_user: {{ .Values.approval.policy.notifications.mention_user }}
+{{- end }}

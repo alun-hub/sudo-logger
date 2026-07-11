@@ -1,0 +1,20 @@
+{{- if and (eq .Values.tls.mode "cert-manager") (not .Values.tls.existingSecret) }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "sudo-logger.fullname" . }}-tls
+  labels:
+    {{- include "sudo-logger.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "sudo-logger.fullname" . }}-tls
+  commonName: {{ include "sudo-logger.fullname" . }}
+  dnsNames:
+    - {{ printf "%s-logserver" (include "sudo-logger.fullname" .) }}
+    - {{ printf "%s-logserver.%s.svc" (include "sudo-logger.fullname" .) .Release.Namespace }}
+    - {{ printf "%s-logserver.%s.svc.cluster.local" (include "sudo-logger.fullname" .) .Release.Namespace }}
+  issuerRef:
+    name: {{ required "tls.certManager.issuerRef.name is required when tls.mode=cert-manager" .Values.tls.certManager.issuerRef.name }}
+    kind: {{ .Values.tls.certManager.issuerRef.kind | default "ClusterIssuer" }}
+  duration: {{ .Values.tls.certManager.duration | default "8760h" }}
+  renewBefore: {{ .Values.tls.certManager.renewBefore | default "720h" }}
+{{- end }}

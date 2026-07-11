@@ -57,3 +57,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "sudo-logger.s3Endpoint" -}}
 {{- .Values.storage.distributed.s3.endpoint | default (printf "http://%s-minio:9000" .Release.Name) -}}
 {{- end }}
+
+{{/* Name of the Secret holding the JIT approval REST API bearer token. */}}
+{{- define "sudo-logger.approvalTokenSecretName" -}}
+{{- .Values.approval.existingTokenSecret | default (printf "%s-approval-token" (include "sudo-logger.fullname" .)) -}}
+{{- end }}
+
+{{/* Name of the ConfigMap holding approval-policy.yaml. */}}
+{{- define "sudo-logger.approvalPolicyConfigMapName" -}}
+{{- .Values.approval.existingPolicyConfigMap | default (printf "%s-approval-policy" (include "sudo-logger.fullname" .)) -}}
+{{- end }}
