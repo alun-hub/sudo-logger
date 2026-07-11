@@ -24,7 +24,10 @@ builds:
   - id: server
     main: ./cmd/server
     dir: go
-    binary: sudo-logger-server
+    # Must match the binary name the shipped systemd unit
+    # (sudo-logserver.service) and INSTALLATION.md's architecture table
+    # expect — "sudo-logger-server" is the package name, not the binary.
+    binary: sudo-logserver
     goos:
       - linux
     goarch:
@@ -36,7 +39,10 @@ builds:
   - id: replay-server
     main: ./cmd/replay-server
     dir: go
-    binary: sudo-logger-replay
+    # Must match the binary name the shipped systemd unit (sudo-replay.service)
+    # and INSTALLATION.md's architecture table expect — "sudo-logger-replay"
+    # is the package name, not the binary.
+    binary: sudo-replay-server
     goos:
       - linux
     goarch:
@@ -227,7 +233,25 @@ nfpms:
     license: MIT
     dependencies:
       - systemd
+      # postinstall generates the ack-sign.key/ack-verify.key keypair via
+      # openssl; without this dependency the scriptlet fails silently
+      # (all its openssl calls are 2>/dev/null) on a system that doesn't
+      # already have openssl installed, and the service then crash-loops
+      # with no signing key and no visible error anywhere.
+      - openssl
     contents:
+      # /var/log/sudoreplay is set as the sudologger user's home directory
+      # (see rpm-pre-server.sh) but useradd without -m never creates it, so
+      # it must be declared explicitly here — otherwise the systemd unit's
+      # ReadWritePaths=/var/log/sudoreplay fails at startup with
+      # "Failed to set up mount namespacing: No such file or directory"
+      # on every fresh install.
+      - dst: /var/log/sudoreplay
+        type: dir
+        file_info:
+          owner: sudologger
+          group: sudologger
+          mode: 0750
       - src: server.conf
         dst: /etc/sudo-logger/server.conf
         type: "config|noreplace"

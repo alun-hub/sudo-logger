@@ -12,6 +12,7 @@ BuildRequires:  golang
 %global debug_package %{nil}
 
 Requires:       systemd
+Requires:       openssl
 Requires(pre):  shadow-utils
 Provides:       user(sudologger)
 Provides:       group(sudologger)

@@ -153,7 +153,11 @@ sudo systemctl enable --now sudo-logger-agent
 ```
 
 > **Note:** The agent service has `RefuseManualStop=yes` to prevent users from stopping
-> it to evade logging. Stopping requires `systemctl --force stop sudo-logger-agent` as root.
+> it to evade logging — `systemctl stop`/`restart sudo-logger-agent` (with or without
+> `--force`; verified `--force` does **not** bypass this) will be refused. As root, use
+> `systemctl kill sudo-logger-agent` instead: `Restart=always` respawns it immediately,
+> and any attempt to kill it from inside an active sudo session is itself captured as
+> TTY I/O before the agent dies, making the tampering self-documenting.
 
 ---
 
