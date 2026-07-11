@@ -23,12 +23,15 @@ fi
 ARCH=$(uname -m)
 case "$ARCH" in
     x86_64)
+        # goreleaser names every package format (.deb and .rpm alike) after
+        # the Go GOARCH value, not the traditional RPM x86_64/aarch64 arch
+        # suffix — both must be "amd64"/"arm64" or the download 404s.
         ARCH_DEB="amd64"
-        ARCH_RPM="x86_64"
+        ARCH_RPM="amd64"
         ;;
     aarch64|arm64)
         ARCH_DEB="arm64"
-        ARCH_RPM="aarch64"
+        ARCH_RPM="arm64"
         ;;
     *)
         echo "❌ Unsupported architecture: $ARCH"
