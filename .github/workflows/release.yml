@@ -23,6 +23,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc make
 
+      # Built in a Rocky Linux 9 container (glibc 2.34) rather than directly
+      # on the ubuntu-24.04 runner (glibc 2.39). A plugin built on 2.39 ends
+      # up requiring GLIBC_2.38 at load time (glibc's symbol versioning
+      # picked up newer isoc23 variants of libc functions the runner ships),
+      # which doesn't exist on RHEL/Rocky 9, Ubuntu 22.04, or Debian 12 —
+      # i.e. every currently-documented minimum supported OS. Building
+      # against Rocky 9's older glibc keeps the resulting .so loadable on
+      # all of them. Verified: only requires symbols up to GLIBC_2.34.
+      - name: Build C plugin (glibc-compatible build environment)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace/plugin \
+            quay.io/rockylinux/rockylinux:9 \
+            bash -c "dnf install -y gcc make >/dev/null && make clean && make"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

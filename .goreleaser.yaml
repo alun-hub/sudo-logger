@@ -5,6 +5,13 @@ project_name: sudo-logger
 
 before:
   hooks:
+    # In CI (release.yml), the plugin is already built by an earlier step in
+    # a Rocky Linux 9 container for glibc compatibility (see that workflow's
+    # "Build C plugin" step) — this is a no-op there since make sees the
+    # .so is newer than plugin.c. Locally (e.g. `goreleaser build
+    # --snapshot`), this does the real build against your host's glibc.
+    # Don't insert a `make clean`/`git clean` between the CI step and this
+    # one, or it'll rebuild against the runner's (too-new) glibc again.
     - make -C plugin
     - sh -c "cd go/cmd/replay-server/ui && npm ci && npm run build"
 

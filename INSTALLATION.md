@@ -53,14 +53,14 @@ cosign verify-blob \
 
 ## Prerequisites
 
-- **OS (monitored hosts, `sudo-logger-client`):** the published `sudo_logger_plugin.so` is built on an `ubuntu-24.04` CI
-  runner and requires **glibc 2.38+**. Verified minimums: Fedora 39+, RHEL/Rocky Linux 10+, Ubuntu 23.10+ (24.04 LTS
-  recommended), Debian 13+. Older releases — including RHEL/Rocky 9, Ubuntu 22.04 LTS, and Debian 12 — ship an older
-  glibc and **cannot load the plugin at all** (`sudo` fails with `GLIBC_2.38 not found`). Check your system's version
-  with `ldd --version`.
-- **OS (server/replay):** dynamically linked against glibc but only needs symbols up to **glibc 2.34** — satisfied by
-  RHEL/Rocky 9+, Ubuntu 22.04 LTS+, Debian 12+, Fedora 38+ (i.e. broadly compatible; the strict 2.38+ requirement
-  above is specific to the client's C plugin, not these Go binaries).
+- **OS:** Linux — Fedora/RHEL/Rocky Linux 9+ recommended; Ubuntu 22.04 LTS+, Debian 12+ supported. All binaries
+  (client plugin included) only need symbols up to **glibc 2.34**, satisfied by every OS above.
+  > Releases **v1.34.0 and earlier** are the exception: their `sudo_logger_plugin.so` was built directly on an
+  > `ubuntu-24.04` CI runner (glibc 2.39) with no older/compatible build environment, so it actually requires
+  > **glibc 2.38+** — which RHEL/Rocky 9, Ubuntu 22.04, and Debian 12 don't have (`sudo` fails with
+  > `GLIBC_2.38 not found`). Fixed for the next release by building the plugin inside a Rocky Linux 9 container in CI
+  > (see `.github/workflows/release.yml`). If you're stuck on an affected release, check `ldd --version` — you need
+  > Fedora 39+/RHEL-Rocky 10+/Ubuntu 23.10+/Debian 13+ until you can upgrade past v1.34.0.
 - **Kernel:** 5.8 or later (required for eBPF).
 - **sudo:** 1.9.0 or later.
 - **TLS certificates:** Agent → log server communication uses mutual TLS. You need a CA, a server certificate/key, and a client certificate/key per monitored host (or a shared client cert for smaller deployments).

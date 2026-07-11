@@ -426,9 +426,8 @@ migrate-sessions \
 
 ### Client
 - Linux with sudo 1.9+
-- **glibc 2.38+** (the published plugin is built on an `ubuntu-24.04` CI runner and won't load on older glibc —
-  verified minimums: Fedora 39+, RHEL/Rocky Linux 10+, Ubuntu 23.10+/24.04 LTS+, Debian 13+; see
-  [INSTALLATION.md](INSTALLATION.md#prerequisites) for details)
+- RHEL/Rocky Linux 9+, Ubuntu 22.04 LTS+, or Debian 12+ (releases v1.34.0 and earlier need newer distros due to a
+  now-fixed CI build issue — see [INSTALLATION.md](INSTALLATION.md#prerequisites))
 - `sudo-logger-client` RPM or equivalent
 - Network access to the log server
 
