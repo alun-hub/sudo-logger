@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] - 2026-07-11
+
+### Added
+- **helm**: `cert-manager` TLS mode now requests a Certificate from an existing Issuer/ClusterIssuer instead of being a documented-but-unimplemented option (must be a CA-backed issuer — this system needs the `ca.crt` a CA issuer populates, to verify agent client certs; an ACME issuer's Secret won't have one). Schema-validated via `helm template` only; no cert-manager installation was available to test a real issuance against.
+- **helm**: JIT Approval is now wired into both local and distributed storage — a new `logserver-admin` ClusterIP Service, an auto-generated shared bearer token (persisted across upgrades), and a chart-rendered `approval-policy` ConfigMap (disabled by default, matching the server's own default). Verified for real: replay successfully reaches logserver's admin API through the new Service.
+- **helm**: The bundled PostgreSQL connection now uses `sslmode=verify-full` instead of `disable`. PostgreSQL gets its own independent CA/cert pair (a separate trust domain from the agent-facing mTLS CA — purely internal plumbing), but does not require a client certificate back from logserver/replay (Bitnami's image enforces mutual TLS whenever a server-side CA file is configured, which those Go clients don't present; server TLS + client-side verify-full already gets an encrypted, server-authenticated connection without that). Verified for real via `pg_stat_ssl` that connections are actually encrypted, not just configured.
+
+### Fixed
+- **helm**: The chart's `appVersion` was left at 1.34.0 after the v1.35.0 release — same class of bug the chart already had once before.
+- **helm**: PostgreSQL's TLS `copy-certs` init container (runs whenever `tls.enabled=true`, regardless of `volumePermissions.enabled`) uses a second Bitnami image (`bitnami/os-shell`) hit by the same 2025 image deprecation as the main postgresql/minio images — now pinned to `bitnamilegacy` like those.
+
 ## [1.35.0] - 2026-07-11
 
 ### Fixed
