@@ -1,73 +1,63 @@
 #!/bin/bash
-# setup.sh — bootstrap PKI och HMAC-nyckel för sudo-logger
-# Kör EN gång på CA-maskinen, distribuera sedan certs till klienter/server.
+# setup.sh — bootstrap a self-signed CA, server certificate, and a client
+# certificate for sudo-logger. Run once on a secure machine, then distribute
+# the resulting files as described below. For installing the actual
+# packages/services, see INSTALLATION.md — this script only handles PKI.
 set -euo pipefail
 
 OUTDIR="${1:-/tmp/sudo-logger-pki}"
 SERVER_HOSTNAME="${2:-logserver.example.com}"
-mkdir -p "$OUTDIR"/{ca,server,client}
-echo "==> Serverhostname: $SERVER_HOSTNAME"
+mkdir -p "$OUTDIR"
+echo "==> Server hostname (used as the certificate SAN): $SERVER_HOSTNAME"
 
-echo "==> Genererar CA"
-openssl genrsa -out "$OUTDIR/ca/ca.key" 4096
-openssl req -x509 -new -nodes \
-    -key "$OUTDIR/ca/ca.key" \
-    -sha256 -days 3650 \
-    -subj "/CN=sudo-logger CA" \
-    -out "$OUTDIR/ca/ca.crt"
+echo "==> Generating CA"
+openssl req -x509 -newkey ed25519 -nodes -days 3650 \
+    -keyout "$OUTDIR/ca.key" -out "$OUTDIR/ca.crt" \
+    -subj "/CN=sudo-logger CA"
 
-echo "==> Genererar servernyckel och certifikat (SAN=$SERVER_HOSTNAME)"
-openssl genrsa -out "$OUTDIR/server/server.key" 2048
-openssl req -new \
-    -key "$OUTDIR/server/server.key" \
-    -subj "/CN=$SERVER_HOSTNAME" \
-    -out "$OUTDIR/server/server.csr"
+echo "==> Generating server key and certificate (SAN=$SERVER_HOSTNAME)"
+cat > "$OUTDIR/server-san.cnf" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+[req_distinguished_name]
+[v3_req]
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = $SERVER_HOSTNAME
+EOF
+openssl req -newkey ed25519 -nodes \
+    -keyout "$OUTDIR/server.key" -out "$OUTDIR/server.csr" \
+    -subj "/CN=$SERVER_HOSTNAME" -config "$OUTDIR/server-san.cnf" -reqexts v3_req
 openssl x509 -req -days 3650 \
-    -in  "$OUTDIR/server/server.csr" \
-    -CA  "$OUTDIR/ca/ca.crt" \
-    -CAkey "$OUTDIR/ca/ca.key" \
-    -CAcreateserial \
-    -extfile <(printf "subjectAltName=DNS:%s" "$SERVER_HOSTNAME") \
-    -out "$OUTDIR/server/server.crt"
+    -in "$OUTDIR/server.csr" \
+    -CA "$OUTDIR/ca.crt" -CAkey "$OUTDIR/ca.key" -CAcreateserial \
+    -copy_extensions copy \
+    -out "$OUTDIR/server.crt"
+rm -f "$OUTDIR/server.csr" "$OUTDIR/server-san.cnf"
 
-echo "==> Genererar klientnyckel och certifikat (ett per klient i produktion)"
-openssl genrsa -out "$OUTDIR/client/client.key" 2048
-openssl req -new \
-    -key "$OUTDIR/client/client.key" \
+echo "==> Generating client key and certificate (mint one per monitored host in production — re-run with a different OUTDIR, or add a loop)"
+openssl req -newkey ed25519 -nodes \
+    -keyout "$OUTDIR/client.key" -out "$OUTDIR/client.csr" \
     -subj "/CN=sudo-client" \
-    -out "$OUTDIR/client/client.csr"
-openssl x509 -req -days 365 \
-    -in  "$OUTDIR/client/client.csr" \
-    -CA  "$OUTDIR/ca/ca.crt" \
-    -CAkey "$OUTDIR/ca/ca.key" \
-    -CAcreateserial \
-    -out "$OUTDIR/client/client.crt"
+    2>/dev/null
+openssl x509 -req -days 825 \
+    -in "$OUTDIR/client.csr" \
+    -CA "$OUTDIR/ca.crt" -CAkey "$OUTDIR/ca.key" -CAcreateserial \
+    -out "$OUTDIR/client.crt"
+rm -f "$OUTDIR/client.csr"
 
 echo ""
-echo "PKI klar i $OUTDIR"
+echo "PKI ready in $OUTDIR:"
+echo "  ca.crt        # CA certificate — copy to every server and client"
+echo "  ca.key        # CA private key — keep secure, needed to mint more client certs, do not distribute"
+echo "  server.crt / server.key  # log server's TLS certificate/key"
+echo "  client.crt / client.key  # one client's TLS certificate/key (mint more with the CA above as needed)"
 echo ""
-echo "Installera på SERVERN:"
-echo "  dnf install sudo-logger-server-1.20.16-1.fc43.x86_64.rpm"
-echo "  cp $OUTDIR/ca/ca.crt               /etc/sudo-logger/"
-echo "  cp $OUTDIR/server/server.crt        /etc/sudo-logger/"
-echo "  cp $OUTDIR/server/server.key        /etc/sudo-logger/"
-echo "  chown root:sudologger /etc/sudo-logger/server.key"
-echo "  chmod 640 /etc/sudo-logger/server.key"
-echo "  systemctl enable --now sudo-logserver"
+echo "The Ed25519 ACK-signing key pair (ack-sign.key / ack-verify.key) is a"
+echo "separate concern from the CA above — see INSTALLATION.md's"
+echo "\"About ack-sign.key\" section for how it's obtained for your chosen"
+echo "deployment mode."
 echo ""
-echo "  # Sudo-logserver genererar ack-sign.key och ack-verify.key automatiskt."
-echo "  # Kopiera ack-verify.key till alla klienter:"
-echo "  # scp /etc/sudo-logger/ack-verify.key klient:/etc/sudo-logger/"
-echo ""
-echo "Installera på varje KLIENT:"
-echo "  dnf install sudo-logger-client-1.20.123-1.fc43.x86_64.rpm"
-echo "  cp $OUTDIR/ca/ca.crt               /etc/sudo-logger/"
-echo "  cp $OUTDIR/client/client.crt        /etc/sudo-logger/"
-echo "  cp $OUTDIR/client/client.key        /etc/sudo-logger/"
-echo "  # Kopiera ack-verify.key från servern till /etc/sudo-logger/"
-echo "  chmod 600 /etc/sudo-logger/client.key"
-echo ""
-echo "  # Konfigurera loggserverns adress i /etc/sudo-logger/agent.conf:"
-echo "  # server = logserver.example.com:9876"
-echo ""
-echo "  systemctl enable --now sudo-logger-agent"
+echo "For installing the server/client packages and placing these files,"
+echo "see INSTALLATION.md in the repository root."

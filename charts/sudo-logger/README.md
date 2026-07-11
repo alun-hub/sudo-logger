@@ -61,7 +61,7 @@ helm install sudo-logger ./charts/sudo-logger \
 ```
 
 See `values.yaml`'s `approval.policy` block for the full field list (mirrors
-`/etc/sudo-logger/approval-policy.yaml` — INSTALLATION.md section 4). Settings
+`/etc/sudo-logger/approval-policy.yaml` — INSTALLATION.md section 5). Settings
 saved later via the Replay UI's **Settings → JIT Approval** page take
 precedence over this at runtime; it only seeds the initial fallback. The
 bearer token shared between logserver and replay for the approvals REST API

@@ -5,7 +5,7 @@
 # ContainerCreating). Content here only matters as an initial fallback: once
 # the Replay UI's Settings -> JIT Approval page is used, the effective policy
 # is stored in the database and takes precedence. See INSTALLATION.md
-# section 4 ("JIT Approval").
+# section 5 ("JIT Approval").
 apiVersion: v1
 kind: ConfigMap
 metadata:

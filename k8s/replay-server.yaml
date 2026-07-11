@@ -42,7 +42,7 @@ spec:
             # Optional: seed the first admin user on a fresh deploy (only takes
             # effect if the user store is empty). Without it, the Replay UI shows
             # the Bootstrap Setup screen for interactive first-admin creation.
-            # See INSTALLATION.md section 5.
+            # See INSTALLATION.md section 6.
             # - -admin-users=<your-username>
 
           env:

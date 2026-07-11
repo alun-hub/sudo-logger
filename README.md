@@ -41,10 +41,7 @@ and organisations that need eBPF-based divergence detection to catch bypass atte
 - [Features](#features)
 - [Limitations](#limitations)
 - [Requirements](#requirements)
-- [Installation](#installation)
-  - [PKI bootstrap](#1-pki-bootstrap)
-  - [Server installation](#2-server-installation)
-  - [Client installation](#3-client-installation)
+- [Installation](#installation) — see [INSTALLATION.md](INSTALLATION.md) for the full guide
 - [Configuration](#configuration)
   - [Secret redaction](#secret-redaction)
   - [Process sandbox](#process-sandbox)
@@ -444,136 +441,22 @@ build the plugin.
 
 ## Installation
 
-### Quick Install (Debian/Ubuntu & Fedora/RHEL/Rocky Linux)
+Full instructions for every supported deployment mode (one-liner script,
+manual RPM/DEB, Kubernetes — local and distributed storage, Docker Compose,
+Helm chart) live in [INSTALLATION.md](INSTALLATION.md), including how to
+prepare TLS certificates (bring your own CA, or generate one with
+`setup.sh`/manual `openssl` commands).
 
-For the fastest setup, use our one-liner install script to download and install pre-compiled packages directly:
-
-```bash
-# To install Client (Monitored Hosts)
-curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- client
-
-# To install Log Server
-curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- server
-
-# To install Replay Server
-curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- replay
-```
-
-For manual installation and verification details, see [INSTALLATION.md](INSTALLATION.md).
-
-### 1. PKI bootstrap
-
-Run once on a secure machine (CA machine). You need `openssl`.
+For the fastest path, the one-liner install script downloads and installs
+pre-compiled, cosign-signed packages directly:
 
 ```bash
-bash setup.sh /tmp/pki logserver.example.com
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- client   # monitored hosts
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- server   # log server
+curl -sSL https://raw.githubusercontent.com/alun-hub/sudo-logger/main/scripts/install.sh | bash -s -- replay   # replay UI
 ```
 
-Replace `logserver.example.com` with the actual hostname or IP of your
-log server. This must match the DNS name clients use to connect.
-
-This generates:
-```
-/tmp/pki/
-  ca/ca.crt             # CA certificate (distributed to all machines)
-  ca/ca.key             # CA private key (keep secure, not distributed)
-  server/server.crt     # Server TLS certificate
-  server/server.key     # Server TLS private key
-  client/client.crt     # Client TLS certificate
-  client/client.key     # Client TLS private key
-```
-
-The ACK signing key pair is generated automatically on the server when the
-`sudo-logger-server` RPM is installed for the first time:
-
-```
-/etc/sudo-logger/ack-sign.key    # ed25519 private key (server only, root:sudologger 0640)
-/etc/sudo-logger/ack-verify.key  # ed25519 public key  (copy to all clients)
-```
-
-**File distribution:**
-
-| File | Server | Client |
-|------|--------|--------|
-| `ca/ca.crt` | Yes | Yes |
-| `server/server.crt` | Yes | No |
-| `server/server.key` | Yes | No |
-| `client/client.crt` | No | Yes |
-| `client/client.key` | No | Yes |
-| `ack-sign.key` | Yes — auto-generated | No |
-| `ack-verify.key` | Yes — auto-generated | Yes — copy from server |
-
----
-
-### 2. Server installation
-
-```bash
-# Install RPM
-dnf install sudo-logger-server-1.20.16-1.fc43.x86_64.rpm
-
-# Install certificates
-cp /tmp/pki/ca/ca.crt           /etc/sudo-logger/
-cp /tmp/pki/server/server.crt   /etc/sudo-logger/
-cp /tmp/pki/server/server.key   /etc/sudo-logger/
-
-# Secure TLS private key
-chown root:sudologger /etc/sudo-logger/server.key
-chmod 640 /etc/sudo-logger/server.key
-
-# ack-sign.key and ack-verify.key are generated automatically by the RPM %post
-# scriptlet if they do not exist. After first start, distribute ack-verify.key
-# to all clients:
-#   scp /etc/sudo-logger/ack-verify.key client:/etc/sudo-logger/
-
-# Configure listen address and log directory if needed
-# Defaults: LISTEN_ADDR=:9876  LOG_DIR=/var/log/sudoreplay
-vim /etc/sudo-logger/server.conf
-
-# Start service
-systemctl enable --now sudo-logserver
-
-# Verify
-systemctl status sudo-logserver
-journalctl -u sudo-logserver -f
-```
-
----
-
-### 3. Client installation
-
-```bash
-# Install RPM (automatically adds Plugin line to /etc/sudo.conf)
-dnf install sudo-logger-client-1.20.124-1.fc43.x86_64.rpm
-
-# Install certificates and ACK verify key
-cp /tmp/pki/ca/ca.crt                    /etc/sudo-logger/
-cp /tmp/pki/client/client.crt            /etc/sudo-logger/
-cp /tmp/pki/client/client.key            /etc/sudo-logger/
-scp logserver:/etc/sudo-logger/ack-verify.key /etc/sudo-logger/
-
-# Secure TLS private key
-chmod 600 /etc/sudo-logger/client.key
-
-# Set the log server address
-vim /etc/sudo-logger/agent.conf
-# Change: server = logserver.example.com:9876
-
-# Start service
-systemctl enable --now sudo-logger-agent
-
-# Verify
-systemctl status sudo-logger-agent
-journalctl -u sudo-logger-agent -f
-
-# Test
-sudo ls
-```
-
-The RPM install adds the following line to `/etc/sudo.conf`:
-```
-Plugin sudo_logger_plugin sudo_logger_plugin.so
-```
-On uninstall (`dnf remove`), this line is automatically removed.
+See [INSTALLATION.md](INSTALLATION.md) for everything else.
 
 ---
 
@@ -1146,16 +1029,8 @@ terminal player for recorded sessions.  It reads asciinema v2 session recordings
 
 ![sudo-replay web interface showing session list and terminal player](docs/replay-ui.svg)
 
-```bash
-# Install RPM on the log server
-dnf install sudo-logger-replay-1.20.27-1.fc43.x86_64.rpm
-
-# Start the service (runs as sudologger, reads /var/log/sudoreplay)
-systemctl enable --now sudo-replay
-
-# Open in browser
-xdg-open http://localhost:8080
-```
+See [INSTALLATION.md](INSTALLATION.md) for installing `sudo-logger-replay` —
+once running, it's reachable at `http://<server>:8080`.
 
 **Features:**
 - Session list with live search by user, host, or command
@@ -2332,136 +2207,14 @@ packages are versioned independently; only bump the affected package.
 ## Container deployment (Podman)
 
 The repository includes a `Dockerfile` and `docker-compose.yaml` for running
-the log server and web replay interface as containers. The plugin and agent
-still run natively on client machines — only the server side is containerised.
+the log server and web replay interface as containers (Docker or Podman) —
+the plugin and agent still run natively on client machines, only the server
+side is containerized. Containers run as the distroless nonroot user
+(UID 65532).
 
-Containers run as the distroless nonroot user (UID 65532). Because rootless
-Podman uses a user namespace, file ownership on bind mounts and named volumes
-must be set up once with `podman unshare` before first start.
-
-### Prerequisites
-
-- `podman` and `podman-compose`
-- A `pki/` directory with the server-side certificates (see
-  [PKI bootstrap](#1-pki-bootstrap))
-
-```
-pki/
-├── ca.crt
-├── server.crt
-├── server.key      ← must be readable only by the container user
-├── ack-sign.key    ← must be readable only by the container user
-└── server.conf     ← optional: override LISTEN_ADDR / LOG_DIR
-```
-
-### First-time setup
-
-Run once after creating the `pki/` directory:
-
-```bash
-# 1. Fix ownership of pki/ so the nonroot container user (65532) can read it
-podman unshare chown -R 65532:65532 ./pki/
-
-# 2. Lock down private keys
-podman unshare chmod 600 ./pki/server.key ./pki/ack-sign.key
-
-# 3. Build the image
-podman-compose build
-
-# 4. Pre-create the log volume and fix its ownership before first start
-#    The replay server writes risk.json cache files here — must be read-write.
-podman volume create sudo-logger_sudologs
-podman unshare chown -R 65532:65532 \
-    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}')
-
-# 5. Start
-podman-compose up -d
-```
-
-### Persisting risk-scoring rule changes (Settings UI)
-
-The default `risk-rules.yaml` is bundled inside the image.  Changes saved via
-the Settings tab are written back to `/etc/sudo-logger/risk-rules.yaml` inside
-the container and are lost when the container is recreated.
-
-To persist rule changes across restarts, mount a host directory:
-
-```bash
-# 1. Create a config directory and copy the default rules into it
-mkdir -p config
-podman run --rm --entrypoint cat sudo-logger:latest \
-    /etc/sudo-logger/risk-rules.yaml > config/risk-rules.yaml
-
-# 2. Fix ownership for the nonroot container user
-podman unshare chown -R 65532:65532 ./config/
-
-# 3. Uncomment the config volume in docker-compose.yaml:
-#      - ./config:/etc/sudo-logger:Z
-#    Then restart:
-podman-compose down && podman-compose up -d
-```
-
-### Start
-
-```bash
-podman-compose up -d
-```
-
-### Stop
-
-```bash
-podman-compose down        # stop and remove containers, keep logs
-podman-compose down -v     # also delete the session log volume
-```
-
-### View logs
-
-```bash
-podman-compose logs -f             # both services
-podman logs -f sudo-logserver      # logserver only
-podman logs -f sudo-replay-server  # replay server only
-```
-
-### Rebuild after code changes
-
-```bash
-podman-compose down
-podman-compose build --no-cache
-podman-compose up -d
-```
-
-### Access session logs from the host
-
-Session recordings are stored in the named volume `sudo-logger_sudologs`, one
-asciinema v2 `session.cast` file per session under `<user>/<host>_<timestamp>/`.
-This is **not** sudo's native I/O log format, so the standard `sudoreplay`
-tool cannot read it — use `asciinema play` instead, or the web replay UI.
-
-To find the path on disk (e.g. for backup):
-
-```bash
-podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}'
-```
-
-To replay a session directly from the host:
-
-```bash
-asciinema play \
-    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}')/alun/fedora_20260311-175401/session.cast
-```
-
-### Fixing permission errors after a failed start
-
-If containers were previously started as root (`user: "0:0"`) or files were
-created with wrong ownership, fix recursively and restart:
-
-```bash
-podman-compose down
-podman unshare chown -R 65532:65532 \
-    $(podman volume inspect sudo-logger_sudologs --format '{{.Mountpoint}}')
-podman unshare chown -R 65532:65532 ./pki/
-podman-compose up -d
-```
+See [INSTALLATION.md section 4](INSTALLATION.md#4-docker-compose) for the
+full walkthrough (TLS/permission setup, starting, persisting risk-rule
+changes, accessing session logs from the host, troubleshooting permissions).
 
 ### Production readiness
 
@@ -2495,73 +2248,24 @@ sudo-logserver speaks raw TCP with mutual TLS. Standard Kubernetes Ingress
 is HTTP/HTTPS only and terminates TLS — this breaks mTLS. Use a
 `LoadBalancer` Service instead (TCP passthrough).
 
-### Quick start — local storage (single node)
+### Installing
 
-```bash
-# 1. Create namespace
-kubectl apply -f k8s/namespace.yaml
-
-# 2. Load PKI files as a Secret (run setup.sh first)
-bash k8s/create-secret.sh /path/to/pki
-
-# 3. Deploy (uses ReadWriteOnce PVC, single replica)
-kubectl apply -k k8s/
-
-# 4. Get the external IP
-kubectl get svc -n sudo-logger sudo-logserver
-
-# 5. Update agent.conf on all clients
-# LOGSERVER=<EXTERNAL-IP>:9876
-```
-
-### Distributed storage (horizontal scaling)
+See [INSTALLATION.md section 2](INSTALLATION.md#2-kubernetes--local-storage)
+for local storage (`kubectl apply -k k8s/` — single-node only, log server and
+replay server share one PVC) and
+[section 3](INSTALLATION.md#3-distributed-storage-kubernetes) for distributed
+storage (`k8s/deploy-local.sh`, or manual `kubectl apply -f`; no working
+`kubectl apply -k` one-liner exists for distributed mode — kustomize's
+security restrictions block referencing files outside its own directory).
+There's also a [Helm chart](charts/sudo-logger/README.md) covering both
+modes with more automation (self-signed cert generation, JIT approval wiring,
+PostgreSQL TLS) if you'd rather not hand-manage raw manifests.
 
 With `--storage=distributed` both servers share no local state — cast files go
 to S3 and all metadata goes to PostgreSQL. This enables:
 - Multiple `sudo-logserver` replicas behind a TCP load balancer
 - Multiple `sudo-replay-server` replicas behind an HTTP ingress
 - Zero-downtime rolling updates
-
-**Prerequisites:** an S3-compatible bucket and a PostgreSQL 14+ database. No
-manual schema migration is needed — the schema is applied automatically at
-startup.
-
-**`k8s/deploy-local.sh`** automates the whole distributed setup end to end —
-namespace, TLS secret (from your `pki/` directory), PostgreSQL, MinIO, the
-distributed-mode log server, and the replay server:
-
-```bash
-# PKI files expected in ../pki/ (ca.crt, server.crt, server.key, ack-sign.key)
-# or /etc/sudo-logger if run on a host with an existing install.
-cd k8s
-bash deploy-local.sh                              # uses default MinIO/PostgreSQL credentials
-bash deploy-local.sh --image ghcr.io/alun-hub/sudo-logger:1.25.5   # pin a specific image
-bash deploy-local.sh --dry-run                    # preview without applying
-```
-
-Override the default (insecure, dev-only) MinIO/PostgreSQL credentials via
-environment variables before running: `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
-`DB_USER`, `DB_PASSWORD`. The script deploys `postgresql.yaml` and
-`minio.yaml` directly — for production, point at externally managed S3 and
-PostgreSQL instead and adapt the script accordingly.
-
-There is no working `kubectl apply -k` one-liner for distributed mode:
-kustomize's default security restrictions block a kustomization from
-referencing files outside its own directory, and `kubectl`'s built-in
-kustomize support (unlike the standalone `kustomize` CLI) does not expose a
-way to lift that restriction — so a distributed-mode overlay sharing files
-with the `k8s/` directory can't be applied this way. Use `deploy-local.sh`,
-or apply each file individually with `kubectl apply -f` (`namespace.yaml`,
-`service.yaml`, `postgresql.yaml`, `minio.yaml`, `deployment-distributed.yaml`,
-`replay-server.yaml`, plus the `sudo-logger-tls`/`sudo-logger-distributed`
-Secrets — see the `kubectl create secret` commands inside `deploy-local.sh`
-for the exact fields expected).
-
-Note that local storage mode's own overlay (`k8s/kustomization.yaml`,
-applied by the Quick start above) only deploys `sudo-logserver` — there is
-currently no local-storage replay-server manifest in `k8s/`, since
-`replay-server.yaml` is hardcoded for distributed-mode storage
-(`-storage=distributed` and PostgreSQL/S3 credentials baked into its args).
 
 **Migrate existing sessions (first deployment only):**
 
