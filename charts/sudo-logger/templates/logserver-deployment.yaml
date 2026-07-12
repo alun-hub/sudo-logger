@@ -129,12 +129,14 @@ spec:
             httpGet:
               path: /healthz
               port: health
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /healthz
               port: health
+              scheme: HTTPS
             initialDelaySeconds: 3
             periodSeconds: 5
       volumes:
