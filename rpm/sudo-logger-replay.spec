@@ -13,6 +13,10 @@ BuildRequires:  npm
 %global debug_package %{nil}
 
 Requires:       systemd
+Requires:       acl
+Requires(pre):  shadow-utils
+Provides:       user(sudoreplay)
+Provides:       group(sudoreplay)
 # sudo-logger-server is only required for single-node (local storage) deployments.
 # In distributed mode (--storage=distributed) the replay server runs independently.
 Recommends:     sudo-logger-server
@@ -49,13 +53,32 @@ install -D -m 0664 siem.yaml \
 install -D -m 0644 man/sudo-replay-server.8 \
     %{buildroot}%{_mandir}/man8/sudo-replay-server.8
 
+%pre
+getent group sudoreplay >/dev/null || groupadd -r sudoreplay
+getent passwd sudoreplay >/dev/null || \
+    useradd -r -g sudoreplay -s /sbin/nologin \
+            -d /var/log/sudoreplay sudoreplay
+
 %post
 %systemd_post sudo-replay.service
-# Ensure the replay service can write config files
-chown root:sudologger %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
-chmod 0664            %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
-chown root:sudologger %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
-chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
+# Ensure the replay service can write its own config files.
+chown root:sudoreplay %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
+chmod 0664             %{_sysconfdir}/sudo-logger/risk-rules.yaml 2>/dev/null || :
+chown root:sudoreplay %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
+chmod 0664             %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
+
+# Grant sudoreplay access to directories shared with the log server via
+# ACL, not group membership -- group membership would also grant read
+# access to ack-sign.key (root:sudologger 0640), which sudoreplay must
+# NOT be able to read. See scripts/rpm-post-replay.sh for the same logic
+# used by the GoReleaser/nfpm release packages.
+for d in %{_localstatedir}/log/sudoreplay %{_sysconfdir}/sudo-logger; do
+    [ -d "$d" ] || continue
+    setfacl -m u:sudoreplay:rwx -m d:u:sudoreplay:rwx "$d" 2>/dev/null || :
+done
+if [ -d %{_localstatedir}/log/sudoreplay ]; then
+    find %{_localstatedir}/log/sudoreplay -maxdepth 3 -name session.json -exec chmod 0644 {} + 2>/dev/null || :
+fi
 
 %preun
 %systemd_preun sudo-replay.service
@@ -66,8 +89,8 @@ chmod 0664            %{_sysconfdir}/sudo-logger/siem.yaml 2>/dev/null || :
 %files
 %{_bindir}/sudo-replay-server
 %{_unitdir}/sudo-replay.service
-%config(noreplace) %attr(0664, root, sudologger) %{_sysconfdir}/sudo-logger/risk-rules.yaml
-%config(noreplace) %attr(0664, root, sudologger) %{_sysconfdir}/sudo-logger/siem.yaml
+%config(noreplace) %attr(0664, root, sudoreplay) %{_sysconfdir}/sudo-logger/risk-rules.yaml
+%config(noreplace) %attr(0664, root, sudoreplay) %{_sysconfdir}/sudo-logger/siem.yaml
 %{_mandir}/man8/sudo-replay-server.8*
 
 %changelog

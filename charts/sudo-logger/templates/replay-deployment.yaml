@@ -23,6 +23,10 @@ spec:
         {{- include "sudo-logger.selectorLabels" . | nindent 8 }}
         app: replay
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
       containers:
         - name: replay
           image: "{{ .Values.replay.image.repository }}:{{ .Values.replay.image.tag | default .Chart.AppVersion }}"
@@ -30,8 +34,14 @@ spec:
           command: ["/usr/local/bin/sudo-replay-server"]
           args:
             - -listen=:8080
-            - -logserver-admin=http://{{ include "sudo-logger.fullname" . }}-logserver-admin:9877
+            - -logserver-admin=https://{{ include "sudo-logger.fullname" . }}-logserver-admin:9877
             - -logserver-admin-token=$(APPROVAL_TOKEN)
+            - -logserver-admin-ca=/etc/sudo-logger/admin-ca.crt
+            # The log server's cert SAN is {fullname}-logserver (see
+            # tls-secret.yaml/certificate.yaml), not the -admin Service name
+            # used to dial it above -- this is the standard SNI-override
+            # pattern (like `curl --resolve`), not a workaround.
+            - -logserver-admin-tls-name={{ include "sudo-logger.fullname" . }}-logserver
             {{- if eq .Values.storage.type "local" }}
             - -logdir=/var/log/sudo-logger
             {{- else }}
@@ -87,6 +97,17 @@ spec:
               readOnly: true
             {{- end }}
             {{- end }}
+            - name: admin-ca
+              mountPath: /etc/sudo-logger/admin-ca.crt
+              subPath: ca.crt
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           livenessProbe:
             httpGet:
               path: /healthz
@@ -113,3 +134,8 @@ spec:
             secretName: {{ .Values.postgresql.tls.certificatesSecret }}
         {{- end }}
         {{- end }}
+        - name: admin-ca
+          secret:
+            secretName: {{ include "sudo-logger.tlsSecretName" . }}
+        - name: tmp
+          emptyDir: {}

@@ -37,8 +37,14 @@ spec:
             - -s3-secret-key=$(S3_SECRET_KEY)
             - -db-url=$(DB_URL)
             - -buffer-dir=/var/lib/sudo-logger/buffer
-            - -logserver-admin=http://sudo-logserver-admin:9877
+            - -logserver-admin=https://sudo-logserver-admin:9877
             - -logserver-admin-token=$(APPROVAL_TOKEN)
+            - -logserver-admin-ca=/etc/sudo-logger/admin-ca.crt
+            # Must match the SAN on the log server's TLS certificate (the
+            # same hostname used as SERVER_HOSTNAME when generating it —
+            # see INSTALLATION.md's "Preparing TLS Certificates" section),
+            # NOT the sudo-logserver-admin Service DNS name used to dial it.
+            - -logserver-admin-tls-name=logserver.example.com
             # Optional: seed the first admin user on a fresh deploy (only takes
             # effect if the user store is empty). Without it, the Replay UI shows
             # the Bootstrap Setup screen for interactive first-admin creation.
@@ -82,6 +88,13 @@ spec:
             - name: ca-cert
               mountPath: /etc/ssl/certs/ca-certificates.crt
               subPath: ca.crt
+            # Same CA, mounted again at a stable, purpose-specific path for
+            # -logserver-admin-ca -- kept independent of the system-bundle
+            # override above, which serves a different purpose (OIDC).
+            - name: ca-cert
+              mountPath: /etc/sudo-logger/admin-ca.crt
+              subPath: ca.crt
+              readOnly: true
 
           securityContext:
             allowPrivilegeEscalation: false

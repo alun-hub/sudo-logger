@@ -1,0 +1,35 @@
+# Defense-in-depth for the log server's admin/JIT-approval API (port 9877):
+# restrict ingress to only the replay-server pod, within this namespace.
+#
+# This is best-effort, not a substitute for the TLS+CA-pinned client the
+# admin API itself now requires (see -logserver-admin-ca/-tls-name in
+# replay-server.yaml) — NetworkPolicy is only enforced if your cluster's CNI
+# implements it. K3s's default CNI (Flannel) does NOT enforce NetworkPolicy;
+# this becomes a real, additional restriction on Calico, Cilium, or a
+# cloud-managed CNI with NetworkPolicy support (EKS, GKE, AKS all support
+# it). On Flannel it is a harmless no-op — the TLS layer is what actually
+# protects this endpoint everywhere.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sudo-logserver-admin-restrict
+  namespace: sudo-logger
+spec:
+  podSelector:
+    matchLabels:
+      app: sudo-logserver
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow the main mTLS session port from anywhere (agents may be
+    # off-cluster) — only the admin port (9877) is restricted below.
+    - ports:
+        - protocol: TCP
+          port: 9876
+    - from:
+        - podSelector:
+            matchLabels:
+              app: sudo-replay-server
+      ports:
+        - protocol: TCP
+          port: 9877

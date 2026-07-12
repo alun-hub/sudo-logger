@@ -19,11 +19,23 @@ NAMESPACE="sudo-logger"
 IMAGE="${IMAGE:-localhost/sudo-logger:latest}"
 DRY_RUN=false
 
-# Credentials — override via env vars before running.
+# Credentials — override via env vars before running. If unset, reuse the
+# existing sudo-logger-distributed Secret's values on a re-run (rotating
+# these would break the already-running PostgreSQL/MinIO StatefulSets,
+# which only pick up credentials on first init — same reasoning as
+# charts/sudo-logger/templates/distributed-auth-secret.yaml's `lookup`),
+# else generate fresh random ones. Usernames stay fixed/memorable; only
+# the actual secrets are randomized.
+existing_secret_field() {
+  kubectl get secret sudo-logger-distributed -n "${NAMESPACE}" \
+    -o jsonpath="{.data.$1}" 2>/dev/null | base64 -d 2>/dev/null || true
+}
 S3_ACCESS_KEY="${S3_ACCESS_KEY:-minioadmin}"
-S3_SECRET_KEY="${S3_SECRET_KEY:-minioadmin}"
+S3_SECRET_KEY="${S3_SECRET_KEY:-$(existing_secret_field s3-secret-key)}"
+S3_SECRET_KEY="${S3_SECRET_KEY:-$(openssl rand -hex 16)}"
 DB_USER="${DB_USER:-sudologger}"
-DB_PASSWORD="${DB_PASSWORD:-sudologger}"
+DB_PASSWORD="${DB_PASSWORD:-$(existing_secret_field db-password)}"
+DB_PASSWORD="${DB_PASSWORD:-$(openssl rand -hex 16)}"
 DB_NAME="sudologger"
 
 for arg in "$@"; do
@@ -160,6 +172,9 @@ log "Deploying sudo-logserver (distributed mode)..."
 kubectl apply -f "${SCRIPT_DIR}/deployment-distributed.yaml"
 [[ "${IMAGE}" != "localhost/sudo-logger:latest" ]] && \
   patch_image sudo-logserver sudo-logserver
+
+log "Applying admin-API NetworkPolicy (defense in depth; no-op on CNIs that don't enforce it)..."
+$KUBECTL apply -f "${SCRIPT_DIR}/networkpolicy.yaml"
 
 # ── Deploy replay server ──────────────────────────────────────────────────────
 log "Deploying sudo-replay-server..."

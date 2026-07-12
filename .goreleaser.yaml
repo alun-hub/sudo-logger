@@ -312,6 +312,7 @@ nfpms:
     license: MIT
     dependencies:
       - systemd
+      - acl
     contents:
       - src: go/cmd/replay-server/risk-rules.yaml
         dst: /etc/sudo-logger/risk-rules.yaml
@@ -334,11 +335,13 @@ nfpms:
     overrides:
       rpm:
         scripts:
+          preinstall: scripts/rpm-pre-replay.sh
           postinstall: scripts/rpm-post-replay.sh
           preremove: scripts/rpm-preun-replay.sh
           postremove: scripts/rpm-postun-replay.sh
       deb:
         scripts:
+          preinstall: scripts/deb-pre-replay.sh
           postinstall: scripts/deb-post-replay.sh
           preremove: scripts/deb-preremove-replay.sh
           postremove: scripts/deb-postremove-replay.sh

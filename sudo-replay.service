@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=sudologger
+User=sudoreplay
 SyslogIdentifier=sudo-replay-server
 # Optional configuration file — create to add flags like -tls-cert, -tls-key,
 # -htpasswd, -trusted-user-header.  See sudo-replay-server(8) for all flags.

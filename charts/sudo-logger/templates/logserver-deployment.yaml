@@ -23,6 +23,11 @@ spec:
         {{- include "sudo-logger.selectorLabels" . | nindent 8 }}
         app: logserver
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532    # distroless nonroot UID
+        runAsGroup: 65532
+        fsGroup: 65532      # ensures PVC mount is writable by the process
       containers:
         - name: logserver
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -113,6 +118,13 @@ spec:
               readOnly: true
             {{- end }}
             {{- end }}
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           livenessProbe:
             httpGet:
               path: /healthz
@@ -148,3 +160,5 @@ spec:
             secretName: {{ .Values.postgresql.tls.certificatesSecret }}
         {{- end }}
         {{- end }}
+        - name: tmp
+          emptyDir: {}

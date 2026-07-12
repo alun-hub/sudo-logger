@@ -3,9 +3,14 @@
 set -euo pipefail
 
 COMPONENT=${1:-client}
+INSECURE=false
+if [ "${2:-}" = "--insecure" ]; then
+    INSECURE=true
+fi
 
 if [ "$COMPONENT" != "client" ] && [ "$COMPONENT" != "server" ] && [ "$COMPONENT" != "replay" ]; then
-    echo "Usage: $0 [client|server|replay]"
+    echo "Usage: $0 [client|server|replay] [--insecure]"
+    echo "  --insecure  install even if cosign is unavailable, skipping signature verification"
     exit 1
 fi
 
@@ -96,9 +101,22 @@ if command -v cosign >/dev/null 2>&1; then
         echo "❌ Cosign signature verification failed!"
         exit 1
     fi
+elif $INSECURE; then
+    echo "⚠️ cosign is not installed — proceeding UNVERIFIED because --insecure was passed."
 else
-    echo "⚠️ cosign is not installed. Skipping signature verification."
-    echo "   To verify releases, install cosign (https://pkg.go.dev/github.com/sigstore/cosign/v2/cmd/cosign) and re-run."
+    echo "❌ cosign is not installed — cannot verify this package's signature." >&2
+    echo "   Install cosign (https://pkg.go.dev/github.com/sigstore/cosign/v2/cmd/cosign) and re-run, or:" >&2
+    if [ -r /dev/tty ] && [ -t 2 ]; then
+        printf "   Proceed WITHOUT signature verification? [y/N] " >&2
+        read -r REPLY < /dev/tty || REPLY=""
+        case "$REPLY" in
+            [yY]|[yY][eE][sS]) echo "==> Proceeding unverified." ;;
+            *) echo "Aborted." >&2; exit 1 ;;
+        esac
+    else
+        echo "   re-run with --insecure to skip verification (e.g. \"... | bash -s -- $COMPONENT --insecure\")." >&2
+        exit 1
+    fi
 fi
 
 echo "==> Installing package..."
