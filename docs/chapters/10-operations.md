@@ -92,7 +92,9 @@ S3/MinIO session files are replicated using the object store's own replication m
 
    ```bash
    tar -xzf /backups/sudo-logger-config-<date>.tar.gz -C /
-   chmod 600 /etc/sudo-logger/server.key /etc/sudo-logger/client.key /etc/sudo-logger/ack-sign.key
+   chmod 600 /etc/sudo-logger/server.key /etc/sudo-logger/client.key
+   chown root:sudologger /etc/sudo-logger/ack-sign.key
+   chmod 640 /etc/sudo-logger/ack-sign.key
    chmod 644 /etc/sudo-logger/ca.crt /etc/sudo-logger/server.crt /etc/sudo-logger/client.crt /etc/sudo-logger/ack-verify.key
    ```
 

@@ -74,7 +74,7 @@ Both tools centralise sudo session recordings over TLS. Their design goals diffe
 
 ### 10. eBPF divergence detection
 
-`sudo-logger` uses kernel tracepoints to monitor all executions of `sudo` and `pkexec`. It correlates these kernel events with plugin activity; if a `sudo` command is executed but the plugin is bypassed (e.g., by tampering with `sudo.conf`), the agent larmar centrally. `sudo-logsrvd` relies entirely on the plugin being loaded.
+`sudo-logger` uses kernel tracepoints to monitor all executions of `sudo` and `pkexec`. It correlates these kernel events with plugin activity; if a `sudo` command is executed but the plugin is bypassed (e.g., by tampering with `sudo.conf`), the agent raises a central alert. `sudo-logsrvd` relies entirely on the plugin being loaded.
 
 ### 11. Relay topology
 

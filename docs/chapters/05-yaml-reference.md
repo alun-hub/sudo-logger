@@ -546,9 +546,9 @@ JSON format.
 
 #### OCSF (Open Cybersecurity Schema Framework)
 
-Events are mapped to OCSF Class 3002 (System Activity / Process Activity).
+Events are mapped to OCSF Class 3003 (System Activity / Process Activity).
 Core fields include `class_uid`, `activity_id`, `time`, `actor.user`,
-`target.process`, `device.hostname`, `severity_id`, and `metadata.product`.
+`process`, `device.hostname`, `severity_id`, and `metadata.product`.
 
 ### replay_url_base
 

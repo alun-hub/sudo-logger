@@ -273,7 +273,9 @@ semanage permissive -a sudo_agent_t
 
    ```yaml
    enabled: true
-   url: https://siem.example.com:8088/services/collector
+   transport: https
+   https:
+     url: https://siem.example.com:8088/services/collector
    ```
 
 2. Is the URL reachable from the replay server host?

@@ -478,7 +478,7 @@ Each file in `api/` wraps a group of backend endpoints. All functions use
    <NavLink to="/my-page">My Page</NavLink>
    ```
 
-6. **Add a backend route** in `go/cmd/replay-server/main.go`:
+6. **Add a backend route** in `go/cmd/replay-server/routes.go` (`registerRoutes`):
    ```go
    mux.HandleFunc("/api/my-endpoint", s.handleMyEndpoint)
    ```
@@ -632,6 +632,6 @@ After deploying, restart the relevant service:
 
 ```bash
 sudo systemctl restart sudo-logger-agent   # on monitored hosts
-sudo systemctl restart sudo-logger-server  # on log server
-sudo systemctl restart sudo-logger-replay  # on replay server
+sudo systemctl restart sudo-logserver      # on log server
+sudo systemctl restart sudo-replay         # on replay server
 ```

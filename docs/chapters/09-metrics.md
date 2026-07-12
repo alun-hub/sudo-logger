@@ -17,7 +17,7 @@ Two components expose Prometheus metrics in the standard text exposition format 
 
 ## Replay-server metrics
 
-The replay server exposes metrics at `GET /metrics` on its main listen port. The handler (`handleMetrics` in `go/cmd/replay-server/main.go`) queries the session cache and emits five metric families.
+The replay server exposes metrics at `GET /metrics` on its main listen port. The handler (`handleMetrics` in `go/cmd/replay-server/handlers_session.go`) queries the session cache and emits five metric families.
 
 | Metric | Type | Description |
 |---|---|---|

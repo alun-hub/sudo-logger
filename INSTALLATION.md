@@ -141,6 +141,16 @@ openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
   -days 825 -out client.crt
 ```
 
+**Shared cert vs. per-host cert:** a single shared client certificate is
+simpler to manage but means the log server cannot tell which real monitored
+host a session actually came from — the `--strict-cert-host` flag (server
+side, default off, see
+[Network & Security](docs/chapters/08-network-security.md#--strict-cert-host))
+is what would normally catch a host claiming another host's identity, and it
+is off by default specifically so shared-cert deployments keep working. If
+you need that protection, mint one certificate per host (CN = the real
+hostname, as above) and enable `--strict-cert-host`.
+
 ### About `ack-sign.key`
 
 Unrelated to the CA above — a separate Ed25519 key the log server uses to sign
@@ -410,7 +420,14 @@ kubectl apply -f k8s/minio.yaml
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/deployment-distributed.yaml
 kubectl apply -f k8s/replay-server.yaml
+kubectl apply -f k8s/networkpolicy.yaml
 ```
+
+`replay-server.yaml`'s `-logserver-admin-tls-name` defaults to the placeholder
+`logserver.example.com` — this must match the actual SAN on your log
+server's TLS certificate (the same hostname you used as `SERVER_HOSTNAME`
+when generating it, above), not the `sudo-logserver-admin` Service name
+used to reach it. Edit that value before applying if it doesn't match.
 
 There is no working `kubectl apply -k` kustomize shortcut for this mode —
 kustomize's default security restrictions block a kustomization from

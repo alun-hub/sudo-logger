@@ -110,6 +110,8 @@ From the source:
 
 Use `--strict-cert-host` in high-assurance environments where agents should not be able to log sessions under another host's identity.
 
+**Recommendation:** the default is off deliberately — flipping it would break any deployment already using a single shared client certificate across hosts (this is a supported, documented configuration, not an oversight). For a new deployment, or one where per-host identity actually matters (multi-tenant hosts, compliance requirements, or any environment where one compromised host impersonating another is a real concern), mint one client certificate per host and enable `--strict-cert-host` from the start — retrofitting per-host certs onto an existing shared-cert fleet later is more work than starting that way.
+
 ### Replay server HTTPS
 
 The replay server supports HTTPS via `--tls-cert` and `--tls-key`:
@@ -319,10 +321,10 @@ The following paths must have the correct ownership and mode for sudo-logger to 
 | `/etc/sudo-logger/ack-verify.key` | root | 0644 | ACK public key (agent) |
 | `/etc/sudo-logger/server.crt` | root | 0644 | Server TLS certificate (public) |
 | `/etc/sudo-logger/server.key` | root | 0600 | Server TLS private key |
-| `/etc/sudo-logger/ack-sign.key` | root | 0600 | ACK signing private key (server) |
+| `/etc/sudo-logger/ack-sign.key` | root:sudologger | 0640 | ACK signing private key (server) |
 | `/run/sudo-logger/` | root | 0755 | Runtime directory |
 | `/run/sudo-logger/plugin.sock` | root | 0660 | Unix socket: plugin ↔ agent |
 | `/var/log/sudoreplay/` | sudologger | 0750 | Session file storage |
 | `/sys/fs/bpf` | root | 0700 | BPF program/map pinning (agent) |
 
-> **Warning:** Private key files (`client.key`, `server.key`, `ack-sign.key`) must be mode 0600 and owned by root (or `sudologger` for the server). Any more permissive mode allows other processes to read the private key, compromising the mTLS trust chain and ACK signing integrity.
+> **Warning:** Private key files `client.key` and `server.key` must be mode 0600 and owned by root. `ack-sign.key` is the exception — mode 0640, owned `root:sudologger`, since the log server runs as the `sudologger` user and needs group-read access to sign ACKs. Any more permissive mode than documented here allows other processes to read the private key, compromising the mTLS trust chain and ACK signing integrity.

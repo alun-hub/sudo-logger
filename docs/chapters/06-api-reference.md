@@ -841,7 +841,7 @@ being applied. `auth_source` tells the client which re-auth flow to run.
 Every successful push writes an audit-log line (actor, host/key, a coarse
 +/- line-count diff) and forwards a `sudoers_config_push` event through
 whatever SIEM/webhook forwarding is configured (`internal/siem.SendAudit`) —
-see [Configuration writes](07-features.md#configuration-writes) in Chapter 7.
+see [Session view / access log](07-features.md#session-view--access-log) in Chapter 7.
 
 ---
 
