@@ -247,18 +247,33 @@ nfpms:
       # with no signing key and no visible error anywhere.
       - openssl
     contents:
+      # Sticky bit (01770, not 0770) is required: the sudo-logger-replay
+      # package grants the sudoreplay user rwx on this directory via ACL.
+      # Without the sticky bit, directory write+execute permission alone
+      # lets a non-owner delete and recreate ANY file here regardless of
+      # its own owner/mode -- including ack-sign.key, ca.crt, server.crt/key
+      # (all root:sudologger). With it, sudoreplay can still create its own
+      # config files but can't delete/replace files it doesn't own.
+      - dst: /etc/sudo-logger
+        type: dir
+        file_info:
+          owner: root
+          group: sudologger
+          mode: 01770
       # /var/log/sudoreplay is set as the sudologger user's home directory
       # (see rpm-pre-server.sh) but useradd without -m never creates it, so
       # it must be declared explicitly here — otherwise the systemd unit's
       # ReadWritePaths=/var/log/sudoreplay fails at startup with
       # "Failed to set up mount namespacing: No such file or directory"
-      # on every fresh install.
+      # on every fresh install. Sticky bit for the same reason as
+      # /etc/sudo-logger above -- sudoreplay also gets ACL rwx here and
+      # must not be able to delete/replace session recordings it doesn't own.
       - dst: /var/log/sudoreplay
         type: dir
         file_info:
           owner: sudologger
           group: sudologger
-          mode: 0750
+          mode: 01750
       - src: server.conf
         dst: /etc/sudo-logger/server.conf
         type: "config|noreplace"

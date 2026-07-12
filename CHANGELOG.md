@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.1] - 2026-07-12
+
+An independent second security review of v1.39.0's changes (before it had been in the wild for even a day) found a real regression in that release's own fix. Caught and fixed immediately.
+
+### Security
+- **rpm/deb**: v1.39.0 separated the replay service onto its own `sudoreplay` OS user specifically so it couldn't read the log server's `ack-sign.key` via shared group membership — but granted that user `rwx` directly on the shared `/etc/sudo-logger` and `/var/log/sudoreplay` directories via ACL, with no sticky bit set. Under standard POSIX semantics, deleting or replacing a file only requires write+execute permission on its *containing directory*, not any permission on the file itself, unless the directory has the sticky bit — so this let `sudoreplay` delete and recreate `ack-sign.key`, `ca.crt`, `server.crt`/`.key`, or session recordings it had no business touching, even without ever having read access to them. Verified for real in a disposable container: with the bug present, `sudoreplay` could `rm` and replace `ack-sign.key` with attacker-controlled content; with the sticky bit added to both directories (`0770`/`0750` → `1770`/`1750`), the same operation is rejected with "Operation not permitted" while every legitimate `sudoreplay` operation (creating its own new config files, writing already-owned files, deleting files it created itself) continues to work unchanged. Fixed in both packaging mechanisms that produce these permissions: `rpm/sudo-logger-server.spec` (local `rpmbuild` path) and `.goreleaser.yaml`'s `nfpm` `contents:` (the actual GitHub Release RPM/DEB build path) — the latter also gained an explicit directory declaration for `/etc/sudo-logger` it was previously missing entirely, relying on nfpm's implicit (and differently-permissioned) parent-directory creation instead.
+- Anyone who installed the v1.39.0 `sudo-logger-server`/`sudo-logger-replay` RPM or DEB packages should upgrade to this version. This does not affect Kubernetes/Helm deployments, which already isolated `ack-sign.key` to the log server container only.
+
 ## [1.39.0] - 2026-07-12
 
 A full-project security/bug audit (C plugin, Go agent, log server, replay-server, frontend, infra/packaging) found no critical issues, 4 high-severity findings, 6 medium, and several low/info items. All fixed and verified — including a live redeploy to a production reference cluster, real spawned-process/signal testing for the cgroup fix, and a real self-signed-CA TLS handshake test (both correct- and wrong-hostname cases) for the admin API change.

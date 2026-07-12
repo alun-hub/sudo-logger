@@ -91,12 +91,24 @@ fi
 %{_unitdir}/sudo-logserver.service
 %{_unitdir}/sudo-logserver-restart.timer
 %{_unitdir}/sudo-logserver-restart.service
-%dir %attr(0770, root, sudologger) %{_sysconfdir}/sudo-logger
+# Sticky bit (mode 1770, not 0770) is required: the sudo-logger-replay
+# package grants the sudoreplay user rwx on this directory via ACL (it
+# needs to create/manage its own config files here). Without the sticky
+# bit, directory write+execute permission alone is enough to delete and
+# recreate ANY file here regardless of that file's own owner/mode --
+# including root:sudologger's ack-sign.key, ca.crt, server.crt/key. With
+# it, a non-owner can still create new files but cannot delete/replace
+# files it doesn't own, closing that path.
+%dir %attr(1770, root, sudologger) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/server.conf
 %ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/ack-sign.key
 %ghost %attr(0644, root, root)       %{_sysconfdir}/sudo-logger/ack-verify.key
 
-%dir %attr(0750, sudologger, sudologger) %{_localstatedir}/log/sudoreplay
+# Sticky bit for the same reason as /etc/sudo-logger above -- sudoreplay
+# also gets ACL rwx here (session data it needs to read/write), and must
+# not be able to delete/replace session.cast/session.json files the log
+# server (sudologger) wrote.
+%dir %attr(1750, sudologger, sudologger) %{_localstatedir}/log/sudoreplay
 %config(noreplace) %{_sysconfdir}/logrotate.d/sudo-logserver
 %{_mandir}/man8/sudo-logserver.8*
 
