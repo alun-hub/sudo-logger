@@ -187,7 +187,13 @@ func NewWriter(baseDir string, meta SessionMeta, startTime time.Time) (*Writer, 
 
 	// Write session.json alongside session.cast so that ListSessions can read
 	// only this small file instead of opening the full (potentially large) cast.
-	if err := os.WriteFile(filepath.Join(dir, "session.json"), b, 0640); err != nil {
+	// Mode 0644 matches session.cast's own de facto mode (os.Create's default
+	// + umask, above) -- the real access gate is the session directory's own
+	// permissions (0750) plus ACLs on it, not individual file modes. This
+	// matters for RPM/DEB installs where the replay service runs as a
+	// separate OS user (sudoreplay) from the log server (sudologger) that
+	// writes this file; 0640 would make it unreadable to sudoreplay.
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), b, 0644); err != nil {
 		castF.Close()
 		return nil, fmt.Errorf("write session.json: %w", err)
 	}

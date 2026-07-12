@@ -16,7 +16,14 @@ import (
 	"sudo-logger/internal/util"
 )
 
-const maxOverflow = 1000
+// maxOverflow bounds the number of overflow goroutines processChunk can spawn
+// once diskQueue's primary buffer (see handler.go) is full, before falling
+// back to blocking backpressure. Combined with diskQueue's capacity, this
+// caps worst-case per-connection memory at roughly
+// (diskQueue capacity + maxOverflow) * MaxChunkPayload -- real chunk sizes
+// are far smaller than that cap in practice, so this still leaves generous
+// headroom over normal bursty load.
+const maxOverflow = 200
 
 type diskTask struct {
 	msgType uint8

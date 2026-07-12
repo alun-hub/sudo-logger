@@ -53,6 +53,13 @@ func sanitizeName(s string) (string, error) {
 	if !validName.MatchString(s) {
 		return "", fmt.Errorf("invalid characters or length in name: %q", s)
 	}
+	// Go's RE2 engine has no lookahead, so "dots only" (".", "..", "...")
+	// can't be excluded in the regex itself -- reject it here instead.
+	// Downstream path builders independently re-check containment within
+	// their base dir, so this is defense in depth, not the only guard.
+	if strings.Trim(s, ".") == "" {
+		return "", fmt.Errorf("invalid name (dots only): %q", s)
+	}
 	return s, nil
 }
 
@@ -221,17 +228,34 @@ func main() {
 			fmt.Fprintf(w, "# TYPE sudologger_sessions_incomplete_total counter\n")
 			fmt.Fprintf(w, "sudologger_sessions_incomplete_total %d\n", srv.sessionsIncomplete.Load())
 		})
+		// This listener also carries the JIT-approval REST API and the
+		// GDPR/audit DELETE /api/sessions endpoint (registered above) --
+		// both destructive/security-relevant, gated only by a shared
+		// bearer token. Serve it over TLS (server-authenticated, no client
+		// cert required -- this is a separate, lighter config from
+		// buildTLSConfig()'s strict mTLS) so that token is never sent in
+		// the clear, using the same server certificate already loaded for
+		// the main mTLS listener.
+		healthCert, err := tls.LoadX509KeyPair(*flagCert, *flagKey)
+		if err != nil {
+			log.Fatalf("health/admin listener: load server cert: %v", err)
+		}
+		healthTLSCfg := &tls.Config{
+			Certificates: []tls.Certificate{healthCert},
+			MinVersion:   tls.VersionTLS12,
+		}
 		go func() {
 			healthServer := &http.Server{
 				Addr:              *flagHealthListen,
 				Handler:           healthMux,
+				TLSConfig:         healthTLSCfg,
 				ReadHeaderTimeout: 5 * time.Second,
 			}
-			if err := healthServer.ListenAndServe(); err != nil {
+			if err := healthServer.ListenAndServeTLS("", ""); err != nil {
 				log.Printf("health/metrics listener: %v", err)
 			}
 		}()
-		log.Printf("health/metrics listening on %s", *flagHealthListen)
+		log.Printf("health/metrics listening on %s (TLS)", *flagHealthListen)
 	}
 
 	log.Printf("sudo-logserver %s listening on %s, storage=%s logdir=%s", version.Version, *flagListen, *flagStorage, *flagLogDir)

@@ -25,7 +25,9 @@ func (srv *server) handleConn(conn *tls.Conn) {
 		remote:    conn.RemoteAddr().String(),
 		r:         bufio.NewReader(conn),
 		w:         bufio.NewWriter(conn),
-		diskQueue: make(chan diskTask, 50000),
+		// Capacity bounded to keep worst-case per-connection memory sane --
+		// see maxOverflow's comment in session_conn.go for the full budget.
+		diskQueue: make(chan diskTask, 2000),
 		diskDone:  make(chan struct{}),
 	}
 	sConn.sendCond = sync.NewCond(&sConn.sendMu)
