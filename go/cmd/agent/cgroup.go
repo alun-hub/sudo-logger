@@ -60,8 +60,12 @@ type cgroupSession struct {
 
 	serverW *protocol.Writer // Used to send sandbox/divergence alerts
 
+	// escaped maps a tracked escaped pid to its process-group id (0 = no
+	// valid pgid was obtainable, so freeze()/unfreeze()/remove() must not
+	// attempt to signal it). Keyed by pid so hasEscapedRunning can still
+	// probe each one individually via /proc.
 	escapedMu sync.Mutex
-	escaped   map[int]bool
+	escaped   map[int]int
 
 	stopTrack  chan struct{}
 	trackDone  chan struct{}
@@ -97,7 +101,7 @@ func newCgroupSession(sessionID string, sudoPid int) *cgroupSession {
 		path:      path,
 		sudoPid:   sudoPid,
 		cgName:    filepath.Base(path),
-		escaped:   make(map[int]bool),
+		escaped:   make(map[int]int),
 		stopTrack: make(chan struct{}),
 		trackDone: make(chan struct{}),
 	}
@@ -288,7 +292,7 @@ func (cg *cgroupSession) trackDescendants() {
 						sandboxSys.registerAuxCgroup(cgroupInodeOf(pid), cg)
 						cg.escapedMu.Lock()
 						if _, already := cg.escaped[pid]; !already {
-							cg.escaped[pid] = false
+							cg.escaped[pid] = 0 // shell case: never signal-stopped, only tracked
 						}
 						cg.escapedMu.Unlock()
 					}
@@ -307,16 +311,26 @@ func (cg *cgroupSession) trackDescendants() {
 					}
 				}
 				sandboxSys.registerAuxCgroup(cgroupInodeOf(pid), cg)
-				shouldSIGSTOP := pgidErr == nil && pgid == pid
+				// Track the whole process group, not just this pid: SIGSTOP
+				// to a lone member of a group (e.g. one side of a pipeline)
+				// can deadlock the other side instead of cleanly pausing
+				// it. kill(-pgid, sig) is standard job-control semantics
+				// (the same primitive a shell's Ctrl-Z uses) and is safe to
+				// call redundantly if another tracked pid shares the same
+				// pgid -- signaling an already-stopped group is a no-op.
+				var trackPgid int
+				if pgidErr == nil {
+					trackPgid = pgid
+				}
 				cg.escapedMu.Lock()
 				if _, already := cg.escaped[pid]; !already {
-					cg.escaped[pid] = shouldSIGSTOP
-					debugLog("cgroup %s: pid %d escaped, tracked (sigstop=%v)", cg.cgName, pid, shouldSIGSTOP)
+					cg.escaped[pid] = trackPgid
+					debugLog("cgroup %s: pid %d escaped, tracked (pgid=%d)", cg.cgName, pid, trackPgid)
 					cg.mu.Lock()
 					isFrozen := cg.frozen
 					cg.mu.Unlock()
-					if isFrozen && shouldSIGSTOP {
-						syscall.Kill(pid, syscall.SIGSTOP)
+					if isFrozen && trackPgid > 0 {
+						syscall.Kill(-trackPgid, syscall.SIGSTOP)
 					}
 				}
 				cg.escapedMu.Unlock()
@@ -419,9 +433,9 @@ func (cg *cgroupSession) freeze() {
 	}
 	cg.mu.Unlock()
 	cg.escapedMu.Lock()
-	for pid, shouldStop := range cg.escaped {
-		if shouldStop {
-			syscall.Kill(pid, syscall.SIGSTOP)
+	for _, pgid := range cg.escaped {
+		if pgid > 0 {
+			syscall.Kill(-pgid, syscall.SIGSTOP)
 		}
 	}
 	cg.escapedMu.Unlock()
@@ -444,9 +458,9 @@ func (cg *cgroupSession) unfreeze() {
 	}
 	cg.mu.Unlock()
 	cg.escapedMu.Lock()
-	for pid, shouldStop := range cg.escaped {
-		if shouldStop {
-			syscall.Kill(pid, syscall.SIGCONT)
+	for _, pgid := range cg.escaped {
+		if pgid > 0 {
+			syscall.Kill(-pgid, syscall.SIGCONT)
 		}
 	}
 	cg.escapedMu.Unlock()
@@ -459,9 +473,9 @@ func (cg *cgroupSession) remove() {
 	cg.removeOnce.Do(func() {
 		_ = os.WriteFile(filepath.Join(cg.path, "cgroup.freeze"), []byte("0\n"), 0644)
 		cg.escapedMu.Lock()
-		for pid, shouldStop := range cg.escaped {
-			if shouldStop {
-				syscall.Kill(pid, syscall.SIGCONT)
+		for _, pgid := range cg.escaped {
+			if pgid > 0 {
+				syscall.Kill(-pgid, syscall.SIGCONT)
 			}
 		}
 		cg.escapedMu.Unlock()

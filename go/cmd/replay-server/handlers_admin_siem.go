@@ -38,6 +38,13 @@ func handleGetSiemConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Mask the bearer/HEC token so it is never returned to the browser —
+	// same convention as OIDC's client_secret (routes.go) and the approval
+	// webhook_secret (approval.go). The UI treats "***" as "secret is
+	// configured; leave unchanged on save" (see handlePutSiemConfig).
+	if cfg.HTTPS.Token != "" { // pragma: allowlist secret
+		cfg.HTTPS.Token = "***" // pragma: allowlist secret
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"path":   *flagSiemConfig,
@@ -81,6 +88,26 @@ func handlePutSiemConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := body.Config
+
+	// The browser sends back the "***" sentinel when the token field was
+	// left untouched (see handleGetSiemConfig's masking) — restore the
+	// real value instead of persisting the literal string "***", which
+	// would silently break SIEM forwarding auth on the next send.
+	if cfg.HTTPS.Token == "***" { // pragma: allowlist secret
+		text, err := sessionStore.GetConfig(r.Context(), "siem.yaml")
+		if err != nil {
+			http.Error(w, "read current config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var current siem.Config
+		if text != "" {
+			if err := yaml.Unmarshal([]byte(text), &current); err != nil {
+				http.Error(w, "parse current config: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		cfg.HTTPS.Token = current.HTTPS.Token // pragma: allowlist secret
+	}
 
 	// Validate transport and format values to avoid writing garbage.
 	switch cfg.Transport {

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +18,44 @@ import (
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 )
+
+// adminHTTPClient is used by proxyToLogServer for all calls to the log
+// server's admin API. Defaults to http.DefaultClient (legacy plain-HTTP
+// deployments); registerRoutes replaces it with a CA-pinned TLS client when
+// -logserver-admin uses https://.
+var adminHTTPClient = http.DefaultClient
+
+// buildAdminHTTPClient builds the TLS client used to reach the log server's
+// admin API over HTTPS. Verification is standard, unmodified crypto/tls
+// (chain-to-caPath's CA + hostname check) -- tlsName overrides only which
+// hostname is checked against, the same mechanism `curl --resolve` or
+// `openssl s_client -servername` use. This is necessary because the admin
+// API is normally dialed via an internal Kubernetes Service DNS name (e.g.
+// sudo-logserver-admin), not the hostname the server's certificate SAN was
+// actually issued for. Both arguments are required -- caller fails closed
+// (does not fall back to an unverified connection) when either is empty.
+func buildAdminHTTPClient(caPath, tlsName string) (*http.Client, error) {
+	if caPath == "" || tlsName == "" {
+		return nil, fmt.Errorf("-logserver-admin uses https:// but -logserver-admin-ca and -logserver-admin-tls-name are both required")
+	}
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("read -logserver-admin-ca: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("-logserver-admin-ca does not contain a valid PEM CA certificate")
+	}
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs:    pool,
+				ServerName: tlsName,
+				MinVersion: tls.VersionTLS12,
+			},
+		},
+	}, nil
+}
 
 // registerRoutes sets up all the HTTP routes on the given mux.
 func registerRoutes(mux *http.ServeMux) {
@@ -60,6 +101,15 @@ func registerRoutes(mux *http.ServeMux) {
 		adminToken, err := config.ResolveSecret(*flagLogServerAdminToken, *flagLogServerAdminTokenFile, "SUDO_LOGGER_ADMIN_TOKEN")
 		if err != nil {
 			log.Fatalf("admin token: %v", err)
+		}
+		if strings.HasPrefix(adminBase, "https://") {
+			client, err := buildAdminHTTPClient(*flagLogServerAdminCA, *flagLogServerAdminTLSName)
+			if err != nil {
+				log.Fatalf("admin: %v", err)
+			}
+			adminHTTPClient = client
+			log.Printf("admin: log server admin API over TLS, verified against %s (server-name %s)",
+				*flagLogServerAdminCA, *flagLogServerAdminTLSName)
 		}
 		mux.HandleFunc("/api/approvals", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {

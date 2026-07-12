@@ -32,7 +32,7 @@ func proxyToLogServer(w http.ResponseWriter, r *http.Request, targetURL, token, 
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := adminHTTPClient.Do(req)
 	if err != nil {
 		http.Error(w, "approval proxy: "+err.Error(), http.StatusBadGateway)
 		return

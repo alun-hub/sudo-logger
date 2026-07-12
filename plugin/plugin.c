@@ -208,8 +208,11 @@ static int read_exact(int fd, void *buf, size_t n)
     while (got < n) {
         ssize_t r = read(fd, (char *)buf + got, n - got);
         if (r <= 0) {
-            if (r == 0)  /* EOF: peer closed connection */
-                atomic_store(&g_agent_dead, 1);
+            /* EOF (r==0) or a real read error (r<0, e.g. ECONNRESET) both
+             * mean this connection is unusable — either way the session
+             * must go through the documented dead-agent path instead of
+             * being misreported as "frozen, waiting for reconnect". */
+            atomic_store(&g_agent_dead, 1);
             return -1;
         }
         got += (size_t)r;
@@ -762,8 +765,15 @@ static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
 
     size_t plen = 8 + 8 + 1 + 4 + dlen;
     uint8_t *p = malloc(plen);
-    if (!p)
+    if (!p) {
+        /* Audit data loss: this chunk of the session's actual terminal
+         * output is dropped silently otherwise. g_seq is intentionally
+         * NOT incremented here, matching the "chunk never sent" case. */
+        syslog(LOG_WARNING,
+               "sudo-logger: ship_chunk: malloc(%zu) failed -- dropping "
+               "%u bytes of session I/O (stream=%u)", plen, dlen, stream);
         return;
+    }
 
     uint64_t seq_be = htobe64(++g_seq);
     int64_t  ts_be  = (int64_t)htobe64((uint64_t)now_ns());
@@ -789,8 +799,13 @@ static void ship_chunk(uint8_t stream, const char *data, unsigned int dlen)
  */
 static void json_escape_into(char *buf, size_t bufsz, const char *src)
 {
+    if (bufsz == 0)
+        return;
+
+    int truncated = 0;
     size_t pos = 0;
-    for (const char *p = src; *p && pos + 2 < bufsz; p++) {
+    const char *p = src;
+    for (; *p && pos + 2 < bufsz; p++) {
         unsigned char c = (unsigned char)*p;
         if (c == '\\' || c == '"') {
             buf[pos++] = '\\';
@@ -798,16 +813,37 @@ static void json_escape_into(char *buf, size_t bufsz, const char *src)
         } else if (c < 0x20) {
             if (pos + 6 < bufsz) {
                 int n = snprintf(buf + pos, bufsz - pos, "\\u%04x", c);
-                if (n > 0 && (size_t)n < bufsz - pos)
+                if (n > 0 && (size_t)n < bufsz - pos) {
                     pos += (size_t)n;
-                else
-                    break; /* Truncated or error */
+                } else {
+                    truncated = 1; /* Truncated or error */
+                    break;
+                }
+            } else {
+                truncated = 1; /* not enough room for \uXXXX -- stop here
+                                 * rather than silently dropping this char
+                                 * and continuing past it */
+                break;
             }
         } else {
             buf[pos++] = (char)c;
         }
     }
-    if (pos < bufsz) buf[pos] = '\0';
+    if (*p != '\0')
+        truncated = 1;
+    buf[pos] = '\0';
+
+    /* Mark truncation explicitly, same convention as build_cmdline_json --
+     * a cut-off field must not be mistaken for the complete value. */
+    if (truncated) {
+        static const char marker[] = "...[truncated]";
+        size_t mlen = sizeof(marker) - 1;
+        if (mlen < bufsz) {
+            size_t start = pos > mlen ? pos - mlen : 0;
+            memcpy(buf + start, marker, mlen);
+            buf[start + mlen] = '\0';
+        }
+    }
 }
 
 /*

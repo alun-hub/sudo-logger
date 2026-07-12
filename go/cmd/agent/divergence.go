@@ -118,10 +118,18 @@ const maxExecveAge = 10 * time.Second
 // issues many rapid sudo calls that never produce a plugin SESSION_START.
 const maxExecvePerUser = 100
 
-// confirmPlugin is called when the plugin delivers a SESSION_START for user+host.
+// confirmPlugin is called when the plugin delivers a SESSION_START for
+// user+host, carrying the sudo process's own PID (SessionStart.Pid). It only
+// confirms an eBPF execve entry whose pid matches exactly — dequeuing the
+// FIFO-oldest entry regardless of pid would let an attacker who bypassed the
+// plugin for one sudo invocation (e.g. via sudo.conf tampering) have that
+// bypass silently "confirmed away" by any other, unrelated sudo invocation
+// the same user happens to run within maxExecveAge.
+//
 // Returns true if a matching eBPF execve was found (confirmed), false if the
-// plugin session has no eBPF witness (unwitnessed — eBPF may be down).
-func (d *divergenceTracker) confirmPlugin(username, host string) bool {
+// plugin session has no eBPF witness for this exact pid (unwitnessed — eBPF
+// may be down, or this really is an unwitnessed/bypassed invocation).
+func (d *divergenceTracker) confirmPlugin(username, host string, pid uint32) bool {
 	key := username + "|" + shortHost(host)
 	now := time.Now()
 
@@ -129,41 +137,49 @@ func (d *divergenceTracker) confirmPlugin(username, host string) bool {
 	queue := d.pending[key]
 
 	// Discard stale entries (from sudo invocations that were killed before the
-	// plugin responded).  Keep only entries newer than maxExecveAge.
+	// plugin responded) and split out anything that isn't the pid we're
+	// trying to confirm.  Keep only entries newer than maxExecveAge.
 	var fresh []*pendingSudoExec
+	var matched *pendingSudoExec
 	for _, e := range queue {
-		if now.Sub(e.wallTime) <= maxExecveAge {
-			fresh = append(fresh, e)
-		} else {
+		if now.Sub(e.wallTime) > maxExecveAge {
 			e.cancelled = true // prevent alert if timer fires during/after Stop
 			e.timer.Stop()
 			debugLog("divergence: discarding stale execve pid=%d age=%v", e.pid, now.Sub(e.wallTime))
+			continue
 		}
+		if matched == nil && e.pid == pid {
+			matched = e
+			continue
+		}
+		fresh = append(fresh, e)
 	}
 
-	if len(fresh) == 0 {
-		delete(d.pending, key)
+	if matched == nil {
+		if len(fresh) == 0 {
+			delete(d.pending, key)
+		} else {
+			d.pending[key] = fresh
+		}
 		d.mu.Unlock()
-		return false // no matching eBPF execve seen — eBPF may be disabled
+		return false // no eBPF execve seen for this exact pid — eBPF may be
+		// disabled, or this SESSION_START is genuinely unwitnessed
 	}
 
-	// Dequeue the oldest fresh entry (FIFO — concurrent sudo invocations by the
-	// same user are matched in the order they arrived).
-	entry := fresh[0]
 	// Set cancelled under the lock so that a concurrently-firing timer callback
 	// that has not yet acquired mu will see it and skip the alert.
-	entry.cancelled = true
-	if len(fresh) == 1 {
+	matched.cancelled = true
+	if len(fresh) == 0 {
 		delete(d.pending, key)
 	} else {
-		d.pending[key] = fresh[1:]
+		d.pending[key] = fresh
 	}
 	d.mu.Unlock()
 
-	entry.timer.Stop() // best-effort; cancelled flag handles the race if Stop returns false
+	matched.timer.Stop() // best-effort; cancelled flag handles the race if Stop returns false
 
 	debugLog("divergence: confirmed plugin SESSION_START for %s@%s pid=%d (latency %v)",
-		username, host, entry.pid, time.Since(entry.wallTime))
+		username, host, matched.pid, time.Since(matched.wallTime))
 	return true
 }
 

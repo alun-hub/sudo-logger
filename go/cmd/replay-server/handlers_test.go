@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"sudo-logger/internal/siem"
 	"sudo-logger/internal/store"
 )
@@ -310,6 +312,64 @@ func TestHandlePutSiemConfigInvalidJSON(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("invalid JSON: got %d, want 400", rr.Code)
+	}
+}
+
+// TestHandleGetSiemConfigMasksTokenAndPutRestoresIt covers the two-sided
+// fix together: GET must never return the real token, and a PUT that sends
+// back the "***" sentinel (an untouched field in the Settings UI) must
+// restore the real value rather than persisting the literal string "***".
+func TestHandleGetSiemConfigMasksTokenAndPutRestoresIt(t *testing.T) {
+	initTestStore(t)
+
+	seed := map[string]any{
+		"enabled":   true,
+		"transport": "https",
+		"format":    "json",
+		"https":     map[string]any{"url": "https://siem.example.com/log", "token": "real-secret-token"},
+	}
+	rr := httptest.NewRecorder()
+	handlePutSiemConfig(rr, httptest.NewRequest(http.MethodPut, "/api/siem-config", siemConfigBody(seed)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("seed PUT: got %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+
+	getRR := httptest.NewRecorder()
+	handleGetSiemConfig(getRR, httptest.NewRequest(http.MethodGet, "/api/siem-config", nil))
+	var getResp struct {
+		Config siem.Config `json:"config"`
+	}
+	if err := json.NewDecoder(getRR.Body).Decode(&getResp); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if getResp.Config.HTTPS.Token != "***" { // pragma: allowlist secret
+		t.Errorf("GET must mask the token, got %q", getResp.Config.HTTPS.Token)
+	}
+
+	// Save again with the sentinel in place of the token, as the Settings
+	// UI would when the field was left untouched.
+	unchanged := map[string]any{
+		"enabled":   true,
+		"transport": "https",
+		"format":    "json",
+		"https":     map[string]any{"url": "https://siem.example.com/log", "token": "***"},
+	}
+	rr2 := httptest.NewRecorder()
+	handlePutSiemConfig(rr2, httptest.NewRequest(http.MethodPut, "/api/siem-config", siemConfigBody(unchanged)))
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("sentinel-preserving PUT: got %d, want 200; body: %s", rr2.Code, rr2.Body.String())
+	}
+
+	text, err := sessionStore.GetConfig(context.Background(), "siem.yaml")
+	if err != nil {
+		t.Fatalf("read stored config: %v", err)
+	}
+	var stored siem.Config
+	if err := yaml.Unmarshal([]byte(text), &stored); err != nil {
+		t.Fatalf("parse stored config: %v", err)
+	}
+	if stored.HTTPS.Token != "real-secret-token" { // pragma: allowlist secret
+		t.Errorf("real token was not preserved across a sentinel-preserving save, got %q", stored.HTTPS.Token)
 	}
 }
 

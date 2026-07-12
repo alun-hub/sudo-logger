@@ -249,9 +249,18 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			// In proxy mode, if the header is missing, we still let it pass to accessLogMiddleware
-			// which will treat the user as "-" (unauthenticated viewer).
-			next.ServeHTTP(w, r)
+			// Fail closed: proxy mode is configured but this request carries
+			// no trusted-header credential (misconfigured/bypassed reverse
+			// proxy). Do NOT fall through — accessLogMiddleware would treat
+			// the resulting viewer=="-" the same as a genuinely open,
+			// unauthenticated deployment and serve every user's sessions to
+			// an anonymous caller. Same fail-closed principle already
+			// applied to the GetAuthConfig/ListUsers error paths above.
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, "unauthorized: reverse proxy did not set the trusted user header", http.StatusUnauthorized)
 			return
 		}
 

@@ -367,3 +367,67 @@ func TestBasicAuthMiddleware_LoginPassesThroughInLocalMode(t *testing.T) {
 		t.Errorf("GET /login in local mode: got %d, want 200 (serve local login page)", rr.Code)
 	}
 }
+
+// ── basicAuthMiddleware: proxy/trusted-header mode ──────────────────────────
+
+// TestBasicAuthMiddleware_ProxyModeMissingHeaderFailsClosed is the H3
+// regression test: proxy mode is configured, but this request carries no
+// trusted-header credential (misconfigured or bypassed reverse proxy).
+// Before the fix this fell through to next.ServeHTTP and the request was
+// treated downstream as an anonymous open-deployment viewer, exposing every
+// user's sessions. It must now be rejected with 401 before reaching the
+// inner handler at all.
+func TestBasicAuthMiddleware_ProxyModeMissingHeaderFailsClosed(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "Correct-Horse1!", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	cfg := store.AuthConfig{Source: "proxy"}
+	cfg.Proxy.UserHeader = "X-Remote-User"
+	if err := sessionStore.SetAuthConfig(t.Context(), cfg); err != nil {
+		t.Fatalf("SetAuthConfig: %v", err)
+	}
+
+	innerCalled := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+	h := basicAuthMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	// Deliberately no X-Remote-User header.
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("proxy mode, missing header: got %d, want 401", rr.Code)
+	}
+	if innerCalled {
+		t.Error("inner handler must not run when the trusted header is missing")
+	}
+}
+
+func TestBasicAuthMiddleware_ProxyModeWithHeaderPassesThrough(t *testing.T) {
+	initTestStore(t)
+	u := newUserWithPassword(t, "alice", "Correct-Horse1!", RoleAdmin)
+	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	cfg := store.AuthConfig{Source: "proxy"}
+	cfg.Proxy.UserHeader = "X-Remote-User"
+	if err := sessionStore.SetAuthConfig(t.Context(), cfg); err != nil {
+		t.Fatalf("SetAuthConfig: %v", err)
+	}
+
+	h := basicAuthMiddleware(newOKHandler())
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	req.Header.Set("X-Remote-User", "proxied-user")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("proxy mode, header present: got %d, want 200", rr.Code)
+	}
+}

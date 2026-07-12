@@ -710,7 +710,7 @@ func handlePluginConn(pluginConn net.Conn) {
 	// Notify the divergence tracker that the plugin logged this sudo session.
 	// witnessed=true means eBPF saw the execve — the session is fully confirmed.
 	// witnessed=false means eBPF was not running or missed the execve.
-	witnessed := div.confirmPlugin(start.User, start.Host)
+	witnessed := div.confirmPlugin(start.User, start.Host, uint32(start.Pid))
 	if witnessed {
 		start.DivergenceStatus = "confirmed"
 	} else {

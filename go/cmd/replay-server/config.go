@@ -17,6 +17,8 @@ var (
 	flagLogServerAdmin          = flag.String("logserver-admin", "", "Log server admin address for approval API (e.g. http://localhost:9877); empty disables approvals tab")
 	flagLogServerAdminToken     = flag.String("logserver-admin-token", "", "Shared bearer token for the log server approval API (must match -approval-token on the log server)")
 	flagLogServerAdminTokenFile = flag.String("logserver-admin-token-file", "", "File containing the log server admin bearer token (alternative to -logserver-admin-token; env SUDO_LOGGER_ADMIN_TOKEN also accepted)")
+	flagLogServerAdminCA        = flag.String("logserver-admin-ca", "", "CA certificate that signed the log server's admin TLS cert (required when -logserver-admin uses https://)")
+	flagLogServerAdminTLSName   = flag.String("logserver-admin-tls-name", "", "Hostname the log server's TLS certificate is actually issued for (SNI override; required when -logserver-admin uses https://, since it's usually dialed by an internal Service DNS name that isn't in the cert's SAN list)")
 	flagTLSCert                 = flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	flagTLSKey                  = flag.String("tls-key", "", "TLS private key file (enables HTTPS)")
 	flagHTPasswd                = flag.String("htpasswd", "", "Path to htpasswd file for HTTP Basic Auth (bcrypt hashes only; reload with SIGHUP)")

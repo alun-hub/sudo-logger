@@ -102,6 +102,16 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 		return // inode unchanged, nothing to do
 	}
 
+	// Insert the new inode BEFORE removing the old one, so there is never a
+	// window where neither is protected (matches the documented-safe order
+	// reloadConfig already uses in sandbox.go) — an atomic file replacement
+	// landing in a delete-then-insert gap would otherwise pass unenforced.
+	marker := uint8(1)
+	if err := s.objs.ProtectedInodes.Put(newKey, marker); err != nil {
+		log.Printf("sandbox: protect inode for %s: %v", path, err)
+		return
+	}
+
 	// Only delete the old key if no other protected path still uses it.
 	shared := false
 	for otherPath, k := range s.pathInodes {
@@ -115,12 +125,6 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 	}
 	log.Printf("sandbox: refreshed protected inode for %s: {ino=%d dev=%d} → {ino=%d dev=%d}",
 		path, old.Ino, old.Dev, newKey.Ino, newKey.Dev)
-
-	marker := uint8(1)
-	if err := s.objs.ProtectedInodes.Put(newKey, marker); err != nil {
-		log.Printf("sandbox: protect inode for %s: %v", path, err)
-		return
-	}
 
 	s.pathInodes[path] = newKey
 }
