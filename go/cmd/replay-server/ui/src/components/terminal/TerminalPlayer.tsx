@@ -143,16 +143,16 @@ export function TerminalPlayer({ session }: Props) {
         <span className="flex-1" />
         <button
           onClick={copyTsid}
-          title="Kopiera session-ID"
+          title="Copy session ID"
           className="shrink-0 text-text-dim hover:text-foreground transition-colors cursor-pointer"
         >
-          {copied ? 'kopierat ✓' : `id: ${session.tsid.split('/').pop()}`}
+          {copied ? 'copied ✓' : `id: ${session.tsid.split('/').pop()}`}
         </button>
         <span className="text-border-mid">│</span>
         <a
           href={`/api/session/cast?tsid=${encodeURIComponent(session.tsid)}`}
           download
-          title="Ladda ner .cast-fil"
+          title="Download .cast file"
           className="shrink-0 text-text-dim hover:text-foreground transition-colors"
         >
           ↓ .cast

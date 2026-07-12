@@ -128,7 +128,10 @@ export function serializeSudoers(rules: SudoersRule[], aliases: SudoersAlias[], 
     '',
   ]
   for (const a of aliases) {
-    if (a.name && a.members) lines.push(`${a.type} ${a.name} = ${a.members}`)
+    // Collapse embedded newlines (same treatment as rule lines below) so a
+    // pasted multi-line alias name/member list can't inject an extra
+    // sudoers directive line.
+    if (a.name && a.members) lines.push(`${a.type} ${a.name} = ${a.members}`.replace(/\s+/g, ' ').trim())
   }
   if (aliases.length) lines.push('')
 

@@ -5,7 +5,7 @@ export function useCan() {
   const qc = useQueryClient()
   const me = qc.getQueryData<MeResponse>(['me'])
   return (perm: string): boolean => {
-    if (!me) return true  // optimistic while loading
+    if (!me) return false  // hide gated UI while /api/me is still loading
     if (me.role === 'admin') return true
     return (me.permissions ?? []).includes(perm)
   }
