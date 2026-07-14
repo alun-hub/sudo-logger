@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.124
+Version:        1.20.125
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -83,6 +83,16 @@ install -D -m 0640 agent.conf \
 # Example sandbox deny-list (not enabled by default)
 install -D -m 0640 sandbox.yaml \
     %{buildroot}%{_sysconfdir}/sudo-logger/sandbox.yaml
+
+# RPM macro redirecting scriptlet temp execution away from /var/tmp, which
+# the BPF sandbox blocks for execution (noexec) — see macro file comment.
+install -D -m 0644 rpm-macros.d/macros.sudo-logger-tmppath \
+    %{buildroot}%{_sysconfdir}/rpm/macros.d/macros.sudo-logger-tmppath
+
+# Dedicated, root-only scriptlet tmp directory. Not a shared multi-user
+# scratch space like /var/tmp, so it does not need noexec protection.
+install -d -m 0700 %{buildroot}%{_localstatedir}/lib/sudo-logger
+install -d -m 0700 %{buildroot}%{_localstatedir}/lib/sudo-logger/rpm-tmp
 
 # SELinux policy module
 install -D -m 0644 selinux/sudo_logger.pp \
@@ -189,6 +199,9 @@ fi
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/agent.conf
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/sandbox.yaml
+%config(noreplace) %attr(0644, root, root) %{_sysconfdir}/rpm/macros.d/macros.sudo-logger-tmppath
+%dir %attr(0700, root, root) %{_localstatedir}/lib/sudo-logger
+%dir %attr(0700, root, root) %{_localstatedir}/lib/sudo-logger/rpm-tmp
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
 %{_datadir}/selinux/packages/sudo_logger.pp
 %{_mandir}/man8/sudo-logger-agent.8*
@@ -215,6 +228,18 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Tue Jul 14 2026 sudo-logger 1.20.125-1
+- fix(sandbox): redirect RPM's %%_tmppath to a dedicated root-only directory
+  (/var/lib/sudo-logger/rpm-tmp, 0700) instead of /var/tmp — the BPF
+  sandbox's noexec rule on /var/tmp was silently blocking every RPM
+  scriptlet (%%pre/%%post/%%preun/%%postun/%%posttrans), which RPM stages
+  as a script file under %%_tmppath and execs directly; this could abort
+  package transactions mid-scriptlet, leaving rpmdb and SELinux policy
+  state corrupted (observed: an interrupted selinux-policy-targeted
+  upgrade broke sudo system-wide). Same fix applied to .goreleaser.yaml's
+  nfpm packaging (rpm-only via packager: rpm); deb is unaffected since
+  dpkg maintainer scripts run from /var/lib/dpkg/info/, never /var/tmp.
+
 * Fri Jul 03 2026 sudo-logger 1.20.124-1
 - security: drop a session chunk that fails to parse instead of forwarding
   it unredacted, so malformed data can never bypass the secret-redaction

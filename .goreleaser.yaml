@@ -149,6 +149,27 @@ nfpms:
         type: "config|noreplace"
         file_info:
           mode: 0640
+      # RPM-only: redirects RPM's scriptlet temp execution away from
+      # /var/tmp, which the BPF sandbox blocks for execution (noexec) —
+      # see the macro file's own comment for the full incident/rationale.
+      # Not needed for deb: dpkg maintainer scripts run from
+      # /var/lib/dpkg/info/, never touch /tmp or /var/tmp.
+      - src: rpm-macros.d/macros.sudo-logger-tmppath
+        dst: /etc/rpm/macros.d/macros.sudo-logger-tmppath
+        type: "config|noreplace"
+        packager: rpm
+        file_info:
+          mode: 0644
+      - dst: /var/lib/sudo-logger
+        type: dir
+        packager: rpm
+        file_info:
+          mode: 0700
+      - dst: /var/lib/sudo-logger/rpm-tmp
+        type: dir
+        packager: rpm
+        file_info:
+          mode: 0700
       - src: sudo-logger-agent.service
         dst: /usr/lib/systemd/system/sudo-logger-agent.service
         file_info:

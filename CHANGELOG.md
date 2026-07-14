@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.2] - 2026-07-14
+
+### Fixed
+- **client/rpm**: the BPF sandbox's `noexec` rule on `/var/tmp` (meant to stop a copied-in forbidden binary from being executed under a fresh inode) also silently blocked RPM's own scriptlet execution — RPM stages every `%pre`/`%post`/`%preun`/`%postun`/`%posttrans` script under `%_tmppath` (`/var/tmp` by default) and execs it directly, which the sandbox's `bprm_check_security` hook treats identically to a user-copied forbidden binary. This could abort a package transaction mid-scriptlet, leaving `rpmdb` and SELinux policy state inconsistent — observed for real when an interrupted `selinux-policy-targeted` upgrade left duplicate `rpmdb` entries and a mislabeled agent binary, breaking `sudo` system-wide until manually recovered. Fixed by redirecting `%_tmppath` to a dedicated, root-only directory (`/var/lib/sudo-logger/rpm-tmp`, `0700`) that was never noexec-protected, rather than weakening the sandbox itself. An eBPF-level exemption for the package manager was considered and rejected: it would have required making the sandbox's exemption state inheritable across `fork()`, which the fork hook deliberately prevents ("even if the parent was the exempt leader"). Fixed in both packaging mechanisms: `rpm/sudo-logger-client.spec` (local `rpmbuild` path) and `.goreleaser.yaml`'s `nfpm` config (the actual GitHub Release RPM path, scoped `rpm`-only via `packager: rpm`) — not needed for the `deb` build, since dpkg's maintainer scripts run from `/var/lib/dpkg/info/` and never touch `/var/tmp`.
+
 ## [1.39.1] - 2026-07-12
 
 An independent second security review of v1.39.0's changes (before it had been in the wild for even a day) found a real regression in that release's own fix. Caught and fixed immediately.

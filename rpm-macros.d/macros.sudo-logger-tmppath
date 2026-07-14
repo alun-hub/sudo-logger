@@ -1,0 +1,18 @@
+# Redirect RPM's scriptlet temp directory away from /var/tmp.
+#
+# sudo-logger's BPF sandbox blocks execution from /var/tmp (protect.noexec
+# in sandbox.yaml) to stop a copied-in forbidden binary from being run under
+# a fresh inode. RPM stages every %pre/%post/%preun/%postun/%posttrans
+# scriptlet as a script file under %_tmppath and execs it directly — which
+# collides with that rule and silently aborts package transactions
+# mid-scriptlet (seen 2026-07-14: an interrupted selinux-policy-targeted
+# upgrade left duplicate rpmdb entries, a mislabeled agent binary, and
+# system-wide sudo breakage).
+#
+# This directory is root-only (0700) and single-purpose, not a shared
+# multi-user scratch space like /var/tmp, so redirecting scriptlet
+# execution here does not reopen the "copy a forbidden binary into
+# writable tmp and exec it" bypass that /var/tmp noexec exists to prevent —
+# only root can write here, and root can already run arbitrary code via
+# any scriptlet regardless of this macro.
+%_tmppath /var/lib/sudo-logger/rpm-tmp
