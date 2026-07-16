@@ -182,6 +182,12 @@ if [ $1 -eq 0 ]; then
     sed -i '/Plugin sudo_logger_plugin sudo_logger_plugin\.so/d' /etc/sudo.conf \
         2>/dev/null || true
 fi
+# Remove the ACK verify key only on full uninstall, never on upgrade — it is
+# not tracked in %%files (see comment there) specifically so upgrades never
+# touch it.
+if [ $1 -eq 0 ]; then
+    rm -f %{_sysconfdir}/sudo-logger/ack-verify.key
+fi
 
 %postun
 # On upgrade: reload unit and signal the running agent to restart.
@@ -207,7 +213,14 @@ fi
 %attr(0644, root, root) %{_rpmmacrodir}/macros.sudo-logger-tmppath
 %dir %attr(0700, root, root) %{_localstatedir}/lib/sudo-logger
 %dir %attr(0700, root, root) %{_localstatedir}/lib/sudo-logger/rpm-tmp
-%ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
+# ack-verify.key is NOT listed here (not even %ghost). It's provisioned once,
+# manually, from the server's keypair, and the agent has no way to
+# re-fetch it (main.go:81 is a hard log.Fatalf if missing). %ghost files are
+# erased by RPM as part of ANY upgrade (erase-old-version is part of every
+# upgrade transaction, not just full removal) — that silently broke sudo
+# system-wide on this exact machine on 2026-07-16 when upgrading a build
+# that still had this file %ghost-listed. Cleanup on genuine full uninstall
+# only is handled explicitly in %preun below, gated on $1 -eq 0.
 %{_datadir}/selinux/packages/sudo_logger.pp
 %{_mandir}/man8/sudo-logger-agent.8*
 %{_mandir}/man8/sudo_logger_plugin.8*

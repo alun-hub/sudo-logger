@@ -82,6 +82,14 @@ fi
 
 %preun
 %systemd_preun sudo-logserver.service sudo-logserver-restart.timer
+# Remove the ACK signing keypair only on full uninstall, never on upgrade —
+# it is not tracked in %%files (see comment there). Losing ack-sign.key
+# invalidates every already-distributed client's ack-verify.key, breaking
+# ACK verification fleet-wide until every client is manually re-provisioned.
+if [ $1 -eq 0 ]; then
+    rm -f %{_sysconfdir}/sudo-logger/ack-sign.key
+    rm -f %{_sysconfdir}/sudo-logger/ack-verify.key
+fi
 
 %postun
 %systemd_postun_with_restart sudo-logserver.service sudo-logserver-restart.timer
@@ -101,8 +109,15 @@ fi
 # files it doesn't own, closing that path.
 %dir %attr(1770, root, sudologger) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/server.conf
-%ghost %attr(0640, root, sudologger) %{_sysconfdir}/sudo-logger/ack-sign.key
-%ghost %attr(0644, root, root)       %{_sysconfdir}/sudo-logger/ack-verify.key
+# ack-sign.key (private) and ack-verify.key (public) are NOT listed here (not
+# even %ghost). %ghost files are erased by RPM as part of ANY upgrade
+# (erase-old-version runs on every upgrade, not just full removal) — for
+# ack-sign.key specifically that would silently destroy the server's signing
+# key on every upgrade, invalidating every already-distributed client's
+# ack-verify.key fleet-wide (the %post generation guard at line ~71 only
+# re-generates when the file is missing, so it would silently mint a NEW
+# keypair the very next upgrade, not error out). Cleanup on genuine full
+# uninstall only is handled explicitly in %preun below, gated on $1 -eq 0.
 
 # Sticky bit for the same reason as /etc/sudo-logger above -- sudoreplay
 # also gets ACL rwx here (session data it needs to read/write), and must
