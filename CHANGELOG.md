@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.4] - 2026-07-16
+
+Found while verifying v1.39.3 on a real host: an upgrade of `sudo-logger-client` deleted
+its own ACK verification key and broke `sudo` system-wide. Not related to the v1.39.3 fix
+itself — a separate, pre-existing packaging bug that this was the first upgrade to
+actually trigger. **The official GoReleaser-built RPM/DEB releases (the actual GitHub
+Release artifacts) were never affected** — this was specific to the local `rpmbuild`
+path (`rpm/*.spec`), documented here for completeness and because the same pattern,
+if ever copied into the release path, would be considerably worse for the server.
+
+### Fixed
+- **client/rpm**: `ack-verify.key` was marked `%ghost` in `rpm/sudo-logger-client.spec`. RPM erases `%ghost` files as part of *any* upgrade (the implicit erase-old-version step runs on every upgrade transaction, not just full removal) — not something `%config(noreplace)` protects against, since there's no payload to preserve. The agent has no way to re-fetch this key if it goes missing (`main.go:81` is a hard `log.Fatalf`), and it's provisioned once, manually, from the server's keypair. Confirmed on a real upgrade: `sudo-logger-agent` crash-looped on `load verify key: ... no such file or directory`, and `sudo` failed system-wide with `error initializing I/O plugin` for every user.
+- **server/rpm**: same bug, worse — `rpm/sudo-logger-server.spec` marked *both* `ack-sign.key` (the private signing key) and `ack-verify.key` `%ghost`. Losing `ack-sign.key` on upgrade wouldn't have errored at all: the key-generation guard in `%post` only fires when the file is missing, so the next upgrade would have silently minted a brand new keypair, invalidating every already-distributed client's `ack-verify.key` fleet-wide with no visible symptom until ACKs started failing everywhere.
+- Fixed by removing both files from `%files` entirely (not even `%ghost`), so rpm's own package-management erase logic never touches them regardless of upgrade/erase ordering. Cleanup on a genuine full uninstall (not an upgrade) is now handled explicitly in `%preun`, gated on `$1 -eq 0`. Verified with real upgrade cycles for both packages (not just build inspection, per the v1.39.3 lesson): installed, recorded the key's checksum, upgraded, confirmed the checksum was unchanged — for the client's manually-provisioned key and the server's `%post`-auto-generated keypair.
+- `.goreleaser.yaml`'s `nfpm` config (the actual release-artifact path) never declared these files in its `contents:` list in the first place — already safe by omission — but gained explanatory comments so nobody adds them back without understanding the upgrade-erasure risk.
+
 ## [1.39.3] - 2026-07-16
 
 v1.39.2's fix was inert on a real install — caught the same day by actually testing it against a live package transaction rather than trusting the packaging inspection that validated it before release.
