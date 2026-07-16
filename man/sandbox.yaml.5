@@ -86,7 +86,7 @@ ext4 and xfs only; the agent logs a warning if inode 256 is detected.
 .PP
 \fBNote:\fR listing \fB/var/tmp\fR also affects RPM, which stages and executes every
 package scriptlet there by default (\fB%_tmppath\fR). \fBsudo\-logger\-client\fR
-1.20.125+ (v1.39.2+) ships an RPM macro redirecting scriptlet execution to a
+1.20.126+ (v1.39.3+) ships an RPM macro redirecting scriptlet execution to a
 dedicated, non\-noexec directory so this does not collide; on an older client, set
 \fB%_tmppath\fR manually rather than removing \fB/var/tmp\fR from this list. See
 \fBsudo-logger-agent\fR(8) and the troubleshooting guide for details.

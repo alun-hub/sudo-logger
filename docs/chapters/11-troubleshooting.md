@@ -250,17 +250,17 @@ RPM stages every scriptlet as a script file under `%_tmppath` (`/var/tmp` by def
 
 **Fix:**
 
-`sudo-logger-client` 1.20.125 / v1.39.2 and later ship an RPM macro (`/etc/rpm/macros.d/macros.sudo-logger-tmppath`) that redirects `%_tmppath` to a dedicated, root-only directory (`/var/lib/sudo-logger/rpm-tmp`, `0700`) that isn't noexec-protected, so this no longer happens. Confirm it's installed:
+`sudo-logger-client` 1.20.126 / v1.39.3 and later ship an RPM macro (`/usr/lib/rpm/macros.d/macros.sudo-logger-tmppath`) that redirects `%_tmppath` to a dedicated, root-only directory (`/var/lib/sudo-logger/rpm-tmp`, `0700`) that isn't noexec-protected, so this no longer happens. Confirm it's installed:
 
 ```bash
 rpm --eval '%_tmppath'
 # should print /var/lib/sudo-logger/rpm-tmp, not /var/tmp
 ```
 
-If it still prints `/var/tmp`, upgrade `sudo-logger-client` to 1.20.125/v1.39.2 or later. On an older client, work around it without weakening the sandbox by setting the macro yourself:
+If it still prints `/var/tmp`, upgrade `sudo-logger-client` to 1.20.126/v1.39.3 or later (1.20.125/v1.39.2 shipped this macro to `/etc/rpm/macros.d`, which rpm 6 does not scan by default — it had no effect). On an older client, work around it without weakening the sandbox by setting the macro yourself, in the directory rpm actually reads:
 
 ```bash
-echo '%_tmppath /var/lib/sudo-logger/rpm-tmp' | sudo tee /etc/rpm/macros.d/macros.sudo-logger-tmppath
+echo '%_tmppath /var/lib/sudo-logger/rpm-tmp' | sudo tee /usr/lib/rpm/macros.d/macros.sudo-logger-tmppath
 sudo install -d -m 0700 /var/lib/sudo-logger/rpm-tmp
 ```
 

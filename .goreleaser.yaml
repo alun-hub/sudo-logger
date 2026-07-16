@@ -154,9 +154,13 @@ nfpms:
       # see the macro file's own comment for the full incident/rationale.
       # Not needed for deb: dpkg maintainer scripts run from
       # /var/lib/dpkg/info/, never touch /tmp or /var/tmp.
+      # Must live under /usr/lib/rpm/macros.d — /etc/rpm/macros.d is NOT
+      # scanned by default on rpm 6 (confirmed empirically on Fedora 44;
+      # v1.39.2 shipped this to /etc/rpm/macros.d and it was silently
+      # never read). Every other vendor macro file on the system already
+      # lives under /usr/lib/rpm/macros.d.
       - src: rpm-macros.d/macros.sudo-logger-tmppath
-        dst: /etc/rpm/macros.d/macros.sudo-logger-tmppath
-        type: "config|noreplace"
+        dst: /usr/lib/rpm/macros.d/macros.sudo-logger-tmppath
         packager: rpm
         file_info:
           mode: 0644

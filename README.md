@@ -1012,7 +1012,7 @@ The agent also logs a warning when loading a name that exceeds 15 characters.
   `%pre`/`%post`/`%preun`/`%postun`/`%posttrans` scriptlet as a script under
   `%_tmppath` (`/var/tmp` by default) and execs it directly, which the default
   `noexec: [/tmp, /var/tmp, ...]` config blocks — silently aborting `dnf`/`rpm`
-  transactions mid-scriptlet. `sudo-logger-client` 1.20.125+ (v1.39.2+) ships
+  transactions mid-scriptlet. `sudo-logger-client` 1.20.126+ (v1.39.3+) ships
   an RPM macro redirecting `%_tmppath` to a dedicated, non-noexec directory
   (`/var/lib/sudo-logger/rpm-tmp`) so this doesn't happen. Not an issue for
   `.deb`: dpkg maintainer scripts run from `/var/lib/dpkg/info/`, never

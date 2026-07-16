@@ -269,7 +269,7 @@ protect:
 
 > **Note:** `/var/tmp` is a common `noexec` entry, but it's also where RPM stages and
 > executes every package scriptlet (`%pre`/`%post`/`%preun`/`%postun`/`%posttrans`) by
-> default. `sudo-logger-client` 1.20.125+ (v1.39.2+) ships an RPM macro that redirects
+> default. `sudo-logger-client` 1.20.126+ (v1.39.3+) ships an RPM macro that redirects
 > RPM's scriptlet staging to a dedicated, non-noexec directory so this doesn't collide.
 > If you're on an older client, or see `dnf`/`rpm` transactions failing unexpectedly,
 > see [Package manager transactions abort mid-scriptlet](11-troubleshooting.md#dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent).

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.3] - 2026-07-16
+
+v1.39.2's fix was inert on a real install — caught the same day by actually testing it against a live package transaction rather than trusting the packaging inspection that validated it before release.
+
+### Fixed
+- **client/rpm**: v1.39.2 shipped the `%_tmppath` redirect macro to `/etc/rpm/macros.d/macros.sudo-logger-tmppath`, which rpm 6 does not scan by default — confirmed empirically on Fedora 44 (every other vendor-shipped macro file on the system, `systemd-rpm-macros`, `selinux-policy`, etc., lives under `/usr/lib/rpm/macros.d`, none under `/etc/rpm/macros.d`). `%_tmppath` still evaluated to `/var/tmp` after installing 1.39.2, so the fix had no effect: a real `dnf install glances` on an upgraded host hit the exact `EXEC_BLOCK` the macro was meant to prevent, because `glances`'s own `%post` scriptlet still staged under `/var/tmp`. Moved to `/usr/lib/rpm/macros.d` (`%{_rpmmacrodir}`) in both packaging mechanisms; this time verified with a real package install and `rpm --eval '%_tmppath'` against the installed macro, not just inspecting the built package's contents and permissions as v1.39.2's testing did.
+- Anyone who installed the v1.39.2 `sudo-logger-client` RPM should upgrade to this version — the underlying `noexec`/scriptlet issue described in v1.39.2's entry is still present until you do. The stray `/etc/rpm/macros.d/macros.sudo-logger-tmppath` file left behind by v1.39.2 is harmless and can be removed manually; it is not owned by this version's package.
+
 ## [1.39.2] - 2026-07-14
 
 ### Fixed

@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.125
+Version:        1.20.126
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -86,8 +86,13 @@ install -D -m 0640 sandbox.yaml \
 
 # RPM macro redirecting scriptlet temp execution away from /var/tmp, which
 # the BPF sandbox blocks for execution (noexec) — see macro file comment.
+# Must live under %{_rpmmacrodir} (/usr/lib/rpm/macros.d) — /etc/rpm/macros.d
+# is NOT scanned by default on rpm 6 (confirmed empirically on Fedora 44;
+# v1.39.2 shipped this to /etc/rpm/macros.d and the macro was silently never
+# read). Every other vendor-shipped macro file (systemd-rpm-macros,
+# selinux-policy, etc.) already lives in %{_rpmmacrodir} on this system.
 install -D -m 0644 rpm-macros.d/macros.sudo-logger-tmppath \
-    %{buildroot}%{_sysconfdir}/rpm/macros.d/macros.sudo-logger-tmppath
+    %{buildroot}%{_rpmmacrodir}/macros.sudo-logger-tmppath
 
 # Dedicated, root-only scriptlet tmp directory. Not a shared multi-user
 # scratch space like /var/tmp, so it does not need noexec protection.
@@ -199,7 +204,7 @@ fi
 %dir %attr(0750, root, root) %{_sysconfdir}/sudo-logger
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/agent.conf
 %config(noreplace) %attr(0640, root, root) %{_sysconfdir}/sudo-logger/sandbox.yaml
-%config(noreplace) %attr(0644, root, root) %{_sysconfdir}/rpm/macros.d/macros.sudo-logger-tmppath
+%attr(0644, root, root) %{_rpmmacrodir}/macros.sudo-logger-tmppath
 %dir %attr(0700, root, root) %{_localstatedir}/lib/sudo-logger
 %dir %attr(0700, root, root) %{_localstatedir}/lib/sudo-logger/rpm-tmp
 %ghost %attr(0644, root, root) %{_sysconfdir}/sudo-logger/ack-verify.key
@@ -228,6 +233,18 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Thu Jul 16 2026 sudo-logger 1.20.126-1
+- fix(spec): 1.20.125's %%_tmppath macro shipped to %%{_sysconfdir}/rpm/macros.d
+  (/etc/rpm/macros.d), which rpm 6 does not scan by default — confirmed
+  empirically on Fedora 44 (every other vendor macro file on the system
+  lives under %%{_rpmmacrodir}, none under /etc/rpm/macros.d). The fix was
+  completely inert: %%_tmppath still evaluated to /var/tmp after installing
+  1.20.125, and a real dnf transaction with a scriptlet (glances) hit the
+  exact EXEC_BLOCK the macro was meant to prevent. Moved to
+  %%{_rpmmacrodir} (/usr/lib/rpm/macros.d); verified with a real install
+  and `rpm --eval '%%_tmppath'` this time, not just file/permission
+  inspection of the built package.
+
 * Tue Jul 14 2026 sudo-logger 1.20.125-1
 - fix(sandbox): redirect RPM's %%_tmppath to a dedicated root-only directory
   (/var/lib/sudo-logger/rpm-tmp, 0700) instead of /var/tmp — the BPF
