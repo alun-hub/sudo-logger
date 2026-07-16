@@ -241,9 +241,16 @@ fi
   completely inert: %%_tmppath still evaluated to /var/tmp after installing
   1.20.125, and a real dnf transaction with a scriptlet (glances) hit the
   exact EXEC_BLOCK the macro was meant to prevent. Moved to
-  %%{_rpmmacrodir} (/usr/lib/rpm/macros.d); verified with a real install
-  and `rpm --eval '%%_tmppath'` this time, not just file/permission
-  inspection of the built package.
+  %%{_rpmmacrodir} (/usr/lib/rpm/macros.d).
+- fix(spec): an unconditional %%_tmppath redirect also broke plain, non-root
+  `rpmbuild` (a developer's own local build), which reads the same macro
+  and has no access to the root-only redirect target. Made the macro
+  conditional on effective UID via rpm's embedded Lua
+  (posix.getprocessid().euid) — redirected only when running as root,
+  since that is the only context the sandbox collision could occur in.
+  Verified both branches: `rpm --eval '%%_tmppath'` returns /var/tmp
+  unchanged as a regular user and /var/lib/sudo-logger/rpm-tmp under sudo;
+  local non-root rpmbuild of this package succeeds again.
 
 * Tue Jul 14 2026 sudo-logger 1.20.125-1
 - fix(sandbox): redirect RPM's %%_tmppath to a dedicated root-only directory

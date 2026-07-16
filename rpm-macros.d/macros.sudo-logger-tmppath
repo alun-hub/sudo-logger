@@ -1,4 +1,4 @@
-# Redirect RPM's scriptlet temp directory away from /var/tmp.
+# Redirect RPM's scriptlet temp directory away from /var/tmp — root only.
 #
 # sudo-logger's BPF sandbox blocks execution from /var/tmp (protect.noexec
 # in sandbox.yaml) to stop a copied-in forbidden binary from being run under
@@ -9,10 +9,22 @@
 # upgrade left duplicate rpmdb entries, a mislabeled agent binary, and
 # system-wide sudo breakage).
 #
-# This directory is root-only (0700) and single-purpose, not a shared
-# multi-user scratch space like /var/tmp, so redirecting scriptlet
-# execution here does not reopen the "copy a forbidden binary into
-# writable tmp and exec it" bypass that /var/tmp noexec exists to prevent —
-# only root can write here, and root can already run arbitrary code via
-# any scriptlet regardless of this macro.
-%_tmppath /var/lib/sudo-logger/rpm-tmp
+# Only redirected when running as root (euid 0). The sandbox's noexec check
+# only ever applies to processes inside a monitored, root-privileged sudo
+# session — a non-root invocation (e.g. a developer's own `rpmbuild` as
+# their own user) was never affected by the collision this exists to fix,
+# and unconditionally redirecting %_tmppath broke exactly that: a plain,
+# non-root local RPM build failed with "Unable to open temp file" because
+# the target directory is intentionally not writable by regular users.
+#
+# The redirect directory is root-only (0700) and single-purpose, not a
+# shared multi-user scratch space like /var/tmp. It is not itself protected
+# by the sandbox (neither noexec nor protect.files — either would defeat
+# the point). That does not reopen the "copy a forbidden binary into
+# writable tmp and exec it" bypass for a privileged sudo-session attacker:
+# such an attacker is already root and can achieve equivalent arbitrary
+# code execution via any package's own scriptlet, which uses this exact
+# same mechanism — this directory grants no capability beyond that. For an
+# unprivileged, non-sudo-session process, this macro is inert (see above),
+# so it grants nothing there either.
+%_tmppath %{lua: local t = posix.getprocessid(); if t.euid == 0 then print("/var/lib/sudo-logger/rpm-tmp") else print("/var/tmp") end}
