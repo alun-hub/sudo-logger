@@ -1,5 +1,5 @@
 Name:           sudo-logger-client
-Version:        1.20.126
+Version:        1.20.127
 Release:        1%{?dist}
 Summary:        Sudo I/O plugin and agent for remote session logging
 
@@ -246,6 +246,13 @@ fi
 /etc/systemd/system/gssproxy.service.d/refuse-stop.conf
 
 %changelog
+* Thu Jul 16 2026 sudo-logger 1.20.127-1
+- fix: stop erasing ack-verify.key on package upgrades — it was %%ghost,
+  which rpm erases on every upgrade (not just full removal); the agent has
+  no way to re-fetch it, so this silently broke sudo system-wide on a real
+  upgrade today. Removed from %%files entirely; cleanup moved to %%preun,
+  gated on full uninstall only ($1 -eq 0).
+
 * Thu Jul 16 2026 sudo-logger 1.20.126-1
 - fix(spec): 1.20.125's %%_tmppath macro shipped to %%{_sysconfdir}/rpm/macros.d
   (/etc/rpm/macros.d), which rpm 6 does not scan by default — confirmed

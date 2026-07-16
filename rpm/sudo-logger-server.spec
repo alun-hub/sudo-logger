@@ -1,5 +1,5 @@
 Name:           sudo-logger-server
-Version:        1.20.16
+Version:        1.20.17
 Release:        1%{?dist}
 Summary:        Remote log server for sudo session recordings
 
@@ -128,6 +128,16 @@ fi
 %{_mandir}/man8/sudo-logserver.8*
 
 %changelog
+* Thu Jul 16 2026 sudo-logger 1.20.17-1
+- fix: stop erasing ack-sign.key/ack-verify.key on package upgrades — both
+  were %%ghost, which rpm erases on every upgrade (not just full removal).
+  For ack-sign.key (private signing key) this would silently mint a brand
+  new keypair on the next upgrade (the %%post generation guard only fires
+  when the file is missing), invalidating every already-distributed
+  client's ack-verify.key fleet-wide with no error. Removed both from
+  %%files entirely; cleanup moved to %%preun, gated on full uninstall
+  only ($1 -eq 0).
+
 * Tue May 26 2026 sudo-logger 1.20.3-1
 - chore: rename shipper → agent in comments and log messages
 
