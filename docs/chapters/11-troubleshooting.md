@@ -236,6 +236,38 @@ semanage permissive -a sudo_agent_t
 
 ---
 
+## dnf/rpm transaction aborts mid-scriptlet, leaves rpmdb or SELinux state inconsistent
+
+**Symptoms:** A `dnf update`/`dnf install` that includes a package with a `%pre`/`%post`/`%preun`/`%postun`/`%posttrans` scriptlet (nearly all packages have at least one) fails partway through, or completes but leaves the system inconsistent — duplicate entries for the same package name in `rpm -qa`, a package whose files were written but whose scriptlet never ran (e.g. SELinux policy updated on disk but not reloaded), or `sudo` itself breaking system-wide afterward with `error initializing I/O plugin sudo_logger_plugin`.
+
+**Diagnosis:**
+
+```bash
+journalctl -u sudo-logger-agent --since "-1 hour" | grep 'SANDBOX VIOLATION action=EXEC_BLOCK comm="sh"'
+```
+
+RPM stages every scriptlet as a script file under `%_tmppath` (`/var/tmp` by default) and execs it directly. If `/var/tmp` is listed under `protect.noexec` in `sandbox.yaml` — it is by default — the sandbox blocks that exec, silently aborting the scriptlet and leaving the transaction half-applied.
+
+**Fix:**
+
+`sudo-logger-client` 1.20.125 / v1.39.2 and later ship an RPM macro (`/etc/rpm/macros.d/macros.sudo-logger-tmppath`) that redirects `%_tmppath` to a dedicated, root-only directory (`/var/lib/sudo-logger/rpm-tmp`, `0700`) that isn't noexec-protected, so this no longer happens. Confirm it's installed:
+
+```bash
+rpm --eval '%_tmppath'
+# should print /var/lib/sudo-logger/rpm-tmp, not /var/tmp
+```
+
+If it still prints `/var/tmp`, upgrade `sudo-logger-client` to 1.20.125/v1.39.2 or later. On an older client, work around it without weakening the sandbox by setting the macro yourself:
+
+```bash
+echo '%_tmppath /var/lib/sudo-logger/rpm-tmp' | sudo tee /etc/rpm/macros.d/macros.sudo-logger-tmppath
+sudo install -d -m 0700 /var/lib/sudo-logger/rpm-tmp
+```
+
+Do **not** remove `/var/tmp` from `protect.noexec` to fix this — that reopens the "copy a forbidden binary into shared tmp storage and run it under a fresh inode" bypass the rule exists to prevent. This is RPM-specific: Debian/Ubuntu's `dpkg` maintainer scripts run from `/var/lib/dpkg/info/` and never touch `/var/tmp`, so this does not affect `.deb` installs.
+
+---
+
 ## Session visible in file system but risk score not showing
 
 **Symptoms:** Sessions appear in the replay UI but the risk score column is blank or shows zero for all sessions.

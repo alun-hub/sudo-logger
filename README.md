@@ -1008,6 +1008,17 @@ The agent also logs a warning when loading a name that exceeds 15 characters.
   Copying a forbidden binary to a new path creates a new inode that is not in
   the map. Pair `forbidden` with `noexec` (on non-Btrfs) to close this gap.
 
+- **`noexec` on `/var/tmp` collides with RPM scriptlets**: RPM stages every
+  `%pre`/`%post`/`%preun`/`%postun`/`%posttrans` scriptlet as a script under
+  `%_tmppath` (`/var/tmp` by default) and execs it directly, which the default
+  `noexec: [/tmp, /var/tmp, ...]` config blocks — silently aborting `dnf`/`rpm`
+  transactions mid-scriptlet. `sudo-logger-client` 1.20.125+ (v1.39.2+) ships
+  an RPM macro redirecting `%_tmppath` to a dedicated, non-noexec directory
+  (`/var/lib/sudo-logger/rpm-tmp`) so this doesn't happen. Not an issue for
+  `.deb`: dpkg maintainer scripts run from `/var/lib/dpkg/info/`, never
+  `/var/tmp`. See [troubleshooting](docs/chapters/11-troubleshooting.md#dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent)
+  if you're on an older client.
+
 - **Unix socket IPC not blocked**: listing a socket path prevents its
   deletion and replacement, but does not intercept `connect()` + `send()`.
   Normal IPC to the socket continues to work.
