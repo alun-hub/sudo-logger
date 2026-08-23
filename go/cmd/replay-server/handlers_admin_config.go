@@ -103,6 +103,11 @@ type sandboxYAML struct {
 		Sockets   []string `yaml:"sockets"`
 		Processes []string `yaml:"processes"`
 	} `yaml:"protect"`
+	TrustedPackageManagers struct {
+		Enabled       *bool    `yaml:"enabled"`
+		Binaries      []string `yaml:"binaries"`
+		AllowCreateIn []string `yaml:"allow_create_in"`
+	} `yaml:"trusted_package_managers"`
 }
 
 const (
