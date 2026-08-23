@@ -28,6 +28,12 @@ const FEATURES = [
 type FeatureKey = typeof FEATURES[number]['key']
 type ProtectKey = 'files' | 'forbidden' | 'noexec' | 'devices' | 'proc' | 'sockets' | 'processes'
 
+interface TrustedPkgMgrsState {
+  enabled: boolean
+  binaries: string[]
+  allowCreateIn: string[]
+}
+
 interface SandboxState {
   enabled: boolean
   features: Record<FeatureKey, boolean>
@@ -38,6 +44,7 @@ interface SandboxState {
   proc: string[]
   sockets: string[]
   processes: string[]
+  trustedPkgMgrs: TrustedPkgMgrsState
 }
 
 // ── YAML helpers ──────────────────────────────────────────────────────────────
@@ -47,6 +54,9 @@ function defaultState(): SandboxState {
     enabled: true,
     features: Object.fromEntries(FEATURES.map(f => [f.key, f.def])) as Record<FeatureKey, boolean>,
     files: [], forbidden: [], noexec: [], devices: [], proc: [], sockets: [], processes: [],
+    // Off by default — granting a package-manager exemption is opt-in,
+    // unlike the deny_* features above which default to protecting.
+    trustedPkgMgrs: { enabled: false, binaries: [], allowCreateIn: [] },
   }
 }
 
@@ -62,6 +72,7 @@ function parseYaml(yaml: string): SandboxState {
     if (em) { s.enabled = em[1] === 'true'; continue }
     if (/^features:/.test(line)) { section = 'features'; currentKey = null; continue }
     if (/^protect:/.test(line))  { section = 'protect';  currentKey = null; continue }
+    if (/^trusted_package_managers:/.test(line)) { section = 'trustedPkgMgrs'; currentKey = null; continue }
     if (section === 'features') {
       const m = line.match(/^ {2}(deny_\w+):\s*(true|false)/)
       if (m) (s.features as any)[m[1]] = m[2] === 'true'
@@ -73,6 +84,18 @@ function parseYaml(yaml: string): SandboxState {
         let v = im[1].trim()
         if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
         ;(s as any)[currentKey].push(v)
+      }
+    } else if (section === 'trustedPkgMgrs') {
+      const em = line.match(/^ {2}enabled:\s*(true|false)/)
+      if (em) { s.trustedPkgMgrs.enabled = em[1] === 'true'; continue }
+      const km = line.match(/^ {2}(binaries|allow_create_in):/)
+      if (km) { currentKey = km[1]; continue }
+      const im = line.match(/^ {4}- (.+)/)
+      if (im && currentKey) {
+        let v = im[1].trim()
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+        if (currentKey === 'binaries') s.trustedPkgMgrs.binaries.push(v)
+        else if (currentKey === 'allow_create_in') s.trustedPkgMgrs.allowCreateIn.push(v)
       }
     }
   }
@@ -89,6 +112,16 @@ function buildYaml(s: SandboxState): string {
   for (const k of keys) {
     const list = s[k]
     if (list.length) { yaml += `  ${k}:\n`; list.forEach(v => { yaml += `    - ${v}\n` }) }
+  }
+  yaml += '\ntrusted_package_managers:\n'
+  yaml += `  enabled: ${s.trustedPkgMgrs.enabled}\n`
+  if (s.trustedPkgMgrs.binaries.length) {
+    yaml += '  binaries:\n'
+    s.trustedPkgMgrs.binaries.forEach(v => { yaml += `    - ${v}\n` })
+  }
+  if (s.trustedPkgMgrs.allowCreateIn.length) {
+    yaml += '  allow_create_in:\n'
+    s.trustedPkgMgrs.allowCreateIn.forEach(v => { yaml += `    - ${v}\n` })
   }
   return yaml
 }
@@ -271,6 +304,9 @@ export function SandboxTab() {
   const setList = (key: ProtectKey, val: string[]) =>
     setState({ ...current, [key]: val })
 
+  const setTrustedPkgMgrs = (patch: Partial<TrustedPkgMgrsState>) =>
+    setState({ ...current, trustedPkgMgrs: { ...current.trustedPkgMgrs, ...patch } })
+
   if (isPending) return <div className="p-6 text-text-dim font-mono text-[13px]">Loading sandbox config…</div>
   if (isError)   return <div className="p-6 text-red font-mono text-[13px]">Failed to load sandbox config</div>
 
@@ -378,6 +414,37 @@ export function SandboxTab() {
                   </span>
                 </label>
               ))}
+            </div>
+          </div>
+
+          {/* Trusted package managers */}
+          <div className="space-y-2">
+            <h3 className="text-[11px] font-bold text-text-dim uppercase tracking-widest">Trusted Package Managers</h3>
+            <div className="flex items-center justify-between p-4 rounded-[5px] bg-card border border-border">
+              <div className="space-y-0.5">
+                <div className="text-[14px] font-medium text-text">Package-manager sandbox exemption</div>
+                <div className="text-[12px] text-text-dim">
+                  {current.trustedPkgMgrs.enabled
+                    ? 'Binaries below may create new files in allow_create_in directories — still fully alerted, never silently allowed.'
+                    : 'Off — dnf/rpm are fully sandboxed like any other process. Enable only if package updates are failing on protected directories.'}
+                </div>
+              </div>
+              <Switch
+                checked={current.trustedPkgMgrs.enabled}
+                onCheckedChange={val => setTrustedPkgMgrs({ enabled: val })}
+              />
+            </div>
+            <div className={cn('space-y-3 pt-1', !current.trustedPkgMgrs.enabled && 'opacity-40 pointer-events-none')}>
+              <TagInput
+                label="Trusted Binaries (exec, verified by inode)"
+                values={current.trustedPkgMgrs.binaries}
+                onChange={v => setTrustedPkgMgrs({ binaries: v })}
+              />
+              <TagInput
+                label="Allow Create In (narrow — not the full protected list)"
+                values={current.trustedPkgMgrs.allowCreateIn}
+                onChange={v => setTrustedPkgMgrs({ allowCreateIn: v })}
+              />
             </div>
           </div>
         </div>

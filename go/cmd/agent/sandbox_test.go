@@ -67,7 +67,7 @@ func TestSandbox_ReportViolation(t *testing.T) {
 		}
 	}()
 
-	s.reportViolation(12345, 9999, alertFileOpen, "test-proc", 0, 0, 0, "", 0)
+	s.reportViolation(12345, 9999, alertFileOpen, "test-proc", 0, 0, 0, "", 0, false)
 
 	select {
 	case alert := <-alertChan:

@@ -458,3 +458,17 @@ rules:
     reason: "Polkit authorization denied — possible privilege escalation probe"
     source: dbus-polkit
     exit_code: 1
+
+  # ── Sandbox policy exemptions ──────────────────────────────────────────────
+  # Kernel-verified signal from the eBPF sandbox itself — not a command/content
+  # text heuristic like the rules above. Fires only when a process explicitly
+  # trusted via sandbox.yaml's trusted_package_managers list actually created
+  # a file inside a configured allow_create_in directory. Complements (does
+  # not duplicate) systemd_unit_write above: that rule guesses from shell
+  # text; this one is a confirmed, kernel-observed write the sandbox chose to
+  # allow instead of block.
+
+  - id: sandbox_trusted_pkgmgr_write
+    score: 30
+    reason: "trusted package manager exemption used (dnf/rpm wrote to a protected directory)"
+    sandbox_trusted_write: true

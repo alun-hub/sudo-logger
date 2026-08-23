@@ -51,6 +51,7 @@ const (
 	cfgDenyCapMacAdmin     = 7
 	cfgDenyCapSysRawio     = 8
 	cfgDenyCapSysBoot      = 9
+	cfgTrustedPkgMgr       = 10
 )
 
 var alertNames = map[uint32]string{
@@ -85,7 +86,8 @@ type bpfSandboxAlert struct {
 	TargetPid  uint32
 	TargetComm [16]byte
 	Sig        uint32
-	_          uint32 // pad
+	Allowed    uint8 // 1 if a trusted-package-manager exemption let this through
+	_          [3]byte // pad
 }
 
 // sigName returns a human-readable signal name for common signals.
@@ -128,7 +130,8 @@ func (s *sandboxSubsystem) pollAlerts() {
 		comm := string(bytes.TrimRight(bpfAlert.Comm[:], "\x00"))
 		targetComm := string(bytes.TrimRight(bpfAlert.TargetComm[:], "\x00"))
 		s.reportViolation(bpfAlert.CgroupID, bpfAlert.Pid, bpfAlert.Type, comm,
-			bpfAlert.Ino, bpfAlert.Dev, bpfAlert.TargetPid, targetComm, bpfAlert.Sig)
+			bpfAlert.Ino, bpfAlert.Dev, bpfAlert.TargetPid, targetComm, bpfAlert.Sig,
+			bpfAlert.Allowed != 0)
 	}
 }
 
@@ -144,8 +147,8 @@ func (s *sandboxSubsystem) pathForInode(ino uint64, dev uint32) string {
 	key := SandboxInodeKey{Ino: ino, Dev: dev}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for path, k := range s.pathInodes {
-		if k == key {
+	for path, wp := range s.pathInodes {
+		if wp.Key == key {
 			return path
 		}
 	}
@@ -153,7 +156,7 @@ func (s *sandboxSubsystem) pathForInode(ino uint64, dev uint32) string {
 }
 
 func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType uint32, comm string,
-	ino uint64, dev uint32, targetPid uint32, targetComm string, sig uint32) {
+	ino uint64, dev uint32, targetPid uint32, targetComm string, sig uint32, allowed bool) {
 	typeName := alertNames[alertType]
 	if typeName == "" {
 		typeName = "UNKNOWN"
@@ -162,10 +165,19 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 	path := s.pathForInode(ino, dev)
 
 	alert := protocol.SandboxAlert{
-		Pid:  pid,
-		Comm: comm,
-		Type: alertType,
-		Ts:   time.Now().Unix(),
+		Pid:     pid,
+		Comm:    comm,
+		Type:    alertType,
+		Ts:      time.Now().Unix(),
+		Allowed: allowed,
+	}
+
+	// Distinct log label for the trusted-package-manager exemption path —
+	// this was NOT blocked, so calling it a "VIOLATION" would mislead anyone
+	// grepping the agent log.
+	label := "SANDBOX VIOLATION"
+	if allowed {
+		label = "SANDBOX ALLOWED (trusted pkg mgr)"
 	}
 
 	// Resolve session before logging so sess= is included in the message.
@@ -188,29 +200,29 @@ func (s *sandboxSubsystem) reportViolation(cgid uint64, pid uint32, alertType ui
 
 	switch {
 	case alertType == alertProcessKill:
-		log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d target=%q target_pid=%d sig=%s sess=%q cgid=%d",
-			typeName, comm, pid, targetComm, targetPid, sigName(sig), sess, cgid)
+		log.Printf("%s action=%s comm=%q pid=%d target=%q target_pid=%d sig=%s sess=%q cgid=%d",
+			label, typeName, comm, pid, targetComm, targetPid, sigName(sig), sess, cgid)
 	case alertType == alertSocketCreate:
-		log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d family=%d protocol=%d sess=%q cgid=%d",
-			typeName, comm, pid, ino, dev, sess, cgid)
+		log.Printf("%s action=%s comm=%q pid=%d family=%d protocol=%d sess=%q cgid=%d",
+			label, typeName, comm, pid, ino, dev, sess, cgid)
 	case alertType == alertCapable:
-		log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d cap=%d sess=%q cgid=%d",
-			typeName, comm, pid, dev, sess, cgid)
+		log.Printf("%s action=%s comm=%q pid=%d cap=%d sess=%q cgid=%d",
+			label, typeName, comm, pid, dev, sess, cgid)
 	case alertType >= alertDirMkdir && alertType <= alertDirSymlink:
 		if path != "" {
-			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d dir=%q sess=%q cgid=%d",
-				typeName, comm, pid, path, sess, cgid)
+			log.Printf("%s action=%s comm=%q pid=%d dir=%q sess=%q cgid=%d",
+				label, typeName, comm, pid, path, sess, cgid)
 		} else {
-			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d sess=%q cgid=%d",
-				typeName, comm, pid, sess, cgid)
+			log.Printf("%s action=%s comm=%q pid=%d sess=%q cgid=%d",
+				label, typeName, comm, pid, sess, cgid)
 		}
 	default:
 		if path != "" {
-			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d path=%q sess=%q cgid=%d",
-				typeName, comm, pid, path, sess, cgid)
+			log.Printf("%s action=%s comm=%q pid=%d path=%q sess=%q cgid=%d",
+				label, typeName, comm, pid, path, sess, cgid)
 		} else {
-			log.Printf("SANDBOX VIOLATION action=%s comm=%q pid=%d sess=%q cgid=%d",
-				typeName, comm, pid, sess, cgid)
+			log.Printf("%s action=%s comm=%q pid=%d sess=%q cgid=%d",
+				label, typeName, comm, pid, sess, cgid)
 		}
 	}
 
@@ -318,10 +330,12 @@ type sandboxSubsystem struct {
 	objs          *SandboxObjects
 	links         []link.Link
 	mu            sync.Mutex
-	pathInodes    map[string]SandboxInodeKey // protected path → inode key currently in BPF map
+	pathInodes    map[string]WatchedPath     // protected path → inode key + target map currently in BPF
 	watcher       *fsnotify.Watcher
 	selfCgroupID  uint64                     // agent's own cgroup ID, excluded from sandbox
 	lastFeatures  resolvedFeatures           // feature flags as of the last reload, for weakening detection
+	lastTrustedBinaryCount int               // len(res.TrustedBinaries) as of the last reload, for trust-expansion detection
+	lastAllowCreateInCount int               // len(res.AllowCreateIn) as of the last reload, for trust-expansion detection
 }
 
 var sandboxSys *sandboxSubsystem
@@ -381,6 +395,7 @@ func applyFeatures(objs *SandboxObjects, f resolvedFeatures) {
 	flag(cfgDenyCapMacAdmin, f.DenyCapMacAdmin)
 	flag(cfgDenyCapSysRawio, f.DenyCapSysRawio)
 	flag(cfgDenyCapSysBoot, f.DenyCapSysBoot)
+	flag(cfgTrustedPkgMgr, f.TrustedPkgMgrEnabled)
 }
 
 func startSandbox(configPath string) {
@@ -449,6 +464,18 @@ func (s *sandboxSubsystem) start(configPath string) error {
 	for _, key := range res.Forbidden {
 		if err := objs.ForbiddenBinaries.Put(key, marker); err != nil {
 			log.Printf("sandbox: insert forbidden binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	for _, key := range res.TrustedBinaries {
+		if err := objs.TrustedBinaries.Put(key, marker); err != nil {
+			log.Printf("sandbox: insert trusted package-manager binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+
+	for _, key := range res.AllowCreateIn {
+		if err := objs.AllowCreateIn.Put(key, marker); err != nil {
+			log.Printf("sandbox: insert allow_create_in inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
 		}
 	}
 
@@ -755,6 +782,52 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 		_ = s.objs.NoexecInodes.Delete(k)
 	}
 
+	// Trusted package-manager binaries.
+	newTrustedBinaries := make(map[SandboxInodeKey]bool)
+	for _, key := range res.TrustedBinaries {
+		newTrustedBinaries[key] = true
+		if err := s.objs.TrustedBinaries.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert trusted package-manager binary {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+	var obsoleteTrustedBinaries []SandboxInodeKey
+	{
+		var k SandboxInodeKey
+		var v uint8
+		iter := s.objs.TrustedBinaries.Iterate()
+		for iter.Next(&k, &v) {
+			if !newTrustedBinaries[k] {
+				obsoleteTrustedBinaries = append(obsoleteTrustedBinaries, k)
+			}
+		}
+	}
+	for _, k := range obsoleteTrustedBinaries {
+		_ = s.objs.TrustedBinaries.Delete(k)
+	}
+
+	// allow_create_in directory inodes.
+	newAllowCreateIn := make(map[SandboxInodeKey]bool)
+	for _, key := range res.AllowCreateIn {
+		newAllowCreateIn[key] = true
+		if err := s.objs.AllowCreateIn.Put(key, marker); err != nil {
+			log.Printf("sandbox reload: insert allow_create_in inode {ino=%d dev=%d}: %v", key.Ino, key.Dev, err)
+		}
+	}
+	var obsoleteAllowCreateIn []SandboxInodeKey
+	{
+		var k SandboxInodeKey
+		var v uint8
+		iter := s.objs.AllowCreateIn.Iterate()
+		for iter.Next(&k, &v) {
+			if !newAllowCreateIn[k] {
+				obsoleteAllowCreateIn = append(obsoleteAllowCreateIn, k)
+			}
+		}
+	}
+	for _, k := range obsoleteAllowCreateIn {
+		_ = s.objs.AllowCreateIn.Delete(k)
+	}
+
 	// Restart the inotify watcher for the new set of parent directories.
 	if s.watcher != nil {
 		s.watcher.Close()
@@ -768,7 +841,16 @@ func (s *sandboxSubsystem) reloadConfig(res *resolvedSandbox, logChange bool) {
 	// reload — it only makes a weakening reload loud instead of silent.
 	logSandboxWeakening(oldFeatures, res.Features, len(obsoleteInodes), len(obsoleteProcs),
 		len(obsoleteIPCInodes), len(obsoleteForbidden), len(obsoleteNoexec))
+
+	// Trust granted/expanded is the opposite direction from weakening above —
+	// worth its own loud, distinct log line rather than folding it into
+	// "protection reduced" phrasing (which this isn't).
+	logSandboxTrustExpansion(oldFeatures.TrustedPkgMgrEnabled, res.Features.TrustedPkgMgrEnabled,
+		s.lastTrustedBinaryCount, len(res.TrustedBinaries),
+		s.lastAllowCreateInCount, len(res.AllowCreateIn))
 	s.lastFeatures = res.Features
+	s.lastTrustedBinaryCount = len(res.TrustedBinaries)
+	s.lastAllowCreateInCount = len(res.AllowCreateIn)
 
 	if logChange {
 		log.Printf("sandbox: config reloaded (%d protected inodes, %d protected processes)",
@@ -822,6 +904,29 @@ func logSandboxWeakening(oldF, newF resolvedFeatures, removedInodes, removedProc
 
 	if len(reasons) > 0 {
 		log.Printf("sandbox: SECURITY WARNING: protection reduced by config reload — %s",
+			strings.Join(reasons, "; "))
+	}
+}
+
+// logSandboxTrustExpansion is the inverse of logSandboxWeakening: the
+// trusted_package_managers exemption grants access rather than restricting
+// it, so its risk direction is enabled:false→true or a growing binaries/
+// allow_create_in list — not the shrinking-protection cases above. Flagged
+// as its own loud line rather than folded into "protection reduced"
+// phrasing, since it isn't a reduction.
+func logSandboxTrustExpansion(oldEnabled, newEnabled bool, oldBinaryCount, newBinaryCount, oldAllowCreateCount, newAllowCreateCount int) {
+	var reasons []string
+	if !oldEnabled && newEnabled {
+		reasons = append(reasons, "trusted_package_managers.enabled turned on")
+	}
+	if newEnabled && newBinaryCount > oldBinaryCount {
+		reasons = append(reasons, fmt.Sprintf("trusted_package_managers.binaries grew (%d → %d)", oldBinaryCount, newBinaryCount))
+	}
+	if newEnabled && newAllowCreateCount > oldAllowCreateCount {
+		reasons = append(reasons, fmt.Sprintf("trusted_package_managers.allow_create_in grew (%d → %d)", oldAllowCreateCount, newAllowCreateCount))
+	}
+	if len(reasons) > 0 {
+		log.Printf("sandbox: TRUST GRANTED: package-manager exemption expanded by config reload — %s",
 			strings.Join(reasons, "; "))
 	}
 }

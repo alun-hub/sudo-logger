@@ -6,6 +6,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/cilium/ebpf"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -16,7 +17,7 @@ import (
 // Atomic editors (vi, cp, install) write to a temp file then rename it over
 // the target, assigning a new inode. Without this watcher the BPF map would
 // hold a stale inode and miss writes to the replaced file.
-func (s *sandboxSubsystem) startWatcher(pathInodes map[string]SandboxInodeKey) {
+func (s *sandboxSubsystem) startWatcher(pathInodes map[string]WatchedPath) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Printf("sandbox: inotify watcher unavailable: %v — protected inodes will not auto-refresh", err)
@@ -67,20 +68,42 @@ func (s *sandboxSubsystem) watchLoop() {
 	}
 }
 
-// refreshInode re-stats path and updates the protected_inodes BPF map if the
-// inode changed. Called after a Create/IN_MOVED_TO event on the parent dir.
+// targetMap returns the BPF map that a WatchTarget's inodes belong to.
+func (s *sandboxSubsystem) targetMap(t WatchTarget) *ebpf.Map {
+	switch t {
+	case WatchTrustedBinaries:
+		return s.objs.TrustedBinaries
+	case WatchAllowCreateIn:
+		return s.objs.AllowCreateIn
+	default:
+		return s.objs.ProtectedInodes
+	}
+}
+
+// refreshInode re-stats path and updates every BPF map path belongs to
+// (routed via the watched path's Targets — a path can be registered in more
+// than one, e.g. protected_inodes AND allow_create_in for the same
+// directory) if the inode changed. Called after a Create/IN_MOVED_TO event
+// on the parent dir.
 func (s *sandboxSubsystem) refreshInode(path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	old, ok := s.pathInodes[path]
+	if !ok {
+		// File is not a watched path — a new unrelated file was created in a
+		// watched parent directory. Do not auto-protect/auto-trust it.
+		return
+	}
+
 	var st syscall.Stat_t
 	if err := syscall.Stat(path, &st); err != nil {
 		// File removed — check if we were tracking it
-		if old, ok := s.pathInodes[path]; ok {
-			log.Printf("sandbox: %s removed — dropping from protected inodes", path)
-			_ = s.objs.ProtectedInodes.Delete(old)
-			delete(s.pathInodes, path)
+		log.Printf("sandbox: %s removed — dropping from tracked inodes (targets=%v)", path, old.Targets)
+		for _, t := range old.Targets {
+			_ = s.targetMap(t).Delete(old.Key)
 		}
+		delete(s.pathInodes, path)
 		return
 	}
 
@@ -91,40 +114,47 @@ func (s *sandboxSubsystem) refreshInode(path string) {
 	}
 	newKey := SandboxInodeKey{Ino: st.Ino, Dev: dev}
 
-	old, ok := s.pathInodes[path]
-	if !ok {
-		// File is not a protected path — a new unrelated file was created in a
-		// watched parent directory. Do not auto-protect it.
-		return
-	}
-
-	if newKey == old {
+	if newKey == old.Key {
 		return // inode unchanged, nothing to do
 	}
 
-	// Insert the new inode BEFORE removing the old one, so there is never a
-	// window where neither is protected (matches the documented-safe order
-	// reloadConfig already uses in sandbox.go) — an atomic file replacement
-	// landing in a delete-then-insert gap would otherwise pass unenforced.
+	// Insert the new inode into every target map BEFORE removing the old one
+	// from any of them, so there is never a window where a target is
+	// unenforced (matches the documented-safe order reloadConfig already
+	// uses in sandbox.go) — an atomic file replacement landing in a
+	// delete-then-insert gap would otherwise pass unenforced.
 	marker := uint8(1)
-	if err := s.objs.ProtectedInodes.Put(newKey, marker); err != nil {
-		log.Printf("sandbox: protect inode for %s: %v", path, err)
-		return
-	}
-
-	// Only delete the old key if no other protected path still uses it.
-	shared := false
-	for otherPath, k := range s.pathInodes {
-		if otherPath != path && k == old {
-			shared = true
-			break
+	for _, t := range old.Targets {
+		if err := s.targetMap(t).Put(newKey, marker); err != nil {
+			log.Printf("sandbox: track inode for %s (target %v): %v", path, t, err)
+			return
 		}
 	}
-	if !shared {
-		_ = s.objs.ProtectedInodes.Delete(old)
-	}
-	log.Printf("sandbox: refreshed protected inode for %s: {ino=%d dev=%d} → {ino=%d dev=%d}",
-		path, old.Ino, old.Dev, newKey.Ino, newKey.Dev)
 
-	s.pathInodes[path] = newKey
+	// Only delete the old key from a target map if no other watched path
+	// registered under that SAME target still uses it.
+	for _, t := range old.Targets {
+		shared := false
+		for otherPath, wp := range s.pathInodes {
+			if otherPath == path || wp.Key != old.Key {
+				continue
+			}
+			for _, ot := range wp.Targets {
+				if ot == t {
+					shared = true
+					break
+				}
+			}
+			if shared {
+				break
+			}
+		}
+		if !shared {
+			_ = s.targetMap(t).Delete(old.Key)
+		}
+	}
+	log.Printf("sandbox: refreshed tracked inode for %s: {ino=%d dev=%d} → {ino=%d dev=%d} (targets=%v)",
+		path, old.Key.Ino, old.Key.Dev, newKey.Ino, newKey.Dev, old.Targets)
+
+	s.pathInodes[path] = WatchedPath{Key: newKey, Targets: old.Targets}
 }

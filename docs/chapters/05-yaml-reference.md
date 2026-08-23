@@ -230,6 +230,15 @@ protect:
   proc: []
   sockets: []
   processes: []
+
+trusted_package_managers:
+  enabled: false   # off by default — see reference below before enabling
+  binaries:
+    - /usr/bin/dnf5
+    - /usr/bin/rpm
+  allow_create_in:
+    - /usr/lib/systemd/system
+    - /etc/systemd/system
 ```
 
 ### Feature flags reference
@@ -273,6 +282,29 @@ protect:
 > RPM's scriptlet staging to a dedicated, non-noexec directory so this doesn't collide.
 > If you're on an older client, or see `dnf`/`rpm` transactions failing unexpectedly,
 > see [Package manager transactions abort mid-scriptlet](11-troubleshooting.md#dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent).
+
+### Trusted package managers reference
+
+| Field | Default | What it does |
+|-------|---------|-------------|
+| `enabled` | `false` | Master switch for the exemption below. Off by default — a package-manager exemption is opt-in, unlike the `deny_*` feature flags above, which default to protecting. |
+| `binaries` | `[]` | Exec targets, matched by inode at exec time like `protect.forbidden` — not by path string, so copying a different binary to the same path does not gain the exemption. |
+| `allow_create_in` | `[]` | Directories where the binaries above (and processes they fork, e.g. RPM scriptlets) may create new files/dirs/symlinks even though the directory is also in `protect.files`. Only has an effect on a directory that is **also** listed under `protect.files` — `inode_protected(dir)` must already be true before this list is even consulted. |
+
+Unlike `protect.files`, an allowed write here is never silent: every
+exemption still generates a full sandbox alert (`allowed=true` instead of a
+block), which the default `risk-rules.yaml` surfaces via the
+`sandbox_trusted_pkgmgr_write` rule in the replay-server session list and
+SIEM export. Writing to, truncating, deleting, or renaming an *existing*
+protected file (`/etc/shadow`, `/etc/sudoers`, an existing systemd unit) is
+never exempted by this feature — only creating *new* entries is.
+
+Trust propagates to forked descendants (a scriptlet's `/bin/sh` needs the
+same exemption its parent had to actually install anything) and is never
+revoked mid-tree — there is no way to distinguish a legitimate
+package-manager action from an attacker-influenced one at the kernel LSM
+level once trust has been granted. Keep `binaries` and `allow_create_in` as
+narrow as your actual package manager needs.
 
 ### How inode protection works
 

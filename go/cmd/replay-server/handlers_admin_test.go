@@ -13,6 +13,11 @@ import (
 	"sudo-logger/internal/store"
 )
 
+// noTrustedWrite is the matchesRule test default for the sandbox_trusted_write
+// condition — none of the tests below exercise it directly (see
+// TestMatchesRule_SandboxTrustedWrite for that).
+func noTrustedWrite() bool { return false }
+
 // ── matchPattern ──────────────────────────────────────────────────────────────
 
 func TestMatchPattern(t *testing.T) {
@@ -101,7 +106,7 @@ func TestMatchesRule_CrossLineWordsDoNotMatch(t *testing.T) {
 		"systemd[1]: /etc/systemd/system/firewalld.service.d/refuse-stop.conf: unknown key\n"
 	getContent := func() string { return content }
 
-	if matchesRule(rule, s, "bash", "bash", getContent) {
+	if matchesRule(rule, s, "bash", "bash", getContent, noTrustedWrite) {
 		t.Error("rule matched even though the two keywords are on different lines")
 	}
 }
@@ -119,7 +124,7 @@ func TestMatchesRule_SameLineDoesMatch(t *testing.T) {
 	content := "systemctl stop sudo-logger-agent\n"
 	getContent := func() string { return content }
 
-	if !matchesRule(rule, s, "bash", "bash", getContent) {
+	if !matchesRule(rule, s, "bash", "bash", getContent, noTrustedWrite) {
 		t.Error("rule did not match when both keywords co-occur on the same line")
 	}
 }
@@ -127,11 +132,11 @@ func TestMatchesRule_SameLineDoesMatch(t *testing.T) {
 func TestMatchesRule_Source(t *testing.T) {
 	rule := Rule{Source: "ebpf-tty"}
 	s := &SessionInfo{Source: "plugin"}
-	if matchesRule(rule, s, "", "", func() string { return "" }) {
+	if matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("source mismatch should not match")
 	}
 	s.Source = "ebpf-tty"
-	if !matchesRule(rule, s, "", "", func() string { return "" }) {
+	if !matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("matching source should match")
 	}
 }
@@ -140,12 +145,38 @@ func TestMatchesRule_ExitCode(t *testing.T) {
 	var want int32 = 1
 	rule := Rule{ExitCode: &want}
 	s := &SessionInfo{ExitCode: 0}
-	if matchesRule(rule, s, "", "", func() string { return "" }) {
+	if matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("exit code mismatch should not match")
 	}
 	s.ExitCode = 1
-	if !matchesRule(rule, s, "", "", func() string { return "" }) {
+	if !matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("matching exit code should match")
+	}
+}
+
+// TestMatchesRule_SandboxTrustedWrite verifies the kernel-verified condition
+// is checked via the lazy hasTrustedWrite closure, not via s.Command/content
+// text like the rules above — and that it's a tri-state *bool like
+// Incomplete/AfterHours (nil = don't care, true/false = required value).
+func TestMatchesRule_SandboxTrustedWrite(t *testing.T) {
+	trustedWriteTrue := true
+	rule := Rule{SandboxTrustedWrite: &trustedWriteTrue}
+	s := &SessionInfo{}
+
+	trusted := func() bool { return false }
+	if matchesRule(rule, s, "", "", func() string { return "" }, trusted) {
+		t.Error("rule requiring sandbox_trusted_write: true should not match when false")
+	}
+
+	trusted = func() bool { return true }
+	if !matchesRule(rule, s, "", "", func() string { return "" }, trusted) {
+		t.Error("rule requiring sandbox_trusted_write: true should match when true")
+	}
+
+	// nil (unset in the rule) must not constrain the match either way.
+	unsetRule := Rule{}
+	if !matchesRule(unsetRule, s, "", "", func() string { return "" }, noTrustedWrite) {
+		t.Error("rule without sandbox_trusted_write should match regardless of the closure's value")
 	}
 }
 
@@ -155,14 +186,14 @@ func TestMatchesRule_IncompleteXORNetworkOutage(t *testing.T) {
 
 	// Agent-killed (incomplete, no network outage) counts as incomplete.
 	s := &SessionInfo{Incomplete: true, NetworkOutage: false}
-	if !matchesRule(rule, s, "", "", func() string { return "" }) {
+	if !matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("agent-killed session should count as incomplete")
 	}
 
 	// Network-outage-terminated session is treated as NOT incomplete for
 	// risk-scoring purposes (it's a network event, not a security incident).
 	s = &SessionInfo{Incomplete: true, NetworkOutage: true}
-	if matchesRule(rule, s, "", "", func() string { return "" }) {
+	if matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("network-outage session should not count as incomplete")
 	}
 }
@@ -173,13 +204,13 @@ func TestMatchesRule_AfterHours(t *testing.T) {
 
 	night := time.Date(2026, 1, 1, 3, 0, 0, 0, time.Local)
 	s := &SessionInfo{StartTime: night.Unix()}
-	if !matchesRule(rule, s, "", "", func() string { return "" }) {
+	if !matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("3am session should be after-hours")
 	}
 
 	noon := time.Date(2026, 1, 1, 12, 0, 0, 0, time.Local)
 	s = &SessionInfo{StartTime: noon.Unix()}
-	if matchesRule(rule, s, "", "", func() string { return "" }) {
+	if matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("noon session should not be after-hours")
 	}
 }
@@ -187,11 +218,11 @@ func TestMatchesRule_AfterHours(t *testing.T) {
 func TestMatchesRule_MinDuration(t *testing.T) {
 	rule := Rule{MinDuration: 100}
 	s := &SessionInfo{Duration: 50}
-	if matchesRule(rule, s, "", "", func() string { return "" }) {
+	if matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("duration below min_duration should not match")
 	}
 	s.Duration = 150
-	if !matchesRule(rule, s, "", "", func() string { return "" }) {
+	if !matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("duration above min_duration should match")
 	}
 }
@@ -199,11 +230,11 @@ func TestMatchesRule_MinDuration(t *testing.T) {
 func TestMatchesRule_RunasCaseInsensitive(t *testing.T) {
 	rule := Rule{Runas: "root"}
 	s := &SessionInfo{Runas: "ROOT"}
-	if !matchesRule(rule, s, "", "", func() string { return "" }) {
+	if !matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("runas comparison should be case-insensitive")
 	}
 	s.Runas = "deploy"
-	if matchesRule(rule, s, "", "", func() string { return "" }) {
+	if matchesRule(rule, s, "", "", func() string { return "" }, noTrustedWrite) {
 		t.Error("mismatched runas should not match")
 	}
 }
@@ -211,10 +242,10 @@ func TestMatchesRule_RunasCaseInsensitive(t *testing.T) {
 func TestMatchesRule_ORGroupCommandBaseAny(t *testing.T) {
 	rule := Rule{CommandBaseAny: []string{"bash", "sh"}}
 	s := &SessionInfo{}
-	if !matchesRule(rule, s, "bash", "bash", func() string { return "" }) {
+	if !matchesRule(rule, s, "bash", "bash", func() string { return "" }, noTrustedWrite) {
 		t.Error("command_base_any should match on cmdBase")
 	}
-	if matchesRule(rule, s, "vim", "vim", func() string { return "" }) {
+	if matchesRule(rule, s, "vim", "vim", func() string { return "" }, noTrustedWrite) {
 		t.Error("command_base_any should not match unrelated cmdBase")
 	}
 }
@@ -226,7 +257,7 @@ func TestMatchesRule_ORGroupNoneMatch(t *testing.T) {
 		Content:        &MatchPattern{ContainsAny: []string{"passwd"}},
 	}
 	s := &SessionInfo{}
-	if matchesRule(rule, s, "vim /etc/hosts", "vim", func() string { return "empty" }) {
+	if matchesRule(rule, s, "vim /etc/hosts", "vim", func() string { return "empty" }, noTrustedWrite) {
 		t.Error("rule should not match when none of command_base_any/command/content match")
 	}
 }
@@ -236,7 +267,7 @@ func TestMatchesRule_NoORGroupConditionsAlwaysMatchesCommand(t *testing.T) {
 	// should match purely on the AND-conditions.
 	rule := Rule{Runas: "root"}
 	s := &SessionInfo{Runas: "root"}
-	if !matchesRule(rule, s, "anything", "anything", func() string { return "" }) {
+	if !matchesRule(rule, s, "anything", "anything", func() string { return "" }, noTrustedWrite) {
 		t.Error("rule with no OR-group conditions should match on metadata alone")
 	}
 }
@@ -253,7 +284,7 @@ func TestMatchesRule_ContentNotLoadedWhenNoContentRule(t *testing.T) {
 		called = true
 		return ""
 	}
-	matchesRule(rule, s, "bash", "bash", getContent)
+	matchesRule(rule, s, "bash", "bash", getContent, noTrustedWrite)
 	if called {
 		t.Error("getContent should not be called when the rule has no content pattern")
 	}

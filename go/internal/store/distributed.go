@@ -138,7 +138,8 @@ func buildS3Client(ctx context.Context, cfg Config) (*s3.Client, error) {
 //	13 — added sudo_users for Enterprise RBAC and Auth management
 //	14 — added sudo_auth_config for dynamic SSO configuration
 //	15 — added sudo_roles for custom role definitions
-const currentSchemaVersion = 15
+//	16 — added sandbox_trusted_write column to sudo_sessions
+const currentSchemaVersion = 16
 
 // applySchema creates the required tables when starting up.
 // It reads a version number from sudo_schema_version and skips the full DDL
@@ -338,6 +339,11 @@ CREATE TABLE IF NOT EXISTS sudo_roles (
 INSERT INTO sudo_roles (name, description, permissions) VALUES
     ('viewer', 'Default viewer: can list and replay own sessions', '["sessions:list_own","sessions:replay_own"]')
 ON CONFLICT DO NOTHING;
+
+-- migration v16: trusted-package-manager sandbox exemption tracking.
+-- Independent of sandbox_violation — an allowed write is not a violation
+-- and must never share that column's hardcoded 100/critical risk score.
+ALTER TABLE sudo_sessions ADD COLUMN IF NOT EXISTS sandbox_trusted_write BOOLEAN DEFAULT FALSE;
 `); err != nil {
 		return err
 	}

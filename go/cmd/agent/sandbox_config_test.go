@@ -247,15 +247,63 @@ func TestLoadSandboxConfig_ExistingFileProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	key, ok := res.PathInodes[f]
+	wp, ok := res.PathInodes[f]
 	if !ok {
 		t.Fatalf("expected path %s to be in PathInodes", f)
 	}
-	if key.Ino == 0 {
+	if wp.Key.Ino == 0 {
 		t.Error("expected non-zero inode for protected file")
+	}
+	if len(wp.Targets) != 1 || wp.Targets[0] != WatchProtectedInodes {
+		t.Errorf("expected exactly [WatchProtectedInodes] targets, got %v", wp.Targets)
 	}
 	if len(res.Inodes) == 0 {
 		t.Error("expected at least one inode in Inodes slice")
+	}
+}
+
+// TestLoadSandboxConfig_OverlappingProtectAndAllowCreateIn covers the
+// primary real-world configuration: a directory listed in BOTH protect.files
+// and trusted_package_managers.allow_create_in — required for the exemption
+// to have any effect at all, since allow_create_in is only consulted once
+// inode_protected(dir) is already true. Both target registrations for that
+// one path must survive, or one of the two BPF maps silently goes stale on
+// the next atomic replacement of the directory.
+func TestLoadSandboxConfig_OverlappingProtectAndAllowCreateIn(t *testing.T) {
+	dir := t.TempDir()
+
+	yaml := "protect:\n  files:\n    - " + dir + "\n" +
+		"trusted_package_managers:\n  enabled: true\n  allow_create_in:\n    - " + dir + "\n"
+	res, err := loadSandboxConfigFromBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wp, ok := res.PathInodes[dir]
+	if !ok {
+		t.Fatalf("expected path %s to be in PathInodes", dir)
+	}
+	if len(wp.Targets) != 2 {
+		t.Fatalf("expected both targets registered for the overlapping path, got %v", wp.Targets)
+	}
+	hasProtected, hasAllowCreate := false, false
+	for _, target := range wp.Targets {
+		switch target {
+		case WatchProtectedInodes:
+			hasProtected = true
+		case WatchAllowCreateIn:
+			hasAllowCreate = true
+		}
+	}
+	if !hasProtected || !hasAllowCreate {
+		t.Errorf("expected both WatchProtectedInodes and WatchAllowCreateIn, got %v", wp.Targets)
+	}
+
+	if len(res.Inodes) != 1 {
+		t.Errorf("expected the directory in res.Inodes (protect.files), got %d entries", len(res.Inodes))
+	}
+	if len(res.AllowCreateIn) != 1 {
+		t.Errorf("expected the directory in res.AllowCreateIn, got %d entries", len(res.AllowCreateIn))
 	}
 }
 

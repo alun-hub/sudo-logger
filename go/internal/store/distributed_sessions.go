@@ -239,6 +239,25 @@ func (d *DistributedStore) HasSandboxViolation(ctx context.Context, tsid string)
 	return violation, nil
 }
 
+func (d *DistributedStore) RecordSandboxTrustedWrite(ctx context.Context, sid string, alert protocol.SandboxAlert) error {
+	_, err := d.db.Exec(ctx,
+		`UPDATE sudo_sessions SET sandbox_trusted_write=TRUE, updated_at=NOW() WHERE session_id=$1`,
+		sid)
+	return err
+}
+
+func (d *DistributedStore) HasSandboxTrustedWrite(ctx context.Context, tsid string) (bool, error) {
+	var trustedWrite bool
+	err := d.db.QueryRow(ctx, `SELECT sandbox_trusted_write FROM sudo_sessions WHERE tsid=$1`, tsid).Scan(&trustedWrite)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return trustedWrite, nil
+}
+
 
 // DeleteSession implements SessionStore.
 // Removes the S3 objects, then records the audit entry in sudo_deletion_log

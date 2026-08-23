@@ -92,11 +92,14 @@ func matchPattern(p *MatchPattern, text string) bool {
 // one must match if any of the three is specified. This allows a single rule
 // to catch both "sudo visudo" (command_base_any matches) and "sudo bash →
 // type visudo" (content matches) without requiring separate rules.
-func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func() string) bool {
+func matchesRule(rule Rule, s *SessionInfo, cmd, cmdBase string, getContent func() string, hasTrustedWrite func() bool) bool {
 	if rule.Source != "" && s.Source != rule.Source {
 		return false
 	}
 	if rule.ExitCode != nil && s.ExitCode != *rule.ExitCode {
+		return false
+	}
+	if rule.SandboxTrustedWrite != nil && *rule.SandboxTrustedWrite != hasTrustedWrite() {
 		return false
 	}
 	if rule.Incomplete != nil {
@@ -255,6 +258,11 @@ func hasViolation(ctx context.Context, tsid string) bool {
 	return violation
 }
 
+func hasTrustedWrite(ctx context.Context, tsid string) bool {
+	trusted, _ := sessionStore.HasSandboxTrustedWrite(ctx, tsid)
+	return trusted
+}
+
 // scoreSession computes a risk score (0–100) for a session using the globally
 // loaded rules.  Results are cached via sessionStore so ttyout is only read
 // once per session per rules version.
@@ -272,7 +280,26 @@ func scoreSession(s *SessionInfo) (int, []string) {
 		return 100, []string{"Sandbox Violation"}
 	}
 
-	if cached, _ := sessionStore.GetRiskCache(ctx, s.TSID, rulesHash); cached != nil {
+	// Same staleness problem as the violation check above: a trusted-package-
+	// manager exemption can be recorded after the session was first scored
+	// and cached. Unlike the violation check, this isn't a hardcoded score —
+	// it's evaluated as a normal rule condition below via matchesRule, so
+	// the score stays admin-configurable in risk-rules.yaml — which means
+	// (unlike violations, which skip the cache read entirely and never
+	// touch it again) the result IS cacheable once trustedWrite is
+	// accounted for. Fold it into the effective cache key, the same
+	// mechanism rulesHash already uses to invalidate on rule changes, so a
+	// session's score is recomputed exactly once right after the exemption
+	// is first recorded and served from cache normally on every call after
+	// that — not on every single future scoring call for that session's
+	// remaining lifetime.
+	trustedWrite := s.TSID != "" && hasTrustedWrite(ctx, s.TSID)
+	effectiveHash := rulesHash
+	if trustedWrite {
+		effectiveHash = rulesHash + ":trusted-write"
+	}
+
+	if cached, _ := sessionStore.GetRiskCache(ctx, s.TSID, effectiveHash); cached != nil {
 		return cached.Score, cached.Reasons
 	}
 
@@ -289,6 +316,7 @@ func scoreSession(s *SessionInfo) (int, []string) {
 		contentOnce.Do(func() { contentText = loadTtyOut(ctx, s.TSID) })
 		return contentText
 	}
+	hasTrustedWriteFn := func() bool { return trustedWrite }
 
 	score := 0
 	var reasons []string
@@ -297,7 +325,7 @@ func scoreSession(s *SessionInfo) (int, []string) {
 		if score >= 100 {
 			break
 		}
-		if !matchesRule(rule, s, cmd, cmdBase, getContent) {
+		if !matchesRule(rule, s, cmd, cmdBase, getContent, hasTrustedWriteFn) {
 			continue
 		}
 		pts := rule.Score
@@ -308,6 +336,6 @@ func scoreSession(s *SessionInfo) (int, []string) {
 		reasons = append(reasons, rule.Reason)
 	}
 
-	_ = sessionStore.SaveRiskCache(ctx, s.TSID, rulesHash, score, reasons)
+	_ = sessionStore.SaveRiskCache(ctx, s.TSID, effectiveHash, score, reasons)
 	return score, reasons
 }

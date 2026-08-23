@@ -835,7 +835,7 @@ sandbox: LSM hooks attached (42 protected inodes, 15 protected processes)
 
 #### Configuration file format
 
-`sandbox.yaml` uses a simple YAML structure with seven protection categories.
+`sandbox.yaml` uses a simple YAML structure with eight protection categories.
 All categories are optional.
 
 ```yaml
@@ -899,11 +899,74 @@ protect:
     - systemd-journal  # systemd-journald truncates to 15 chars
     - firewalld        # Firewall daemon
 
+trusted_package_managers:
+  # Off by default. Enable only if package updates are failing on directories
+  # listed in `protect.files` — see "Trusted package managers" below before
+  # turning this on.
+  enabled: false
+
+  # Exec targets, matched by inode like `forbidden` above — verified, not
+  # spoofable by copying a different binary to the same path.
+  binaries:
+    - /usr/bin/dnf5
+    - /usr/bin/rpm
+
+  # Narrow allow-list of directories where the binaries above (and their
+  # forked descendants, e.g. RPM scriptlets) may create new files even
+  # though the directory is also in `protect.files`. Deliberately NOT the
+  # same list as `files` — /root/.ssh, /etc/sudoers.d, /etc/cron.d etc. stay
+  # fully blocking regardless. A directory here has no effect unless it is
+  # ALSO listed under `protect.files`.
+  allow_create_in:
+    - /usr/lib/systemd/system
+    - /etc/systemd/system
 ```
 
 A comprehensive example for Fedora systems (covering sudo, PAM, SSH, SSSD,
 Kerberos, auditd, SELinux, PKI, cron, systemd units, and all major security
 daemons) is included in `sandbox.yaml` in the repository root.
+
+#### Trusted package managers
+
+`protect.files` and package management can collide: `dnf`/`rpm` legitimately
+need to create new systemd unit files under `/usr/lib/systemd/system` and
+`/etc/systemd/system`, which are also two of the directories `protect.files`
+exists to guard against backdoor persistence. Without an exemption, a large
+`dnf update` can hit `EPERM` mid-transaction on those directories, which has
+cascaded into RPM database corruption and the sandbox's own agent binary
+losing its SELinux label in the past — see
+[troubleshooting](docs/chapters/11-troubleshooting.md#dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent).
+
+`trusted_package_managers` (off by default) grants a narrow, explicit
+exemption instead of disabling protection wholesale or requiring updates to
+run outside `sudo` entirely (which would mean no audit trail at all — not
+acceptable when every privileged action is expected to go through a
+monitored `sudo` session):
+
+- Binaries are identified by **inode at exec time**, the same technique
+  `forbidden` already uses — not by path string, so it cannot be spoofed by
+  copying a different binary to a trusted path.
+- The exemption only applies to **creating new entries** (`mkdir`, `create`,
+  `mknod`, `symlink`) inside the directories listed in `allow_create_in` — a
+  deliberately narrower list than `protect.files`. Writing to, truncating,
+  deleting, or renaming an *existing* protected file — `/etc/shadow`,
+  `/etc/sudoers`, an existing systemd unit — is never exempted, regardless of
+  this setting.
+- Trust propagates to forked descendants (RPM scriptlets exec `/bin/sh`, and
+  that shell needs the same exemption to actually install anything), but
+  **every allowed operation still generates a full sandbox alert** —
+  `allowed=true` instead of a block — so nothing becomes silently invisible.
+  The default `risk-rules.yaml` ships a rule (`sandbox_trusted_pkgmgr_write`)
+  that surfaces this in the replay-server session list and SIEM export.
+- This is inherent to trusting a process (sub)tree, not a bug: once a
+  process is exec'd from a `binaries` entry, the exemption is available to
+  everything that process subsequently forks or exec's — there is no way to
+  distinguish a legitimate package-manager scriptlet action from an
+  attacker-influenced one at the kernel LSM level. A deliberate `sudo rpm -i
+  evil.rpm` would still succeed in the moment; it would no longer be silent
+  about it. Keep `binaries` and `allow_create_in` as narrow as your actual
+  package manager needs — grow them reactively, driven by real failures, not
+  preemptively.
 
 #### How enforcement works
 
@@ -1018,6 +1081,13 @@ The agent also logs a warning when loading a name that exceeds 15 characters.
   `.deb`: dpkg maintainer scripts run from `/var/lib/dpkg/info/`, never
   `/var/tmp`. See [troubleshooting](docs/chapters/11-troubleshooting.md#dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent)
   if you're on an older client.
+
+- **`protect.files` also collides with package management** — a different
+  problem from the `noexec`/`/var/tmp` one above: `dnf`/`rpm` legitimately
+  need to create new files under directories like `/usr/lib/systemd/system`
+  that `protect.files` exists to guard. See "Trusted package managers" above
+  for the narrow, explicit exemption (`trusted_package_managers`, off by
+  default) rather than disabling protection on those directories entirely.
 
 - **Unix socket IPC not blocked**: listing a socket path prevents its
   deletion and replacement, but does not intercept `connect()` + `send()`.

@@ -95,6 +95,7 @@ type SandboxProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type SandboxMapSpecs struct {
 	AlertRatelimit    *ebpf.MapSpec `ebpf:"alert_ratelimit"`
+	AllowCreateIn     *ebpf.MapSpec `ebpf:"allow_create_in"`
 	ForbiddenBinaries *ebpf.MapSpec `ebpf:"forbidden_binaries"`
 	NoexecInodes      *ebpf.MapSpec `ebpf:"noexec_inodes"`
 	ProtectedInodes   *ebpf.MapSpec `ebpf:"protected_inodes"`
@@ -104,6 +105,7 @@ type SandboxMapSpecs struct {
 	SandboxedCgroups  *ebpf.MapSpec `ebpf:"sandboxed_cgroups"`
 	SandboxedPids     *ebpf.MapSpec `ebpf:"sandboxed_pids"`
 	SystemdIpcInodes  *ebpf.MapSpec `ebpf:"systemd_ipc_inodes"`
+	TrustedBinaries   *ebpf.MapSpec `ebpf:"trusted_binaries"`
 }
 
 // SandboxVariableSpecs contains global variables before they are loaded into the kernel.
@@ -133,6 +135,7 @@ func (o *SandboxObjects) Close() error {
 // It can be passed to LoadSandboxObjects or ebpf.CollectionSpec.LoadAndAssign.
 type SandboxMaps struct {
 	AlertRatelimit    *ebpf.Map `ebpf:"alert_ratelimit"`
+	AllowCreateIn     *ebpf.Map `ebpf:"allow_create_in"`
 	ForbiddenBinaries *ebpf.Map `ebpf:"forbidden_binaries"`
 	NoexecInodes      *ebpf.Map `ebpf:"noexec_inodes"`
 	ProtectedInodes   *ebpf.Map `ebpf:"protected_inodes"`
@@ -142,11 +145,13 @@ type SandboxMaps struct {
 	SandboxedCgroups  *ebpf.Map `ebpf:"sandboxed_cgroups"`
 	SandboxedPids     *ebpf.Map `ebpf:"sandboxed_pids"`
 	SystemdIpcInodes  *ebpf.Map `ebpf:"systemd_ipc_inodes"`
+	TrustedBinaries   *ebpf.Map `ebpf:"trusted_binaries"`
 }
 
 func (m *SandboxMaps) Close() error {
 	return _SandboxClose(
 		m.AlertRatelimit,
+		m.AllowCreateIn,
 		m.ForbiddenBinaries,
 		m.NoexecInodes,
 		m.ProtectedInodes,
@@ -156,6 +161,7 @@ func (m *SandboxMaps) Close() error {
 		m.SandboxedCgroups,
 		m.SandboxedPids,
 		m.SystemdIpcInodes,
+		m.TrustedBinaries,
 	)
 }
 

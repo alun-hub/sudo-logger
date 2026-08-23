@@ -28,6 +28,12 @@ type Rule struct {
 	Incomplete     *bool         `yaml:"incomplete"       json:"incomplete,omitempty"`
 	AfterHours     *bool         `yaml:"after_hours"      json:"after_hours,omitempty"`
 	MinDuration    float64       `yaml:"min_duration"     json:"min_duration,omitempty"`
+	// SandboxTrustedWrite, when non-nil, requires that the session did (true)
+	// or did not (false) trigger a trusted-package-manager sandbox exemption
+	// — a kernel-verified signal (see RecordSandboxTrustedWrite), not a
+	// command/content text heuristic like the other conditions on this
+	// struct.
+	SandboxTrustedWrite *bool `yaml:"sandbox_trusted_write" json:"sandbox_trusted_write,omitempty"`
 	// Source filters by session source ("plugin", "ebpf-tty", "ebpf-pkexec", "dbus-polkit").
 	// Empty means the rule applies to all sources.
 	Source   string `yaml:"source"    json:"source,omitempty"`

@@ -90,7 +90,9 @@ struct sandbox_alert {
 	__u32 target_pid;     // PROCESS_KILL: PID (tgid) of the target process
 	char  target_comm[TASK_COMM_LEN]; // PROCESS_KILL: comm of target
 	__u32 sig;            // PROCESS_KILL: signal number
-	__u32 pad;
+	__u8  allowed;         // 1 if a trusted-package-manager exemption let this
+	                       // through instead of blocking it (see submit_alert_ex)
+	__u8  pad[3];
 };
 
 struct inode_key {
@@ -118,8 +120,13 @@ struct {
 	__uint(max_entries, 256 * 1024); // 256 KB ring buffer
 } sandbox_alerts SEC(".maps");
 
-static __always_inline void submit_alert(enum sandbox_alert_type type,
-					 __u64 ino, __u32 dev)
+// submit_alert_ex is the full alert-submission path; allowed=1 marks a
+// trusted-package-manager exemption that let the operation through instead
+// of blocking it (see the four inode-creation hooks below). submit_alert()
+// is a thin wrapper for the many pre-existing always-blocking call sites, so
+// none of them need to change.
+static __always_inline void submit_alert_ex(enum sandbox_alert_type type,
+					     __u64 ino, __u32 dev, __u8 allowed)
 {
 	__u64 now = bpf_ktime_get_ns();
 	__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
@@ -149,9 +156,16 @@ static __always_inline void submit_alert(enum sandbox_alert_type type,
 	a->target_pid = 0;
 	__builtin_memset(a->target_comm, 0, sizeof(a->target_comm));
 	a->sig = 0;
-	a->pad = 0;
+	a->allowed = allowed;
+	__builtin_memset(a->pad, 0, sizeof(a->pad));
 
 	bpf_ringbuf_submit(a, 0);
+}
+
+static __always_inline void submit_alert(enum sandbox_alert_type type,
+					 __u64 ino, __u32 dev)
+{
+	submit_alert_ex(type, ino, dev, 0);
 }
 
 // sandboxed_cgroups: set of session cgroup IDs subject to restrictions.
@@ -225,6 +239,43 @@ struct {
 	__type(value, __u8);
 } systemd_ipc_inodes SEC(".maps");
 
+// trusted_binaries: exec-time allow-list of package-manager binaries
+// (dnf5/rpm), verified by inode like forbidden_binaries — cannot be spoofed
+// by copying a different binary to the same path. Checked in
+// bprm_check_security; a hit marks the process PID_MARKER_TRUSTED_PKGMGR in
+// sandboxed_pids (see sandbox_process_fork for how that propagates to child
+// processes/scriptlets).
+// key = {inode number, block device id}, value = u8 marker.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 32);
+	__type(key, struct inode_key);
+	__type(value, __u8);
+} trusted_binaries SEC(".maps");
+
+// allow_create_in: narrow *admin-configured* allow-list of directories where
+// a PID_MARKER_TRUSTED_PKGMGR process may create new files/dirs/symlinks
+// even though the directory is also in protected_inodes — deliberately a
+// separate map from protected_inodes so /root/.ssh, /etc/sudoers.d,
+// /etc/cron.d etc. stay fully blocking regardless of trust. Every allowed
+// operation still submits an alert (see submit_alert_ex) — this exempts
+// enforcement, not visibility.
+//
+// max_entries matches MAX_PROTECTED_INODES, not the (deliberately short)
+// admin-facing YAML list: the Go side resolves each configured root
+// recursively (existing subdirectories like a systemd unit's *.wants/ need
+// their own entry too — see sandbox_config.go's resolveProtectedTree), and
+// a real /usr/lib/systemd/system alone resolves to 1000+ inodes at
+// max depth 3, confirmed against a real system — a "narrow list of two
+// directories" is not a narrow inode count once recursed.
+// key = {inode number, block device id}, value = u8 marker.
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, MAX_PROTECTED_INODES);
+	__type(key, struct inode_key);
+	__type(value, __u8);
+} allow_create_in SEC(".maps");
+
 // sandbox_config: feature-flag array written by the agent from sandbox.yaml.
 // key = index (u32), value = u32 (0=disabled, 1=enabled).
 // Default when not populated by Go: 0 (disabled) — Go always writes all entries.
@@ -238,7 +289,8 @@ struct {
 #define CFG_DENY_CAP_MAC_ADMIN     7
 #define CFG_DENY_CAP_SYS_RAWIO     8
 #define CFG_DENY_CAP_SYS_BOOT      9
-#define CFG_COUNT                  10
+#define CFG_TRUSTED_PKGMGR         10
+#define CFG_COUNT                  11
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -247,28 +299,46 @@ struct {
 	__type(value, __u32);
 } sandbox_config SEC(".maps");
 
-#define PID_MARKER_SANDBOXED 1
-#define PID_MARKER_EXEMPT     2
+#define PID_MARKER_SANDBOXED     1
+#define PID_MARKER_EXEMPT        2
+#define PID_MARKER_TRUSTED_PKGMGR 3
 
-// in_sandbox_cgroup: cgroup-only scoping, used for file/inode hooks.
-// PAM scope migration moves short-lived commands out of the session cgroup
-// before they can write, so this correctly exempts rpm/dnf etc.
+// in_sandbox_cgroup: true if the current process is running inside a tracked
+// session cgroup. Kept as a fallback net inside in_sandbox_pid() below for
+// processes the PID-propagation path hasn't (yet) tagged — e.g. a brand new
+// fork the sched_process_fork hook hasn't processed yet, or the (essentially
+// vestigial) direct-cgroup path from before PID-based propagation existed.
 static __always_inline int in_sandbox_cgroup(void)
 {
 	__u64 cgid = bpf_get_current_cgroup_id();
 	return bpf_map_lookup_elem(&sandboxed_cgroups, &cgid) != NULL;
 }
 
-// in_sandbox_pid: checks both cgroups and sandboxed_pids.
-// Returns the PID marker (1=sandboxed, 2=exempt leader) if in a sandbox, else 0.
+// in_sandbox_pid: checks sandboxed_pids FIRST, falling back to the cgroup
+// check only when there's no PID-specific entry at all.
+//
+// This order matters: a marked PID (SANDBOXED, EXEMPT, or
+// TRUSTED_PKGMGR — see sandbox_bprm_check_security) almost always is
+// STILL inside the tracked session cgroup when this runs — PAM/systemd
+// scope migration for an interactively-run command essentially never
+// actually happens in practice (confirmed against a real dnf/rpm session).
+// Checking the cgroup first would make this ALWAYS return plain
+// PID_MARKER_SANDBOXED (1) for such a process, silently discarding its
+// real, more specific marker — which is exactly why is_exempt_leader()
+// used to be unreliable while the sudo process itself was still in the
+// session cgroup, and why is_trusted_pkgmgr() below would otherwise never
+// see the marker sandbox_bprm_check_security just wrote for the exact
+// same tgid one hook invocation earlier.
+// Returns the PID marker (1=sandboxed, 2=exempt leader,
+// 3=trusted package manager) if in a sandbox, else 0.
 static __always_inline int in_sandbox_pid(void)
 {
-	if (in_sandbox_cgroup())
-		return PID_MARKER_SANDBOXED;
 	__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
 	__u8 *marker = bpf_map_lookup_elem(&sandboxed_pids, &tgid);
 	if (marker)
 		return *marker;
+	if (in_sandbox_cgroup())
+		return PID_MARKER_SANDBOXED;
 	return 0;
 }
 
@@ -278,6 +348,25 @@ static __always_inline int in_sandbox_pid(void)
 static __always_inline bool is_exempt_leader()
 {
 	return in_sandbox_pid() == PID_MARKER_EXEMPT;
+}
+
+// is_trusted_pkgmgr: returns true if the current process (or an ancestor it
+// forked from — see sandbox_process_fork) exec'd a configured
+// trusted_binaries entry while already inside a monitored session.
+static __always_inline bool is_trusted_pkgmgr()
+{
+	return in_sandbox_pid() == PID_MARKER_TRUSTED_PKGMGR;
+}
+
+static __always_inline int allow_create_protected(struct inode *dir)
+{
+	if (!dir)
+		return 0;
+	struct inode_key key = {};
+	key.ino = BPF_CORE_READ(dir, i_ino);
+	key.dev = (__u32)BPF_CORE_READ(dir, i_sb, s_dev);
+	key.pad = 0;
+	return bpf_map_lookup_elem(&allow_create_in, &key) != NULL;
 }
 
 static __always_inline int inode_protected(struct inode *inode)
@@ -433,16 +522,23 @@ int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_den
 	return 0;
 }
 
-// Deny creation of new files/directories inside protected directories.
+// Deny creation of new files/directories inside protected directories,
+// unless the process is a trusted package manager (see is_trusted_pkgmgr)
+// AND the directory is also in the narrow allow_create_in list — in which
+// case the write is let through but still fully alerted (allowed=1).
 SEC("lsm/inode_mkdir")
 int BPF_PROG(sandbox_inode_mkdir, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_MKDIR,
-			     BPF_CORE_READ(dir, i_ino),
-			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
+		__u64 ino = BPF_CORE_READ(dir, i_ino);
+		__u32 dev = (__u32)BPF_CORE_READ(dir, i_sb, s_dev);
+		if (is_trusted_pkgmgr() && allow_create_protected(dir)) {
+			submit_alert_ex(ALERT_DIR_MKDIR, ino, dev, 1);
+			return 0;
+		}
+		submit_alert(ALERT_DIR_MKDIR, ino, dev);
 		return -EPERM;
 	}
 	return 0;
@@ -454,9 +550,13 @@ int BPF_PROG(sandbox_inode_create, struct inode *dir, struct dentry *dentry, umo
 	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_CREATE,
-			     BPF_CORE_READ(dir, i_ino),
-			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
+		__u64 ino = BPF_CORE_READ(dir, i_ino);
+		__u32 dev = (__u32)BPF_CORE_READ(dir, i_sb, s_dev);
+		if (is_trusted_pkgmgr() && allow_create_protected(dir)) {
+			submit_alert_ex(ALERT_DIR_CREATE, ino, dev, 1);
+			return 0;
+		}
+		submit_alert(ALERT_DIR_CREATE, ino, dev);
 		return -EPERM;
 	}
 	return 0;
@@ -480,10 +580,18 @@ int BPF_PROG(sandbox_inode_mknod, struct inode *dir, struct dentry *dentry, umod
 		return -EPERM;
 	}
 
+	// Directory-protection check, same trusted-package-manager exemption as
+	// inode_mkdir/inode_create above. Note: local var named sb_dev, not dev —
+	// this function's `dev_t dev` parameter (the node's major:minor) would
+	// otherwise be shadowed.
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_MKNOD,
-			     BPF_CORE_READ(dir, i_ino),
-			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
+		__u64 ino = BPF_CORE_READ(dir, i_ino);
+		__u32 sb_dev = (__u32)BPF_CORE_READ(dir, i_sb, s_dev);
+		if (is_trusted_pkgmgr() && allow_create_protected(dir)) {
+			submit_alert_ex(ALERT_DIR_MKNOD, ino, sb_dev, 1);
+			return 0;
+		}
+		submit_alert(ALERT_DIR_MKNOD, ino, sb_dev);
 		return -EPERM;
 	}
 	return 0;
@@ -495,9 +603,13 @@ int BPF_PROG(sandbox_inode_symlink, struct inode *dir, struct dentry *dentry, co
 	if (!in_sandbox_pid())
 		return 0;
 	if (inode_protected(dir)) {
-		submit_alert(ALERT_DIR_SYMLINK,
-			     BPF_CORE_READ(dir, i_ino),
-			     (__u32)BPF_CORE_READ(dir, i_sb, s_dev));
+		__u64 ino = BPF_CORE_READ(dir, i_ino);
+		__u32 dev = (__u32)BPF_CORE_READ(dir, i_sb, s_dev);
+		if (is_trusted_pkgmgr() && allow_create_protected(dir)) {
+			submit_alert_ex(ALERT_DIR_SYMLINK, ino, dev, 1);
+			return 0;
+		}
+		submit_alert(ALERT_DIR_SYMLINK, ino, dev);
 		return -EPERM;
 	}
 	return 0;
@@ -529,7 +641,8 @@ int BPF_PROG(sandbox_task_kill, struct task_struct *p,
 		a->target_pid = (__u32)BPF_CORE_READ(p, tgid);
 		bpf_probe_read_kernel_str(a->target_comm, sizeof(a->target_comm), p->comm);
 		a->sig = (__u32)sig;
-		a->pad = 0;
+		a->allowed = 0;
+		__builtin_memset(a->pad, 0, sizeof(a->pad));
 		bpf_ringbuf_submit(a, 0);
 		return -EPERM;
 	}
@@ -638,7 +751,8 @@ int BPF_PROG(sandbox_ptrace_access_check, struct task_struct *child, unsigned in
 		a->target_pid = target_tgid;
 		bpf_probe_read_kernel_str(a->target_comm, sizeof(a->target_comm), child->comm);
 		a->sig = 0;
-		a->pad = 0;
+		a->allowed = 0;
+		__builtin_memset(a->pad, 0, sizeof(a->pad));
 		bpf_ringbuf_submit(a, 0);
 		return -EPERM;
 	}
@@ -796,6 +910,36 @@ int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 		return -EPERM;
 	}
 
+	// Grant trusted-package-manager status: exec'ing a configured,
+	// inode-verified binary (dnf5/rpm) marks this process
+	// PID_MARKER_TRUSTED_PKGMGR, which sandbox_process_fork propagates to
+	// its forked descendants (scriptlets etc.) below. Only the narrow
+	// allow_create_in directory list is affected — see the four
+	// inode-creation hooks above.
+	//
+	// Deliberately upgrade-only: a PID already carrying the marker that
+	// later exec's a DIFFERENT, non-trusted binary in the same tgid (a
+	// scriptlet's shell using `exec` to replace its own image, for
+	// instance) keeps the marker — this function never downgrades it back
+	// to PID_MARKER_SANDBOXED. That is intentional, not an oversight: the
+	// scriptlet path this feature exists for is dnf/rpm forking a child
+	// that immediately exec's /bin/sh, and /bin/sh itself will never be a
+	// trusted_binaries entry — a "clear trust on any non-matching exec"
+	// rule would strip the fork-inherited marker at exactly that exec and
+	// break every scriptlet. There is no way to distinguish that
+	// legitimate case from an attacker-influenced scriptlet exec'ing
+	// something else from a kernel LSM hook alone; trusting the whole
+	// process (sub)tree once trust is granted is inherent to this
+	// exemption model, not a bug to fix here — see allow_create_in's own
+	// doc comment and sandbox.yaml for the resulting blast radius this
+	// trades off against.
+	if (cfg_enabled(CFG_TRUSTED_PKGMGR) &&
+	    bpf_map_lookup_elem(&trusted_binaries, &key)) {
+		__u32 tgid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+		__u8 marker = PID_MARKER_TRUSTED_PKGMGR;
+		bpf_map_update_elem(&sandboxed_pids, &tgid, &marker, BPF_ANY);
+	}
+
 	// Walk up the dentry tree to see if this binary resides anywhere under a
 	// noexec directory (e.g. /tmp or /home). We limit to 16 levels deep to
 	// satisfy the BPF verifier while covering all realistic user paths.
@@ -833,13 +977,22 @@ SEC("tp_btf/sched_process_fork")
 int BPF_PROG(sandbox_process_fork, struct task_struct *parent, struct task_struct *child)
 {
 	__u32 parent_tgid = BPF_CORE_READ(parent, tgid);
-	if (!bpf_map_lookup_elem(&sandboxed_pids, &parent_tgid))
+	__u8 *parent_marker = bpf_map_lookup_elem(&sandboxed_pids, &parent_tgid);
+	if (!parent_marker)
 		return 0;
 
 	// All descendants of a sandboxed PID are subject to full restrictions,
-	// even if the parent was the exempt leader (the sudo process itself).
+	// even if the parent was the exempt leader (the sudo process itself) —
+	// UNLESS the parent is a trusted package manager (dnf/rpm), in which
+	// case trust propagates too: rpm scriptlets exec /bin/sh, which must
+	// inherit the exemption for a package install to actually work. This is
+	// the one exception to "descendants never inherit more than SANDBOXED";
+	// trusted_binaries is the only thing that can grant it, and re-grants it
+	// per-exec (bprm_check_security above), not via this fork path alone.
 	__u32 child_tgid = BPF_CORE_READ(child, tgid);
 	__u8 marker = PID_MARKER_SANDBOXED;
+	if (*parent_marker == PID_MARKER_TRUSTED_PKGMGR)
+		marker = PID_MARKER_TRUSTED_PKGMGR;
 	bpf_map_update_elem(&sandboxed_pids, &child_tgid, &marker, BPF_ANY);
 	return 0;
 }

@@ -1,0 +1,15 @@
+# CVE-2026-67422 (pymdown-extensions, HIGH, ReDoS)
+#
+# Only findable inside a vendored dependency's own docs-build tooling:
+# go/vendor/github.com/testcontainers/testcontainers-go/Pipfile.lock.
+# testcontainers-go is a test-only Go dependency (its own package files are
+# never imported outside internal/store's *_test.go); its Pipfile.lock is a
+# Python mkdocs/pymdown-extensions pin used to build ITS OWN documentation
+# site upstream, checked in only because `go mod vendor` mirrors the whole
+# module source tree, not just the .go files sudo-logger actually compiles.
+# There is no code path in this repo that installs or runs this Python
+# tooling. testcontainers-go v0.44.0 (latest available at the time this was
+# added) still pins pymdown-extensions 10.21.3; the fix (11.0.1) has not
+# been adopted upstream yet. Re-check this line when bumping
+# testcontainers-go again — remove it once upstream picks up the fix.
+CVE-2026-67422

@@ -546,6 +546,39 @@ func (ls *LocalStore) HasSandboxViolation(_ context.Context, tsid string) (bool,
 }
 
 
+func (ls *LocalStore) RecordSandboxTrustedWrite(_ context.Context, sid string, alert protocol.SandboxAlert) error {
+	v, ok := ls.sessionDirs.Load(sid)
+	if !ok {
+		log.Printf("sandbox: RecordSandboxTrustedWrite: session %q not in sessionDirs — not stored", sid)
+		return nil
+	}
+	dir := v.(string)
+	path := filepath.Join(dir, "SANDBOX_TRUSTED_WRITE")
+	data, _ := json.Marshal(alert)
+	if err := os.WriteFile(path, data, 0o640); err != nil {
+		return err
+	}
+	log.Printf("sandbox: trusted package-manager write recorded: %s", path)
+	return nil
+}
+
+
+func (ls *LocalStore) HasSandboxTrustedWrite(_ context.Context, tsid string) (bool, error) {
+	dir, err := ls.resolveSessionDir(tsid)
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(filepath.Join(dir, "SANDBOX_TRUSTED_WRITE"))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+
 // resolveSessionDir converts tsid to an absolute directory path and checks
 // that it stays within logDir (path-traversal guard).
 func (ls *LocalStore) resolveSessionDir(tsid string) (string, error) {

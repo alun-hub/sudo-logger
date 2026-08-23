@@ -579,6 +579,18 @@ func (s *sessionConn) handleMessage(mType uint8, payload []byte) error {
 			log.Printf("parse SANDBOX_ALERT from %s: %v", s.remote, err)
 			return nil
 		}
+
+		if alert.Allowed {
+			log.Printf("SECURITY ALERT: SANDBOX_ALLOWED (trusted pkg mgr) from %s — process %q (PID %d) permitted (type %d) in session %s",
+				s.remote, alert.Comm, alert.Pid, alert.Type, alert.SessionID)
+			if alert.SessionID != "" {
+				if err := s.srv.sessionStore.RecordSandboxTrustedWrite(context.Background(), alert.SessionID, alert); err != nil {
+					log.Printf("[%s] record trusted write: %v", alert.SessionID, err)
+				}
+			}
+			return nil
+		}
+
 		log.Printf("SECURITY ALERT: SANDBOX_VIOLATION from %s — process %q (PID %d) blocked (type %d) in session %s",
 			s.remote, alert.Comm, alert.Pid, alert.Type, alert.SessionID)
 

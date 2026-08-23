@@ -166,6 +166,18 @@ type SessionStore interface {
 	// for the session identified by tsid.
 	HasSandboxViolation(ctx context.Context, tsid string) (bool, error)
 
+	// RecordSandboxTrustedWrite persists that a trusted-package-manager
+	// exemption (alert.Allowed) let a session write into a protected
+	// directory instead of blocking it. Independent of
+	// RecordSandboxViolation — an allowed write is not a violation, and
+	// must never be conflated with one (that column's hardcoded 100/
+	// critical risk score must stay reserved for actual blocks).
+	RecordSandboxTrustedWrite(ctx context.Context, sid string, alert protocol.SandboxAlert) error
+
+	// HasSandboxTrustedWrite reports whether any trusted-package-manager
+	// exemption fired during the session identified by tsid.
+	HasSandboxTrustedWrite(ctx context.Context, tsid string) (bool, error)
+
 	// SaveSudoersSnapshot persists a sudoers snapshot from an agent.
 	// Deduplicates by (host, sha256): a snapshot with the same content as a
 	// previously stored one for that host is silently ignored.

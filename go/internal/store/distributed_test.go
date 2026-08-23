@@ -949,6 +949,52 @@ func TestDistributedStore_HasSandboxViolation_MissingSession(t *testing.T) {
 	}
 }
 
+func TestDistributedStore_SandboxTrustedWrite(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	meta := distTestMeta("alice", "host1")
+	w, err := d.CreateSession(ctx, meta, time.Now())
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	tsid := w.TSID()
+	defer w.Close()
+
+	if trusted, err := d.HasSandboxTrustedWrite(ctx, tsid); err != nil || trusted {
+		t.Fatalf("HasSandboxTrustedWrite before any alert = %v, %v; want false, nil", trusted, err)
+	}
+
+	alert := protocol.SandboxAlert{SessionID: meta.SessionID, Pid: 4242, Comm: "dnf5", Type: 8, Ts: time.Now().Unix(), Allowed: true}
+	if err := d.RecordSandboxTrustedWrite(ctx, meta.SessionID, alert); err != nil {
+		t.Fatalf("RecordSandboxTrustedWrite: %v", err)
+	}
+
+	trusted, err := d.HasSandboxTrustedWrite(ctx, tsid)
+	if err != nil {
+		t.Fatalf("HasSandboxTrustedWrite: %v", err)
+	}
+	if !trusted {
+		t.Error("HasSandboxTrustedWrite = false after RecordSandboxTrustedWrite, want true")
+	}
+
+	// The two columns must stay independent: an allowed exemption is not a
+	// violation, and must never be conflated with the hardcoded 100/critical
+	// score that sandbox_violation drives.
+	if violated, err := d.HasSandboxViolation(ctx, tsid); err != nil || violated {
+		t.Errorf("HasSandboxViolation after RecordSandboxTrustedWrite = %v, %v; want false, nil — the two columns must not be conflated", violated, err)
+	}
+}
+
+func TestDistributedStore_HasSandboxTrustedWrite_MissingSession(t *testing.T) {
+	d, _ := newDistributedTestStore(t)
+	ctx := t.Context()
+
+	if trusted, err := d.HasSandboxTrustedWrite(ctx, "no-such-tsid"); err != nil || trusted {
+		t.Errorf("HasSandboxTrustedWrite(missing) = %v, %v; want false, nil", trusted, err)
+	}
+}
+
 // findSessionRecord is a test helper: fetches a single session by tsid via
 // ListSessions, failing the test if it isn't found.
 func findSessionRecord(t *testing.T, d *DistributedStore, ctx context.Context, tsid string) SessionRecord {

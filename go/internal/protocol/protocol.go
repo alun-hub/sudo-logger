@@ -156,13 +156,16 @@ type DivergenceAlert struct {
 }
 
 // SandboxAlert is the JSON payload for MsgSandboxAlert.
-// Sent by the agent when the kernel LSM blocks an operation.
+// Sent by the agent when the kernel LSM blocks — or, if Allowed is true,
+// deliberately permits under a trusted-package-manager exemption — an
+// operation.
 type SandboxAlert struct {
 	SessionID string `json:"session_id,omitempty"` // mapped from cgroup_id in userspace
 	Pid       uint32 `json:"pid"`
 	Comm      string `json:"comm"`
 	Type      uint32 `json:"type"`
 	Ts        int64  `json:"ts"`
+	Allowed   bool   `json:"allowed,omitempty"`
 }
 
 // ServerReadyBody is the optional JSON payload in a SERVER_READY message (server→agent).
