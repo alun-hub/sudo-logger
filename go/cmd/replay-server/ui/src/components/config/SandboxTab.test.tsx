@@ -31,7 +31,7 @@ describe('SandboxTab', () => {
     expect(await screen.findByText('Process Sandbox')).toBeInTheDocument()
     expect(screen.getByText('/etc/sudo-logger/sandbox.yaml')).toBeInTheDocument()
     expect(screen.getByText('Block AF_NETLINK')).toBeInTheDocument()
-    expect(screen.getByRole('switch')).toHaveAttribute('data-state', 'checked')
+    expect(screen.getByRole('switch', { name: 'eBPF Process Sandbox' })).toHaveAttribute('data-state', 'checked')
     expect(screen.getByRole('button', { name: 'Save sandbox.yaml' })).toBeDisabled()
   })
 
@@ -60,7 +60,7 @@ describe('SandboxTab', () => {
     render(<SandboxTab />, { wrapper })
     await screen.findByText('Process Sandbox')
 
-    fireEvent.click(screen.getByRole('switch'))
+    fireEvent.click(screen.getByRole('switch', { name: 'eBPF Process Sandbox' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save sandbox.yaml' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Push change' }))
 

@@ -362,7 +362,7 @@ export function SandboxTab() {
             {current.enabled ? 'Enforcement active — filesystem and process restrictions apply.' : 'Enforcement disabled — no restrictions active. Save to push to all agents within 60 s.'}
           </div>
         </div>
-        <Switch checked={current.enabled} onCheckedChange={setEnabled} />
+        <Switch aria-label="eBPF Process Sandbox" checked={current.enabled} onCheckedChange={setEnabled} />
       </div>
 
       {/* Template loader */}
@@ -430,6 +430,7 @@ export function SandboxTab() {
                 </div>
               </div>
               <Switch
+                aria-label="Package-manager sandbox exemption"
                 checked={current.trustedPkgMgrs.enabled}
                 onCheckedChange={val => setTrustedPkgMgrs({ enabled: val })}
               />
