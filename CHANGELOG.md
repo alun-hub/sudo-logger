@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.0] - 2026-08-24
+
+A large `sudo dnf update` on a monitored host can legitimately need to create new files (e.g. systemd unit files) inside directories `protect.files` exists specifically to guard against backdoor persistence — with no exemption path, this could abort mid-transaction and cascade into `rpmdb`/SELinux-label corruption severe enough to break `sudo` system-wide. This release adds a narrow, opt-in escape hatch instead of weakening `protect.files` itself.
+
+### Added
+- **sandbox**: new opt-in `trusted_package_managers` section in `sandbox.yaml` (off by default). Binaries listed under `binaries` (matched by inode at exec time, exactly like the existing `forbidden` list — not by path string) are permitted to create *new* files, directories, and symlinks inside directories listed under `allow_create_in`, even when that directory is also protected by `protect.files`. Writing to, truncating, deleting, or renaming an *already-existing* protected file is never exempted, regardless of this setting. Trust propagates to forked descendants (an RPM scriptlet's `/bin/sh` needs the same exemption its parent had) — a deliberate, narrow exception to the sandbox's usual rule that exempt status never survives `fork()`.
+- **sandbox**: every exempted operation still emits a full sandbox alert (`allowed=true`) instead of becoming silent, so a `sudo rpm -i` of an untrusted package stays fully auditable even though it isn't blocked in the moment. The replay-server scores this through the normal `risk-rules.yaml` engine (new `sandbox_trusted_pkgmgr_write` rule, Medium band) rather than a hardcoded shortcut, so it's admin-tunable and shows up in the session list/SIEM export like any other rule.
+- **sandbox**: config reloads now also warn loudly (`TRUST GRANTED: package-manager exemption expanded by config reload`) when this exemption is turned on or its lists grow — the inverse-direction counterpart to the existing "protection reduced" weakening warning.
+- **replay-server**: `trusted_package_managers` added to the existing Process Sandbox config tab (fleet-pushed like the rest of `sandbox.yaml` already is, same diff-preview/step-up-auth flow).
+
+### Fixed
+- **replay-server**: the replay-server's own separate strict-schema copy of the sandbox config struct (used to validate `PUT /api/sandbox`) was missing the new `trusted_package_managers` field, so saving a sandbox config containing it failed with `field trusted_package_managers not found in type main.sandboxYAML` — caught via the GUI's own save path before release, not just code review.
+
+Verified against a real reproduction on a live kernel, toggled both directions: with the exemption on, a `dnf reinstall` that creates a unit file under `/usr/lib/systemd/system` succeeds and logs `SANDBOX ALLOWED (trusted pkg mgr)`; with it off, the identical operation is blocked (`SANDBOX VIOLATION`), reproducing the original failure. `sudo` itself remained fully functional throughout both cases.
+
 ## [1.39.4] - 2026-07-16
 
 Found while verifying v1.39.3 on a real host: an upgrade of `sudo-logger-client` deleted
