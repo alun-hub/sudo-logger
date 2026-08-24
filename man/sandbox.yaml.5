@@ -153,6 +153,20 @@ Every exempted operation still generates a full sandbox alert
 (\fBallowed=true\fR instead of a block) rather than becoming silent; the
 default \fBrisk-rules.yaml\fR surfaces this via the
 \fBsandbox_trusted_pkgmgr_write\fR rule in the replay-server session list.
+.PP
+\fBLimitation:\fR because existing protected files are never exempted, a
+\fBsudo dnf install\fR/\fBrpm -U\fR that \fIupgrades\fR a package which already
+has files installed under a \fBfiles\fR-protected directory will still be
+blocked once those files already exist \(em only their first, initial
+creation is covered. This affects \fBsudo-logger-client\fR's own package,
+which ships \fI/etc/systemd/system/*/refuse-stop.conf\fR drop-ins: the first
+install succeeds, but every subsequent version upgrade of
+\fBsudo-logger-client\fR itself is blocked via \fBsudo\fR
+(\fBSANDBOX VIOLATION action=FILE_RENAME\fR). Install client upgrades as
+direct root instead (\fBsu -\fR, then \fBdnf\fR/\fBrpm\fR directly), which
+bypasses the sandbox entirely since it only hooks \fBsudo\fR-mediated
+sessions, or temporarily disable the sandbox via the replay-server UI for the
+upgrade window.
 .SH SCOPE
 Restrictions only apply to processes that are:
 .IP 1.

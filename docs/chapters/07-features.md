@@ -609,6 +609,19 @@ and the default `risk-rules.yaml` surfaces it via the
 `sandbox_trusted_pkgmgr_write` rule (Medium band) in the session list — see
 [Risk scoring](#risk-scoring) above.
 
+**Limitation — package upgrades, not just installs:** since only *creating
+new* files is exempted, upgrading a package that already has files installed
+under a `protect.files`-covered directory is still blocked once those files
+already exist. This affects `sudo-logger-client`'s own package, which ships
+`/etc/systemd/system/*/refuse-stop.conf` drop-ins: the very first install
+succeeds (the files are new), but every subsequent version upgrade of
+`sudo-logger-client` itself is blocked via `sudo`
+(`SANDBOX VIOLATION action=FILE_RENAME`), even with the exemption enabled.
+Install client upgrades as direct root instead (`su -`, then `dnf install
+<rpm>` — this sidesteps the sandbox entirely, since it only hooks
+`sudo`-mediated sessions), or temporarily disable the sandbox via the
+replay-server UI for the upgrade window.
+
 ---
 
 ## GDPR / Session deletion

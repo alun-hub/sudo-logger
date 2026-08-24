@@ -8043,6 +8043,21 @@ the session’s <code>sandbox_trusted_write</code> column and the default
 <code>risk-rules.yaml</code> surfaces it via the
 <code>sandbox_trusted_pkgmgr_write</code> rule (Medium band) in the
 session list — see <a href="#risk-scoring">Risk scoring</a> above.</p>
+<p><strong>Limitation — package upgrades, not just installs:</strong>
+since only <em>creating new</em> files is exempted, upgrading a package
+that already has files installed under a
+<code>protect.files</code>-covered directory is still blocked once those
+files already exist. This affects <code>sudo-logger-client</code>’s own
+package, which ships <code>/etc/systemd/system/*/refuse-stop.conf</code>
+drop-ins: the very first install succeeds (the files are new), but every
+subsequent version upgrade of <code>sudo-logger-client</code> itself is
+blocked via <code>sudo</code>
+(<code>SANDBOX VIOLATION action=FILE_RENAME</code>), even with the
+exemption enabled. Install client upgrades as direct root instead
+(<code>su -</code>, then <code>dnf install &lt;rpm&gt;</code> — this
+sidesteps the sandbox entirely, since it only hooks
+<code>sudo</code>-mediated sessions), or temporarily disable the sandbox
+via the replay-server UI for the upgrade window.</p>
 <hr />
 <h2 id="gdpr-session-deletion">GDPR / Session deletion</h2>
 <h3 id="what-is-deleted">What is deleted</h3>
