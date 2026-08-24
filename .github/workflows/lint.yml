@@ -91,7 +91,7 @@ jobs:
 
       - name: Run pre-commit (skip system-tool hooks)
         env:
-          SKIP: go-vet,golangci-lint,go-test,cppcheck,flawfinder,trivy
+          SKIP: go-vet,golangci-lint,go-test,ui-test,cppcheck,flawfinder,trivy
         run: pre-commit run --all-files
 
   goreleaser:
