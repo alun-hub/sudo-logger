@@ -239,6 +239,7 @@ trusted_package_managers:
   allow_create_in:
     - /usr/lib/systemd/system
     - /etc/systemd/system
+    - /usr/lib/systemd/system-preset
 ```
 
 ### Feature flags reference

@@ -556,6 +556,8 @@ The sandbox uses separate maps from the recorder:
 | `noexec_inodes` | Inodes of directories where execution is denied (`protect.noexec[]`) |
 | `protected_procs` | Process name strings in `protect.processes[]` |
 | `systemd_ipc_inodes` | Inodes for systemd/dbus sockets (used by `deny_systemd_ipc`) |
+| `trusted_binaries` | Device+inode pairs of exec targets in `trusted_package_managers.binaries[]` |
+| `allow_create_in` | Device+inode pairs of directories in `trusted_package_managers.allow_create_in[]` |
 | `sandbox_config` | Feature flag bitmask (single-element array) |
 | `sandbox_alerts` | Ring buffer for sandbox violation events → user space |
 
@@ -579,6 +581,33 @@ When the sandbox blocks an operation, it writes to the `sandbox_alerts` ring buf
 1. Logs the violation to the session record (`RecordSandboxViolation`)
 2. Sends a risk event back to the log server (if `serverW` is configured)
 3. Increments the session's risk score contribution
+
+### Trusted package-manager exemption
+
+`trusted_package_managers` (off by default, see [YAML
+reference](05-yaml-reference.md)) grants a narrow, explicit exemption from
+`protect.files`' directory-creation restriction to a short list of
+binaries — matched by inode at exec time exactly like `forbidden_binaries`,
+never by path string — so that `dnf`/`rpm` can complete real package
+transactions (e.g. writing new systemd unit files) inside a monitored
+`sudo` session, instead of requiring updates to run outside `sudo`
+entirely and lose their audit trail.
+
+A process exec'd from a listed binary is marked trusted for its lifetime,
+and the mark propagates to forked descendants (an RPM scriptlet's `/bin/sh`
+needs the same exemption its parent had) — a deliberate, narrow exception
+to the sandbox's normal rule that exempt-leader status never survives
+`fork()`. The exemption only ever applies to *creating new entries* inside
+directories also listed in `allow_create_in`; writing to, truncating,
+deleting, or renaming an *existing* protected file is never exempted,
+regardless of this setting.
+
+Every exempted write still generates a full `sandbox_alerts` event
+(`allowed=true` instead of a block) rather than becoming silent. The
+replay-server records this as the session's `sandbox_trusted_write` column
+and the default `risk-rules.yaml` surfaces it via the
+`sandbox_trusted_pkgmgr_write` rule (Medium band) in the session list — see
+[Risk scoring](#risk-scoring) above.
 
 ---
 
@@ -704,6 +733,12 @@ write:
    agent logs a distinct `SECURITY WARNING: protection reduced` line when it
    reloads. This is detection only — the reload still applies; it's meant to
    make an accidental or malicious weakening loud instead of silent.
+6. **Trust-expansion detection** (sandbox only) — the inverse case: if a
+   pushed policy turns `trusted_package_managers.enabled` on, or grows its
+   `binaries`/`allow_create_in` lists, the agent logs a distinct
+   `TRUST GRANTED: package-manager exemption expanded by config reload`
+   line when it reloads, for the same reason — an exemption being widened
+   should be just as loud as protection being narrowed.
 
 None of this prevents a fully compromised replay-server, or an
 already-stepped-up admin session, from pushing a malicious config — that

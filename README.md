@@ -920,6 +920,7 @@ trusted_package_managers:
   allow_create_in:
     - /usr/lib/systemd/system
     - /etc/systemd/system
+    - /usr/lib/systemd/system-preset
 ```
 
 A comprehensive example for Fedora systems (covering sudo, PAM, SSH, SSSD,

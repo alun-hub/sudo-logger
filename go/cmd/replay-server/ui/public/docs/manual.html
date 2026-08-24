@@ -757,6 +757,8 @@ reference</a></li>
 <li><a href="#schema-1" id="toc-schema-1">Schema</a></li>
 <li><a href="#feature-flags-reference" id="toc-feature-flags-reference">Feature flags reference</a></li>
 <li><a href="#protect-sections-reference" id="toc-protect-sections-reference">Protect sections reference</a></li>
+<li><a href="#trusted-package-managers-reference" id="toc-trusted-package-managers-reference">Trusted package managers
+reference</a></li>
 <li><a href="#how-inode-protection-works" id="toc-how-inode-protection-works">How inode protection works</a></li>
 </ul></li>
 <li><a href="#jit-approval-policy-approval-policy.yaml" id="toc-jit-approval-policy-approval-policy.yaml">JIT Approval policy
@@ -928,6 +930,8 @@ modes</a></li>
 replacement (sandbox_watch.go)</a></li>
 <li><a href="#violation-alerts" id="toc-violation-alerts">Violation
 alerts</a></li>
+<li><a href="#trusted-package-manager-exemption" id="toc-trusted-package-manager-exemption">Trusted package-manager
+exemption</a></li>
 </ul></li>
 <li><a href="#gdpr-session-deletion" id="toc-gdpr-session-deletion">GDPR
 / Session deletion</a>
@@ -1104,6 +1108,9 @@ rejections</a></li>
 to load</a></li>
 <li><a href="#selinux-denials" id="toc-selinux-denials">SELinux
 denials</a></li>
+<li><a href="#dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent" id="toc-dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent">dnf/rpm
+transaction aborts mid-scriptlet, leaves rpmdb or SELinux state
+inconsistent</a></li>
 <li><a href="#session-visible-in-file-system-but-risk-score-not-showing" id="toc-session-visible-in-file-system-but-risk-score-not-showing">Session
 visible in file system but risk score not showing</a></li>
 <li><a href="#siem-forwarding-not-working" id="toc-siem-forwarding-not-working">SIEM forwarding not
@@ -5276,7 +5283,17 @@ disables the sandbox on the agent</li>
 <span id="cb78-23"><a href="#cb78-23" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">devices</span><span class="kw">:</span><span class="at"> </span><span class="kw">[]</span></span>
 <span id="cb78-24"><a href="#cb78-24" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">proc</span><span class="kw">:</span><span class="at"> </span><span class="kw">[]</span></span>
 <span id="cb78-25"><a href="#cb78-25" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sockets</span><span class="kw">:</span><span class="at"> </span><span class="kw">[]</span></span>
-<span id="cb78-26"><a href="#cb78-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">processes</span><span class="kw">:</span><span class="at"> </span><span class="kw">[]</span></span></code></pre></div>
+<span id="cb78-26"><a href="#cb78-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">processes</span><span class="kw">:</span><span class="at"> </span><span class="kw">[]</span></span>
+<span id="cb78-27"><a href="#cb78-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb78-28"><a href="#cb78-28" aria-hidden="true" tabindex="-1"></a><span class="fu">trusted_package_managers</span><span class="kw">:</span></span>
+<span id="cb78-29"><a href="#cb78-29" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">enabled</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span><span class="co">   # off by default — see reference below before enabling</span></span>
+<span id="cb78-30"><a href="#cb78-30" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">binaries</span><span class="kw">:</span></span>
+<span id="cb78-31"><a href="#cb78-31" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> /usr/bin/dnf5</span></span>
+<span id="cb78-32"><a href="#cb78-32" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> /usr/bin/rpm</span></span>
+<span id="cb78-33"><a href="#cb78-33" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">allow_create_in</span><span class="kw">:</span></span>
+<span id="cb78-34"><a href="#cb78-34" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> /usr/lib/systemd/system</span></span>
+<span id="cb78-35"><a href="#cb78-35" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> /etc/systemd/system</span></span>
+<span id="cb78-36"><a href="#cb78-36" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> /usr/lib/systemd/system-preset</span></span></code></pre></div>
 <h3 id="feature-flags-reference">Feature flags reference</h3>
 <table>
 <colgroup>
@@ -5434,6 +5451,76 @@ names</td>
 </tr>
 </tbody>
 </table>
+<blockquote>
+<p><strong>Note:</strong> <code>/var/tmp</code> is a common
+<code>noexec</code> entry, but it’s also where RPM stages and executes
+every package scriptlet
+(<code>%pre</code>/<code>%post</code>/<code>%preun</code>/<code>%postun</code>/<code>%posttrans</code>)
+by default. <code>sudo-logger-client</code> 1.20.126+ (v1.39.3+) ships
+an RPM macro that redirects RPM’s scriptlet staging to a dedicated,
+non-noexec directory so this doesn’t collide. If you’re on an older
+client, or see <code>dnf</code>/<code>rpm</code> transactions failing
+unexpectedly, see <a href="11-troubleshooting.md#dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent">Package
+manager transactions abort mid-scriptlet</a>.</p>
+</blockquote>
+<h3 id="trusted-package-managers-reference">Trusted package managers
+reference</h3>
+<table>
+<colgroup>
+<col style="width: 24%" />
+<col style="width: 31%" />
+<col style="width: 44%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td><code>false</code></td>
+<td>Master switch for the exemption below. Off by default — a
+package-manager exemption is opt-in, unlike the <code>deny_*</code>
+feature flags above, which default to protecting.</td>
+</tr>
+<tr>
+<td><code>binaries</code></td>
+<td><code>[]</code></td>
+<td>Exec targets, matched by inode at exec time like
+<code>protect.forbidden</code> — not by path string, so copying a
+different binary to the same path does not gain the exemption.</td>
+</tr>
+<tr>
+<td><code>allow_create_in</code></td>
+<td><code>[]</code></td>
+<td>Directories where the binaries above (and processes they fork,
+e.g. RPM scriptlets) may create new files/dirs/symlinks even though the
+directory is also in <code>protect.files</code>. Only has an effect on a
+directory that is <strong>also</strong> listed under
+<code>protect.files</code> — <code>inode_protected(dir)</code> must
+already be true before this list is even consulted.</td>
+</tr>
+</tbody>
+</table>
+<p>Unlike <code>protect.files</code>, an allowed write here is never
+silent: every exemption still generates a full sandbox alert
+(<code>allowed=true</code> instead of a block), which the default
+<code>risk-rules.yaml</code> surfaces via the
+<code>sandbox_trusted_pkgmgr_write</code> rule in the replay-server
+session list and SIEM export. Writing to, truncating, deleting, or
+renaming an <em>existing</em> protected file (<code>/etc/shadow</code>,
+<code>/etc/sudoers</code>, an existing systemd unit) is never exempted
+by this feature — only creating <em>new</em> entries is.</p>
+<p>Trust propagates to forked descendants (a scriptlet’s
+<code>/bin/sh</code> needs the same exemption its parent had to actually
+install anything) and is never revoked mid-tree — there is no way to
+distinguish a legitimate package-manager action from an
+attacker-influenced one at the kernel LSM level once trust has been
+granted. Keep <code>binaries</code> and <code>allow_create_in</code> as
+narrow as your actual package manager needs.</p>
 <h3 id="how-inode-protection-works">How inode protection works</h3>
 <p>The <code>files</code> section protects inodes, not path strings.
 When the agent starts, it resolves each listed path to its current inode
@@ -5849,10 +5936,10 @@ Medium=4, High=7, Critical=10). Extension fields map the same session
 metadata as the JSON format.</p>
 <h4 id="ocsf-open-cybersecurity-schema-framework">OCSF (Open
 Cybersecurity Schema Framework)</h4>
-<p>Events are mapped to OCSF Class 3002 (System Activity / Process
+<p>Events are mapped to OCSF Class 3003 (System Activity / Process
 Activity). Core fields include <code>class_uid</code>,
 <code>activity_id</code>, <code>time</code>, <code>actor.user</code>,
-<code>target.process</code>, <code>device.hostname</code>,
+<code>process</code>, <code>device.hostname</code>,
 <code>severity_id</code>, and <code>metadata.product</code>.</p>
 <h3 id="replay_url_base">replay_url_base</h3>
 <p>When <code>replay_url_base</code> is set, SIEM events include a
@@ -6726,8 +6813,8 @@ which re-auth flow to run.</p>
 <p>Every successful push writes an audit-log line (actor, host/key, a
 coarse +/- line-count diff) and forwards a
 <code>sudoers_config_push</code> event through whatever SIEM/webhook
-forwarding is configured (<code>internal/siem.SendAudit</code>) — see <a href="07-features.md#configuration-writes">Configuration writes</a> in
-Chapter 7.</p>
+forwarding is configured (<code>internal/siem.SendAudit</code>) — see <a href="07-features.md#session-view--access-log">Session view / access
+log</a> in Chapter 7.</p>
 <hr />
 <h4 id="delete-apisudoersconfig"><code>DELETE /api/sudoers/config</code></h4>
 <p>Remove a host’s staged override, reverting it to inherit
@@ -7884,6 +7971,16 @@ assignment</td>
 <code>deny_systemd_ipc</code>)</td>
 </tr>
 <tr>
+<td><code>trusted_binaries</code></td>
+<td>Device+inode pairs of exec targets in
+<code>trusted_package_managers.binaries[]</code></td>
+</tr>
+<tr>
+<td><code>allow_create_in</code></td>
+<td>Device+inode pairs of directories in
+<code>trusted_package_managers.allow_create_in[]</code></td>
+</tr>
+<tr>
 <td><code>sandbox_config</code></td>
 <td>Feature flag bitmask (single-element array)</td>
 </tr>
@@ -7920,6 +8017,32 @@ and: 1. Logs the violation to the session record
 (<code>RecordSandboxViolation</code>) 2. Sends a risk event back to the
 log server (if <code>serverW</code> is configured) 3. Increments the
 session’s risk score contribution</p>
+<h3 id="trusted-package-manager-exemption">Trusted package-manager
+exemption</h3>
+<p><code>trusted_package_managers</code> (off by default, see <a href="05-yaml-reference.md">YAML reference</a>) grants a narrow,
+explicit exemption from <code>protect.files</code>’ directory-creation
+restriction to a short list of binaries — matched by inode at exec time
+exactly like <code>forbidden_binaries</code>, never by path string — so
+that <code>dnf</code>/<code>rpm</code> can complete real package
+transactions (e.g. writing new systemd unit files) inside a monitored
+<code>sudo</code> session, instead of requiring updates to run outside
+<code>sudo</code> entirely and lose their audit trail.</p>
+<p>A process exec’d from a listed binary is marked trusted for its
+lifetime, and the mark propagates to forked descendants (an RPM
+scriptlet’s <code>/bin/sh</code> needs the same exemption its parent
+had) — a deliberate, narrow exception to the sandbox’s normal rule that
+exempt-leader status never survives <code>fork()</code>. The exemption
+only ever applies to <em>creating new entries</em> inside directories
+also listed in <code>allow_create_in</code>; writing to, truncating,
+deleting, or renaming an <em>existing</em> protected file is never
+exempted, regardless of this setting.</p>
+<p>Every exempted write still generates a full
+<code>sandbox_alerts</code> event (<code>allowed=true</code> instead of
+a block) rather than becoming silent. The replay-server records this as
+the session’s <code>sandbox_trusted_write</code> column and the default
+<code>risk-rules.yaml</code> surfaces it via the
+<code>sandbox_trusted_pkgmgr_write</code> rule (Medium band) in the
+session list — see <a href="#risk-scoring">Risk scoring</a> above.</p>
 <hr />
 <h2 id="gdpr-session-deletion">GDPR / Session deletion</h2>
 <h3 id="what-is-deleted">What is deleted</h3>
@@ -8062,6 +8185,14 @@ covered), the agent logs a distinct
 <code>SECURITY WARNING: protection reduced</code> line when it reloads.
 This is detection only — the reload still applies; it’s meant to make an
 accidental or malicious weakening loud instead of silent.</li>
+<li><strong>Trust-expansion detection</strong> (sandbox only) — the
+inverse case: if a pushed policy turns
+<code>trusted_package_managers.enabled</code> on, or grows its
+<code>binaries</code>/<code>allow_create_in</code> lists, the agent logs
+a distinct
+<code>TRUST GRANTED: package-manager exemption expanded by config reload</code>
+line when it reloads, for the same reason — an exemption being widened
+should be just as loud as protection being narrowed.</li>
 </ol>
 <p>None of this prevents a fully compromised replay-server, or an
 already-stepped-up admin session, from pushing a malicious config — that
@@ -8342,6 +8473,16 @@ default to support shared-cert setups.”</p>
 <p>Use <code>--strict-cert-host</code> in high-assurance environments
 where agents should not be able to log sessions under another host’s
 identity.</p>
+<p><strong>Recommendation:</strong> the default is off deliberately —
+flipping it would break any deployment already using a single shared
+client certificate across hosts (this is a supported, documented
+configuration, not an oversight). For a new deployment, or one where
+per-host identity actually matters (multi-tenant hosts, compliance
+requirements, or any environment where one compromised host
+impersonating another is a real concern), mint one client certificate
+per host and enable <code>--strict-cert-host</code> from the start —
+retrofitting per-host certs onto an existing shared-cert fleet later is
+more work than starting that way.</p>
 <h3 id="replay-server-https">Replay server HTTPS</h3>
 <p>The replay server supports HTTPS via <code>--tls-cert</code> and
 <code>--tls-key</code>:</p>
@@ -8659,8 +8800,8 @@ sudo-logger to function correctly.</p>
 </tr>
 <tr>
 <td><code>/etc/sudo-logger/ack-sign.key</code></td>
-<td>root</td>
-<td>0600</td>
+<td>root:sudologger</td>
+<td>0640</td>
 <td>ACK signing private key (server)</td>
 </tr>
 <tr>
@@ -8690,11 +8831,14 @@ sudo-logger to function correctly.</p>
 </tbody>
 </table>
 <blockquote>
-<p><strong>Warning:</strong> Private key files (<code>client.key</code>,
-<code>server.key</code>, <code>ack-sign.key</code>) must be mode 0600
-and owned by root (or <code>sudologger</code> for the server). Any more
-permissive mode allows other processes to read the private key,
-compromising the mTLS trust chain and ACK signing integrity.</p>
+<p><strong>Warning:</strong> Private key files <code>client.key</code>
+and <code>server.key</code> must be mode 0600 and owned by root.
+<code>ack-sign.key</code> is the exception — mode 0640, owned
+<code>root:sudologger</code>, since the log server runs as the
+<code>sudologger</code> user and needs group-read access to sign ACKs.
+Any more permissive mode than documented here allows other processes to
+read the private key, compromising the mTLS trust chain and ACK signing
+integrity.</p>
 </blockquote>
 <h1 id="prometheus-metrics">Prometheus Metrics</h1>
 <h2 id="overview-11">Overview</h2>
@@ -8758,8 +8902,8 @@ not rely on Basic Auth credentials to protect it.</p>
 <h2 id="replay-server-metrics">Replay-server metrics</h2>
 <p>The replay server exposes metrics at <code>GET /metrics</code> on its
 main listen port. The handler (<code>handleMetrics</code> in
-<code>go/cmd/replay-server/main.go</code>) queries the session cache and
-emits five metric families.</p>
+<code>go/cmd/replay-server/handlers_session.go</code>) queries the
+session cache and emits five metric families.</p>
 <table>
 <colgroup>
 <col style="width: 33%" />
@@ -9279,8 +9423,10 @@ versioning and replication configuration.</p>
 certificates, the agent cannot establish mTLS connections to the log
 server and all sudo sessions will be blocked.</p>
 <div class="sourceCode" id="cb169"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb169-1"><a href="#cb169-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tar</span> <span class="at">-xzf</span> /backups/sudo-logger-config-<span class="op">&lt;</span>date<span class="op">&gt;</span>.tar.gz <span class="at">-C</span> /</span>
-<span id="cb169-2"><a href="#cb169-2" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> 600 /etc/sudo-logger/server.key /etc/sudo-logger/client.key /etc/sudo-logger/ack-sign.key</span>
-<span id="cb169-3"><a href="#cb169-3" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> 644 /etc/sudo-logger/ca.crt /etc/sudo-logger/server.crt /etc/sudo-logger/client.crt /etc/sudo-logger/ack-verify.key</span></code></pre></div></li>
+<span id="cb169-2"><a href="#cb169-2" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> 600 /etc/sudo-logger/server.key /etc/sudo-logger/client.key</span>
+<span id="cb169-3"><a href="#cb169-3" aria-hidden="true" tabindex="-1"></a><span class="fu">chown</span> root:sudologger /etc/sudo-logger/ack-sign.key</span>
+<span id="cb169-4"><a href="#cb169-4" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> 640 /etc/sudo-logger/ack-sign.key</span>
+<span id="cb169-5"><a href="#cb169-5" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> 644 /etc/sudo-logger/ca.crt /etc/sudo-logger/server.crt /etc/sudo-logger/client.crt /etc/sudo-logger/ack-verify.key</span></code></pre></div></li>
 <li><p><strong>Restore session data.</strong></p>
 <div class="sourceCode" id="cb170"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb170-1"><a href="#cb170-1" aria-hidden="true" tabindex="-1"></a><span class="fu">rsync</span> <span class="at">-av</span> backup-host:/backups/sudoreplay/ /var/log/sudoreplay/</span>
 <span id="cb170-2"><a href="#cb170-2" aria-hidden="true" tabindex="-1"></a><span class="fu">chown</span> <span class="at">-R</span> sudologger:sudologger /var/log/sudoreplay/</span></code></pre></div>
@@ -9959,6 +10105,54 @@ enforcement for that domain only. Remove with
 resolved.</p>
 </blockquote>
 <hr />
+<h2 id="dnfrpm-transaction-aborts-mid-scriptlet-leaves-rpmdb-or-selinux-state-inconsistent">dnf/rpm
+transaction aborts mid-scriptlet, leaves rpmdb or SELinux state
+inconsistent</h2>
+<p><strong>Symptoms:</strong> A
+<code>dnf update</code>/<code>dnf install</code> that includes a package
+with a
+<code>%pre</code>/<code>%post</code>/<code>%preun</code>/<code>%postun</code>/<code>%posttrans</code>
+scriptlet (nearly all packages have at least one) fails partway through,
+or completes but leaves the system inconsistent — duplicate entries for
+the same package name in <code>rpm -qa</code>, a package whose files
+were written but whose scriptlet never ran (e.g. SELinux policy updated
+on disk but not reloaded), or <code>sudo</code> itself breaking
+system-wide afterward with
+<code>error initializing I/O plugin sudo_logger_plugin</code>.</p>
+<p><strong>Diagnosis:</strong></p>
+<div class="sourceCode" id="cb205"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb205-1"><a href="#cb205-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-logger-agent <span class="at">--since</span> <span class="st">&quot;-1 hour&quot;</span> <span class="kw">|</span> <span class="fu">grep</span> <span class="st">&#39;SANDBOX VIOLATION action=EXEC_BLOCK comm=&quot;sh&quot;&#39;</span></span></code></pre></div>
+<p>RPM stages every scriptlet as a script file under
+<code>%_tmppath</code> (<code>/var/tmp</code> by default) and execs it
+directly. If <code>/var/tmp</code> is listed under
+<code>protect.noexec</code> in <code>sandbox.yaml</code> — it is by
+default — the sandbox blocks that exec, silently aborting the scriptlet
+and leaving the transaction half-applied.</p>
+<p><strong>Fix:</strong></p>
+<p><code>sudo-logger-client</code> 1.20.126 / v1.39.3 and later ship an
+RPM macro
+(<code>/usr/lib/rpm/macros.d/macros.sudo-logger-tmppath</code>) that
+redirects <code>%_tmppath</code> to a dedicated, root-only directory
+(<code>/var/lib/sudo-logger/rpm-tmp</code>, <code>0700</code>) that
+isn’t noexec-protected, so this no longer happens. Confirm it’s
+installed:</p>
+<div class="sourceCode" id="cb206"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb206-1"><a href="#cb206-1" aria-hidden="true" tabindex="-1"></a><span class="ex">rpm</span> <span class="at">--eval</span> <span class="st">&#39;%_tmppath&#39;</span></span>
+<span id="cb206-2"><a href="#cb206-2" aria-hidden="true" tabindex="-1"></a><span class="co"># should print /var/lib/sudo-logger/rpm-tmp, not /var/tmp</span></span></code></pre></div>
+<p>If it still prints <code>/var/tmp</code>, upgrade
+<code>sudo-logger-client</code> to 1.20.126/v1.39.3 or later
+(1.20.125/v1.39.2 shipped this macro to <code>/etc/rpm/macros.d</code>,
+which rpm 6 does not scan by default — it had no effect). On an older
+client, work around it without weakening the sandbox by setting the
+macro yourself, in the directory rpm actually reads:</p>
+<div class="sourceCode" id="cb207"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb207-1"><a href="#cb207-1" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="st">&#39;%_tmppath /var/lib/sudo-logger/rpm-tmp&#39;</span> <span class="kw">|</span> <span class="fu">sudo</span> tee /usr/lib/rpm/macros.d/macros.sudo-logger-tmppath</span>
+<span id="cb207-2"><a href="#cb207-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> install <span class="at">-d</span> <span class="at">-m</span> 0700 /var/lib/sudo-logger/rpm-tmp</span></code></pre></div>
+<p>Do <strong>not</strong> remove <code>/var/tmp</code> from
+<code>protect.noexec</code> to fix this — that reopens the “copy a
+forbidden binary into shared tmp storage and run it under a fresh inode”
+bypass the rule exists to prevent. This is RPM-specific: Debian/Ubuntu’s
+<code>dpkg</code> maintainer scripts run from
+<code>/var/lib/dpkg/info/</code> and never touch <code>/var/tmp</code>,
+so this does not affect <code>.deb</code> installs.</p>
+<hr />
 <h2 id="session-visible-in-file-system-but-risk-score-not-showing">Session
 visible in file system but risk score not showing</h2>
 <p><strong>Symptoms:</strong> Sessions appear in the replay UI but the
@@ -9975,9 +10169,9 @@ missing.</li>
 <p><strong>Fix:</strong></p>
 <ol type="1">
 <li><p>Verify the rules file exists and is valid YAML:</p>
-<div class="sourceCode" id="cb205"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb205-1"><a href="#cb205-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> /etc/sudo-logger/risk-rules.yaml</span></code></pre></div></li>
+<div class="sourceCode" id="cb208"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb208-1"><a href="#cb208-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> /etc/sudo-logger/risk-rules.yaml</span></code></pre></div></li>
 <li><p>Check replay server logs for rule parsing errors:</p>
-<div class="sourceCode" id="cb206"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb206-1"><a href="#cb206-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-replay <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-i</span> <span class="st">&#39;risk\|rules\|yaml&#39;</span></span></code></pre></div></li>
+<div class="sourceCode" id="cb209"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb209-1"><a href="#cb209-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-replay <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-i</span> <span class="st">&#39;risk\|rules\|yaml&#39;</span></span></code></pre></div></li>
 <li><p>Rules take effect immediately when saved through the Settings tab
 (or <code>PUT /api/rules</code>) — there is no signal-based reload; the
 replay server only handles <code>SIGTERM</code>/<code>SIGINT</code> for
@@ -9992,14 +10186,16 @@ replay UI but do not appear in the SIEM (Splunk, Elastic, etc.).</p>
 <ol type="1">
 <li><p>Is SIEM forwarding enabled in
 <code>/etc/sudo-logger/siem.yaml</code>?</p>
-<div class="sourceCode" id="cb207"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb207-1"><a href="#cb207-1" aria-hidden="true" tabindex="-1"></a><span class="fu">enabled</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
-<span id="cb207-2"><a href="#cb207-2" aria-hidden="true" tabindex="-1"></a><span class="fu">url</span><span class="kw">:</span><span class="at"> https://siem.example.com:8088/services/collector</span></span></code></pre></div></li>
+<div class="sourceCode" id="cb210"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb210-1"><a href="#cb210-1" aria-hidden="true" tabindex="-1"></a><span class="fu">enabled</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb210-2"><a href="#cb210-2" aria-hidden="true" tabindex="-1"></a><span class="fu">transport</span><span class="kw">:</span><span class="at"> https</span></span>
+<span id="cb210-3"><a href="#cb210-3" aria-hidden="true" tabindex="-1"></a><span class="fu">https</span><span class="kw">:</span></span>
+<span id="cb210-4"><a href="#cb210-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">url</span><span class="kw">:</span><span class="at"> https://siem.example.com:8088/services/collector</span></span></code></pre></div></li>
 <li><p>Is the URL reachable from the replay server host?</p>
-<div class="sourceCode" id="cb208"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb208-1"><a href="#cb208-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-v</span> https://siem.example.com:8088/services/collector</span></code></pre></div></li>
+<div class="sourceCode" id="cb211"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb211-1"><a href="#cb211-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-v</span> https://siem.example.com:8088/services/collector</span></code></pre></div></li>
 <li><p>If the SIEM endpoint uses a private CA, ensure the CA cert is
 trusted by the system or configured in <code>siem.yaml</code>.</p></li>
 <li><p>Check replay server logs for SIEM-related errors:</p>
-<div class="sourceCode" id="cb209"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb209-1"><a href="#cb209-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-replay <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-i</span> <span class="st">&#39;siem\|forward\|hec\|http&#39;</span></span></code></pre></div></li>
+<div class="sourceCode" id="cb212"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb212-1"><a href="#cb212-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-replay <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-i</span> <span class="st">&#39;siem\|forward\|hec\|http&#39;</span></span></code></pre></div></li>
 <li><p>The <code>siem.yaml</code> file is polled for changes every 30
 seconds — after editing it directly, wait for the next poll (there is no
 signal-based reload; the replay server only handles
@@ -10027,7 +10223,7 @@ session.</p></li>
 replay server contacts the log server’s admin port to list and approve
 sessions. Check that <code>--logserver-admin</code> is set on the replay
 server and points to the correct URL:</p>
-<div class="sourceCode" id="cb210"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb210-1"><a href="#cb210-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://logserver:9877/api/approvals</span></code></pre></div>
+<div class="sourceCode" id="cb213"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb213-1"><a href="#cb213-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> http://logserver:9877/api/approvals</span></code></pre></div>
 <p>If this URL is unreachable, <code>--health-listen</code> may not be
 configured on the log server. Add <code>-health-listen :9877</code> to
 the log server’s flags.</p></li>
@@ -10037,7 +10233,7 @@ the log server’s flags.</p></li>
 env var, or <code>-approval-token-file</code> file) on the log
 server.</p></li>
 <li><p><strong>Check pending approvals directly:</strong></p>
-<div class="sourceCode" id="cb211"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb211-1"><a href="#cb211-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer &lt;token&gt;&quot;</span> http://logserver:9877/api/approvals</span></code></pre></div></li>
+<div class="sourceCode" id="cb214"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb214-1"><a href="#cb214-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer &lt;token&gt;&quot;</span> http://logserver:9877/api/approvals</span></code></pre></div></li>
 </ol>
 <hr />
 <h2 id="rbac-403-on-api-endpoints">RBAC: 403 on API endpoints</h2>
@@ -10048,13 +10244,13 @@ role does not hold (e.g. <code>sessions:list_all</code>,
 <p><strong>Diagnosis:</strong></p>
 <ol type="1">
 <li><p>Check what roles and permissions the current user has:</p>
-<div class="sourceCode" id="cb212"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb212-1"><a href="#cb212-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://replay-server:8080/api/me <span class="dt">\</span></span>
-<span id="cb212-2"><a href="#cb212-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer &lt;token&gt;&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb215"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb215-1"><a href="#cb215-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://replay-server:8080/api/me <span class="dt">\</span></span>
+<span id="cb215-2"><a href="#cb215-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer &lt;token&gt;&quot;</span></span></code></pre></div>
 <p>The response includes the user’s roles and effective
 permissions.</p></li>
 <li><p>Verify the user is listed in <code>--admin-users</code> (for the
 admin role):</p>
-<div class="sourceCode" id="cb213"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb213-1"><a href="#cb213-1" aria-hidden="true" tabindex="-1"></a><span class="ex">systemctl</span> cat sudo-replay <span class="kw">|</span> <span class="fu">grep</span> admin-users</span></code></pre></div>
+<div class="sourceCode" id="cb216"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb216-1"><a href="#cb216-1" aria-hidden="true" tabindex="-1"></a><span class="ex">systemctl</span> cat sudo-replay <span class="kw">|</span> <span class="fu">grep</span> admin-users</span></code></pre></div>
 <p><code>--admin-users</code> accepts a comma-separated list of
 usernames. Users not listed here do not receive the admin role.</p></li>
 <li><p>If OIDC is in use, verify the group-to-role mapping in the RBAC
@@ -10084,7 +10280,7 @@ doesn’t re-prompt every time.</p>
 <code>GET /api/oidc/login</code> and <code>GET /api/oidc/callback</code>
 (OIDC) or <code>POST /api/stepup</code> (local auth); that sequence
 marks exactly when the session last stepped up:</p>
-<div class="sourceCode" id="cb214"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb214-1"><a href="#cb214-1" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> logs deployment/sudo-replay-server <span class="at">-n</span> sudo-logger <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-i</span> <span class="st">&quot;stepup\|oidc/login\|oidc/callback\|status=403&quot;</span></span></code></pre></div></li>
+<div class="sourceCode" id="cb217"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb217-1"><a href="#cb217-1" aria-hidden="true" tabindex="-1"></a><span class="ex">kubectl</span> logs deployment/sudo-replay-server <span class="at">-n</span> sudo-logger <span class="kw">|</span> <span class="fu">grep</span> <span class="at">-i</span> <span class="st">&quot;stepup\|oidc/login\|oidc/callback\|status=403&quot;</span></span></code></pre></div></li>
 <li><p>Compare the timestamp of that step-up against the current push.
 If it’s within the configured TTL (<strong>Config → System Auth →
 “Step-up Re-authentication TTL”</strong>, default 10 minutes), no new
@@ -10104,7 +10300,7 @@ integrity</h2>
 <p>The <code>scripts/verify-integrity.sh</code> script performs a syntax
 check on source files. It is intended for validating Go and C files
 during development:</p>
-<div class="sourceCode" id="cb215"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb215-1"><a href="#cb215-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./scripts/verify-integrity.sh</span> <span class="op">&lt;</span>file<span class="op">&gt;</span></span></code></pre></div>
+<div class="sourceCode" id="cb218"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb218-1"><a href="#cb218-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./scripts/verify-integrity.sh</span> <span class="op">&lt;</span>file<span class="op">&gt;</span></span></code></pre></div>
 <ul>
 <li>For <code>.go</code> files: runs <code>go fmt</code> then
 <code>go vet</code>.</li>
@@ -10121,54 +10317,54 @@ and non-zero. Sessions are stored as asciinema v2
 <code>session.cast</code> files (see Chapter 7), not sudo’s native
 <code>.iolog</code> format, so check for empty <code>session.cast</code>
 files:</p>
-<div class="sourceCode" id="cb216"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb216-1"><a href="#cb216-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> <span class="at">-lh</span> /var/log/sudoreplay/</span>
-<span id="cb216-2"><a href="#cb216-2" aria-hidden="true" tabindex="-1"></a><span class="fu">find</span> /var/log/sudoreplay/ <span class="at">-name</span> <span class="st">&#39;session.cast&#39;</span> <span class="at">-empty</span></span></code></pre></div>
+<div class="sourceCode" id="cb219"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb219-1"><a href="#cb219-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> <span class="at">-lh</span> /var/log/sudoreplay/</span>
+<span id="cb219-2"><a href="#cb219-2" aria-hidden="true" tabindex="-1"></a><span class="fu">find</span> /var/log/sudoreplay/ <span class="at">-name</span> <span class="st">&#39;session.cast&#39;</span> <span class="at">-empty</span></span></code></pre></div>
 <hr />
 <h2 id="getting-debug-output">Getting debug output</h2>
 <h3 id="agent">Agent</h3>
 <p>Enable debug logging in <code>/etc/sudo-logger/agent.conf</code>:</p>
-<div class="sourceCode" id="cb217"><pre class="sourceCode ini"><code class="sourceCode ini"><span id="cb217-1"><a href="#cb217-1" aria-hidden="true" tabindex="-1"></a><span class="dt">Debug </span><span class="ot">=</span><span class="st"> </span><span class="kw">true</span></span></code></pre></div>
+<div class="sourceCode" id="cb220"><pre class="sourceCode ini"><code class="sourceCode ini"><span id="cb220-1"><a href="#cb220-1" aria-hidden="true" tabindex="-1"></a><span class="dt">Debug </span><span class="ot">=</span><span class="st"> </span><span class="kw">true</span></span></code></pre></div>
 <p>Restart the agent:</p>
-<div class="sourceCode" id="cb218"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb218-1"><a href="#cb218-1" aria-hidden="true" tabindex="-1"></a><span class="ex">systemctl</span> restart sudo-logger-agent</span></code></pre></div>
+<div class="sourceCode" id="cb221"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb221-1"><a href="#cb221-1" aria-hidden="true" tabindex="-1"></a><span class="ex">systemctl</span> restart sudo-logger-agent</span></code></pre></div>
 <p>With <code>Debug = true</code>, the agent logs each message exchange
 with the plugin, connection events to the log server, ACK processing,
 and eBPF events to the journal.</p>
-<div class="sourceCode" id="cb219"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb219-1"><a href="#cb219-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-logger-agent <span class="at">-f</span></span></code></pre></div>
+<div class="sourceCode" id="cb222"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb222-1"><a href="#cb222-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-logger-agent <span class="at">-f</span></span></code></pre></div>
 <h3 id="log-server-1">Log server</h3>
 <p>The log server does not currently support a <code>--debug</code>
 flag. Verbose output is available via the standard journal. Check for
 connection events, TLS handshake errors, and session write errors:</p>
-<div class="sourceCode" id="cb220"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb220-1"><a href="#cb220-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-logserver <span class="at">-f</span></span></code></pre></div>
+<div class="sourceCode" id="cb223"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb223-1"><a href="#cb223-1" aria-hidden="true" tabindex="-1"></a><span class="ex">journalctl</span> <span class="at">-u</span> sudo-logserver <span class="at">-f</span></span></code></pre></div>
 <p>For TLS debugging, use <code>openssl s_client</code> directly (see <a href="#sudo-hangs-or-blocks-at-startup">sudo hangs or blocks at
 startup</a> above).</p>
 <h3 id="replay-server-1">Replay server</h3>
 <p>The replay server does not currently support a <code>--debug</code>
 flag. Run it in the foreground to see all log output:</p>
-<div class="sourceCode" id="cb221"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb221-1"><a href="#cb221-1" aria-hidden="true" tabindex="-1"></a><span class="ex">sudo-replay-server</span> <span class="dt">\</span></span>
-<span id="cb221-2"><a href="#cb221-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">-logdir</span>      /var/log/sudoreplay <span class="dt">\</span></span>
-<span id="cb221-3"><a href="#cb221-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">-listen</span>      :8080 <span class="dt">\</span></span>
-<span id="cb221-4"><a href="#cb221-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">-admin-users</span> yourusername</span></code></pre></div>
+<div class="sourceCode" id="cb224"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb224-1"><a href="#cb224-1" aria-hidden="true" tabindex="-1"></a><span class="ex">sudo-replay-server</span> <span class="dt">\</span></span>
+<span id="cb224-2"><a href="#cb224-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">-logdir</span>      /var/log/sudoreplay <span class="dt">\</span></span>
+<span id="cb224-3"><a href="#cb224-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">-listen</span>      :8080 <span class="dt">\</span></span>
+<span id="cb224-4"><a href="#cb224-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">-admin-users</span> yourusername</span></code></pre></div>
 <p>All HTTP requests, rule reload events, SIEM errors, and approval API
 calls are logged to stderr.</p>
 <h3 id="checking-component-connectivity-end-to-end">Checking component
 connectivity end-to-end</h3>
-<div class="sourceCode" id="cb222"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb222-1"><a href="#cb222-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Plugin → agent (Unix socket)</span></span>
-<span id="cb222-2"><a href="#cb222-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> <span class="at">-la</span> /run/sudo-logger/plugin.sock</span>
-<span id="cb222-3"><a href="#cb222-3" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> <span class="at">-l</span>   <span class="co"># triggers plugin connect, check agent log</span></span>
-<span id="cb222-4"><a href="#cb222-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb222-5"><a href="#cb222-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Agent → log server (mTLS)</span></span>
-<span id="cb222-6"><a href="#cb222-6" aria-hidden="true" tabindex="-1"></a><span class="ex">openssl</span> s_client <span class="dt">\</span></span>
-<span id="cb222-7"><a href="#cb222-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">-connect</span> logserver:9876 <span class="dt">\</span></span>
-<span id="cb222-8"><a href="#cb222-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">-cert</span>    /etc/sudo-logger/client.crt <span class="dt">\</span></span>
-<span id="cb222-9"><a href="#cb222-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">-key</span>     /etc/sudo-logger/client.key <span class="dt">\</span></span>
-<span id="cb222-10"><a href="#cb222-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">-CAfile</span>  /etc/sudo-logger/ca.crt <span class="dt">\</span></span>
-<span id="cb222-11"><a href="#cb222-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">-brief</span></span>
-<span id="cb222-12"><a href="#cb222-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb222-13"><a href="#cb222-13" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. Replay server → log server admin port</span></span>
-<span id="cb222-14"><a href="#cb222-14" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://logserver:9877/healthz</span>
-<span id="cb222-15"><a href="#cb222-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb222-16"><a href="#cb222-16" aria-hidden="true" tabindex="-1"></a><span class="co"># 4. Browser → replay server</span></span>
-<span id="cb222-17"><a href="#cb222-17" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://replay-server:8080/healthz</span></code></pre></div>
+<div class="sourceCode" id="cb225"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb225-1"><a href="#cb225-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Plugin → agent (Unix socket)</span></span>
+<span id="cb225-2"><a href="#cb225-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> <span class="at">-la</span> /run/sudo-logger/plugin.sock</span>
+<span id="cb225-3"><a href="#cb225-3" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> <span class="at">-l</span>   <span class="co"># triggers plugin connect, check agent log</span></span>
+<span id="cb225-4"><a href="#cb225-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb225-5"><a href="#cb225-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Agent → log server (mTLS)</span></span>
+<span id="cb225-6"><a href="#cb225-6" aria-hidden="true" tabindex="-1"></a><span class="ex">openssl</span> s_client <span class="dt">\</span></span>
+<span id="cb225-7"><a href="#cb225-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">-connect</span> logserver:9876 <span class="dt">\</span></span>
+<span id="cb225-8"><a href="#cb225-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">-cert</span>    /etc/sudo-logger/client.crt <span class="dt">\</span></span>
+<span id="cb225-9"><a href="#cb225-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">-key</span>     /etc/sudo-logger/client.key <span class="dt">\</span></span>
+<span id="cb225-10"><a href="#cb225-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">-CAfile</span>  /etc/sudo-logger/ca.crt <span class="dt">\</span></span>
+<span id="cb225-11"><a href="#cb225-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">-brief</span></span>
+<span id="cb225-12"><a href="#cb225-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb225-13"><a href="#cb225-13" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. Replay server → log server admin port</span></span>
+<span id="cb225-14"><a href="#cb225-14" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://logserver:9877/healthz</span>
+<span id="cb225-15"><a href="#cb225-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb225-16"><a href="#cb225-16" aria-hidden="true" tabindex="-1"></a><span class="co"># 4. Browser → replay server</span></span>
+<span id="cb225-17"><a href="#cb225-17" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-s</span> http://replay-server:8080/healthz</span></code></pre></div>
 <p>Each step should succeed independently before testing the full
 chain.</p>
 <h1 id="developer-guide">Developer Guide</h1>
@@ -10297,7 +10493,7 @@ chain.</p>
 <hr />
 <h2 id="build-system">Build system</h2>
 <h3 id="prerequisites-1">Prerequisites</h3>
-<div class="sourceCode" id="cb224"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb224-1"><a href="#cb224-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install clang llvm libbpf-devel bpftool golang</span></code></pre></div>
+<div class="sourceCode" id="cb227"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb227-1"><a href="#cb227-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install clang llvm libbpf-devel bpftool golang</span></code></pre></div>
 <p>The C plugin’s <code>sudo_plugin.h</code> header is vendored in
 <code>plugin/include/</code> (verify with
 <code>ls plugin/include/</code>), so no <code>sudo-devel</code> package
@@ -10309,15 +10505,15 @@ pointing at the vendored copy, not a system header. (The
 <code>%build</code> step does not reference anything from that package —
 it only uses the vendored header.)</p>
 <p>For documentation:</p>
-<div class="sourceCode" id="cb225"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb225-1"><a href="#cb225-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install pandoc</span>
-<span id="cb225-2"><a href="#cb225-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install mkdocs mkdocs-material</span></code></pre></div>
+<div class="sourceCode" id="cb228"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb228-1"><a href="#cb228-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> dnf install pandoc</span>
+<span id="cb228-2"><a href="#cb228-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install mkdocs mkdocs-material</span></code></pre></div>
 <h3 id="first-time-setup-ebpf-vmlinux.h">First-time setup (eBPF
 vmlinux.h)</h3>
 <p>The eBPF programs require a <code>vmlinux.h</code> file generated
 from the running kernel’s BTF (BPF Type Format) data. This file is not
 committed to the repository:</p>
-<div class="sourceCode" id="cb226"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb226-1"><a href="#cb226-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> vmlinux-agent      <span class="co"># generates go/cmd/agent/bpf/vmlinux.h from /sys/kernel/btf/vmlinux</span></span>
-<span id="cb226-2"><a href="#cb226-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> generate-agent     <span class="co"># runs bpf2go to compile recorder.c and sandbox.bpf.c → Go bindings</span></span></code></pre></div>
+<div class="sourceCode" id="cb229"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb229-1"><a href="#cb229-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> vmlinux-agent      <span class="co"># generates go/cmd/agent/bpf/vmlinux.h from /sys/kernel/btf/vmlinux</span></span>
+<span id="cb229-2"><a href="#cb229-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> generate-agent     <span class="co"># runs bpf2go to compile recorder.c and sandbox.bpf.c → Go bindings</span></span></code></pre></div>
 <p><code>vmlinux-agent</code> calls
 <code>bpftool btf dump file /sys/kernel/btf/vmlinux format c</code> and
 writes the output to <code>go/cmd/agent/bpf/vmlinux.h</code>. Re-run
@@ -10329,8 +10525,8 @@ or arm64, derived from <code>uname -m</code>) and generates the
 <code>recorder_bpfel.go</code> and <code>sandbox_bpfel.go</code> Go
 binding files.</p>
 <h3 id="building-the-agent">Building the agent</h3>
-<div class="sourceCode" id="cb227"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb227-1"><a href="#cb227-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> agent</span>
-<span id="cb227-2"><a href="#cb227-2" aria-hidden="true" tabindex="-1"></a><span class="co"># equivalent: cd go &amp;&amp; go build -o ../bin/sudo-logger-agent ./cmd/agent/</span></span></code></pre></div>
+<div class="sourceCode" id="cb230"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb230-1"><a href="#cb230-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> agent</span>
+<span id="cb230-2"><a href="#cb230-2" aria-hidden="true" tabindex="-1"></a><span class="co"># equivalent: cd go &amp;&amp; go build -o ../bin/sudo-logger-agent ./cmd/agent/</span></span></code></pre></div>
 <p>The <code>agent</code> target depends on <code>generate-agent</code>,
 which depends on <code>vmlinux-agent</code>. On a fresh checkout,
 <code>make agent</code> runs the full chain.</p>
@@ -10342,10 +10538,10 @@ server and replay server</h3>
 top-level one used for the agent (that one lives at the repo root and
 has the <code>agent</code>/<code>vmlinux-agent</code> targets described
 above). Run these from the <code>go/</code> directory:</p>
-<div class="sourceCode" id="cb228"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb228-1"><a href="#cb228-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> server         <span class="co"># go build -o cmd/server/server ./cmd/server/</span></span>
-<span id="cb228-2"><a href="#cb228-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> replay-server   <span class="co"># runs ui-build (npm ci &amp;&amp; npm run build) first, then</span></span>
-<span id="cb228-3"><a href="#cb228-3" aria-hidden="true" tabindex="-1"></a>                     <span class="co"># go build -o cmd/replay-server/replay-server ./cmd/replay-server/</span></span>
-<span id="cb228-4"><a href="#cb228-4" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> all             <span class="co"># builds both replay-server and server</span></span></code></pre></div>
+<div class="sourceCode" id="cb231"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb231-1"><a href="#cb231-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> server         <span class="co"># go build -o cmd/server/server ./cmd/server/</span></span>
+<span id="cb231-2"><a href="#cb231-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> replay-server   <span class="co"># runs ui-build (npm ci &amp;&amp; npm run build) first, then</span></span>
+<span id="cb231-3"><a href="#cb231-3" aria-hidden="true" tabindex="-1"></a>                     <span class="co"># go build -o cmd/replay-server/replay-server ./cmd/replay-server/</span></span>
+<span id="cb231-4"><a href="#cb231-4" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> all             <span class="co"># builds both replay-server and server</span></span></code></pre></div>
 <p>There is no <code>make replay</code> target — it is named
 <code>replay-server</code>. Binaries land inside their own
 <code>cmd/</code> subdirectory (<code>go/cmd/server/server</code>,
@@ -10363,25 +10559,25 @@ frontend automatically — you do not need to build it separately first.
 The replay server binary embeds <code>cmd/replay-server/static/</code>
 using <code>//go:embed</code>.</p>
 <h3 id="building-the-plugin-c">Building the plugin (C)</h3>
-<div class="sourceCode" id="cb229"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb229-1"><a href="#cb229-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> plugin        <span class="co"># gcc → sudo_logger_plugin.so</span></span>
-<span id="cb229-2"><a href="#cb229-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> install <span class="at">-C</span> plugin <span class="co"># installs to /usr/libexec/sudo/</span></span></code></pre></div>
+<div class="sourceCode" id="cb232"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb232-1"><a href="#cb232-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-C</span> plugin        <span class="co"># gcc → sudo_logger_plugin.so</span></span>
+<span id="cb232-2"><a href="#cb232-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> install <span class="at">-C</span> plugin <span class="co"># installs to /usr/libexec/sudo/</span></span></code></pre></div>
 <p>The plugin Makefile uses <code>gcc</code> (not clang) and links
 against the vendored <code>plugin/include/sudo_plugin.h</code> header
 via <code>-Iinclude</code>. The output is
 <code>plugin/sudo_logger_plugin.so</code>.</p>
 <h3 id="building-the-frontend-react-spa">Building the frontend (React
 SPA)</h3>
-<div class="sourceCode" id="cb230"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb230-1"><a href="#cb230-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go/cmd/replay-server/ui</span>
-<span id="cb230-2"><a href="#cb230-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> install</span>
-<span id="cb230-3"><a href="#cb230-3" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run build   <span class="co"># tsc -b &amp;&amp; vite build → outputs to ../static/</span></span></code></pre></div>
+<div class="sourceCode" id="cb233"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb233-1"><a href="#cb233-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go/cmd/replay-server/ui</span>
+<span id="cb233-2"><a href="#cb233-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> install</span>
+<span id="cb233-3"><a href="#cb233-3" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run build   <span class="co"># tsc -b &amp;&amp; vite build → outputs to ../static/</span></span></code></pre></div>
 <p>Vite is configured (in <code>vite.config.ts</code>) to write the
 production build to <code>../static/</code>, which is the directory
 embedded by the Go server. The dev server proxies <code>/api</code>
 requests to <code>:8080</code> so it can be used against a running
 replay-server instance.</p>
 <h3 id="building-documentation">Building documentation</h3>
-<div class="sourceCode" id="cb231"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb231-1"><a href="#cb231-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> docs-manual    <span class="co"># pandoc → docs/manual.html (also copied to replay-server static/)</span></span>
-<span id="cb231-2"><a href="#cb231-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> docs-site      <span class="co"># mkdocs build → docs/site/</span></span></code></pre></div>
+<div class="sourceCode" id="cb234"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb234-1"><a href="#cb234-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> docs-manual    <span class="co"># pandoc → docs/manual.html (also copied to replay-server static/)</span></span>
+<span id="cb234-2"><a href="#cb234-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> docs-site      <span class="co"># mkdocs build → docs/site/</span></span></code></pre></div>
 <p><code>docs-manual</code> concatenates the chapter Markdown files and
 runs pandoc to produce a single-file HTML manual. The output is also
 copied into the replay server’s static directory so auditors can access
@@ -10402,23 +10598,23 @@ unchanged.</li>
 <li>Always add a <code>%changelog</code> entry for every bump.</li>
 </ul>
 <h3 id="build-steps">Build steps</h3>
-<div class="sourceCode" id="cb232"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb232-1"><a href="#cb232-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Set up rpmbuild tree (once)</span></span>
-<span id="cb232-2"><a href="#cb232-2" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmdev-setuptree</span></span>
-<span id="cb232-3"><a href="#cb232-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb232-4"><a href="#cb232-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Set VERSION to match the Version: field in the target spec file</span></span>
-<span id="cb232-5"><a href="#cb232-5" aria-hidden="true" tabindex="-1"></a><span class="va">VERSION</span><span class="op">=</span>1.20.25   <span class="co"># example — read from spec file, do not guess</span></span>
-<span id="cb232-6"><a href="#cb232-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb232-7"><a href="#cb232-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Commit all changes first — git archive only includes committed files</span></span>
-<span id="cb232-8"><a href="#cb232-8" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> archive <span class="at">--format</span><span class="op">=</span>tar.gz <span class="at">--prefix</span><span class="op">=</span>sudo-logger-<span class="va">${VERSION}</span>/ HEAD <span class="dt">\</span></span>
-<span id="cb232-9"><a href="#cb232-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;</span> ~/rpmbuild/SOURCES/sudo-logger-<span class="va">${VERSION}</span>.tar.gz</span>
-<span id="cb232-10"><a href="#cb232-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb232-11"><a href="#cb232-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Build the RPMs</span></span>
-<span id="cb232-12"><a href="#cb232-12" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmbuild</span> <span class="at">-ba</span> rpm/sudo-logger-client.spec</span>
-<span id="cb232-13"><a href="#cb232-13" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmbuild</span> <span class="at">-ba</span> rpm/sudo-logger-server.spec</span>
-<span id="cb232-14"><a href="#cb232-14" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmbuild</span> <span class="at">-ba</span> rpm/sudo-logger-replay.spec</span>
-<span id="cb232-15"><a href="#cb232-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb232-16"><a href="#cb232-16" aria-hidden="true" tabindex="-1"></a><span class="co"># RPMs land in:</span></span>
-<span id="cb232-17"><a href="#cb232-17" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> ~/rpmbuild/RPMS/x86_64/</span></code></pre></div>
+<div class="sourceCode" id="cb235"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb235-1"><a href="#cb235-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Set up rpmbuild tree (once)</span></span>
+<span id="cb235-2"><a href="#cb235-2" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmdev-setuptree</span></span>
+<span id="cb235-3"><a href="#cb235-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb235-4"><a href="#cb235-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Set VERSION to match the Version: field in the target spec file</span></span>
+<span id="cb235-5"><a href="#cb235-5" aria-hidden="true" tabindex="-1"></a><span class="va">VERSION</span><span class="op">=</span>1.20.25   <span class="co"># example — read from spec file, do not guess</span></span>
+<span id="cb235-6"><a href="#cb235-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb235-7"><a href="#cb235-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Commit all changes first — git archive only includes committed files</span></span>
+<span id="cb235-8"><a href="#cb235-8" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> archive <span class="at">--format</span><span class="op">=</span>tar.gz <span class="at">--prefix</span><span class="op">=</span>sudo-logger-<span class="va">${VERSION}</span>/ HEAD <span class="dt">\</span></span>
+<span id="cb235-9"><a href="#cb235-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;</span> ~/rpmbuild/SOURCES/sudo-logger-<span class="va">${VERSION}</span>.tar.gz</span>
+<span id="cb235-10"><a href="#cb235-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb235-11"><a href="#cb235-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Build the RPMs</span></span>
+<span id="cb235-12"><a href="#cb235-12" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmbuild</span> <span class="at">-ba</span> rpm/sudo-logger-client.spec</span>
+<span id="cb235-13"><a href="#cb235-13" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmbuild</span> <span class="at">-ba</span> rpm/sudo-logger-server.spec</span>
+<span id="cb235-14"><a href="#cb235-14" aria-hidden="true" tabindex="-1"></a><span class="ex">rpmbuild</span> <span class="at">-ba</span> rpm/sudo-logger-replay.spec</span>
+<span id="cb235-15"><a href="#cb235-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb235-16"><a href="#cb235-16" aria-hidden="true" tabindex="-1"></a><span class="co"># RPMs land in:</span></span>
+<span id="cb235-17"><a href="#cb235-17" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> ~/rpmbuild/RPMS/x86_64/</span></code></pre></div>
 <p>Use the <code>/rpm-builder</code> skill to be guided through the full
 versioning and build workflow.</p>
 <h3 id="what-each-rpm-contains">What each RPM contains</h3>
@@ -10480,11 +10676,11 @@ upgrades instead).</p>
 layers in this order:</p>
 <p><strong>Step 1: Add the constant in
 <code>go/internal/protocol/protocol.go</code></strong></p>
-<div class="sourceCode" id="cb233"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb233-1"><a href="#cb233-1" aria-hidden="true" tabindex="-1"></a><span class="co">// go/internal/protocol/protocol.go</span></span>
-<span id="cb233-2"><a href="#cb233-2" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> <span class="op">(</span></span>
-<span id="cb233-3"><a href="#cb233-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... existing constants ...</span></span>
-<span id="cb233-4"><a href="#cb233-4" aria-hidden="true" tabindex="-1"></a>    MsgMyNewMessage <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x</span><span class="er">NN</span><span class="op">)</span>   <span class="co">// direction: component→component; payload: description</span></span>
-<span id="cb233-5"><a href="#cb233-5" aria-hidden="true" tabindex="-1"></a><span class="op">)</span></span></code></pre></div>
+<div class="sourceCode" id="cb236"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb236-1"><a href="#cb236-1" aria-hidden="true" tabindex="-1"></a><span class="co">// go/internal/protocol/protocol.go</span></span>
+<span id="cb236-2"><a href="#cb236-2" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> <span class="op">(</span></span>
+<span id="cb236-3"><a href="#cb236-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">// ... existing constants ...</span></span>
+<span id="cb236-4"><a href="#cb236-4" aria-hidden="true" tabindex="-1"></a>    MsgMyNewMessage <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x</span><span class="er">NN</span><span class="op">)</span>   <span class="co">// direction: component→component; payload: description</span></span>
+<span id="cb236-5"><a href="#cb236-5" aria-hidden="true" tabindex="-1"></a><span class="op">)</span></span></code></pre></div>
 <p>Choose the next available hex value. Add a comment documenting the
 direction and payload format.</p>
 <p><strong>Step 2: Add a handler in <code>plugin.c</code> (if the plugin
@@ -10498,8 +10694,8 @@ new type constant (for messages sent by the plugin). Define the matching
 (agent side)</strong></p>
 <p>In <code>handlePluginConn</code>, add a case to the frame dispatch
 switch:</p>
-<div class="sourceCode" id="cb234"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb234-1"><a href="#cb234-1" aria-hidden="true" tabindex="-1"></a><span class="cf">case</span> protocol<span class="op">.</span>MsgMyNewMessage<span class="op">:</span></span>
-<span id="cb234-2"><a href="#cb234-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">// handle the message</span></span></code></pre></div>
+<div class="sourceCode" id="cb237"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb237-1"><a href="#cb237-1" aria-hidden="true" tabindex="-1"></a><span class="cf">case</span> protocol<span class="op">.</span>MsgMyNewMessage<span class="op">:</span></span>
+<span id="cb237-2"><a href="#cb237-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">// handle the message</span></span></code></pre></div>
 <p>If the message flows through the agent without processing, add it to
 the proxy forwarding logic.</p>
 <p><strong>Step 4: Add a handler in
@@ -10515,35 +10711,35 @@ constants (go/internal/protocol/protocol.go)</h3>
 <p>Message types now run through <code>0x1b</code>. This table was
 significantly out of date (stopped at <code>0x14</code> and had one
 value wrong); verify against the source directly if in doubt.</p>
-<div class="sourceCode" id="cb235"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb235-1"><a href="#cb235-1" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> <span class="op">(</span></span>
-<span id="cb235-2"><a href="#cb235-2" aria-hidden="true" tabindex="-1"></a>    MsgSessionStart             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x01</span><span class="op">)</span> <span class="co">// plugin→agent→server: JSON SessionStart</span></span>
-<span id="cb235-3"><a href="#cb235-3" aria-hidden="true" tabindex="-1"></a>    MsgChunk                    <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x02</span><span class="op">)</span> <span class="co">// plugin→agent→server: binary chunk</span></span>
-<span id="cb235-4"><a href="#cb235-4" aria-hidden="true" tabindex="-1"></a>    MsgSessionEnd               <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x03</span><span class="op">)</span> <span class="co">// plugin→agent→server: binary final_seq+exit_code</span></span>
-<span id="cb235-5"><a href="#cb235-5" aria-hidden="true" tabindex="-1"></a>    MsgAck                      <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x04</span><span class="op">)</span> <span class="co">// server→agent: binary seq+ts_ns+sig(64)</span></span>
-<span id="cb235-6"><a href="#cb235-6" aria-hidden="true" tabindex="-1"></a>    MsgAckQuery                 <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x05</span><span class="op">)</span> <span class="co">// plugin→agent: empty</span></span>
-<span id="cb235-7"><a href="#cb235-7" aria-hidden="true" tabindex="-1"></a>    MsgAckResponse              <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x06</span><span class="op">)</span> <span class="co">// agent→plugin: binary last_ack_ts_ns+last_seq</span></span>
-<span id="cb235-8"><a href="#cb235-8" aria-hidden="true" tabindex="-1"></a>    MsgSessionReady             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x07</span><span class="op">)</span> <span class="co">// agent→plugin: empty — server OK, sudo may proceed</span></span>
-<span id="cb235-9"><a href="#cb235-9" aria-hidden="true" tabindex="-1"></a>    MsgSessionError             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x08</span><span class="op">)</span> <span class="co">// agent→plugin: string error — sudo blocked</span></span>
-<span id="cb235-10"><a href="#cb235-10" aria-hidden="true" tabindex="-1"></a>    MsgHeartbeat                <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x09</span><span class="op">)</span> <span class="co">// agent→server: empty keepalive (every 400 ms)</span></span>
-<span id="cb235-11"><a href="#cb235-11" aria-hidden="true" tabindex="-1"></a>    MsgHeartbeatAck             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0a</span><span class="op">)</span> <span class="co">// server→agent: empty reply to heartbeat</span></span>
-<span id="cb235-12"><a href="#cb235-12" aria-hidden="true" tabindex="-1"></a>    MsgServerReady              <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0b</span><span class="op">)</span> <span class="co">// server→agent: session accepted, agent may send SESSION_READY</span></span>
-<span id="cb235-13"><a href="#cb235-13" aria-hidden="true" tabindex="-1"></a>    MsgSessionDenied            <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0c</span><span class="op">)</span> <span class="co">// server→agent AND agent→plugin: policy denial, string block message</span></span>
-<span id="cb235-14"><a href="#cb235-14" aria-hidden="true" tabindex="-1"></a>    MsgFreezeTimeout            <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0d</span><span class="op">)</span> <span class="co">// agent→plugin: server unreachable too long, session will be terminated</span></span>
-<span id="cb235-15"><a href="#cb235-15" aria-hidden="true" tabindex="-1"></a>    MsgSessionAbandon           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0e</span><span class="op">)</span> <span class="co">// agent→server (new conn): freeze-timeout fired; payload = session_id UTF-8</span></span>
-<span id="cb235-16"><a href="#cb235-16" aria-hidden="true" tabindex="-1"></a>    MsgSessionFreezing          <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0f</span><span class="op">)</span> <span class="co">// agent→server (new conn): session frozen due to network loss; payload = session_id UTF-8</span></span>
-<span id="cb235-17"><a href="#cb235-17" aria-hidden="true" tabindex="-1"></a>    MsgDivergenceAlert          <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x10</span><span class="op">)</span> <span class="co">// agent→server: JSON divergence metadata (DivergenceAlert)</span></span>
-<span id="cb235-18"><a href="#cb235-18" aria-hidden="true" tabindex="-1"></a>    MsgSandboxAlert             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x11</span><span class="op">)</span> <span class="co">// agent→server: JSON sandbox violation (SandboxAlert)</span></span>
-<span id="cb235-19"><a href="#cb235-19" aria-hidden="true" tabindex="-1"></a>    MsgFetchConfig              <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x12</span><span class="op">)</span> <span class="co">// agent→server: UTF-8 config key (e.g. &quot;sandbox.yaml&quot;)</span></span>
-<span id="cb235-20"><a href="#cb235-20" aria-hidden="true" tabindex="-1"></a>    MsgConfigData               <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x13</span><span class="op">)</span> <span class="co">// server→agent: UTF-8 YAML content (empty = not found)</span></span>
-<span id="cb235-21"><a href="#cb235-21" aria-hidden="true" tabindex="-1"></a>    MsgSessionChallenge         <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x14</span><span class="op">)</span> <span class="co">// server→agent→plugin: JSON SessionChallenge — justification required</span></span>
-<span id="cb235-22"><a href="#cb235-22" aria-hidden="true" tabindex="-1"></a>    MsgSessionChallengeResponse <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x15</span><span class="op">)</span> <span class="co">// plugin→agent→server: JSON SessionChallengeResponse — user&#39;s justification</span></span>
-<span id="cb235-23"><a href="#cb235-23" aria-hidden="true" tabindex="-1"></a>    MsgSessionExpired           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x16</span><span class="op">)</span> <span class="co">// agent→plugin: approval window expired, session is being terminated</span></span>
-<span id="cb235-24"><a href="#cb235-24" aria-hidden="true" tabindex="-1"></a>    MsgSessionWarning           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x17</span><span class="op">)</span> <span class="co">// agent→plugin: session will be terminated soon; payload = UTF-8 seconds left</span></span>
-<span id="cb235-25"><a href="#cb235-25" aria-hidden="true" tabindex="-1"></a>    MsgSudoersSnapshot          <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x18</span><span class="op">)</span> <span class="co">// agent→server: JSON SudoersSnapshot</span></span>
-<span id="cb235-26"><a href="#cb235-26" aria-hidden="true" tabindex="-1"></a>    MsgSudoersError             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x19</span><span class="op">)</span> <span class="co">// agent→server: JSON SudoersError — failed to apply received config</span></span>
-<span id="cb235-27"><a href="#cb235-27" aria-hidden="true" tabindex="-1"></a>    MsgHeartbeatAgent           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x1a</span><span class="op">)</span> <span class="co">// agent→server: periodic liveness signal; payload = UTF-8 host</span></span>
-<span id="cb235-28"><a href="#cb235-28" aria-hidden="true" tabindex="-1"></a>    MsgResize                   <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x1b</span><span class="op">)</span> <span class="co">// plugin→agent→server: binary ts_ns(8BE)+cols(2BE)+rows(2BE)</span></span>
-<span id="cb235-29"><a href="#cb235-29" aria-hidden="true" tabindex="-1"></a><span class="op">)</span></span></code></pre></div>
+<div class="sourceCode" id="cb238"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb238-1"><a href="#cb238-1" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> <span class="op">(</span></span>
+<span id="cb238-2"><a href="#cb238-2" aria-hidden="true" tabindex="-1"></a>    MsgSessionStart             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x01</span><span class="op">)</span> <span class="co">// plugin→agent→server: JSON SessionStart</span></span>
+<span id="cb238-3"><a href="#cb238-3" aria-hidden="true" tabindex="-1"></a>    MsgChunk                    <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x02</span><span class="op">)</span> <span class="co">// plugin→agent→server: binary chunk</span></span>
+<span id="cb238-4"><a href="#cb238-4" aria-hidden="true" tabindex="-1"></a>    MsgSessionEnd               <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x03</span><span class="op">)</span> <span class="co">// plugin→agent→server: binary final_seq+exit_code</span></span>
+<span id="cb238-5"><a href="#cb238-5" aria-hidden="true" tabindex="-1"></a>    MsgAck                      <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x04</span><span class="op">)</span> <span class="co">// server→agent: binary seq+ts_ns+sig(64)</span></span>
+<span id="cb238-6"><a href="#cb238-6" aria-hidden="true" tabindex="-1"></a>    MsgAckQuery                 <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x05</span><span class="op">)</span> <span class="co">// plugin→agent: empty</span></span>
+<span id="cb238-7"><a href="#cb238-7" aria-hidden="true" tabindex="-1"></a>    MsgAckResponse              <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x06</span><span class="op">)</span> <span class="co">// agent→plugin: binary last_ack_ts_ns+last_seq</span></span>
+<span id="cb238-8"><a href="#cb238-8" aria-hidden="true" tabindex="-1"></a>    MsgSessionReady             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x07</span><span class="op">)</span> <span class="co">// agent→plugin: empty — server OK, sudo may proceed</span></span>
+<span id="cb238-9"><a href="#cb238-9" aria-hidden="true" tabindex="-1"></a>    MsgSessionError             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x08</span><span class="op">)</span> <span class="co">// agent→plugin: string error — sudo blocked</span></span>
+<span id="cb238-10"><a href="#cb238-10" aria-hidden="true" tabindex="-1"></a>    MsgHeartbeat                <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x09</span><span class="op">)</span> <span class="co">// agent→server: empty keepalive (every 400 ms)</span></span>
+<span id="cb238-11"><a href="#cb238-11" aria-hidden="true" tabindex="-1"></a>    MsgHeartbeatAck             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0a</span><span class="op">)</span> <span class="co">// server→agent: empty reply to heartbeat</span></span>
+<span id="cb238-12"><a href="#cb238-12" aria-hidden="true" tabindex="-1"></a>    MsgServerReady              <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0b</span><span class="op">)</span> <span class="co">// server→agent: session accepted, agent may send SESSION_READY</span></span>
+<span id="cb238-13"><a href="#cb238-13" aria-hidden="true" tabindex="-1"></a>    MsgSessionDenied            <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0c</span><span class="op">)</span> <span class="co">// server→agent AND agent→plugin: policy denial, string block message</span></span>
+<span id="cb238-14"><a href="#cb238-14" aria-hidden="true" tabindex="-1"></a>    MsgFreezeTimeout            <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0d</span><span class="op">)</span> <span class="co">// agent→plugin: server unreachable too long, session will be terminated</span></span>
+<span id="cb238-15"><a href="#cb238-15" aria-hidden="true" tabindex="-1"></a>    MsgSessionAbandon           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0e</span><span class="op">)</span> <span class="co">// agent→server (new conn): freeze-timeout fired; payload = session_id UTF-8</span></span>
+<span id="cb238-16"><a href="#cb238-16" aria-hidden="true" tabindex="-1"></a>    MsgSessionFreezing          <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x0f</span><span class="op">)</span> <span class="co">// agent→server (new conn): session frozen due to network loss; payload = session_id UTF-8</span></span>
+<span id="cb238-17"><a href="#cb238-17" aria-hidden="true" tabindex="-1"></a>    MsgDivergenceAlert          <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x10</span><span class="op">)</span> <span class="co">// agent→server: JSON divergence metadata (DivergenceAlert)</span></span>
+<span id="cb238-18"><a href="#cb238-18" aria-hidden="true" tabindex="-1"></a>    MsgSandboxAlert             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x11</span><span class="op">)</span> <span class="co">// agent→server: JSON sandbox violation (SandboxAlert)</span></span>
+<span id="cb238-19"><a href="#cb238-19" aria-hidden="true" tabindex="-1"></a>    MsgFetchConfig              <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x12</span><span class="op">)</span> <span class="co">// agent→server: UTF-8 config key (e.g. &quot;sandbox.yaml&quot;)</span></span>
+<span id="cb238-20"><a href="#cb238-20" aria-hidden="true" tabindex="-1"></a>    MsgConfigData               <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x13</span><span class="op">)</span> <span class="co">// server→agent: UTF-8 YAML content (empty = not found)</span></span>
+<span id="cb238-21"><a href="#cb238-21" aria-hidden="true" tabindex="-1"></a>    MsgSessionChallenge         <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x14</span><span class="op">)</span> <span class="co">// server→agent→plugin: JSON SessionChallenge — justification required</span></span>
+<span id="cb238-22"><a href="#cb238-22" aria-hidden="true" tabindex="-1"></a>    MsgSessionChallengeResponse <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x15</span><span class="op">)</span> <span class="co">// plugin→agent→server: JSON SessionChallengeResponse — user&#39;s justification</span></span>
+<span id="cb238-23"><a href="#cb238-23" aria-hidden="true" tabindex="-1"></a>    MsgSessionExpired           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x16</span><span class="op">)</span> <span class="co">// agent→plugin: approval window expired, session is being terminated</span></span>
+<span id="cb238-24"><a href="#cb238-24" aria-hidden="true" tabindex="-1"></a>    MsgSessionWarning           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x17</span><span class="op">)</span> <span class="co">// agent→plugin: session will be terminated soon; payload = UTF-8 seconds left</span></span>
+<span id="cb238-25"><a href="#cb238-25" aria-hidden="true" tabindex="-1"></a>    MsgSudoersSnapshot          <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x18</span><span class="op">)</span> <span class="co">// agent→server: JSON SudoersSnapshot</span></span>
+<span id="cb238-26"><a href="#cb238-26" aria-hidden="true" tabindex="-1"></a>    MsgSudoersError             <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x19</span><span class="op">)</span> <span class="co">// agent→server: JSON SudoersError — failed to apply received config</span></span>
+<span id="cb238-27"><a href="#cb238-27" aria-hidden="true" tabindex="-1"></a>    MsgHeartbeatAgent           <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x1a</span><span class="op">)</span> <span class="co">// agent→server: periodic liveness signal; payload = UTF-8 host</span></span>
+<span id="cb238-28"><a href="#cb238-28" aria-hidden="true" tabindex="-1"></a>    MsgResize                   <span class="op">=</span> <span class="dt">uint8</span><span class="op">(</span><span class="bn">0x1b</span><span class="op">)</span> <span class="co">// plugin→agent→server: binary ts_ns(8BE)+cols(2BE)+rows(2BE)</span></span>
+<span id="cb238-29"><a href="#cb238-29" aria-hidden="true" tabindex="-1"></a><span class="op">)</span></span></code></pre></div>
 <hr />
 <h2 id="frontend-architecture">Frontend architecture</h2>
 <h3 id="stack">Stack</h3>
@@ -10743,24 +10939,25 @@ domain.</p></li>
 <code>AppShell.tsx</code> using <code>NavLink</code>:</p>
 <pre class="tsx"><code>&lt;NavLink to=&quot;/my-page&quot;&gt;My Page&lt;/NavLink&gt;</code></pre></li>
 <li><p><strong>Add a backend route</strong> in
-<code>go/cmd/replay-server/main.go</code>:</p>
-<div class="sourceCode" id="cb239"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb239-1"><a href="#cb239-1" aria-hidden="true" tabindex="-1"></a>mux<span class="op">.</span>HandleFunc<span class="op">(</span><span class="st">&quot;/api/my-endpoint&quot;</span><span class="op">,</span> s<span class="op">.</span>handleMyEndpoint<span class="op">)</span></span></code></pre></div>
+<code>go/cmd/replay-server/routes.go</code>
+(<code>registerRoutes</code>):</p>
+<div class="sourceCode" id="cb242"><pre class="sourceCode go"><code class="sourceCode go"><span id="cb242-1"><a href="#cb242-1" aria-hidden="true" tabindex="-1"></a>mux<span class="op">.</span>HandleFunc<span class="op">(</span><span class="st">&quot;/api/my-endpoint&quot;</span><span class="op">,</span> s<span class="op">.</span>handleMyEndpoint<span class="op">)</span></span></code></pre></div>
 <p>Gate access with <code>can(r, store.PermXxx)</code> or
 <code>require(w, r, store.PermXxx)</code>.</p></li>
 </ol>
 <h3 id="running-the-dev-server">Running the dev server</h3>
-<div class="sourceCode" id="cb240"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb240-1"><a href="#cb240-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go/cmd/replay-server/ui</span>
-<span id="cb240-2"><a href="#cb240-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run dev</span></code></pre></div>
+<div class="sourceCode" id="cb243"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb243-1"><a href="#cb243-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go/cmd/replay-server/ui</span>
+<span id="cb243-2"><a href="#cb243-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run dev</span></code></pre></div>
 <p>Vite starts a dev server (default port 5173) with hot module
 replacement. <code>/api</code> requests are proxied to
 <code>http://localhost:8080</code> (the replay server). The replay
 server must be running separately:</p>
-<div class="sourceCode" id="cb241"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb241-1"><a href="#cb241-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./bin/sudo-replay-server</span> <span class="dt">\</span></span>
-<span id="cb241-2"><a href="#cb241-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">--logdir</span> /var/log/sudoreplay <span class="dt">\</span></span>
-<span id="cb241-3"><a href="#cb241-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--listen</span> :8080</span></code></pre></div>
+<div class="sourceCode" id="cb244"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb244-1"><a href="#cb244-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./bin/sudo-replay-server</span> <span class="dt">\</span></span>
+<span id="cb244-2"><a href="#cb244-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">--logdir</span> /var/log/sudoreplay <span class="dt">\</span></span>
+<span id="cb244-3"><a href="#cb244-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--listen</span> :8080</span></code></pre></div>
 <hr />
 <h2 id="running-tests">Running tests</h2>
-<div class="sourceCode" id="cb242"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb242-1"><a href="#cb242-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go <span class="kw">&amp;&amp;</span> <span class="ex">go</span> test ./...</span></code></pre></div>
+<div class="sourceCode" id="cb245"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb245-1"><a href="#cb245-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go <span class="kw">&amp;&amp;</span> <span class="ex">go</span> test ./...</span></code></pre></div>
 <p>Test coverage spans most of the tree (~36 <code>_test.go</code> files
 at last count) — this list was previously limited to a single file and
 badly understated it:</p>
@@ -10847,20 +11044,20 @@ rejection, concurrent writes, RBAC/roles, retention cleanup, distributed
 </tbody>
 </table>
 <p>To run a single package:</p>
-<div class="sourceCode" id="cb243"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb243-1"><a href="#cb243-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go <span class="kw">&amp;&amp;</span> <span class="ex">go</span> test ./internal/store/...</span></code></pre></div>
+<div class="sourceCode" id="cb246"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb246-1"><a href="#cb246-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go <span class="kw">&amp;&amp;</span> <span class="ex">go</span> test ./internal/store/...</span></code></pre></div>
 <p>To run with race detection (recommended before committing concurrent
 code):</p>
-<div class="sourceCode" id="cb244"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb244-1"><a href="#cb244-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go <span class="kw">&amp;&amp;</span> <span class="ex">go</span> test <span class="at">-race</span> ./...</span></code></pre></div>
+<div class="sourceCode" id="cb247"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb247-1"><a href="#cb247-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> go <span class="kw">&amp;&amp;</span> <span class="ex">go</span> test <span class="at">-race</span> ./...</span></code></pre></div>
 <p>The pre-commit hook <code>go-test</code> runs
 <code>go test -count=1 ./...</code> automatically on every commit
 attempt (see below).</p>
 <hr />
 <h2 id="pre-commit-checks">Pre-commit checks</h2>
 <p>Install pre-commit once:</p>
-<div class="sourceCode" id="cb245"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb245-1"><a href="#cb245-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install pre-commit</span>
-<span id="cb245-2"><a href="#cb245-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pre-commit</span> install</span></code></pre></div>
+<div class="sourceCode" id="cb248"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb248-1"><a href="#cb248-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> install pre-commit</span>
+<span id="cb248-2"><a href="#cb248-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pre-commit</span> install</span></code></pre></div>
 <p>Run all hooks manually:</p>
-<div class="sourceCode" id="cb246"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb246-1"><a href="#cb246-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pre-commit</span> run <span class="at">--all-files</span></span></code></pre></div>
+<div class="sourceCode" id="cb249"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb249-1"><a href="#cb249-1" aria-hidden="true" tabindex="-1"></a><span class="ex">pre-commit</span> run <span class="at">--all-files</span></span></code></pre></div>
 <p>Hooks configured in <code>.pre-commit-config.yaml</code>:</p>
 <table>
 <colgroup>
@@ -10994,8 +11191,8 @@ received each chunk.</p>
 </tbody>
 </table>
 <p>After deploying, restart the relevant service:</p>
-<div class="sourceCode" id="cb247"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb247-1"><a href="#cb247-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl restart sudo-logger-agent   <span class="co"># on monitored hosts</span></span>
-<span id="cb247-2"><a href="#cb247-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl restart sudo-logger-server  <span class="co"># on log server</span></span>
-<span id="cb247-3"><a href="#cb247-3" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl restart sudo-logger-replay  <span class="co"># on replay server</span></span></code></pre></div>
+<div class="sourceCode" id="cb250"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb250-1"><a href="#cb250-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl restart sudo-logger-agent   <span class="co"># on monitored hosts</span></span>
+<span id="cb250-2"><a href="#cb250-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl restart sudo-logserver      <span class="co"># on log server</span></span>
+<span id="cb250-3"><a href="#cb250-3" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> systemctl restart sudo-replay         <span class="co"># on replay server</span></span></code></pre></div>
 </body>
 </html>

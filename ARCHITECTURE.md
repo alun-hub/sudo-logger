@@ -270,6 +270,7 @@ The sandbox is configured via `/etc/sudo-logger/sandbox.yaml` and enforces:
 - **Directory Protection**: Prevents file creation inside protected directories (e.g., `/etc/pam.d`).
 - **Process Protection**: Prevents sending signals (SIGKILL, etc.) to protected system daemons.
 - **Socket Protection**: Prevents deletion or replacement of critical Unix sockets.
+- **Trusted Package-Manager Exemption** (`trusted_package_managers`, off by default): a narrow, inode-verified exemption letting `dnf`/`rpm` create new files in a short admin-configured directory allowlist without leaving the sandboxed, audited session — every exempted write still generates a full sandbox alert instead of going silent.
 
 The sandbox is automatically propagated to all child processes via the `sched_process_fork` tracepoint.
 

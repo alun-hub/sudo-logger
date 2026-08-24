@@ -38,7 +38,10 @@ making them effective even against the root user within a sandboxed session.
 .IP \(bu 2
 \fBtp_btf/sched_process_exit\fR: Remove a process from sandbox tracking on exit.
 .SH FILE FORMAT
-The file uses YAML format with a single top-level \fBprotect\fR key.
+The file uses YAML format. This page documents the \fBprotect\fR key (the
+deny-list) and \fBtrusted_package_managers\fR (narrow exemptions from it);
+see the project's YAML reference documentation for the top-level
+\fBenabled\fR and \fBfeatures\fR keys.
 .PP
 .RS
 .nf
@@ -60,6 +63,13 @@ The file uses YAML format with a single top-level \fBprotect\fR key.
   \fBprocesses:\fR
     \- auditd
     \- sshd
+\fBtrusted_package_managers:\fR
+  \fBenabled:\fR false
+  \fBbinaries:\fR
+    \- /usr/bin/dnf5
+    \- /usr/bin/rpm
+  \fBallow_create_in:\fR
+    \- /usr/lib/systemd/system
 .fi
 .RE
 .SH SECTIONS
@@ -67,7 +77,9 @@ The file uses YAML format with a single top-level \fBprotect\fR key.
 .B files
 A list of absolute paths to regular files or directories.
 Protected files cannot be opened for writing, truncated, deleted, or renamed.
-Protected directories cannot have new files or subdirectories created inside them.
+Protected directories cannot have new files or subdirectories created inside
+them, unless the process doing so is exempted by \fBtrusted_package_managers\fR
+below \(em existing files remain fully protected even then.
 Protection is recursive for all existing files found inside a directory at agent startup.
 .TP
 .B forbidden
@@ -111,6 +123,36 @@ services using \fBsystemctl stop\fR or \fBkill\fR.
 .IP
 \fBNOTE:\fR Linux process names are limited to 15 characters. Longer names are
 truncated. Use \fBcat /proc/<pid>/comm\fR to verify the exact name.
+.SH TRUSTED_PACKAGE_MANAGERS
+Off by default. Grants a narrow, explicit exemption from \fBfiles\fR'
+directory-creation restriction to a small set of trusted binaries, so that
+\fBdnf\fR/\fBrpm\fR can complete real package transactions (e.g. writing new
+systemd unit files) while running inside a monitored \fBsudo\fR session,
+instead of requiring updates to run outside \fBsudo\fR entirely.
+.TP
+.B enabled
+Master switch. \fBfalse\fR (or absent) leaves directory protection fully
+enforced with no exemption, identical to omitting this key.
+.TP
+.B binaries
+Exec targets, matched by inode at exec time exactly like \fBforbidden\fR \(em
+not by path string, so copying a different binary to a trusted path does not
+gain the exemption. Trust propagates to forked descendants (an RPM scriptlet's
+\fB/bin/sh\fR needs the same exemption its parent had) and is never revoked
+mid-tree.
+.TP
+.B allow_create_in
+Directories where the binaries above (and their descendants) may create new
+files, directories, or symlinks even though the directory is also listed
+under \fBfiles\fR. Deliberately narrower than \fBfiles\fR \(em a directory
+here has no effect unless it is \fBalso\fR listed there, and writing to,
+truncating, deleting, or renaming an \fIexisting\fR protected file is never
+exempted by this feature, regardless of this setting.
+.PP
+Every exempted operation still generates a full sandbox alert
+(\fBallowed=true\fR instead of a block) rather than becoming silent; the
+default \fBrisk-rules.yaml\fR surfaces this via the
+\fBsandbox_trusted_pkgmgr_write\fR rule in the replay-server session list.
 .SH SCOPE
 Restrictions only apply to processes that are:
 .IP 1.
