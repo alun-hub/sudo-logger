@@ -35,6 +35,16 @@ repos:
         pass_filenames: false
         files: \.go$
 
+  # --- Frontend: vitest (replay-server UI) ---
+  - repo: local
+    hooks:
+      - id: ui-test
+        name: npm test (replay-server UI)
+        language: system
+        entry: bash -c 'cd go/cmd/replay-server/ui && npm run test:run'
+        pass_filenames: false
+        files: ^go/cmd/replay-server/ui/.*\.(ts|tsx|js|jsx)$
+
   # --- C plugin: cppcheck + flawfinder ---
   - repo: local
     hooks:
