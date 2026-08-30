@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -257,5 +258,90 @@ func TestHandleMetrics_RejectsNonGet(t *testing.T) {
 	handleMetrics(rr, httptest.NewRequest(http.MethodPost, "/metrics", nil))
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", rr.Code)
+	}
+}
+
+func TestProcessEventLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantKeep bool
+		wantData string // if kept, what the unmarshaled data should be (for 'o')
+		wantRaw  string // if kept, direct check of the raw output
+	}{
+		{
+			name:     "input event is filtered",
+			input:    `[1.0, "i", "hello"]`,
+			wantKeep: false,
+		},
+		{
+			name:     "resize event is kept as-is",
+			input:    `[1.0, "r", "80x24"]`,
+			wantKeep: true,
+			wantRaw:  `[1.0, "r", "80x24"]`,
+		},
+		{
+			name:     "output event without newlines is kept as-is",
+			input:    `[1.0, "o", "hello world"]`,
+			wantKeep: true,
+			wantRaw:  `[1.0, "o", "hello world"]`,
+		},
+		{
+			name:     "output event with raw newline translates to CRLF",
+			input:    `[1.0, "o", "hello\nworld"]`,
+			wantKeep: true,
+			wantData: "hello\r\nworld",
+		},
+		{
+			name:     "output event with CRLF is kept as CRLF",
+			input:    `[1.0, "o", "hello\r\nworld"]`,
+			wantKeep: true,
+			wantData: "hello\r\nworld",
+		},
+		{
+			name:     "output event with mixed newlines translates all to CRLF",
+			input:    `[1.0, "o", "hello\r\nworld\nagain"]`,
+			wantKeep: true,
+			wantData: "hello\r\nworld\r\nagain",
+		},
+		{
+			name:     "invalid json is kept as-is",
+			input:    `invalid json`,
+			wantKeep: true,
+			wantRaw:  `invalid json`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, keep := processEventLine([]byte(tc.input))
+			if keep != tc.wantKeep {
+				t.Fatalf("keep = %v, want %v", keep, tc.wantKeep)
+			}
+			if !keep {
+				return
+			}
+			if tc.wantRaw != "" {
+				if string(got) != tc.wantRaw {
+					t.Errorf("got = %q, want %q", string(got), tc.wantRaw)
+				}
+			}
+			if tc.wantData != "" {
+				var decoded []any
+				if err := json.Unmarshal(got, &decoded); err != nil {
+					t.Fatalf("failed to unmarshal got: %v", err)
+				}
+				if len(decoded) < 3 {
+					t.Fatalf("decoded array too short: %v", decoded)
+				}
+				gotData, ok := decoded[2].(string)
+				if !ok {
+					t.Fatalf("data element is not string: %T", decoded[2])
+				}
+				if gotData != tc.wantData {
+					t.Errorf("decoded data = %q, want %q", gotData, tc.wantData)
+				}
+			}
+		})
 	}
 }

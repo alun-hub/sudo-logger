@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -492,36 +491,52 @@ func handleSessionCast(w http.ResponseWriter, r *http.Request) {
 	w.Write(headerBytes)
 	w.Write([]byte("\n"))
 
-	isInputEvent := func(line []byte) bool {
-		if !bytes.Contains(line, []byte(`"i"`)) {
-			return false
-		}
-		var raw []json.RawMessage
-		if json.Unmarshal(line, &raw) != nil || len(raw) < 2 {
-			return false
-		}
-		var kind string
-		return json.Unmarshal(raw[1], &kind) == nil && kind == "i"
-	}
-
 	for _, bl := range buffered {
-		if !isInputEvent(bl.data) {
-			w.Write(bl.data)
+		if processed, keep := processEventLine(bl.data); keep {
+			w.Write(processed)
 			w.Write([]byte("\n"))
 		}
 	}
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if isInputEvent(line) {
-			continue
+		if processed, keep := processEventLine(line); keep {
+			w.Write(processed)
+			w.Write([]byte("\n"))
 		}
-		w.Write(line)
-		w.Write([]byte("\n"))
 	}
 	if err := scanner.Err(); err != nil {
 		log.Printf("error streaming cast %s: %v", tsid, err)
 	}
+}
+
+func processEventLine(line []byte) ([]byte, bool) {
+	var raw []json.RawMessage
+	if json.Unmarshal(line, &raw) != nil || len(raw) < 3 {
+		return line, true
+	}
+	var kind string
+	if json.Unmarshal(raw[1], &kind) != nil {
+		return line, true
+	}
+	if kind == "i" {
+		return nil, false
+	}
+	if kind == "o" {
+		var data string
+		if json.Unmarshal(raw[2], &data) == nil {
+			if strings.Contains(data, "\n") {
+				data = strings.ReplaceAll(data, "\r\n", "\n")
+				data = strings.ReplaceAll(data, "\n", "\r\n")
+				var timestamp float64
+				_ = json.Unmarshal(raw[0], &timestamp)
+				if patched, err := json.Marshal([]any{timestamp, "o", data}); err == nil {
+					return patched, true
+				}
+			}
+		}
+	}
+	return line, true
 }
 
 // handleMetrics serves a Prometheus text exposition (no external library needed).
