@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.1] - 2026-08-30
+
+Follow-up to 1.41.0. Once `sudo dnf` transactions ran to completion again, two
+pre-existing sandbox interactions surfaced in the scriptlet phase — previously masked
+because the transaction failed earlier.
+
+### Changed
+- **sandbox**: a `trusted_package_managers` process and its forked scriptlet subtree
+  are now exempt from the `forbidden`-binary and `noexec`-directory execution blocks in
+  addition to the file hooks — still fully alerted (`allowed=true`). systemd's package
+  `%filetrigger` runs `systemctl --user -M "<uid>@"`, whose `sd-bus` machine transport
+  is literally `unixexec:path=systemd-run` (a `forbidden` binary), and rpm 6 / dnf5
+  stage helper shell scripts under `/var/tmp` (a `noexec` directory). Both produced
+  `SANDBOX VIOLATION action=EXEC_BLOCK` and a non-fatal `Failed to start jobs:
+  Transport endpoint is not connected` from the trigger; the affected post-install
+  unit reloads were silently skipped. Signal (`processes`), capability, `ptrace`,
+  mount and netlink enforcement are unchanged — the marker only lifts the exec gate
+  for the same narrow, inode-verified `dnf5`/`rpm` subtree the create/rename/unlink
+  exemptions already trust.
+
 ## [1.41.0] - 2026-08-30
 
 Follow-up to 1.40.0's `trusted_package_managers`, prompted by a monitored host where a
