@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.0] - 2026-08-30
+
+Follow-up to 1.40.0's `trusted_package_managers`, prompted by a monitored host where a
+`sudo dnf update` still broke `sudo` system-wide. Two independent causes: the official
+client package had silently stopped shipping its SELinux policy module, and the
+package-manager exemption did not cover the file operation `rpm` actually relies on.
+
+### Fixed
+- **client/packaging**: the GoReleaser-built `sudo-logger-client` RPM has not shipped
+  `/usr/share/selinux/packages/sudo_logger.pp` since the switch to GoReleaser — the
+  `contents:` entry was never carried over from `rpm/*.spec`. `%post`'s `semodule -i`
+  was a no-op against a missing file, so the SELinux module only ever existed on hosts
+  where an older client build had loaded it once. When a `selinux-policy` upgrade later
+  rebuilt the module store, the module was gone, the agent binary and plugin relabelled
+  to `unlabeled_t`, and `sudo` failed for every user with
+  `error initializing I/O plugin sudo_logger_plugin`. The release workflow now compiles
+  the module in a Fedora container (the toolchain is not available on the Ubuntu
+  runner) and the package includes it again. Local `rpm/*.spec` builds were unaffected
+  and still work.
+
+### Changed
+- **sandbox**: `trusted_package_managers` now also exempts `rename` and `unlink`, not
+  only file/dir/symlink creation — but strictly within an `allow_create_in` directory,
+  and still fully alerted (`allowed=true`). `rpm` never writes a payload file in place;
+  it stages a `;HEXHEX` file and renames it over the target, and deletes files a
+  package stopped shipping. Without this, `sudo dnf update` of any package that already
+  had files under a protected directory (a systemd unit, a GPG key) aborted
+  mid-transaction — the exact failure this feature was added to prevent. Opening an
+  existing protected file for writing or truncating it is still never exempted, and a
+  rename that would move a protected file out of `allow_create_in`, or into a directory
+  that is only in `protect.files`, is still blocked. The 1.40.0 note that "renaming an
+  already-existing protected file is never exempted" no longer holds for the narrow
+  `allow_create_in` case.
+- **sandbox**: upgrading `sudo-logger-client` itself via `sudo` is still blocked (its
+  agent/plugin binaries are under `protect.files` and deliberately not under
+  `allow_create_in`) — install client upgrades with `su -`, as before.
+
+### Added
+- **sandbox**: the shipped example `/etc/sudo-logger/sandbox.yaml` now enables
+  `trusted_package_managers` and lists `/etc/systemd/system`,
+  `/usr/lib/systemd/system-preset` and `/etc/pki/rpm-gpg` alongside
+  `/usr/lib/systemd/system` under `allow_create_in`, so a host that turns the sandbox
+  on gets a working `dnf` path by default rather than one that aborts on the first
+  protected write.
+
 ## [1.40.0] - 2026-08-24
 
 A large `sudo dnf update` on a monitored host can legitimately need to create new files (e.g. systemd unit files) inside directories `protect.files` exists specifically to guard against backdoor persistence — with no exemption path, this could abort mid-transaction and cascade into `rpmdb`/SELinux-label corruption severe enough to break `sudo` system-wide. This release adds a narrow, opt-in escape hatch instead of weakening `protect.files` itself.
