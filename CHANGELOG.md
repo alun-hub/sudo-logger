@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.2] - 2026-08-30
+
+### Fixed
+- **sandbox**: `resolveProtectedTree` walked the filesystem with `os.Stat` / `os.ReadDir`,
+  which follow symlinks. A symlink inside a protected directory therefore pulled its
+  target's entire subtree into `protected_inodes` — the dracut `*.wants/` links under
+  `/usr/lib/systemd/system` dragged in `/usr/lib/dracut/modules.d/*`, and a
+  misconfigured parent root (`/usr/lib/systemd` instead of `/usr/lib/systemd/system`)
+  dragged in sibling trees like `/usr/lib/systemd/user` — blocking unrelated package
+  writes there with no matching `protect.files` entry. It also recorded the target's
+  inode rather than the link's, so deleting the link itself was never actually blocked.
+  The walk now uses `Lstat`, protects a symlink by its own inode, and never traverses
+  through one. Real directory recursion is unchanged.
+
 ## [1.41.1] - 2026-08-30
 
 Follow-up to 1.41.0. Once `sudo dnf` transactions ran to completion again, two
