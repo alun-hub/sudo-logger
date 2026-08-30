@@ -13,6 +13,16 @@ before:
     # Don't insert a `make clean`/`git clean` between the CI step and this
     # one, or it'll rebuild against the runner's (too-new) glibc again.
     - make -C plugin
+    # Same pattern for the SELinux policy module: release.yml builds
+    # selinux/sudo_logger.pp in a Fedora container (selinux-policy-devel is not
+    # available on the ubuntu runner), so this is a no-op in CI — make sees the
+    # .pp is newer than its .te/.fc/.if sources. Locally on Fedora it does the
+    # real build. On a host with neither a prebuilt .pp nor
+    # /usr/share/selinux/devel it fails loudly, which is correct: the client
+    # package must never ship without its policy module (a missing module means
+    # the next selinux-policy upgrade silently un-labels the agent and breaks
+    # sudo system-wide).
+    - make -C selinux
     - sh -c "cd go/cmd/replay-server/ui && npm ci && npm run build"
 
 builds:
@@ -174,6 +184,23 @@ nfpms:
         packager: rpm
         file_info:
           mode: 0700
+      # SELinux policy module. RPM-only: it is compiled against Fedora's
+      # refpolicy and won't load on a Debian SELinux system, and only the
+      # rpm scriptlets call semodule. scripts/rpm-post-client.sh runs
+      # `semodule -i` on this file when present (and restorecon afterwards);
+      # scripts/rpm-preun-client.sh runs `semodule -r sudo_logger` on full
+      # uninstall. This entry was missing from the goreleaser config, so the
+      # official RPM shipped no policy module at all (the rpm/*.spec local-
+      # build path had it, the release path never did) — `semodule -i` in
+      # %post was a silent no-op, and the module only survived on hosts where
+      # some earlier client build had loaded it, until a selinux-policy
+      # upgrade reset the module store, un-labeled the agent binary to
+      # unlabeled_t, and broke sudo system-wide (2026-08-30).
+      - src: selinux/sudo_logger.pp
+        dst: /usr/share/selinux/packages/sudo_logger.pp
+        packager: rpm
+        file_info:
+          mode: 0644
       # ack-verify.key is deliberately NOT listed here. It's provisioned once,
       # manually, from the server's keypair, and the agent can't re-fetch it
       # if lost (main.go:81 is a hard failure if missing). A package that

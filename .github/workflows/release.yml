@@ -37,6 +37,21 @@ jobs:
             quay.io/rockylinux/rockylinux:9 \
             bash -c "dnf install -y gcc make >/dev/null && make clean && make"
 
+      # The SELinux policy module (selinux/sudo_logger.pp) is packaged into the
+      # client RPM but cannot be compiled on the ubuntu runner — checkmodule /
+      # semodule_package and the refpolicy headers live in selinux-policy-devel,
+      # a Fedora/RHEL-only package. Build it in a Fedora container matching the
+      # deployment target's policy version. Pin the tag: a .pp built against a
+      # much newer refpolicy can fail to load on an older client that has not
+      # upgraded yet — bump this in lockstep with the supported Fedora baseline.
+      # goreleaser's `make -C selinux` before-hook is a no-op after this (the
+      # .pp is now newer than its .te/.fc/.if sources).
+      - name: Build SELinux policy module (Fedora build environment)
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace/selinux \
+            quay.io/fedora/fedora:44 \
+            bash -c "dnf install -y selinux-policy-devel make >/dev/null && make"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
