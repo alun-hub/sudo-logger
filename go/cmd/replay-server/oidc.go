@@ -110,7 +110,13 @@ func generateState() string {
 // open redirect -- the value arrives via a query param under the caller's
 // control.
 func isSafeReturnPath(p string) bool {
-	if p == "" || p[0] != '/' || strings.HasPrefix(p, "//") || strings.Contains(p, "\\") {
+	if p == "" || p[0] != '/' {
+		return false
+	}
+	if len(p) >= 2 && (p[1] == '/' || p[1] == '\\') {
+		return false
+	}
+	if strings.Contains(p, "\\") {
 		return false
 	}
 	u, err := url.Parse(p)
