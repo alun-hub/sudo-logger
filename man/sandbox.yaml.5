@@ -22,7 +22,7 @@ making them effective even against the root user within a sandboxed session.
 .IP \(bu 2
 \fBlsm/socket_create\fR: Prevent creating \fBAF_NETLINK\fR sockets (firewall/route tampering).
 .IP \(bu 2
-\fBlsm/bprm_check_security\fR: Block execution of binaries in \fBforbidden\fR or under \fBnoexec\fR directories.
+\fBlsm/bprm_check_security\fR: Block execution of binaries in \fBforbidden\fR or under \fBnoexec\fR directories (trusted package managers exempt).
 .IP \(bu 2
 \fBlsm/ptrace_access_check\fR: Prevent attaching to/debugging processes outside the sandbox.
 .IP \(bu 2
@@ -90,11 +90,18 @@ Protection is recursive for all existing files found inside a directory at agent
 A list of absolute paths to binaries forbidden from execution inside any
 session, matched by inode (renaming the binary is still blocked; copying it
 to a new path creates a new inode that is not covered — pair with
-\fBnoexec\fR to close that gap).
+\fBnoexec\fR to close that gap). A process carrying the
+\fBtrusted_package_managers\fR marker (\fBdnf\fR/\fBrpm\fR and their forked
+scriptlets) is exempt and only alerted \(em package triggers legitimately
+exec \fBsystemd-run\fR (systemd's \fB%filetrigger\fR does
+\fBsystemctl --user -M\fR, whose \fBsd-bus\fR machine transport is
+\fBunixexec:path=systemd-run\fR).
 .TP
 .B noexec
 A list of directories under which execution is blocked entirely, preventing
-a forbidden binary from being copied elsewhere and run from there.
+a forbidden binary from being copied elsewhere and run from there. As with
+\fBforbidden\fR, a \fBtrusted_package_managers\fR process is exempt and only
+alerted.
 \fBWARNING:\fR not safe on Btrfs — every subvolume root (e.g. \fB/\fR,
 \fB/home\fR) shares inode 256 on the same device, so listing a subvolume
 root also matches \fB/\fR and blocks all execution in the session. Safe on
@@ -137,7 +144,12 @@ Within an \fBallow_create_in\fR directory the exemption covers creating new
 files/dirs/symlinks, renaming a staging file over an existing one (how
 \fBrpm\fR installs every payload file \(em it never writes in place), and
 deleting a file. In-place writes and truncation are never exempted, and
-nothing outside \fBallow_create_in\fR is affected.
+nothing outside \fBallow_create_in\fR is affected. Independently of
+\fBallow_create_in\fR, the marked process (and its forked scriptlet subtree)
+is also exempt from the \fBforbidden\fR and \fBnoexec\fR execution blocks so
+that package triggers can run \fBsystemd-run\fR etc. Signal
+(\fBprocesses\fR), capability, \fBptrace\fR, mount and netlink enforcement
+are never lifted. Every exempted operation is alerted (\fBallowed=true\fR).
 .TP
 .B enabled
 Master switch. \fBfalse\fR (or absent) leaves directory protection fully

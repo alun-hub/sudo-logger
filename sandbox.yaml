@@ -284,10 +284,15 @@ protect:
 #   - creating files / dirs / symlinks (a package's new unit files)
 #   - renaming a staging file over an existing one (how rpm installs every file)
 #   - deleting a file (a unit a package stopped shipping; rpm temp-file cleanup)
-# Never exempted: in-place writes / truncation, and anything at all in a
-# protect.files directory not also listed here (/etc/sudoers.d, /etc/pam.d,
-# /etc/ssh, /root/.ssh, ...). Every exempted operation is still fully alerted
-# (allowed=true) and scored by risk-rules.yaml's sandbox_trusted_pkgmgr_write.
+# Also exempted, independent of allow_create_in: dnf/rpm and their scriptlets
+# may exec `forbidden` binaries and run from `noexec` dirs — systemd's package
+# %filetrigger runs `systemctl --user -M` (sd-bus transport = systemd-run), and
+# rpm 6 / dnf5 stage helper scripts in /var/tmp.
+# Never exempted: in-place writes / truncation; signal / capability / ptrace /
+# mount / netlink blocks; and anything at all in a protect.files directory not
+# also listed here (/etc/sudoers.d, /etc/pam.d, /etc/ssh, /root/.ssh, ...).
+# Every exempted operation is still fully alerted (allowed=true) and scored by
+# risk-rules.yaml's sandbox_trusted_pkgmgr_write.
 #
 # A directory here has no effect unless it is ALSO under protect.files above.
 # Upgrading sudo-logger-client itself still fails via sudo (its agent/plugin

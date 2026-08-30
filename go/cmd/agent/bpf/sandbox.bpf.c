@@ -21,7 +21,7 @@
 //   lsm/ptrace_access_check  — deny ptrace of processes outside the sandbox
 //   lsm/sb_mount             — deny mounting over protected inodes (bind-mount bypass)
 //   lsm/capable              — deny CAP_AUDIT_CONTROL, CAP_NET_ADMIN, CAP_SYS_MODULE, CAP_MAC_ADMIN, CAP_SYS_RAWIO, CAP_SYS_BOOT
-//   lsm/bprm_check_security  — deny execution of forbidden binaries and from noexec dirs
+//   lsm/bprm_check_security  — deny execution of forbidden binaries and from noexec dirs (trusted pkg mgr exempt)
 //   tp_btf/sched_process_fork — propagate PID tracking from sudo to all descendants
 //   tp_btf/sched_process_exit — clean up PID tracking when a process exits
 //
@@ -968,7 +968,23 @@ int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 	key.dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
 	key.pad = 0;
 
+	// A trusted package manager and its forked scriptlet subtree are exempt
+	// from the forbidden-binary and noexec-directory execution blocks — still
+	// fully alerted (allowed=1). Package triggers legitimately reach for these:
+	// systemd's %filetrigger runs `systemctl --user -M`, whose sd-bus machine
+	// transport is literally `unixexec:path=systemd-run` (a forbidden binary),
+	// and rpm 6 / dnf5 stage helper scripts under /var/tmp (a noexec dir). The
+	// file/dir/signal/capability hooks are unchanged; this only lifts the
+	// exec-gate for the same narrow, inode-verified dnf5/rpm subtree the
+	// create/rename/unlink exemptions already trust. See allow_create_in's doc
+	// comment for the blast-radius tradeoff.
+	bool trusted = is_trusted_pkgmgr();
+
 	if (bpf_map_lookup_elem(&forbidden_binaries, &key)) {
+		if (trusted) {
+			submit_alert_ex(ALERT_EXEC_BLOCK, key.ino, key.dev, 1);
+			return 0;
+		}
 		submit_alert(ALERT_EXEC_BLOCK, key.ino, key.dev);
 		return -EPERM;
 	}
@@ -976,9 +992,11 @@ int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 	// Grant trusted-package-manager status: exec'ing a configured,
 	// inode-verified binary (dnf5/rpm) marks this process
 	// PID_MARKER_TRUSTED_PKGMGR, which sandbox_process_fork propagates to
-	// its forked descendants (scriptlets etc.) below. Only the narrow
-	// allow_create_in directory list is affected — see the four
-	// inode-creation hooks above.
+	// its forked descendants (scriptlets etc.) below. What the marker lifts:
+	// the allow_create_in file/dir/symlink/rename/unlink exemptions (four
+	// inode-creation hooks + inode_rename/inode_unlink above) and the
+	// forbidden-binary / noexec exec-gate (just above). Signal, capability,
+	// ptrace, mount and netlink enforcement are NOT affected.
 	//
 	// Deliberately upgrade-only: a PID already carrying the marker that
 	// later exec's a DIFFERENT, non-trusted binary in the same tgid (a
@@ -1002,6 +1020,13 @@ int BPF_PROG(sandbox_bprm_check_security, struct linux_binprm *bprm)
 		__u8 marker = PID_MARKER_TRUSTED_PKGMGR;
 		bpf_map_update_elem(&sandboxed_pids, &tgid, &marker, BPF_ANY);
 	}
+
+	// noexec directory walk — skipped for a trusted package manager (see the
+	// `trusted` comment above). `trusted` is sampled before the grant above,
+	// so dnf5/rpm's own exec still runs this walk (they are never in a noexec
+	// dir); only their already-marked scriptlet subtree is exempt.
+	if (trusted)
+		return 0;
 
 	// Walk up the dentry tree to see if this binary resides anywhere under a
 	// noexec directory (e.g. /tmp or /home). We limit to 16 levels deep to
