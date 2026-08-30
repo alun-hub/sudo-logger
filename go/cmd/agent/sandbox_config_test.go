@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -329,6 +330,54 @@ func TestLoadSandboxConfig_DirectoryRecursion(t *testing.T) {
 	}
 	if _, ok := res.PathInodes[sub]; !ok {
 		t.Errorf("expected subdirectory %s in PathInodes", sub)
+	}
+}
+
+// TestLoadSandboxConfig_SymlinkNotTraversed reproduces the bug where a
+// symlink inside a protected directory pulled its target's whole subtree
+// into protected_inodes (real-world: dracut *.wants/ links under
+// /usr/lib/systemd/system caused /usr/lib/systemd/user and
+// /usr/lib/dracut/modules.d/* to be treated as protected, blocking
+// unrelated dnf writes). The symlink's own inode must be protected; its
+// target must not be walked.
+func TestLoadSandboxConfig_SymlinkNotTraversed(t *testing.T) {
+	protected := t.TempDir()
+	outside := t.TempDir()
+
+	outsideFile := filepath.Join(outside, "victim.txt")
+	if err := os.WriteFile(outsideFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(protected, "link-to-outside")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+
+	yaml := "protect:\n  files:\n    - " + protected + "\n"
+	res, err := loadSandboxConfigFromBytes([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The symlink itself is protected (an unlink/rename of it is the tamper),
+	// keyed by its own inode — not the directory it points at.
+	wp, ok := res.PathInodes[link]
+	if !ok {
+		t.Fatalf("expected the symlink %s to be protected", link)
+	}
+	var linkSt, dirSt, fileSt syscall.Stat_t
+	_ = syscall.Lstat(link, &linkSt)
+	_ = syscall.Stat(outside, &dirSt)
+	_ = syscall.Stat(outsideFile, &fileSt)
+	if wp.Key.Ino == dirSt.Ino {
+		t.Errorf("symlink protected by its target's inode (%d), not its own (%d)", dirSt.Ino, linkSt.Ino)
+	}
+	// The target directory's and the target file's inodes must be nowhere in
+	// the protected set — that is the false-protection that blocked dnf.
+	for _, k := range res.Inodes {
+		if k.Ino == dirSt.Ino || k.Ino == fileSt.Ino {
+			t.Errorf("symlink target inode %d leaked into protected_inodes", k.Ino)
+		}
 	}
 }
 

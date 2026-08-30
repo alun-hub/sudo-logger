@@ -84,7 +84,10 @@ Protected directories cannot have new files or subdirectories created inside
 them. Both restrictions can be narrowly relaxed for \fBdnf\fR/\fBrpm\fR via
 \fBtrusted_package_managers\fR below; in-place writes and truncation of an
 existing protected file are never relaxed.
-Protection is recursive for all existing files found inside a directory at agent startup.
+Protection is recursive for all existing files found inside a directory at agent
+startup, to a depth of 3. Symlinks are protected by their own inode and are not
+followed — a symlink to another directory does not bring that directory's tree
+into the protected set.
 .TP
 .B forbidden
 A list of absolute paths to binaries forbidden from execution inside any

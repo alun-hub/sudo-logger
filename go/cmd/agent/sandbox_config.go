@@ -243,6 +243,10 @@ func resolveExactPaths(paths []string) (inodes []SandboxInodeKey, pathInodes map
 // sockets and by trusted_package_managers.allow_create_in, which both need
 // pre-existing nested directories (e.g. a systemd unit dir's *.wants/
 // subdirectory) covered automatically, not just the literal configured path.
+//
+// Symlinks are resolved with Lstat and never traversed: the symlink's own
+// inode is protected (that is what an unlink/rename of it hits) and the BFS
+// does not follow it into another directory tree.
 func resolveProtectedTree(roots []string, dangerousRoots map[string]bool) (inodes []SandboxInodeKey, pathInodes map[string]SandboxInodeKey) {
 	type node struct {
 		path  string
@@ -274,13 +278,27 @@ func resolveProtectedTree(roots []string, dangerousRoots map[string]bool) (inode
 			continue
 		}
 
-		fi, err := os.Stat(p)
+		// Lstat, not Stat: a path reached by the BFS may be a symlink, and
+		// os.Stat / os.ReadDir would silently follow it. Following it both
+		// pulled the target's whole subtree into protected_inodes — the dracut
+		// *.wants/ links under /usr/lib/systemd/system dragging in
+		// /usr/lib/dracut/modules.d/* (and, with a misconfigured parent root
+		// like /usr/lib/systemd, whole sibling trees), blocking unrelated
+		// package writes there — and recorded the target's inode instead of
+		// the link's, so deleting the link itself was never actually blocked.
+		fi, err := os.Lstat(p)
 		if err != nil {
-			debugLog("sandbox: stat %s: %v (skipping)", p, err)
+			debugLog("sandbox: lstat %s: %v (skipping)", p, err)
 			continue
 		}
 
-		if fi.IsDir() && n.depth < maxDepth && !dangerousRoots[filepath.Clean(p)] {
+		isSymlink := fi.Mode()&os.ModeSymlink != 0
+
+		// Recurse into real directories only — never step through a symlink
+		// into another tree. (An explicitly configured root that is itself a
+		// symlink, e.g. /etc/resolv.conf, still gets its own inode protected
+		// below so it cannot be swapped; it just is not traversed.)
+		if fi.IsDir() && !isSymlink && n.depth < maxDepth && !dangerousRoots[filepath.Clean(p)] {
 			entries, err := os.ReadDir(p)
 			if err != nil {
 				log.Printf("sandbox: readdir %s: %v", p, err)
@@ -289,12 +307,12 @@ func resolveProtectedTree(roots []string, dangerousRoots map[string]bool) (inode
 					queue = append(queue, node{filepath.Join(p, entry.Name()), n.depth + 1})
 				}
 			}
-		} else if fi.IsDir() && dangerousRoots[filepath.Clean(p)] {
+		} else if fi.IsDir() && !isSymlink && dangerousRoots[filepath.Clean(p)] {
 			log.Printf("sandbox: skipping recursive scan of large root %q (protecting inode only)", p)
 		}
 
 		var st syscall.Stat_t
-		if err := syscall.Stat(p, &st); err != nil {
+		if err := syscall.Lstat(p, &st); err != nil {
 			continue
 		}
 		// Use mountinfo to get i_sb->s_dev (what BPF reads) rather than
