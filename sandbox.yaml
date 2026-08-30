@@ -272,3 +272,33 @@ protect:
     - gssproxy           # Kerberos GSS proxy
     - crond              # crond
     - sudo-logger-age    # sudo-logger-agent (16 chars → truncated to 15)
+
+# ── Trusted package managers ──────────────────────────────────────────────────
+# Narrow, explicit exemption from the protect.files directory rules for dnf/rpm,
+# matched by inode at exec time (like `forbidden`, not by path string). Lets a
+# real `sudo dnf update` finish inside a monitored session instead of aborting
+# part-way — which historically cascaded into rpmdb + SELinux-label corruption
+# bad enough to break sudo system-wide.
+#
+# What is exempted, inside an allow_create_in directory ONLY:
+#   - creating files / dirs / symlinks (a package's new unit files)
+#   - renaming a staging file over an existing one (how rpm installs every file)
+#   - deleting a file (a unit a package stopped shipping; rpm temp-file cleanup)
+# Never exempted: in-place writes / truncation, and anything at all in a
+# protect.files directory not also listed here (/etc/sudoers.d, /etc/pam.d,
+# /etc/ssh, /root/.ssh, ...). Every exempted operation is still fully alerted
+# (allowed=true) and scored by risk-rules.yaml's sandbox_trusted_pkgmgr_write.
+#
+# A directory here has no effect unless it is ALSO under protect.files above.
+# Upgrading sudo-logger-client itself still fails via sudo (its agent/plugin
+# binaries live in protect.files but not here, by design) — use `su -` for that.
+trusted_package_managers:
+  enabled: true
+  binaries:
+    - /usr/bin/dnf5
+    - /usr/bin/rpm
+  allow_create_in:
+    - /usr/lib/systemd/system         # package-shipped systemd unit files
+    - /etc/systemd/system             # unit drop-ins, preset *.wants/ symlinks
+    - /usr/lib/systemd/system-preset
+    - /etc/pki/rpm-gpg                # `rpm --import` / dnf repo GPG key install

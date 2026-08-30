@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ── featureDefault / featureDefaultFalse ─────────────────────────────────────
@@ -417,4 +419,50 @@ func TestLoadSandboxConfigFile_ValidFile(t *testing.T) {
 	if !res.Features.DenyMount {
 		t.Error("expected DenyMount=true from valid config file")
 	}
+}
+
+// TestShippedExampleEnablesTrustedPackageManagers guards the shipped example
+// /etc/sudo-logger/sandbox.yaml (repo root) against silently losing the
+// trusted_package_managers block. Without it, a monitored host that turns the
+// sandbox on has `sudo dnf update` abort mid-transaction on the first package
+// that touches a protected directory — which has repeatedly cascaded into
+// rpmdb + SELinux-label corruption bad enough to break sudo system-wide.
+// Asserted at the YAML layer, not the resolved layer, so it does not depend on
+// /usr/bin/dnf5 or /etc/pki/rpm-gpg existing on the machine running the test.
+func TestShippedExampleEnablesTrustedPackageManagers(t *testing.T) {
+	data, err := os.ReadFile("../../../sandbox.yaml")
+	if err != nil {
+		t.Fatalf("read shipped sandbox.yaml: %v", err)
+	}
+	var cfg sandboxYAML
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("parse shipped sandbox.yaml: %v", err)
+	}
+
+	tpm := cfg.TrustedPackageManagers
+	if tpm.Enabled == nil || !*tpm.Enabled {
+		t.Error("shipped sandbox.yaml must set trusted_package_managers.enabled: true")
+	}
+	for _, want := range []string{"/usr/bin/dnf5", "/usr/bin/rpm"} {
+		if !containsString(tpm.Binaries, want) {
+			t.Errorf("trusted_package_managers.binaries missing %q", want)
+		}
+	}
+	// The systemd unit directories and the RPM GPG-key directory are the paths
+	// a routine `dnf update` actually writes into; dropping any of them
+	// reintroduces the mid-transaction abort.
+	for _, want := range []string{"/usr/lib/systemd/system", "/etc/pki/rpm-gpg"} {
+		if !containsString(tpm.AllowCreateIn, want) {
+			t.Errorf("trusted_package_managers.allow_create_in missing %q", want)
+		}
+	}
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }

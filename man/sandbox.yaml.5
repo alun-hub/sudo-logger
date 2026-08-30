@@ -64,12 +64,15 @@ see the project's YAML reference documentation for the top-level
     \- auditd
     \- sshd
 \fBtrusted_package_managers:\fR
-  \fBenabled:\fR false
+  \fBenabled:\fR true
   \fBbinaries:\fR
     \- /usr/bin/dnf5
     \- /usr/bin/rpm
   \fBallow_create_in:\fR
     \- /usr/lib/systemd/system
+    \- /etc/systemd/system
+    \- /usr/lib/systemd/system-preset
+    \- /etc/pki/rpm-gpg
 .fi
 .RE
 .SH SECTIONS
@@ -78,8 +81,9 @@ see the project's YAML reference documentation for the top-level
 A list of absolute paths to regular files or directories.
 Protected files cannot be opened for writing, truncated, deleted, or renamed.
 Protected directories cannot have new files or subdirectories created inside
-them, unless the process doing so is exempted by \fBtrusted_package_managers\fR
-below \(em existing files remain fully protected even then.
+them. Both restrictions can be narrowly relaxed for \fBdnf\fR/\fBrpm\fR via
+\fBtrusted_package_managers\fR below; in-place writes and truncation of an
+existing protected file are never relaxed.
 Protection is recursive for all existing files found inside a directory at agent startup.
 .TP
 .B forbidden
@@ -124,11 +128,16 @@ services using \fBsystemctl stop\fR or \fBkill\fR.
 \fBNOTE:\fR Linux process names are limited to 15 characters. Longer names are
 truncated. Use \fBcat /proc/<pid>/comm\fR to verify the exact name.
 .SH TRUSTED_PACKAGE_MANAGERS
-Off by default. Grants a narrow, explicit exemption from \fBfiles\fR'
-directory-creation restriction to a small set of trusted binaries, so that
-\fBdnf\fR/\fBrpm\fR can complete real package transactions (e.g. writing new
-systemd unit files) while running inside a monitored \fBsudo\fR session,
-instead of requiring updates to run outside \fBsudo\fR entirely.
+Off by default when the key is absent; the shipped example
+\fB/etc/sudo-logger/sandbox.yaml\fR enables it. Grants a narrow, explicit
+exemption to a small set of trusted binaries so that \fBdnf\fR/\fBrpm\fR can
+complete real package transactions while running inside a monitored \fBsudo\fR
+session, instead of requiring updates to run outside \fBsudo\fR entirely.
+Within an \fBallow_create_in\fR directory the exemption covers creating new
+files/dirs/symlinks, renaming a staging file over an existing one (how
+\fBrpm\fR installs every payload file \(em it never writes in place), and
+deleting a file. In-place writes and truncation are never exempted, and
+nothing outside \fBallow_create_in\fR is affected.
 .TP
 .B enabled
 Master switch. \fBfalse\fR (or absent) leaves directory protection fully
@@ -143,30 +152,32 @@ mid-tree.
 .TP
 .B allow_create_in
 Directories where the binaries above (and their descendants) may create new
-files, directories, or symlinks even though the directory is also listed
-under \fBfiles\fR. Deliberately narrower than \fBfiles\fR \(em a directory
-here has no effect unless it is \fBalso\fR listed there, and writing to,
-truncating, deleting, or renaming an \fIexisting\fR protected file is never
-exempted by this feature, regardless of this setting.
+files, directories, and symlinks, rename a staging file over an existing
+entry, and delete an entry \(em even though the directory is also listed
+under \fBfiles\fR. Deliberately narrower than \fBfiles\fR: a directory here
+has no effect unless it is \fBalso\fR listed there; opening an existing
+protected file for writing or truncating it is never exempted; and a rename
+that would move a protected file \fIout\fR of an \fBallow_create_in\fR
+directory, or into one that is only under \fBfiles\fR, is still blocked.
 .PP
 Every exempted operation still generates a full sandbox alert
 (\fBallowed=true\fR instead of a block) rather than becoming silent; the
 default \fBrisk-rules.yaml\fR surfaces this via the
 \fBsandbox_trusted_pkgmgr_write\fR rule in the replay-server session list.
 .PP
-\fBLimitation:\fR because existing protected files are never exempted, a
-\fBsudo dnf install\fR/\fBrpm -U\fR that \fIupgrades\fR a package which already
-has files installed under a \fBfiles\fR-protected directory will still be
-blocked once those files already exist \(em only their first, initial
-creation is covered. This affects \fBsudo-logger-client\fR's own package,
-which ships \fI/etc/systemd/system/*/refuse-stop.conf\fR drop-ins: the first
-install succeeds, but every subsequent version upgrade of
-\fBsudo-logger-client\fR itself is blocked via \fBsudo\fR
-(\fBSANDBOX VIOLATION action=FILE_RENAME\fR). Install client upgrades as
-direct root instead (\fBsu -\fR, then \fBdnf\fR/\fBrpm\fR directly), which
+\fBLimitation:\fR the exemption only reaches directories in
+\fBallow_create_in\fR. \fBsudo-logger-client\fR's own upgrade still fails via
+\fBsudo\fR because its agent and plugin binaries
+(\fI/usr/bin/sudo-logger-agent\fR, \fI/usr/libexec/sudo/sudo_logger_plugin.so\fR)
+are under \fBfiles\fR but deliberately \fInot\fR under \fBallow_create_in\fR \(em
+letting a package replace them in place is exactly the tamper this guards
+against (\fBSANDBOX VIOLATION action=FILE_RENAME\fR). Install client upgrades
+as direct root instead (\fBsu -\fR, then \fBdnf\fR/\fBrpm\fR directly), which
 bypasses the sandbox entirely since it only hooks \fBsudo\fR-mediated
 sessions, or temporarily disable the sandbox via the replay-server UI for the
-upgrade window.
+upgrade window. A \fBsudo dnf update\fR of ordinary packages that ship files
+under \fI/usr/lib/systemd/system\fR and the other \fBallow_create_in\fR
+directories now completes normally.
 .SH SCOPE
 Restrictions only apply to processes that are:
 .IP 1.

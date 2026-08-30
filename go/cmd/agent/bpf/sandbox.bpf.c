@@ -10,8 +10,8 @@
 //   lsm/file_permission      — deny write/append access to protected inodes
 //   lsm/path_truncate        — deny truncation of protected paths (truncate() + open O_TRUNC)
 //   lsm/inode_setattr        — deny attribute changes (chmod, chown, truncate) on protected inodes
-//   lsm/inode_unlink         — deny deletion of protected inodes
-//   lsm/inode_rename         — deny rename of/onto protected inodes (prevents atomic replacement)
+//   lsm/inode_unlink         — deny deletion of protected inodes (trusted pkg mgr exempted within allow_create_in)
+//   lsm/inode_rename         — deny rename of/onto protected inodes (trusted pkg mgr exempted within allow_create_in)
 //   lsm/inode_mkdir          — deny creating directories inside protected directories
 //   lsm/inode_create         — deny creating files inside protected directories
 //   lsm/inode_mknod          — deny creating device nodes inside protected directories
@@ -369,6 +369,23 @@ static __always_inline int allow_create_protected(struct inode *dir)
 	return bpf_map_lookup_elem(&allow_create_in, &key) != NULL;
 }
 
+// pkgmgr_may_manage: true when the caller is a trusted package manager
+// (dnf/rpm, or a scriptlet forked from one — see sandbox_bprm_check_security /
+// sandbox_process_fork) AND `dir` is one of the admin-configured
+// allow_create_in directories. Gates the rename/unlink exemptions the same way
+// allow_create_protected() gates the four file-creation hooks — but note the
+// difference in what it permits: a rename or unlink let through here can
+// *replace or delete an already-existing protected file*, not just add a new
+// one. That is confined to the narrow allow_create_in list (systemd unit
+// directories, /etc/pki/rpm-gpg — never /etc/sudoers.d, /root/.ssh, /etc/pam.d
+// and the rest of protect.files) and is what a real `dnf update` needs: rpm
+// never writes a payload file in place, it always renames a ";HEXHEX" staging
+// file over the target, and drops files a package stopped shipping.
+static __always_inline bool pkgmgr_may_manage(struct inode *dir)
+{
+	return is_trusted_pkgmgr() && allow_create_protected(dir);
+}
+
 static __always_inline int inode_protected(struct inode *inode)
 {
 	if (!inode)
@@ -471,48 +488,94 @@ int BPF_PROG(sandbox_inode_setattr, struct dentry *dentry, struct iattr *attr)
 	return 0;
 }
 
-// Deny deletion of protected inodes.
+// Deny deletion of protected inodes — except a trusted package manager
+// removing a file inside one of its allow_create_in directories (a unit file
+// a package stopped shipping, or rpm cleaning up its own ";HEXHEX" staging
+// file). The exemption is gated on the *parent directory* being allow-listed,
+// same rule as the create and rename hooks; the operation is still fully
+// alerted (allowed=1).
 SEC("lsm/inode_unlink")
 int BPF_PROG(sandbox_inode_unlink, struct inode *dir, struct dentry *dentry)
 {
 	if (!in_sandbox_pid())
 		return 0;
 	struct inode *inode = BPF_CORE_READ(dentry, d_inode);
-	if (inode_protected(inode)) {
-		submit_alert(ALERT_FILE_UNLINK,
-			     BPF_CORE_READ(inode, i_ino),
-			     (__u32)BPF_CORE_READ(inode, i_sb, s_dev));
-		return -EPERM;
+	if (!inode_protected(inode))
+		return 0;
+
+	__u64 ino = BPF_CORE_READ(inode, i_ino);
+	__u32 dev = (__u32)BPF_CORE_READ(inode, i_sb, s_dev);
+
+	if (pkgmgr_may_manage(dir)) {
+		submit_alert_ex(ALERT_FILE_UNLINK, ino, dev, 1);
+		return 0;
 	}
-	return 0;
+
+	submit_alert(ALERT_FILE_UNLINK, ino, dev);
+	return -EPERM;
 }
 
-// Deny rename of protected inodes, and rename onto protected inodes.
-// Without this hook, a process could write a new file then rename it over a
-// protected path — atomically replacing the protected content.
+// Deny rename of protected inodes, and rename onto / into protected paths.
+// Without this hook a process could stage a new file then rename it over a
+// protected path, atomically replacing the content.
+//
+// Exemption: a trusted package manager doing its normal
+// stage-file-then-rename-into-place install, with every protected inode the
+// rename touches confined to an allow_create_in directory. rpm never writes a
+// payload file in place — it renames a ";HEXHEX" staging file over the target
+// — so without this, `dnf update` cannot replace an existing systemd unit
+// under /usr/lib/systemd/system even with the package-manager exemption on.
+// A rename that would move a protected file OUT of an allow-listed dir, or
+// land in a dir that is only in protect.files, still hits -EPERM. Alerted
+// either way (allowed=1 on the exempt path).
 SEC("lsm/inode_rename")
 int BPF_PROG(sandbox_inode_rename, struct inode *old_dir, struct dentry *old_dentry,
 	     struct inode *new_dir, struct dentry *new_dentry, unsigned int flags)
 {
 	if (!in_sandbox_pid())
 		return 0;
+
 	struct inode *old_inode = BPF_CORE_READ(old_dentry, d_inode);
-	if (inode_protected(old_inode)) {
+	struct inode *new_inode = BPF_CORE_READ(new_dentry, d_inode);
+
+	bool old_prot    = inode_protected(old_inode);
+	bool new_prot    = inode_protected(new_inode);
+	bool newdir_prot = inode_protected(new_dir);
+
+	if (!old_prot && !new_prot && !newdir_prot)
+		return 0;
+
+	if (is_trusted_pkgmgr()) {
+		bool olddir_ok = allow_create_protected(old_dir);
+		bool newdir_ok = allow_create_protected(new_dir);
+		// A protected source inode may move only *between* allow-listed
+		// directories — never out of one into a merely-unprotected path
+		// (that would erase a protected file from its guarded namespace).
+		bool ok = (!old_prot    || (olddir_ok && newdir_ok)) &&
+			  (!new_prot    || newdir_ok) &&
+			  (!newdir_prot || newdir_ok);
+		if (ok) {
+			submit_alert_ex(ALERT_FILE_RENAME,
+					BPF_CORE_READ(new_dir, i_ino),
+					(__u32)BPF_CORE_READ(new_dir, i_sb, s_dev),
+					1);
+			return 0;
+		}
+	}
+
+	if (old_prot) {
 		submit_alert(ALERT_FILE_RENAME,
 			     BPF_CORE_READ(old_inode, i_ino),
 			     (__u32)BPF_CORE_READ(old_inode, i_sb, s_dev));
 		return -EPERM;
 	}
-	struct inode *new_inode = BPF_CORE_READ(new_dentry, d_inode);
-	if (inode_protected(new_inode)) {
+	if (new_prot) {
 		submit_alert(ALERT_FILE_RENAME,
 			     BPF_CORE_READ(new_inode, i_ino),
 			     (__u32)BPF_CORE_READ(new_inode, i_sb, s_dev));
 		return -EPERM;
 	}
-
-	// Also prevent renaming a new file INTO a protected directory.
-	if (inode_protected(new_dir)) {
+	if (newdir_prot) {
 		submit_alert(ALERT_FILE_RENAME,
 			     BPF_CORE_READ(new_dir, i_ino),
 			     (__u32)BPF_CORE_READ(new_dir, i_sb, s_dev));
