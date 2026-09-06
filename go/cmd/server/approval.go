@@ -170,9 +170,16 @@ func (m *ApprovalManager) loadPolicy() error {
 		// Fallback to local file (err == nil && cfgStr == "").
 		data, err = os.ReadFile(m.policyPath)
 		if os.IsNotExist(err) {
+			// No approval policy on disk: JIT approval stays off, but the
+			// OPA policy and the justification redactor live under their own
+			// store keys and must still be (re)loaded. Returning here left
+			// the redactor permanently nil, so any secret pasted into a
+			// justification went to the log and the webhook unmasked.
 			m.mu.Lock()
 			m.policy = approvalPolicy{}
 			m.mu.Unlock()
+			m.loadOPAPolicy(ctx)
+			m.loadRedactor(ctx)
 			return nil
 		}
 		if err != nil {
