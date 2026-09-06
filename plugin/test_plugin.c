@@ -194,6 +194,43 @@ void test_safe_write_tty(void) {
     assert(strstr((char*)mock_write_buf, "^[") != NULL);
 }
 
+void test_build_cmdline_json_truncation(void) {
+    printf("Running test_build_cmdline_json_truncation...\n");
+
+    /* A control character whose \uXXXX escape cannot fit must stop the
+     * build and be reported, not be dropped silently. Sized so the literal
+     * text fits but the six-byte escape does not. */
+    /* Sized so the control character is reached with room for a literal byte
+     * (pos + 2 < bufsz) but not for its six-byte escape (pos + 6 >= bufsz) --
+     * the only window in which the old code dropped it. */
+    char small[20];
+    char argbuf[] = "abcdefghijklmno\x01XYZ";
+    char *argv_ctl[] = { argbuf };
+    build_cmdline_json(small, sizeof(small), 1, argv_ctl);
+    /* The old code emitted "abcdefghijklmnoXYZ": the control character gone,
+     * the rest carried on, and nothing marked. */
+    assert(strstr(small, "oXYZ") == NULL);
+    assert(strstr(small, "...[truncated]") != NULL);
+
+    /* Truncation is terminal: no later argument may be spliced on after it,
+     * or the recorded command line would be one that was never run. */
+    char argbuf2[] = "abcdefghijklmno\x01XYZ";
+    char argbuf3[] = "SECOND";
+    char *argv_two[] = { argbuf2, argbuf3 };
+    char small2[20];
+    build_cmdline_json(small2, sizeof(small2), 2, argv_two);
+    assert(strstr(small2, "SECOND") == NULL);
+
+    /* A command that fits is untouched and unmarked. */
+    char roomy[128];
+    char ok1[] = "systemctl";
+    char ok2[] = "restart";
+    char ok3[] = "nginx";
+    char *argv_ok[] = { ok1, ok2, ok3 };
+    build_cmdline_json(roomy, sizeof(roomy), 3, argv_ok);
+    assert(strcmp(roomy, "systemctl restart nginx") == 0);
+}
+
 void test_sanitize_id_part(void) {
     printf("Running test_sanitize_id_part...\n");
     char dst[32];
@@ -241,6 +278,7 @@ int main(void) {
     test_plugin_open_success();
     test_ship_chunk();
     test_safe_write_tty();
+    test_build_cmdline_json_truncation();
     test_sanitize_id_part();
     test_plugin_open_non_root_uid();
 

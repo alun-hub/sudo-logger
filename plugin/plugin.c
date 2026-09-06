@@ -928,7 +928,10 @@ static void build_cmdline_json(char *buf, size_t bufsz,
     int truncated = 0;
     size_t pos = 0;
     int i;
-    for (i = 0; i < argc && pos + 1 < bufsz; i++) {
+    /* !truncated in the outer condition makes truncation terminal: once we
+     * stop mid-argument, appending later arguments would splice a command
+     * line that was never run. */
+    for (i = 0; i < argc && !truncated && pos + 1 < bufsz; i++) {
         if (i > 0 && pos + 1 < bufsz)
             buf[pos++] = ' ';
 
@@ -939,11 +942,15 @@ static void build_cmdline_json(char *buf, size_t bufsz,
                 buf[pos++] = '\\';
                 buf[pos++] = (char)c;
             } else if (c < 0x20) {
-                /* Escape control characters as \uXXXX — needs 6 bytes */
-                if (pos + 6 < bufsz) {
-                    pos += (size_t)snprintf(buf + pos, bufsz - pos,
-                                            "\\u%04x", c);
-                }
+                /* Escape control characters as \uXXXX — needs 6 bytes. When
+                 * they don't fit, stop and let the marker below say so; the
+                 * old code dropped the character and carried on, so a command
+                 * came back subtly altered with nothing to show for it.
+                 * json_escape_into already behaves this way. */
+                if (pos + 6 >= bufsz)
+                    break;
+                pos += (size_t)snprintf(buf + pos, bufsz - pos,
+                                        "\\u%04x", c);
             } else {
                 buf[pos++] = (char)c;
             }
