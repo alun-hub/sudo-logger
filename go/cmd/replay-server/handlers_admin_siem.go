@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -195,17 +196,22 @@ func handleUploadSiemCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := make([]byte, maxSize+1)
-	n, err := f.Read(data)
-	if err != nil && n == 0 {
+	// io.ReadAll, not a single Read: an io.Reader may return fewer bytes than
+	// asked for, and a short read here would write a silently truncated
+	// certificate or key to /etc/sudo-logger. The multipart part is currently
+	// always in memory (MaxBytesReader caps the body below ParseMultipartForm's
+	// memory limit, so it never spills to a temp file) and so always reads
+	// whole, but that is a property of today's limits rather than of the API.
+	// LimitReader keeps the oversize check below meaningful.
+	data, err := io.ReadAll(io.LimitReader(f, maxSize+1))
+	if err != nil {
 		http.Error(w, "read file: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if n > maxSize {
+	if len(data) > maxSize {
 		http.Error(w, "file exceeds 64 KB limit", http.StatusRequestEntityTooLarge)
 		return
 	}
-	data = data[:n]
 
 	if !containsPEMBlock(data) {
 		http.Error(w, "file does not contain a valid PEM block", http.StatusBadRequest)
@@ -226,7 +232,7 @@ func handleUploadSiemCert(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "write failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("siem: cert uploaded → %s (%d bytes)", dest, n)
+	log.Printf("siem: cert uploaded → %s (%d bytes)", dest, len(data))
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"path": dest}); err != nil {
