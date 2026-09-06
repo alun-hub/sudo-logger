@@ -126,18 +126,3 @@ func (e *Engine) Eval(ctx context.Context, in Input) Decision {
 		return DecisionChallenge
 	}
 }
-
-// ValidateRego compiles the given raw Rego source and returns any error.
-// Used by the API endpoint to validate user-provided raw_rego before saving.
-func ValidateRego(raw string) error {
-	p := &Policy{DefaultAction: "challenge", RawRego: raw}
-	src := CompileToRego(p)
-	_, err := opaRego.New(
-		opaRego.Query("data.sudo_logger.jit.decision"),
-		opaRego.Module("sudo_logger_jit.rego", src),
-	).PrepareForEval(context.Background())
-	if err != nil {
-		return fmt.Errorf("invalid Rego: %w", err)
-	}
-	return nil
-}

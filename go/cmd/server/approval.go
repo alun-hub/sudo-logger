@@ -303,16 +303,6 @@ func (m *ApprovalManager) loadOPAPolicy(ctx context.Context) {
 	log.Printf("approval: OPA policy loaded (%d rules, default=%s)", len(p.Rules), p.DefaultAction)
 }
 
-// HasWebhook reports whether the policy has a webhook configured.
-func (m *ApprovalManager) HasWebhook() bool {
-	if m == nil {
-		return false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.policy.Notifications.WebhookURL != ""
-}
-
 // ── Check ─────────────────────────────────────────────────────────────────────
 
 // Check evaluates whether the SESSION_START should be allowed, pending, or denied.

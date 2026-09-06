@@ -456,9 +456,3 @@ func (w *Writer) WriteMessage(msgType uint8, payload []byte) error {
 	defer w.mu.Unlock()
 	return WriteMessage(w.w, msgType, payload)
 }
-
-func (w *Writer) Flush() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.w.Flush()
-}

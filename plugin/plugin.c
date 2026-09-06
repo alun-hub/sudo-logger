@@ -90,10 +90,10 @@
 #define STREAM_TTYIN   0x03
 #define STREAM_TTYOUT  0x04
 
-/* ---------- freeze warning written to /dev/tty ---------- */
-#define FREEZE_MSG \
-    "\r\n\033[41;97;1m[ SUDO-LOGGER: log server unreachable — input frozen ]\033[0m\r\n" \
-    "\033[33mWaiting for log server to come back...\033[0m\r\n"
+/* ---------- banners written to /dev/tty ---------- */
+/* The freeze banner is written by sudo-logger-agent, not here: it owns the
+ * cgroup freeze and knows the configured freeze timeout, so it can say how
+ * long the session has left. See writeTTYFreezeMsg in go/cmd/agent/plugin.go. */
 #define UNFREEZE_MSG \
     "\r\n\033[42;97;1m[ SUDO-LOGGER: log server reconnected — input resumed ]\033[0m\r\n"
 #define BLOCKED_HDR \

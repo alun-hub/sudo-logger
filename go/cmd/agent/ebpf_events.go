@@ -29,7 +29,12 @@ func (s *ebpfSubsystem) readLoop(ctx context.Context) {
 		case eventTypeExec:
 			s.handleExecve(rec.RawSample)
 		case eventTypeExit:
-			// Exit events are informational; session lifecycle is managed by inotify.
+			// Deliberately ignored: session lifecycle is driven by inotify, not
+			// by process exits. recorder.c still emits these, so the branch stays
+			// explicit rather than falling into the unknown-type warning below.
+			// Layout, should it ever be decoded (struct exit_event in
+			// bpf/recorder.c): event_type(1) pad(3) exit_code(4) cgroup_id(8)
+			// timestamp_ns(8).
 		default:
 			debugLog("ebpf: unknown event type %d", eventType)
 		}

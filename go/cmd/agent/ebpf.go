@@ -53,16 +53,6 @@ type execEvent struct {
 	Target      [64]byte // path passed to execve, captured at tracepoint time
 }
 
-// exitEvent mirrors struct exit_event in bpf/recorder.c.
-// Layout: event_type(1) pad(3) exit_code(4) cgroup_id(8) timestamp_ns(8)
-type exitEvent struct {
-	EventType   uint8
-	Pad         [3]byte
-	ExitCode    uint32
-	CgroupID    uint64
-	TimestampNS uint64
-}
-
 // ── eBPF subsystem ────────────────────────────────────────────────────────────
 
 // pkexecWaiter is registered by handlePkexecExec so that the watch() goroutine

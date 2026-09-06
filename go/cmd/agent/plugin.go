@@ -1066,8 +1066,6 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,255}$`)
-
 // sendDivergenceAlert sends a DIVERGENCE_ALERT to the log server with
 // exponential backoff retries.  Called as a goroutine by the divergence tracker.
 func sendDivergenceAlert(user, host, comm string, ts time.Time) {

@@ -35,9 +35,6 @@ import (
 // Maximum 64 characters. Rejects empty strings, dots-only, and path separators.
 var validName = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 
-// nonIDChar matches characters not allowed in a session ID.
-var nonIDChar = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
-
 // validSessionID is a looser check for the full session ID, which includes
 // host, user, PID, nanosecond timestamp and a random hex suffix — and is
 // therefore longer than a single name component (up to 255 chars).
