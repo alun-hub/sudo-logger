@@ -268,6 +268,11 @@ func TestAccessLogMiddleware_BootstrapForcesAdmin(t *testing.T) {
 // gets full access, matching that flag's historical behavior — it predates
 // per-user roles and was always a single flat auth tier. Seeds an unrelated
 // store user first so this isn't just exercising bootstrap mode.
+//
+// Wires the full basicAuth -> accessLog chain rather than accessLogMiddleware
+// alone: identity now comes from the credential basicAuthMiddleware verified,
+// so testing the log layer in isolation would assert a caller that no gate
+// ever authenticated.
 func TestAccessLogMiddleware_HTPasswdUserGetsAdmin(t *testing.T) {
 	initTestStore(t)
 	resetHTPasswdUsers(t)
@@ -289,13 +294,16 @@ func TestAccessLogMiddleware_HTPasswdUserGetsAdmin(t *testing.T) {
 		gotRole = roleFromContext(r)
 		w.WriteHeader(http.StatusOK)
 	})
-	h := accessLogMiddleware(inner, "")
+	h := basicAuthMiddleware(accessLogMiddleware(inner, ""))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	req.SetBasicAuth("htp-admin", "htp-pass")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rr.Code, rr.Body.String())
+	}
 	if gotRole != RoleAdmin {
 		t.Errorf("htpasswd user role = %q, want admin", gotRole)
 	}

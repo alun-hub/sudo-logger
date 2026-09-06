@@ -15,6 +15,22 @@ type ctxKey int
 
 const ctxViewer ctxKey = 0
 
+// ctxAuthedUser carries the username whose Basic Auth credential
+// basicAuthMiddleware actually verified. It exists so accessLogMiddleware can
+// name the caller without re-reading — and thereby implicitly trusting — the
+// Authorization header, which is attacker-supplied until authenticate() has
+// checked the password. (ctxRole = 1 and ctxPermissions = 2 live in rbac.go.)
+const ctxAuthedUser ctxKey = 3
+
+// authedUserFromContext returns the username basicAuthMiddleware verified for
+// this request, and whether Basic Auth was verified at all. A request that
+// arrived by any other route — session cookie, proxy header, bootstrap, or an
+// open deployment with no local passwords — reports false.
+func authedUserFromContext(r *http.Request) (string, bool) {
+	v, ok := r.Context().Value(ctxAuthedUser).(string)
+	return v, ok && v != ""
+}
+
 // viewerFromContext returns the authenticated username stored in ctx,
 // or "-" if none was set.
 func viewerFromContext(r *http.Request) string {
@@ -105,7 +121,11 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		}
 
 		if user == "-" && (cfg.Source == "local" || cfg.Source == "") {
-			if u, _, ok := r.BasicAuth(); ok {
+			// Only the name basicAuthMiddleware verified, never the raw header:
+			// on an open deployment (no local passwords) every request is let
+			// through unauthenticated, so trusting the header here would let a
+			// caller pick any username — and inherit that user's role.
+			if u, ok := authedUserFromContext(r); ok {
 				user = u
 			}
 		}
@@ -299,7 +319,11 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// Fallback to Basic Auth (for API clients/legacy)
 		u, p, ok := r.BasicAuth()
 		if ok && authenticate(r.Context(), u, p) {
-			next.ServeHTTP(w, r)
+			// Pass the verified name downstream so accessLogMiddleware can
+			// name the caller from a checked credential rather than from the
+			// Authorization header it would otherwise have to trust blindly.
+			next.ServeHTTP(w, r.WithContext(
+				context.WithValue(r.Context(), ctxAuthedUser, u)))
 			return
 		}
 
