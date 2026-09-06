@@ -1335,7 +1335,7 @@ REPLAY_ARGS=-tls-cert /etc/sudo-logger/replay.crt -tls-key /etc/sudo-logger/repl
 | `-tls-key file` | — | PEM TLS private key |
 | `-htpasswd file` | — | Any non-empty path forces Basic Auth on even with zero passworded local users. Content is never read — real credentials live in the local user database (`/api/users`). No reload signal exists. |
 | `-trusted-user-header hdr` | — | Log username from this request header (e.g. `X-Forwarded-User`) |
-| `-admin-users list` | — | Comma-separated list of usernames that receive the `admin` role (e.g. `alice,bob`). All other authenticated users receive the `viewer` role. |
+| `-admin-users list` | — | Comma-separated list of usernames that receive the `admin` role (e.g. `alice,bob`). All other authenticated users receive the `viewer` role. Seeds the accounts **without passwords**: until one of them has a password (or a trusted proxy is configured), no local account has one and the server serves every request unauthenticated. See the bootstrap section of INSTALLATION.md. |
 | `-listen addr` | `:8080` | Listen address |
 | `-logdir dir` | `/var/log/sudoreplay` | Session log directory |
 | `-rules file` | `/etc/sudo-logger/risk-rules.yaml` | Risk scoring rules |

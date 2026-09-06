@@ -585,6 +585,18 @@ echo 'REPLAY_ARGS="-admin-users your_username"' \
 sudo systemctl restart sudo-replay
 ```
 
+> **Important:** `-admin-users` seeds the account but does **not** give it a
+> password, and the replay server treats a deployment where no local account has
+> a password as an open one: every request is served without authentication, and
+> the whole session archive is readable by anyone who can reach the port. The
+> bootstrap screen does not reappear either, because a user now exists.
+>
+> Seeding this way is therefore only half a setup. Finish it by giving the
+> account a password — open the UI, sign in as that user, and set one under
+> **Config -> Users & Auth** — or put the replay server behind an
+> authenticating reverse proxy and switch the auth source to **External Proxy**.
+> Until one of those is done, treat the instance as public.
+
 Once the initial administrator is created, you can navigate to **Config -> Users & Auth** in the web interface to configure advanced authentication strategies such as **OIDC (Enterprise SSO)** or **External Proxy** (e.g., oauth2-proxy, Pomerium).
 
 Additional flags (TLS, etc.) can be appended to `REPLAY_ARGS` in the same file.
