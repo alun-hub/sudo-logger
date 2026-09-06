@@ -315,7 +315,8 @@ fi
   Slack/Mattermost webhook notification with HMAC-SHA256 signing.
   Approval REST API with Bearer token auth; approver identity from
   authenticated session (never from forwarded headers).
-  Per-host activation via require_justification=1 in sudo.conf Plugin line.
+  Activation is server-side policy; the plugin prompts only when the
+  server issues a challenge.
   Exempt users configurable in approval-policy.yaml.
   Time-window approval model (approve once, valid for N hours).
   LocalStore: YAML persistence (approval-store.yaml).

@@ -261,13 +261,28 @@ Revokes an already approved, active window before it expires naturally.
 #### `GET /api/approval-config` & `PUT /api/approval-config`
 Manages the global configuration for JIT approvals (timeouts, slack webhook URLs).
 *   **Role Required:** `admin`
-*   **Request/Response Format:**
+*   **Request/Response Format:** the policy is wrapped in a `config` object.
+    Durations are Go duration strings (`"30m"`, `"24h"`), not numbers. `GET`
+    additionally returns `path`, and masks `webhook_secret` as `"***"`; sending
+    `"***"` back on `PUT` leaves the stored secret unchanged.
     ```json
     {
-      "enabled": true,
-      "default_duration_minutes": 60,
-      "webhook_url": "https://hooks.slack.com/services/...",
-      "require_justification": true
+      "config": {
+        "enabled": true,
+        "default_window": "30m",
+        "pending_ttl": "24h",
+        "max_session_duration": "4h",
+        "exempt": [
+          { "user": "deploy", "hosts": ["build-*"] }
+        ],
+        "notifications": {
+          "webhook_url": "https://hooks.slack.com/services/...",
+          "webhook_secret": "***",
+          "mention_user": true,
+          "request_channel": "#sudo-approvals",
+          "replay_web_app_url": "https://replay.example.com"
+        }
+      }
     }
     ```
 

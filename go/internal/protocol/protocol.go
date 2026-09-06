@@ -133,8 +133,10 @@ type SessionStart struct {
 	// Empty for plugin and ebpf-tty sessions.
 	CallerProcess string `json:"caller_process,omitempty"`
 	// Justification is the reason the user provided when prompted by the plugin.
-	// Empty when the host does not have require_justification enabled or when
-	// the user ran sudo non-interactively (cron, scripts).
+	// The plugin prompts only after the server answers SESSION_START with
+	// SESSION_CHALLENGE, so this is empty whenever the approval policy did not
+	// ask for a reason, and whenever sudo ran non-interactively (cron,
+	// scripts) and there was no terminal to prompt on.
 	Justification string `json:"justification,omitempty"`
 	// NotifyVia is an optional contact handle the user supplied at prompt time
 	// (e.g. a Slack username) so the notification system can route approvals.

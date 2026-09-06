@@ -1497,13 +1497,15 @@ static int plugin_open(unsigned int        version,
     parse_command_info(command_info, &raw_resolved, &runas_uid, &runas_gid,
                         &term_cols, &term_rows);
 
-    /* ── Justification prompt ─────────────────────────────────────────────
-     * Enabled via plugin option in /etc/sudo.conf:
-     *   Plugin sudo_logger sudo_logger_plugin.so require_justification=1
-     * Skipped automatically for non-interactive sessions (no TTY).        */
-    /* ── JIT Approval ─────────────────────────────────────────────────────
-     * We no longer prompt by default. We send an empty justification and
-     * only prompt if the server challenges us. */
+    /* ── JIT approval ─────────────────────────────────────────────────────
+     * The plugin never prompts on its own initiative. SESSION_START carries
+     * an empty justification; the user is prompted only if the server answers
+     * with SESSION_CHALLENGE, which it decides from the approval policy.
+     *
+     * There is no require_justification plugin option. One was described for
+     * a while, but plugin_options[] has never been read -- whether a
+     * justification is required is a server-side policy decision, not a
+     * per-host one. */
     const char *runas_user;
     char        flags[128];
     parse_settings(settings, &runas_user, flags, sizeof(flags));
