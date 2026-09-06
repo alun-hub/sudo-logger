@@ -887,10 +887,15 @@ loop:
 		}
 	}
 
-	// Give the descendant tracker a moment to catch the first child fork
-	// before we decide whether to enter linger mode. This is crucial for
-	// commands like 'gvim' where the parent exits immediately after forking.
-	time.Sleep(2 * time.Second)
+	// Give the descendant tracker a chance to catch the first child fork
+	// before deciding whether to enter linger mode. This matters for commands
+	// like 'gvim' whose parent exits immediately after forking.
+	//
+	// The window stays 2s -- shortening it would miss a late fork and tear the
+	// cgroup down under a live program -- but it is polled rather than slept
+	// through, so the common case (nothing left behind, or a child that shows
+	// up at once) no longer pays the full delay on every single session.
+	waitForDescendants(cg, 2*time.Second, 100*time.Millisecond)
 
 	if cg.hasPids() || cg.hasEscapedRunning() {
 		log.Printf("[%s] sudo exited but GUI processes remain; entering linger mode", start.SessionID)
@@ -921,6 +926,27 @@ loop:
 	sc.sessionAckMu.Unlock()
 	serverConn.Close()
 }
+// waitForDescendants waits up to limit for the descendant tracker to notice a
+// child of the session, polling every interval and returning as soon as one
+// appears. A session that leaves nothing behind still waits the full limit:
+// absence cannot be confirmed early, only presence.
+func waitForDescendants(cg *cgroupSession, limit, interval time.Duration) {
+	deadline := time.Now().Add(limit)
+	for {
+		if cg.hasPids() || cg.hasEscapedRunning() {
+			return
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return
+		}
+		if remaining < interval {
+			interval = remaining
+		}
+		time.Sleep(interval)
+	}
+}
+
 func lingerCgroup(cg *cgroupSession, server string) {
 	defer cg.stopTracking()
 	defer cg.remove()
@@ -1108,11 +1134,9 @@ func trySendDivergenceAlert(payload []byte) error {
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	w := bufio.NewWriter(conn)
+	// WriteMessage flushes; no second Flush is needed here.
 	if err := protocol.WriteMessage(w, protocol.MsgDivergenceAlert, payload); err != nil {
 		return fmt.Errorf("send: %w", err)
-	}
-	if err := w.Flush(); err != nil {
-		return fmt.Errorf("flush: %w", err)
 	}
 	return nil
 }

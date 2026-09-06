@@ -448,9 +448,9 @@ func sessionTTL(windowExp time.Time, maxDur time.Duration) int64 {
 		}
 	}
 	if maxDur > 0 {
-		cap := int64(maxDur.Seconds())
-		if ttl == 0 || cap < ttl {
-			ttl = cap
+		maxTTL := int64(maxDur.Seconds())
+		if ttl == 0 || maxTTL < ttl {
+			ttl = maxTTL
 		}
 	}
 	return ttl

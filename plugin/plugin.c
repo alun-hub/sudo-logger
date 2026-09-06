@@ -9,10 +9,12 @@
  *   plugin_close() → stops monitor thread, sends SESSION_END, closes socket.
  *
  * Freeze behaviour:
- *   The background monitor thread polls ACK state every 150 ms.  If no fresh
- *   ACK has arrived within ACK_TIMEOUT_SECS, it writes the freeze banner to
- *   /dev/tty.  The actual process freeze is performed by sudo-logger-agent via
- *   cgroup.freeze=1 on the kernel side — the plugin only shows the banner.
+ *   The background monitor thread polls ACK state every 150 ms and tracks
+ *   whether the session is frozen, so it can write the "reconnected" banner
+ *   when the server comes back.  Both the freeze itself (cgroup.freeze=1) and
+ *   the banner announcing it belong to sudo-logger-agent: it owns the cgroup
+ *   and knows the configured freeze timeout, so it can say how long the
+ *   session has left.  See writeTTYFreezeMsg in go/cmd/agent/plugin.go.
  *
  * Build:  see Makefile (or rpm/sudo-logger-client.spec)
  * Install: copy .so to /usr/libexec/sudo/, add Plugin line to /etc/sudo.conf
@@ -47,9 +49,10 @@
 #include <sys/syscall.h>
 #include <syslog.h>
 
-/* CLONE_NEWCGROUP: enter a new cgroup namespace (Linux 4.6+, <sched.h>/_GNU_SOURCE).
- * Defined here directly to avoid pulling in _GNU_SOURCE globally, which can
- * conflict with sudo_plugin.h and other system headers. */
+/* CLONE_NEWCGROUP: enter a new cgroup namespace (Linux 4.6+, <sched.h>).
+ * Defined here so this file does not depend on <sched.h> being reachable;
+ * _GNU_SOURCE itself is set by the build (see Makefile and
+ * rpm/sudo-logger-client.spec), which is what makes struct ucred visible. */
 #ifndef CLONE_NEWCGROUP
 #define CLONE_NEWCGROUP 0x02000000
 #endif
@@ -644,9 +647,10 @@ static void unfreeze_session_cgroup(void)
 /*
  * Background monitor thread.
  *
- * Polls ACK state every 150 ms.  On freeze, sets g_frozen (which makes
- * log_ttyin drop keyboard input) and writes the freeze banner directly to
- * the tty.
+ * Polls ACK state every 150 ms and tracks freeze transitions so the
+ * "reconnected" banner can be written when the server returns.  Input is not
+ * dropped here: keystrokes typed during a freeze sit in the pty until the
+ * agent unfreezes the cgroup.
  *
  * We deliberately do NOT send SIGSTOP.  SIGSTOP triggers the kernel's job-
  * control machinery: the shell receives SIGCHLD with CLD_STOPPED, prints
