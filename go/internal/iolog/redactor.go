@@ -147,12 +147,24 @@ func (r *Redactor) addPattern(p string, group int) {
 	}
 }
 
+// RedactString masks secrets in a complete, self-contained string — a command
+// line, a resolved command, a JIT justification.
+//
+// It deliberately bypasses Redact. Redact carries per-stream state (interactive
+// prompt masking and cross-chunk PEM buffering) that only makes sense for bytes
+// arriving in pieces, and a whole string is not a stream. Routing one through it
+// meant any string merely containing "-----BEGIN " without a matching "-----END "
+// was absorbed into the PEM buffer and returned as "" — and, because that buffer
+// is never drained on this path, so was every later call on the same Redactor,
+// until 64 KB had accumulated and was flushed into an unrelated caller's result.
+//
+// applyPatterns holds no state, so this is also safe for concurrent use, unlike
+// Redact.
 func (r *Redactor) RedactString(s string) string {
 	if s == "" {
 		return ""
 	}
-	data, _ := r.Redact([]byte(s), 0xFF) // 0xFF never triggers PEM buffering
-	return string(data)
+	return string(r.applyPatterns([]byte(s)))
 }
 
 var (

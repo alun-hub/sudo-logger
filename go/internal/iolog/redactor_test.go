@@ -153,3 +153,63 @@ func TestRedactorSurgicalRedaction(t *testing.T) {
 		}
 	}
 }
+
+// TestRedactString_PEMMarkerDoesNotSwallowInput covers a string that merely
+// mentions a PEM header. Routed through Redact's streaming path such a string
+// was absorbed into the per-stream PEM buffer and came back empty, taking every
+// later call on the same Redactor with it.
+func TestRedactString_PEMMarkerDoesNotSwallowInput(t *testing.T) {
+	r := MustNewRedactor(nil)
+
+	cmd := `sh -c 'echo -----BEGIN CERTIFICATE----- > /tmp/x'`
+	if got := r.RedactString(cmd); got != cmd {
+		t.Errorf("command mentioning a PEM header was altered:\n got %q\nwant %q", got, cmd)
+	}
+
+	// The Redactor must not have been left in a state that eats later input.
+	const next = "deploying the new billing service"
+	if got := r.RedactString(next); got != next {
+		t.Errorf("later call contaminated by earlier one:\n got %q\nwant %q", got, next)
+	}
+}
+
+// TestRedactString_StillMasksSecrets guards the other direction: bypassing the
+// streaming path must not bypass redaction itself.
+func TestRedactString_StillMasksSecrets(t *testing.T) {
+	r := MustNewRedactor(nil)
+
+	for _, tc := range []struct{ name, in, mustNotContain string }{
+		{"aws key", "aws configure set key AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"}, // pragma: allowlist secret
+		{"github pat", "git clone https://ghp_abcdefghijklmnopqrstuvwxyz0123456789@x", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"}, // pragma: allowlist secret
+		{"assignment", "export DB_PASSWORD=hunter2hunter2hunter2", "hunter2hunter2hunter2"}, // pragma: allowlist secret
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := r.RedactString(tc.in)
+			if strings.Contains(got, tc.mustNotContain) {
+				t.Errorf("secret survived redaction: %q", got)
+			}
+			if got == "" {
+				t.Error("whole string was dropped instead of masked")
+			}
+		})
+	}
+}
+
+// TestRedactString_DoesNotDisturbStreamState makes sure the string path cannot
+// interfere with an in-flight stream on the same Redactor: the agent uses one
+// Redactor for both a session's command line and its I/O chunks.
+func TestRedactString_DoesNotDisturbStreamState(t *testing.T) {
+	r := MustNewRedactor(nil)
+
+	// Open a PEM block on a real stream; it must stay buffered.
+	if _, buffering := r.Redact([]byte("-----BEGIN PRIVATE KEY-----\nabc\n"), protocol.StreamTtyOut); !buffering {
+		t.Fatal("expected the stream to start buffering the PEM block")
+	}
+	// A string redaction in between must neither consume nor flush that buffer.
+	if got := r.RedactString("systemctl restart nginx"); got != "systemctl restart nginx" {
+		t.Errorf("RedactString returned %q", got)
+	}
+	if flushed := r.FlushPEM(protocol.StreamTtyOut); flushed == nil {
+		t.Error("stream PEM buffer was lost while redacting a string")
+	}
+}
