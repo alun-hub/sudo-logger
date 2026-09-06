@@ -11,6 +11,8 @@ plugin/test_plugin
 *.tar.gz
 go/sudo-replay-server
 go/replay-server
+go/cmd/server/server
+go/cmd/replay-server/replay-server
 go/loadgen
 
 # Helm bundled dependencies (run: helm dependency update)
