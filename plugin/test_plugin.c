@@ -180,6 +180,18 @@ void test_safe_write_tty(void) {
     assert(mock_write_len > 0);
     // Let's verify it contains "^["
     assert(strstr((char*)mock_write_buf, "^[") != NULL);
+
+    // A hostile block_message: clear the screen, home the cursor and paint a
+    // fake password prompt. block_message is free-form operator text that
+    // reaches the terminal unvalidated, so the SESSION_DENIED path routes it
+    // through here; no raw ESC byte may survive.
+    mock_write_len = 0;
+    const char *hostile = "\x1b[2J\x1b[H[sudo] password for root: ";
+    safe_write_tty(mock_agent_fd, hostile, strlen(hostile));
+    assert(mock_write_len > 0);
+    for (size_t i = 0; i < mock_write_len; i++)
+        assert(mock_write_buf[i] != 0x1b);
+    assert(strstr((char*)mock_write_buf, "^[") != NULL);
 }
 
 void test_sanitize_id_part(void) {

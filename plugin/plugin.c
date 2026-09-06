@@ -1272,7 +1272,13 @@ read_agent:
             read_exact(g_agent_fd, msgbuf, dlen);
             if (g_tty_fd >= 0) {
                 write(g_tty_fd, DENIED_HDR,   sizeof(DENIED_HDR)   - 1);
-                write(g_tty_fd, msgbuf, dlen);
+                /* block_message is free-form operator text, set through the
+                 * replay-server admin UI and never validated on the way here,
+                 * so it reaches this terminal as untrusted input. Route it
+                 * through safe_write_tty like every other server-supplied
+                 * string (the disclaimer and SESSION_WARNING already do),
+                 * which keeps SGR colour and neutralises everything else. */
+                safe_write_tty(g_tty_fd, msgbuf, dlen);
                 write(g_tty_fd, BLOCKED_TAIL, sizeof(BLOCKED_TAIL) - 1);
             } else {
                 g_printf(SUDO_CONV_ERROR_MSG,
