@@ -374,7 +374,7 @@ func (w *Writer) CastPath() string {
 // Close syncs and closes the cast file.
 // Sync is called first so that kernel crash or power loss cannot silently
 // truncate the tail of a security recording.
-func (w *Writer) Close() error {
+func (w *Writer) Close() (err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	// Flush any trailing bytes still held back as a possibly-incomplete
@@ -391,11 +391,23 @@ func (w *Writer) Close() error {
 		}
 	}
 	w.pendingUTF8 = nil
-	if err := w.castBuf.Flush(); err != nil {
+
+	// Close the descriptor on every path, exactly once. Flush and Sync fail
+	// here when the volume is full or has gone away -- precisely the moment
+	// the agent goes on opening new session files -- so returning early
+	// without closing leaked one descriptor per failed session, and the
+	// process ran out of them just as the disk pressure eased.
+	//
+	// The close error must not shadow a Flush or Sync error: those say the
+	// recording is truncated, which is what the caller needs to hear.
+	defer func() {
+		if cerr := w.castF.Close(); err == nil {
+			err = cerr
+		}
+	}()
+
+	if err = w.castBuf.Flush(); err != nil {
 		return err
 	}
-	if err := w.castF.Sync(); err != nil {
-		return err
-	}
-	return w.castF.Close()
+	return w.castF.Sync()
 }
