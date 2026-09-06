@@ -251,7 +251,26 @@ func (m *ApprovalManager) redactJustification(s string) string {
 // loadOPAPolicy loads the OPA JIT policy from the store and (re)compiles it.
 func (m *ApprovalManager) loadOPAPolicy(ctx context.Context) {
 	cfgStr, err := m.backend.GetConfig(ctx, "jit-policy")
-	if err != nil || cfgStr == "" {
+	if err != nil {
+		// A read failure is not a removed policy. Keep evaluating whatever is
+		// already loaded rather than dropping enforcement on a transient
+		// store error.
+		log.Printf("approval: read OPA policy: %v", err)
+		return
+	}
+	if cfgStr == "" {
+		// Deleted through the admin UI, or never configured. Drop the
+		// compiled engine: it used to stay live until the next restart, so a
+		// policy an operator had removed went on deciding sessions. Falling
+		// back to the justification flow is the stricter direction.
+		m.mu.Lock()
+		had := m.opaEngine != nil
+		m.opaEngine = nil
+		m.opaPolicy = policy.Policy{}
+		m.mu.Unlock()
+		if had {
+			log.Printf("approval: OPA policy removed — reverting to the exempt list and justification flow")
+		}
 		return
 	}
 	var p policy.Policy
@@ -399,24 +418,31 @@ func (m *ApprovalManager) SetOPAPolicy(ctx context.Context, p policy.Policy) err
 		return err
 	}
 
+	// Compile into a fresh engine first: invalid Rego is rejected without the
+	// live policy being touched. (Engine.Update compiles in place, so it
+	// cannot be used to validate a candidate without committing to it.)
+	eng, err := policy.NewEngine(&p)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+
+	// Persist before swapping the engine in. The other order left a failed
+	// write with the process evaluating a policy that was never stored and
+	// that no restart would bring back -- the API reported an error while the
+	// running policy had already silently changed.
+	if err := m.backend.SetConfig(ctx, "jit-policy", string(data)); err != nil {
+		return err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if m.opaEngine == nil {
-		eng, err := policy.NewEngine(&p)
-		if err != nil {
-			return err
-		}
-		m.opaEngine = eng
-	} else {
-		if err := m.opaEngine.Update(&p); err != nil {
-			return err
-		}
-	}
+	m.opaEngine = eng
 	m.opaPolicy = p
-
-	data, _ := json.Marshal(p)
-	return m.backend.SetConfig(ctx, "jit-policy", string(data))
+	return nil
 }
 
 // sessionTTL returns the session lifetime in seconds given the window expiry and

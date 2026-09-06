@@ -546,6 +546,11 @@ type Config struct {
 	// Default: /etc/sudo-logger/redaction-config.json
 	RedactionConfigPath string
 
+	// JitPolicyPath is the path to jit-policy.json (LocalStore only).
+	// Holds the OPA/Rego just-in-time approval policy. In distributed mode
+	// the same document lives under the "jit-policy" key in sudo_config.
+	JitPolicyPath string
+
 	// ── DistributedStore fields ──────────────────────────────────────────────
 
 	// S3Bucket is the bucket used for storing cast files.

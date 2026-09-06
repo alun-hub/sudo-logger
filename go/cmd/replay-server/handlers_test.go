@@ -87,6 +87,7 @@ func testStoreConfig(dir string) store.Config {
 		ApprovalPolicyPath:   dir + "/approval-policy.yaml",
 		ApprovalStorePath:    dir + "/approval-store.yaml",
 		RedactionConfigPath:  dir + "/redaction-config.json",
+		JitPolicyPath:        dir + "/jit-policy.json",
 	}
 }
 

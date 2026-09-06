@@ -214,6 +214,7 @@ func testStoreConfig(dir string) store.Config {
 		ApprovalPolicyPath:   dir + "/approval-policy.yaml",
 		ApprovalStorePath:    dir + "/approval-store.yaml",
 		RedactionConfigPath:  dir + "/redaction-config.json",
+		JitPolicyPath:        dir + "/jit-policy.json",
 	}
 }
 
@@ -709,5 +710,39 @@ func TestLocalStoreSudoersSnapshots_Deduplication(t *testing.T) {
 	}
 	if len(snaps) != 1 {
 		t.Errorf("expected 1 snapshot due to deduplication/overwrite, got %d", len(snaps))
+	}
+}
+
+// TestLocalStore_JitPolicyRoundTrip guards the config key the OPA/JIT approval
+// policy is stored under. It was missing from configFilePath, so both reads
+// and writes failed with "unknown config key" and the whole OPA policy feature
+// was inert in local mode: loadOPAPolicy always returned early, and saving a
+// policy through the API reported an error after the running engine had
+// already been changed.
+func TestLocalStore_JitPolicyRoundTrip(t *testing.T) {
+	ls, _ := newLocalStore(t)
+	ctx := context.Background()
+
+	// Absent key reads as empty with no error, the same as every other
+	// optional config -- that is what lets loadOPAPolicy tell "removed"
+	// apart from "could not read".
+	got, err := ls.GetConfig(ctx, "jit-policy")
+	if err != nil {
+		t.Fatalf("GetConfig on absent jit-policy: %v", err)
+	}
+	if got != "" {
+		t.Errorf("absent jit-policy read as %q, want empty", got)
+	}
+
+	const doc = `{"default_action":"challenge","rules":[{"id":"r1","action":"allow"}]}`
+	if err := ls.SetConfig(ctx, "jit-policy", doc); err != nil {
+		t.Fatalf("SetConfig jit-policy: %v", err)
+	}
+	got, err = ls.GetConfig(ctx, "jit-policy")
+	if err != nil {
+		t.Fatalf("GetConfig after write: %v", err)
+	}
+	if got != doc {
+		t.Errorf("jit-policy round-trip: got %q, want %q", got, doc)
 	}
 }

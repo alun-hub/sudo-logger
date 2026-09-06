@@ -115,6 +115,9 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 	if cfg.RedactionConfigPath == "" {
 		cfg.RedactionConfigPath = "/etc/sudo-logger/redaction-config.json"
 	}
+	if cfg.JitPolicyPath == "" {
+		cfg.JitPolicyPath = "/etc/sudo-logger/jit-policy.json"
+	}
 
 	ls := &LocalStore{
 		cfg:             cfg,
@@ -200,6 +203,8 @@ func (ls *LocalStore) configFilePath(key string) string {
 		return ls.cfg.ApprovalPolicyPath
 	case "redaction_config":
 		return ls.cfg.RedactionConfigPath
+	case "jit-policy":
+		return ls.cfg.JitPolicyPath
 	default:
 		return ""
 	}
