@@ -78,6 +78,12 @@ func (s *ebpfSubsystem) handlePkexecExec(ev execEvent, invokingUID uint32) {
 		pkexecCmd = "pkexec"
 	}
 
+	// NOTE: this session is recorded but not sandboxed. The eBPF LSM hooks
+	// only apply to PIDs registered in sandboxed_pids, and that registration
+	// happens on the sudo path alone (see sandboxSubsystem.registerChildPID
+	// for why). A pkexec-captured session is therefore audited but not
+	// restricted.
+	//
 	// Read pkexec's current cgroup path NOW — polkit may have already moved it
 	// into a new session scope (e.g. user-0.slice/session-N.scope) before this
 	// goroutine runs.

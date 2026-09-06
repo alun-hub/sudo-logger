@@ -301,8 +301,23 @@ func (s *sandboxSubsystem) registerPID(pid uint32) {
 	debugLog("sandbox: pid %d registered (EXEMPT)", pid)
 }
 
-// registerChildPID marks a PID as sandboxed (not exempt). Used for secondary
-// captures (e.g. aux pkexec) where we want immediate full enforcement.
+// registerChildPID marks a PID as sandboxed (not exempt), i.e. under immediate
+// full enforcement rather than the grace the session root gets.
+//
+// Nothing calls it. The sandbox deliberately covers privilege escalation via
+// sudo only: sessions captured through pkexec/polkit (see ebpf_pkexec.go) are
+// recorded but never registered here, so the LSM hooks do not apply to them.
+// Extending enforcement to pkexec would place filesystem restrictions on
+// polkit-driven actions across every monitored host -- desktop update agents,
+// package managers invoked through polkit -- which is the same blast radius as
+// the dnf sandbox incidents. That is a deliberate scope decision, not an
+// oversight.
+//
+// This is the hook to call if that decision is ever revisited; it is kept
+// rather than deleted so the marker constants stay a coherent pair with the
+// BPF side, which distinguishes SANDBOXED from EXEMPT.
+//
+//nolint:unused // documents a deliberate scope boundary; see comment above
 func (s *sandboxSubsystem) registerChildPID(pid uint32) {
 	if s == nil || s.objs == nil || pid == 0 {
 		return

@@ -507,6 +507,19 @@ Events are mapped to OCSF v1.3.0 class `Process Activity` (class UID `3003`, cat
 
 The agent loads an eBPF LSM (Linux Security Module) program (`sandbox.bpf.c`) that runs inside the kernel and enforces restrictions on processes inside a sudo session's cgroup. Unlike seccomp, the sandbox operates at the LSM hook level (after syscall argument validation) and is keyed to the session's cgroup — not to the process image.
 
+### Scope: sudo sessions only
+
+The sandbox applies to privilege escalation through **sudo**. Sessions captured
+through **pkexec/polkit** are recorded and replayable, but their processes are
+never registered in the `sandboxed_pids` map, so no LSM restriction applies to
+them.
+
+This is deliberate. Polkit is how desktop update agents and several package
+managers acquire privilege, and putting filesystem restrictions on that path
+across a monitored fleet has a far wider blast radius than restricting
+interactive sudo. Treat the sandbox as a control on administrator sessions, not
+as a general-purpose privilege-escalation sandbox for the host.
+
 ### Requirements
 
 - Kernel ≥ 5.7 with `CONFIG_BPF_LSM=y` and `lsm=bpf` in kernel boot parameters
