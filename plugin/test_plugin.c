@@ -194,6 +194,46 @@ void test_safe_write_tty(void) {
     assert(strstr((char*)mock_write_buf, "^[") != NULL);
 }
 
+void test_json_unescape_utf8(void) {
+    printf("Running test_json_unescape_utf8...\n");
+    char dst[64];
+    size_t n;
+
+    /* Surrogate pair -> one 4-byte UTF-8 sequence (U+1F600). Encoding the
+     * halves separately would give two 3-byte sequences, which is not UTF-8. */
+    const char *pair = "\\uD83D\\uDE00";
+    n = json_unescape_into(dst, sizeof(dst), pair, strlen(pair));
+    assert(n == 4);
+    assert((unsigned char)dst[0] == 0xF0 && (unsigned char)dst[1] == 0x9F);
+    assert((unsigned char)dst[2] == 0x98 && (unsigned char)dst[3] == 0x80);
+
+    /* A lone high surrogate is not a code point; expect U+FFFD, not a
+     * 3-byte encoding of the surrogate itself. */
+    const char *lone = "\\uD83D";
+    n = json_unescape_into(dst, sizeof(dst), lone, strlen(lone));
+    assert(n == 3);
+    assert((unsigned char)dst[0] == 0xEF && (unsigned char)dst[1] == 0xBF
+           && (unsigned char)dst[2] == 0xBD);
+
+    /* Two-byte code point stays two bytes when space is tight: the old code
+     * fell through to the three-byte branch and emitted an overlong form. */
+    char tight[3];   /* room for exactly 2 bytes + NUL */
+    const char *eacute = "\\u00e9";
+    n = json_unescape_into(tight, sizeof(tight), eacute, strlen(eacute));
+    assert(n == 2);
+    assert((unsigned char)tight[0] == 0xC3 && (unsigned char)tight[1] == 0xA9);
+
+    /* Malformed escape: stop rather than build a code point from bad digits. */
+    const char *bad = "ok\\uZZZZtail";
+    n = json_unescape_into(dst, sizeof(dst), bad, strlen(bad));
+    assert(strcmp(dst, "ok") == 0);
+
+    /* Ordinary escapes still work. */
+    const char *plain = "a\\nb\\tc";
+    n = json_unescape_into(dst, sizeof(dst), plain, strlen(plain));
+    assert(strcmp(dst, "a\nb\tc") == 0);
+}
+
 void test_build_cmdline_json_truncation(void) {
     printf("Running test_build_cmdline_json_truncation...\n");
 
@@ -278,6 +318,7 @@ int main(void) {
     test_plugin_open_success();
     test_ship_chunk();
     test_safe_write_tty();
+    test_json_unescape_utf8();
     test_build_cmdline_json_truncation();
     test_sanitize_id_part();
     test_plugin_open_non_root_uid();

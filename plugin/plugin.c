@@ -863,6 +863,26 @@ static const char *json_str_end(const char *p)
 }
 
 /*
+ * parse_hex4 — reads exactly four hex digits into *out.
+ * Returns 0 if any of them is not a hex digit, so a malformed escape is
+ * rejected instead of silently contributing a zero nibble.
+ */
+static int parse_hex4(const char *p, unsigned int *out)
+{
+    unsigned int v = 0;
+    for (int k = 0; k < 4; k++) {
+        char h = p[k];
+        v <<= 4;
+        if      (h >= '0' && h <= '9') v |= (unsigned)(h - '0');
+        else if (h >= 'a' && h <= 'f') v |= (unsigned)(h - 'a' + 10);
+        else if (h >= 'A' && h <= 'F') v |= (unsigned)(h - 'A' + 10);
+        else return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+/*
  * json_unescape_into — decodes a JSON string value (between the outer quotes)
  * into dst, handling \n \r \t \\ \" and \uXXXX (BMP, emitted as UTF-8).
  * Returns the number of bytes written (not including the NUL terminator).
@@ -881,33 +901,57 @@ static size_t json_unescape_into(char *dst, size_t dstsz,
         case 't':  dst[out++] = '\t'; break;
         case '\\': dst[out++] = '\\'; break;
         case '"':  dst[out++] = '"';  break;
-        case 'u':
-            if (i + 4 < srclen) {
-                unsigned int cp = 0;
-                const char *hex = src + i + 1;
-                for (int k = 0; k < 4; k++) {
-                    cp <<= 4;
-                    char h = hex[k];
-                    if      (h >= '0' && h <= '9') cp |= (unsigned)(h - '0');
-                    else if (h >= 'a' && h <= 'f') cp |= (unsigned)(h - 'a' + 10);
-                    else if (h >= 'A' && h <= 'F') cp |= (unsigned)(h - 'A' + 10);
-                }
-                i += 4;
-                if (cp < 0x80) {
-                    dst[out++] = (char)cp;
-                } else if (cp < 0x800 && out + 2 < dstsz) {
-                    dst[out++] = (char)(0xC0 | (cp >> 6));
-                    dst[out++] = (char)(0x80 | (cp & 0x3F));
-                } else if (out + 3 < dstsz) {
-                    dst[out++] = (char)(0xE0 | (cp >> 12));
-                    dst[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                    dst[out++] = (char)(0x80 | (cp & 0x3F));
+        case 'u': {
+            unsigned int cp;
+            if (i + 4 >= srclen || !parse_hex4(src + i + 1, &cp))
+                goto done;   /* truncated or malformed escape */
+            i += 4;
+
+            /* JSON writes a non-BMP code point as a surrogate pair. Combining
+             * the halves is what makes \uD83D\uDE00 one 4-byte UTF-8
+             * sequence; encoding them separately yields two 3-byte encodings
+             * of surrogates, which is not valid UTF-8. */
+            if (cp >= 0xD800 && cp <= 0xDBFF &&
+                i + 6 < srclen && src[i + 1] == '\\' && src[i + 2] == 'u') {
+                unsigned int lo;
+                if (parse_hex4(src + i + 3, &lo) &&
+                    lo >= 0xDC00 && lo <= 0xDFFF) {
+                    cp = 0x10000u + ((cp - 0xD800u) << 10) + (lo - 0xDC00u);
+                    i += 6;
                 }
             }
+            /* A surrogate half on its own is not a code point. */
+            if (cp >= 0xD800 && cp <= 0xDFFF)
+                cp = 0xFFFD;
+
+            /* Each width checks its own room. Falling through to a longer
+             * encoding for want of space produced overlong forms, which some
+             * consumers reject and others silently normalise. */
+            if (cp < 0x80) {
+                if (out + 1 >= dstsz) goto done;
+                dst[out++] = (char)cp;
+            } else if (cp < 0x800) {
+                if (out + 2 >= dstsz) goto done;
+                dst[out++] = (char)(0xC0 | (cp >> 6));
+                dst[out++] = (char)(0x80 | (cp & 0x3F));
+            } else if (cp < 0x10000) {
+                if (out + 3 >= dstsz) goto done;
+                dst[out++] = (char)(0xE0 | (cp >> 12));
+                dst[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                dst[out++] = (char)(0x80 | (cp & 0x3F));
+            } else {
+                if (out + 4 >= dstsz) goto done;
+                dst[out++] = (char)(0xF0 | (cp >> 18));
+                dst[out++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                dst[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                dst[out++] = (char)(0x80 | (cp & 0x3F));
+            }
             break;
+        }
         default: dst[out++] = src[i]; break;
         }
     }
+done:
     dst[out] = '\0';
     return out;
 }
