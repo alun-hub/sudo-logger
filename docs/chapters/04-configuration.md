@@ -281,10 +281,10 @@ sudo-replay-server \
 | `--htpasswd` | _(empty)_ | Any non-empty path forces Basic Auth on even with zero passworded local users. The file's contents are never read — see [Authentication configuration](#authentication-configuration) below. |
 | `--trusted-user-header` | _(empty)_ | HTTP request header containing a pre-authenticated username from an upstream proxy (e.g. `X-Forwarded-User`) |
 | `--admin-users` | _(empty)_ | Comma-separated list of usernames granted the admin role (can view all sessions, approve requests, delete sessions) |
-| `--oidc-issuer` | _(empty)_ | OIDC provider issuer URL (e.g. `https://accounts.google.com`) |
-| `--oidc-client-id` | _(empty)_ | OIDC client ID |
-| `--oidc-client-secret` | _(empty)_ | OIDC client secret |
-| `--oidc-redirect-url` | _(empty)_ | OIDC redirect URL (e.g. `https://replay.example.com/api/oidc/callback`) |
+| `--oidc-issuer` | _(empty)_ | **Deprecated and ignored.** OIDC provider issuer URL. Configure OIDC under Config → Users & Auth; the flag is kept only so existing deployments still start. |
+| `--oidc-client-id` | _(empty)_ | **Deprecated and ignored.** OIDC client ID. Configure OIDC under Config → Users & Auth; the flag is kept only so existing deployments still start. |
+| `--oidc-client-secret` | _(empty)_ | **Deprecated and ignored.** OIDC client secret. Configure OIDC under Config → Users & Auth; the flag is kept only so existing deployments still start. |
+| `--oidc-redirect-url` | _(empty)_ | **Deprecated and ignored.** OIDC redirect URL. Configure OIDC under Config → Users & Auth; the flag is kept only so existing deployments still start. |
 | `--storage` | `local` | Storage backend: `local` or `distributed` (must match log server) |
 | `--s3-bucket` | _(empty)_ | S3 bucket name (distributed storage) |
 | `--s3-region` | `us-east-1` | S3 region (distributed storage) |
@@ -344,16 +344,28 @@ and supply a groups header via `PUT /api/auth-config`.
 
 #### 3. OIDC (OpenID Connect)
 
-Set the four OIDC flags to enable the Authorization Code Flow:
+Configure the Authorization Code Flow in the web UI under **Config → Users &
+Auth**, or through the API:
 
 ```bash
-sudo-replay-server \
-  --oidc-issuer https://accounts.google.com \
-  --oidc-client-id 1234567890-abc.apps.googleusercontent.com \
-  --oidc-client-secret GOCSPX-... \
-  --oidc-redirect-url https://replay.example.com/api/oidc/callback \
-  # ...
+curl -X PUT https://replay.example.com/api/auth-config \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "source": "oidc",
+        "oidc": {
+          "issuer":        "https://accounts.google.com",
+          "client_id":     "1234567890-abc.apps.googleusercontent.com",
+          "client_secret": "<your client secret>"
+        }
+      }'
 ```
+
+The redirect URL is derived from the request host and is always
+`<scheme>://<host>/api/oidc/callback`; register that with your provider.
+
+> The `--oidc-*` command-line flags are **deprecated and read by nothing**.
+> They remain declared so that deployments already passing them keep starting.
+> If any is set, the replay server logs a warning naming it at startup.
 
 OIDC can also be configured at runtime via `PUT /api/auth-config` with
 `AuthConfig.Source = "oidc"`. CLI flags take precedence over the API

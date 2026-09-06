@@ -25,11 +25,17 @@ var (
 	flagTrustedUserHeader       = flag.String("trusted-user-header", "", "Header containing pre-authenticated username (e.g. X-Forwarded-User)")
 	flagAdminUsers              = flag.String("admin-users", "", "Comma-separated list of usernames granted admin role (can view all sessions, approve, delete)")
 
-	// ── OIDC (Enterprise) ───────────────────────────────────────────────────
-	flagOIDCIssuer   = flag.String("oidc-issuer", "", "OIDC provider issuer URL (e.g. https://accounts.google.com)")
-	flagOIDCClientID = flag.String("oidc-client-id", "", "OIDC client ID")
-	flagOIDCSecret   = flag.String("oidc-client-secret", "", "OIDC client secret")
-	flagOIDCRedirect = flag.String("oidc-redirect-url", "", "OIDC redirect URL (e.g. https://replay.example.com/api/oidc/callback)")
+	// ── OIDC (Enterprise) — DEPRECATED, NOT READ ────────────────────────────
+	// OIDC is configured through the admin UI (Config -> Users & Auth) and
+	// stored in the auth config; nothing reads these flags. They are kept so
+	// that deployments already passing them keep starting, and warnOnDeadOIDCFlags
+	// tells the operator why setting them had no effect.
+	deprecated = "DEPRECATED and ignored; configure OIDC under Config -> Users & Auth"
+
+	flagOIDCIssuer   = flag.String("oidc-issuer", "", "OIDC provider issuer URL ("+deprecated+")")
+	flagOIDCClientID = flag.String("oidc-client-id", "", "OIDC client ID ("+deprecated+")")
+	flagOIDCSecret   = flag.String("oidc-client-secret", "", "OIDC client secret ("+deprecated+")")
+	flagOIDCRedirect = flag.String("oidc-redirect-url", "", "OIDC redirect URL ("+deprecated+")")
 
 	// Storage backend flags.
 	// NOTE: these flags are intentionally duplicated in cmd/server/main.go.

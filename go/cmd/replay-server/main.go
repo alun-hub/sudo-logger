@@ -22,6 +22,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"os/signal"
 	"strings"
 	"sync"
@@ -183,6 +184,8 @@ func main() {
 		fmt.Printf("sudo-replay-server %s\n", version.Version)
 		os.Exit(0)
 	}
+
+	warnOnDeadOIDCFlags()
 
 	// Initialise storage first — rules and siem config may be loaded from DB.
 	var storeErr error
@@ -380,4 +383,34 @@ func main() {
 		log.Fatalf("listen: %v", serveErr)
 	}
 	log.Printf("sudo-replay-server: shutdown complete")
+}
+
+
+// warnOnDeadOIDCFlags reports the -oidc-* flags as ignored.
+//
+// They were the original way to configure OIDC. Configuration moved into the
+// store, reachable from Config -> Users & Auth, and nothing has read the flags
+// since -- but they stayed declared, so a deployment passing them started
+// normally and simply had no OIDC, with nothing to explain why. Removing them
+// would instead stop those deployments from starting at all ("flag provided
+// but not defined"), so they are kept and the mismatch is reported here.
+func warnOnDeadOIDCFlags() {
+	set := []string{}
+	for name, value := range map[string]*string{
+		"-oidc-issuer":        flagOIDCIssuer,
+		"-oidc-client-id":     flagOIDCClientID,
+		"-oidc-client-secret": flagOIDCSecret,
+		"-oidc-redirect-url":  flagOIDCRedirect,
+	} {
+		if *value != "" {
+			set = append(set, name)
+		}
+	}
+	if len(set) == 0 {
+		return
+	}
+	sort.Strings(set)
+	log.Printf("WARNING: %s ignored — OIDC is configured under Config -> Users & Auth "+
+		"and stored with the rest of the auth settings. These flags are deprecated "+
+		"and read by nothing.", strings.Join(set, ", "))
 }

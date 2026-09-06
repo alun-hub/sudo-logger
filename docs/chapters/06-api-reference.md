@@ -25,7 +25,7 @@ Common HTTP status codes: `400` bad request · `401` not authenticated · `403` 
 |-----------|---------------|-----------|
 | HTTP Basic Auth | `--htpasswd` (bcrypt htpasswd file) | Replay server |
 | Trusted-header proxy | `--trusted-user-header` | Replay server |
-| OIDC | `--oidc-issuer` / `PUT /api/auth-config` | Replay server |
+| OIDC | `PUT /api/auth-config` (the `--oidc-*` flags are deprecated and ignored) | Replay server |
 | Bearer token | `--approval-token` / `--approval-token-file` | Log server admin API |
 | No auth | — | `/healthz`, `/metrics` |
 
@@ -419,7 +419,10 @@ effect in `"proxy"` mode.
 
 > **Note:** `client_secret` is masked (`"***"`) in GET responses.
 
-> **Note:** CLI flags (`--oidc-issuer`, etc.) take precedence over the database-stored config when both are set.
+> **Note:** The `--oidc-*` CLI flags are deprecated and read by nothing. This
+> endpoint, backed by the stored auth config, is the only way to configure
+> OIDC. Passing the flags is harmless but has no effect; the replay server
+> logs a warning naming any that were set.
 
 ---
 

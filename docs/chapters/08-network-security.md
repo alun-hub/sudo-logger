@@ -124,7 +124,7 @@ sudo-replay-server \
     -logdir    /var/log/sudoreplay
 ```
 
-When both flags are set, the server uses standard TLS (server-only certificate). The replay server does **not** do mTLS with browsers — client authentication is handled at the application level via HTTP Basic Auth (`--htpasswd`), OIDC (`--oidc-issuer`), or a trusted proxy header (`--trusted-user-header`).
+When both flags are set, the server uses standard TLS (server-only certificate). The replay server does **not** do mTLS with browsers — client authentication is handled at the application level via HTTP Basic Auth (`--htpasswd`), OIDC (configured under Config → Users & Auth), or a trusted proxy header (`--trusted-user-header`).
 
 In Kubernetes, HTTPS is typically handled by an Ingress controller or the `oauth2-proxy` sidecar rather than by the replay server binary directly.
 
