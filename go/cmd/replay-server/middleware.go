@@ -82,7 +82,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		user := "-"
 		role := RoleViewer
 
-		cfg, err := sessionStore.GetAuthConfig(r.Context())
+		cfg, err := authConfigFor(r)
 		if err != nil {
 			// Logging-only path (not an auth gate) — proceed with the
 			// zero-value config, but note the failure so it isn't silent.
@@ -195,6 +195,10 @@ func resolveRoleFromGroups(groups []string, cfg store.AuthConfig) Role {
 // so that the first admin can be created.
 func basicAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Outermost of the two middlewares that authenticate, so the snapshot
+		// taken here serves accessLogMiddleware and the handler as well.
+		r = withAuthSnapshot(r)
+
 		if isBootstrapMode(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -203,7 +207,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// In OIDC mode, a (re)load of the local login page should go straight to the
 		// identity provider instead of showing the unusable local username/password form.
 		if r.URL.Path == "/login" {
-			cfg, _ := sessionStore.GetAuthConfig(r.Context())
+			cfg, _ := authConfigFor(r)
 			if cfg.Source == "oidc" {
 				if c, err := r.Cookie("sudo_session"); err != nil || loginSessions.lookup(c.Value) == nil {
 					http.Redirect(w, r, "/api/oidc/login", http.StatusFound)
@@ -228,7 +232,7 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		cfg, err := sessionStore.GetAuthConfig(r.Context())
+		cfg, err := authConfigFor(r)
 		if err != nil {
 			// Fail closed: a store error must never be interpreted as "no
 			// auth config" (Source == ""), which the local-mode branch below
@@ -289,7 +293,8 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 		// If no one has a password, we treat it as an open deployment.
 		hasLocalPasswords := *flagHTPasswd != "" // pragma: allowlist secret
 		if !hasLocalPasswords {
-			users, err := sessionStore.ListUsers(r.Context())
+			snap := authSnapshotFor(r)
+			users, err := snap.users, snap.usersErr
 			if err != nil {
 				// Fail closed: a store error must not be interpreted as
 				// "no local users have passwords" (open deployment).

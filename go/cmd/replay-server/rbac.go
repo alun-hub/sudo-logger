@@ -88,12 +88,11 @@ func isBootstrapMode(r *http.Request) bool {
 	if *flagHTPasswd != "" { // pragma: allowlist secret
 		return false
 	}
-	cfg, _ := sessionStore.GetAuthConfig(r.Context())
-	if cfg.Source != "local" && cfg.Source != "" {
+	snap := authSnapshotFor(r)
+	if snap.cfg.Source != "local" && snap.cfg.Source != "" {
 		return false
 	}
-	users, err := sessionStore.ListUsers(r.Context())
-	return err == nil && len(users) == 0
+	return snap.usersErr == nil && len(snap.users) == 0
 }
 
 // requireAdmin writes 403 and returns false if the request is not admin.
@@ -117,7 +116,7 @@ func requireStepUp(w http.ResponseWriter, r *http.Request) bool {
 	if isBootstrapMode(r) {
 		return true
 	}
-	cfg, err := sessionStore.GetAuthConfig(r.Context())
+	cfg, err := authConfigFor(r)
 	if err != nil {
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return false
@@ -131,7 +130,8 @@ func requireStepUp(w http.ResponseWriter, r *http.Request) bool {
 		// independent credential to re-check, same rationale as proxy mode.
 		hasLocalPasswords := *flagHTPasswd != "" // pragma: allowlist secret
 		if !hasLocalPasswords {
-			users, err := sessionStore.ListUsers(r.Context())
+			snap := authSnapshotFor(r)
+			users, err := snap.users, snap.usersErr
 			if err != nil {
 				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 				return false
