@@ -322,82 +322,110 @@ static int connect_agent(void)
  * Query agent for ACK state. Updates g_last_ack_time if fresh ACK found.
  * Uses a short select() timeout to avoid blocking the terminal.
  */
+/* Outcome of reading and dispatching one framed message from the agent. */
+typedef enum {
+    FRAME_HANDLED,  /* consumed in full; the caller may read the next one */
+    FRAME_ACK,      /* ACK_RESPONSE header read; its payload is NOT consumed */
+    FRAME_ERROR     /* socket unusable or stream malformed; caller must stop */
+} frame_result;
+
+/*
+ * handle_agent_frame — read one message from the agent and act on it.
+ *
+ * Control messages (FREEZE_TIMEOUT, SESSION_EXPIRED, SESSION_WARNING) are
+ * handled here and their payloads consumed, so the caller is left positioned on
+ * the next header.  ACK_RESPONSE is the one type the caller wants for itself:
+ * the header is consumed, *ack_plen is set, and the payload is left in place.
+ *
+ * A payload length beyond MAX_MSG_PAYLOAD means the framing can no longer be
+ * trusted, which is indistinguishable from a dead peer — hence g_agent_dead.
+ */
+static frame_result handle_agent_frame(int fd, uint32_t *ack_plen)
+{
+    uint8_t hdr[5];
+    if (read_exact(fd, hdr, 5) < 0)
+        return FRAME_ERROR;   /* read_exact sets g_agent_dead itself */
+
+    uint32_t plen;
+    memcpy(&plen, hdr + 1, 4);
+    plen = be32toh(plen);
+    if (plen > MAX_MSG_PAYLOAD) {
+        atomic_store(&g_agent_dead, 1);
+        return FRAME_ERROR;
+    }
+
+    if (hdr[0] == MSG_ACK_RESPONSE) {
+        *ack_plen = plen;
+        return FRAME_ACK;
+    }
+
+    if (hdr[0] == MSG_FREEZE_TIMEOUT)
+        atomic_store(&g_freeze_timeout, 1);
+    if (hdr[0] == MSG_SESSION_EXPIRED)
+        atomic_store(&g_session_expired, 1);
+
+    /* The warning body is the seconds remaining, printed between two fixed
+     * banners.  With no tty there is nowhere to print it, and it falls through
+     * to the drain below so the stream stays in sync either way. */
+    if (hdr[0] == MSG_SESSION_WARNING && g_tty_fd >= 0) {
+        write(g_tty_fd, WARN_MSG_START, sizeof(WARN_MSG_START) - 1);
+        for (uint32_t rem = plen; rem > 0; ) {
+            uint8_t buf[64];
+            uint32_t n = rem < (uint32_t)sizeof(buf) ? rem : (uint32_t)sizeof(buf);
+            if (read_exact(fd, buf, n) < 0)
+                return FRAME_ERROR;
+            safe_write_tty(g_tty_fd, (const char *)buf, n);
+            rem -= n;
+        }
+        write(g_tty_fd, WARN_MSG_END, sizeof(WARN_MSG_END) - 1);
+        return FRAME_HANDLED;
+    }
+
+    if (drain_payload(fd, plen) < 0)
+        return FRAME_ERROR;
+    return FRAME_HANDLED;
+}
+
+/*
+ * Query agent for ACK state. Updates g_last_ack_time if fresh ACK found.
+ * Uses a short select() timeout to avoid blocking the terminal.
+ */
 static void refresh_ack_cache(void)
 {
     if (g_agent_fd < 0)
         return;
 
     /*
-     * Drain all pending unsolicited messages from the agent before sending
-     * ACK_QUERY.  Must loop until the socket has no more data; a single drain
-     * would leave subsequent messages in the buffer and cause the ACK_RESPONSE
-     * read below to misparse the stream.
+     * Drain everything the agent has already sent before asking a question of
+     * our own; otherwise the ACK_RESPONSE read below would misparse a message
+     * that was already queued.  Must loop: one drain would leave the rest.
      */
-    {
+    for (;;) {
         fd_set rfds;
-        struct timeval tv;
-        for (;;) {
-            FD_ZERO(&rfds);
-            FD_SET(g_agent_fd, &rfds);
-            tv.tv_sec  = 0;
-            tv.tv_usec = 0;
-            if (select(g_agent_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
-                break;
-            uint8_t hdr[5];
-            if (read_exact(g_agent_fd, hdr, 5) != 0)
-                return;
-            uint32_t plen;
-            memcpy(&plen, hdr + 1, 4);
-            plen = be32toh(plen);
-            if (plen > MAX_MSG_PAYLOAD) {
-                /* Malformed/hostile length — the framed stream can no
-                 * longer be trusted; stop trying to parse it. */
-                atomic_store(&g_agent_dead, 1);
-                return;
-            }
-            if (hdr[0] == MSG_FREEZE_TIMEOUT)
-                atomic_store(&g_freeze_timeout, 1);
-            if (hdr[0] == MSG_SESSION_EXPIRED)
-                atomic_store(&g_session_expired, 1);
+        struct timeval tv = { .tv_sec = 0, .tv_usec = 0 };
+        FD_ZERO(&rfds);
+        FD_SET(g_agent_fd, &rfds);
+        if (select(g_agent_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
+            break;
 
-            if (hdr[0] == MSG_SESSION_WARNING) {
-                if (g_tty_fd >= 0) {
-                    write(g_tty_fd, WARN_MSG_START, sizeof(WARN_MSG_START) - 1);
-                    for (uint32_t rem = plen; rem > 0; ) {
-                        uint8_t buf[64];
-                        uint32_t n = rem < (uint32_t)sizeof(buf) ? rem : (uint32_t)sizeof(buf);
-                        if (read_exact(g_agent_fd, buf, n) < 0) return;
-                        safe_write_tty(g_tty_fd, (const char *)buf, n);
-                        rem -= n;
-                    }
-                    write(g_tty_fd, WARN_MSG_END, sizeof(WARN_MSG_END) - 1);
-                } else {
-                    /* No tty — drain payload to keep protocol stream in sync. */
-                    for (uint32_t rem = plen; rem > 0; ) {
-                        uint8_t discard[64];
-                        uint32_t n = rem < (uint32_t)sizeof(discard) ? rem : (uint32_t)sizeof(discard);
-                        if (read_exact(g_agent_fd, discard, n) < 0) return;
-                        rem -= n;
-                    }
-                }
-                continue;
-            }
-
-            for (uint32_t rem = plen; rem > 0; ) {
-                uint8_t drain[64];
-                uint32_t n = rem < (uint32_t)sizeof(drain)
-                             ? rem : (uint32_t)sizeof(drain);
-                if (read_exact(g_agent_fd, drain, n) < 0)
-                    return;
-                rem -= n;
-            }
+        uint32_t stale_ack_plen = 0;
+        switch (handle_agent_frame(g_agent_fd, &stale_ack_plen)) {
+        case FRAME_ERROR:
+            return;
+        case FRAME_ACK:
+            /* Left over from an earlier query that timed out; discard it. */
+            if (drain_payload(g_agent_fd, stale_ack_plen) < 0)
+                return;
+            break;
+        case FRAME_HANDLED:
+            break;
         }
     }
 
     pthread_mutex_lock(&g_send_mu);
-    int _rc = send_msg(g_agent_fd, MSG_ACK_QUERY, NULL, 0);
+    int rc = send_msg(g_agent_fd, MSG_ACK_QUERY, NULL, 0);
     pthread_mutex_unlock(&g_send_mu);
-    if (_rc < 0)
+    if (rc < 0)
         return;
 
     struct timespec deadline;
@@ -408,18 +436,14 @@ static void refresh_ack_cache(void)
         deadline.tv_nsec %= 1000000000;
     }
 
-    uint8_t hdr[5];
     uint32_t plen = 0;
     for (;;) {
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-
         long long diff_us = (long long)(deadline.tv_sec - now.tv_sec) * 1000000LL +
                             (deadline.tv_nsec - now.tv_nsec) / 1000LL;
-        if (diff_us <= 0) {
-            /* Timeout reached */
-            return;
-        }
+        if (diff_us <= 0)
+            return;   /* timed out waiting for the ACK */
 
         struct timeval tv;
         tv.tv_sec  = diff_us / 1000000LL;
@@ -428,64 +452,17 @@ static void refresh_ack_cache(void)
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(g_agent_fd, &rfds);
-
-        int s = select(g_agent_fd + 1, &rfds, NULL, NULL, &tv);
-        if (s <= 0) {
-            /* Timeout or select error */
-            return;
-        }
-
-        if (read_exact(g_agent_fd, hdr, 5) < 0)
+        if (select(g_agent_fd + 1, &rfds, NULL, NULL, &tv) <= 0)
             return;
 
-        memcpy(&plen, hdr + 1, 4);
-        plen = be32toh(plen);
-        if (plen > MAX_MSG_PAYLOAD) {
-            atomic_store(&g_agent_dead, 1);
+        frame_result fr = handle_agent_frame(g_agent_fd, &plen);
+        if (fr == FRAME_ERROR)
             return;
-        }
-
-        if (hdr[0] == MSG_ACK_RESPONSE) {
+        if (fr == FRAME_ACK)
             break;
-        }
-
-        /* Process non-ACK_RESPONSE frame */
-        if (hdr[0] == MSG_FREEZE_TIMEOUT)
-            atomic_store(&g_freeze_timeout, 1);
-        if (hdr[0] == MSG_SESSION_EXPIRED)
-            atomic_store(&g_session_expired, 1);
-
-        if (hdr[0] == MSG_SESSION_WARNING) {
-            if (g_tty_fd >= 0) {
-                write(g_tty_fd, WARN_MSG_START, sizeof(WARN_MSG_START) - 1);
-                for (uint32_t rem = plen; rem > 0; ) {
-                    uint8_t buf[64];
-                    uint32_t n = rem < (uint32_t)sizeof(buf) ? rem : (uint32_t)sizeof(buf);
-                    if (read_exact(g_agent_fd, buf, n) < 0) return;
-                    safe_write_tty(g_tty_fd, (const char *)buf, n);
-                    rem -= n;
-                }
-                write(g_tty_fd, WARN_MSG_END, sizeof(WARN_MSG_END) - 1);
-            } else {
-                for (uint32_t rem = plen; rem > 0; ) {
-                    uint8_t discard[64];
-                    uint32_t n = rem < (uint32_t)sizeof(discard) ? rem : (uint32_t)sizeof(discard);
-                    if (read_exact(g_agent_fd, discard, n) < 0) return;
-                    rem -= n;
-                }
-            }
-            continue;
-        }
-
-        /* Drain payload for any other message type */
-        for (uint32_t rem = plen; rem > 0; ) {
-            uint8_t drain[64];
-            uint32_t n = rem < (uint32_t)sizeof(drain) ? rem : (uint32_t)sizeof(drain);
-            if (read_exact(g_agent_fd, drain, n) < 0)
-                return;
-            rem -= n;
-        }
+        /* Anything else was a control message; keep waiting for the ACK. */
     }
+
     if (plen < 16) {
         /* Drain undersized payload to keep the socket in sync. */
         uint8_t drain[16];
@@ -498,14 +475,8 @@ static void refresh_ack_cache(void)
     uint8_t payload[16];
     if (read_exact(g_agent_fd, payload, 16) < 0)
         return;
-    /* Drain any extra bytes beyond the 16 we consumed. */
-    for (uint32_t rem = plen - 16; rem > 0; ) {
-        uint8_t discard[64];
-        uint32_t n = rem < (uint32_t)sizeof(discard) ? rem : (uint32_t)sizeof(discard);
-        if (read_exact(g_agent_fd, discard, (size_t)n) < 0)
-            return;
-        rem -= n;
-    }
+    if (drain_payload(g_agent_fd, plen - 16) < 0)
+        return;
 
     int64_t last_ack_ts_ns;
     memcpy(&last_ack_ts_ns, payload, 8);

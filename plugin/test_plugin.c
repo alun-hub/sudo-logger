@@ -194,6 +194,80 @@ void test_safe_write_tty(void) {
     assert(strstr((char*)mock_write_buf, "^[") != NULL);
 }
 
+/* Builds one framed message into the mock read buffer. */
+static void queue_frame(uint8_t type, const uint8_t *payload, uint32_t plen) {
+    size_t at = mock_read_len;
+    mock_read_buf[at] = type;
+    uint32_t be = htobe32(plen);
+    memcpy(mock_read_buf + at + 1, &be, 4);
+    if (plen > 0)
+        memcpy(mock_read_buf + at + 5, payload, plen);
+    mock_read_len = at + 5 + plen;
+}
+
+void test_handle_agent_frame(void) {
+    printf("Running test_handle_agent_frame...\n");
+    uint32_t ack_plen;
+
+    /* ACK_RESPONSE: header consumed, payload deliberately left for the caller,
+     * which is what lets refresh_ack_cache parse it itself. */
+    mock_read_pos = mock_read_len = 0;
+    atomic_store(&g_agent_dead, 0);
+    uint8_t ack[16] = {0};
+    queue_frame(MSG_ACK_RESPONSE, ack, sizeof(ack));
+    ack_plen = 0;
+    frame_result fr = handle_agent_frame(mock_agent_fd, &ack_plen);
+    assert(fr == FRAME_ACK);
+    assert(ack_plen == 16);
+    assert(mock_read_pos == 5);   /* header only */
+
+    /* A control message is consumed whole, leaving the stream on the next
+     * header — the property the drain loop depends on. */
+    mock_read_pos = mock_read_len = 0;
+    atomic_store(&g_freeze_timeout, 0);
+    uint8_t body[8] = {1,2,3,4,5,6,7,8};
+    queue_frame(MSG_FREEZE_TIMEOUT, body, sizeof(body));
+    queue_frame(MSG_ACK_RESPONSE, ack, sizeof(ack));
+    fr = handle_agent_frame(mock_agent_fd, &ack_plen);
+    assert(fr == FRAME_HANDLED);
+    assert(atomic_load(&g_freeze_timeout) == 1);
+    fr = handle_agent_frame(mock_agent_fd, &ack_plen);
+    assert(fr == FRAME_ACK);
+
+    /* SESSION_EXPIRED sets its flag and is likewise consumed. */
+    mock_read_pos = mock_read_len = 0;
+    atomic_store(&g_session_expired, 0);
+    queue_frame(MSG_SESSION_EXPIRED, body, sizeof(body));
+    fr = handle_agent_frame(mock_agent_fd, &ack_plen);
+    assert(fr == FRAME_HANDLED);
+    assert(atomic_load(&g_session_expired) == 1);
+
+    /* A length past MAX_MSG_PAYLOAD means the framing can no longer be
+     * trusted; the session must go down the dead-agent path. */
+    mock_read_pos = mock_read_len = 0;
+    atomic_store(&g_agent_dead, 0);
+    mock_read_buf[0] = MSG_SESSION_WARNING;
+    uint32_t huge = htobe32(MAX_MSG_PAYLOAD + 1);
+    memcpy(mock_read_buf + 1, &huge, 4);
+    mock_read_len = 5;
+    fr = handle_agent_frame(mock_agent_fd, &ack_plen);
+    assert(fr == FRAME_ERROR);
+    assert(atomic_load(&g_agent_dead) == 1);
+
+    /* A truncated header is an error, and read_exact marks the agent dead. */
+    mock_read_pos = mock_read_len = 0;
+    atomic_store(&g_agent_dead, 0);
+    mock_read_buf[0] = MSG_FREEZE_TIMEOUT;
+    mock_read_len = 3;   /* short header */
+    fr = handle_agent_frame(mock_agent_fd, &ack_plen);
+    assert(fr == FRAME_ERROR);
+    assert(atomic_load(&g_agent_dead) == 1);
+
+    atomic_store(&g_agent_dead, 0);
+    atomic_store(&g_freeze_timeout, 0);
+    atomic_store(&g_session_expired, 0);
+}
+
 void test_json_unescape_utf8(void) {
     printf("Running test_json_unescape_utf8...\n");
     char dst[64];
@@ -318,6 +392,7 @@ int main(void) {
     test_plugin_open_success();
     test_ship_chunk();
     test_safe_write_tty();
+    test_handle_agent_frame();
     test_json_unescape_utf8();
     test_build_cmdline_json_truncation();
     test_sanitize_id_part();
