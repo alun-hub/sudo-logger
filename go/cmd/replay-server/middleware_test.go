@@ -4,7 +4,9 @@ package main
 // (middleware.go).
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -174,9 +176,9 @@ func TestRequire_BootstrapModeAlwaysAllows(t *testing.T) {
 	}
 }
 
-// ── accessLogMiddleware ──────────────────────────────────────────────────────
+// ── identityMiddleware ───────────────────────────────────────────────────────
 
-func TestAccessLogMiddleware_ProxyHeaderWithGroups(t *testing.T) {
+func TestIdentityMiddleware_ProxyHeaderWithGroups(t *testing.T) {
 	initTestStore(t)
 	cfg := store.AuthConfig{
 		Source:      "proxy",
@@ -202,7 +204,7 @@ func TestAccessLogMiddleware_ProxyHeaderWithGroups(t *testing.T) {
 		gotViewer = viewerFromContext(r)
 		w.WriteHeader(http.StatusOK)
 	})
-	h := accessLogMiddleware(inner, "")
+	h := identityMiddleware(inner, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	req.Header.Set("X-Remote-User", "proxied-user")
@@ -218,7 +220,7 @@ func TestAccessLogMiddleware_ProxyHeaderWithGroups(t *testing.T) {
 	}
 }
 
-func TestAccessLogMiddleware_LocalSessionCookie(t *testing.T) {
+func TestIdentityMiddleware_LocalSessionCookie(t *testing.T) {
 	initTestStore(t)
 	u := newUserWithPassword(t, "alice", "Correct-Horse1!", RoleAdmin)
 	if err := sessionStore.UpsertUser(t.Context(), u); err != nil {
@@ -232,7 +234,7 @@ func TestAccessLogMiddleware_LocalSessionCookie(t *testing.T) {
 		gotViewer = viewerFromContext(r)
 		w.WriteHeader(http.StatusOK)
 	})
-	h := accessLogMiddleware(inner, "")
+	h := identityMiddleware(inner, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	req.AddCookie(&http.Cookie{Name: "sudo_session", Value: sid})
@@ -244,7 +246,7 @@ func TestAccessLogMiddleware_LocalSessionCookie(t *testing.T) {
 	}
 }
 
-func TestAccessLogMiddleware_BootstrapForcesAdmin(t *testing.T) {
+func TestIdentityMiddleware_BootstrapForcesAdmin(t *testing.T) {
 	initTestStore(t) // zero users → bootstrap mode
 
 	var gotRole Role
@@ -252,7 +254,7 @@ func TestAccessLogMiddleware_BootstrapForcesAdmin(t *testing.T) {
 		gotRole = roleFromContext(r)
 		w.WriteHeader(http.StatusOK)
 	})
-	h := accessLogMiddleware(inner, "")
+	h := identityMiddleware(inner, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	rr := httptest.NewRecorder()
@@ -263,7 +265,7 @@ func TestAccessLogMiddleware_BootstrapForcesAdmin(t *testing.T) {
 	}
 }
 
-// TestAccessLogMiddleware_HTPasswdUserGetsAdmin verifies that a user
+// TestIdentityMiddleware_HTPasswdUserGetsAdmin verifies that a user
 // authenticated via the legacy -htpasswd file (not present in the store)
 // gets full access, matching that flag's historical behavior — it predates
 // per-user roles and was always a single flat auth tier. Seeds an unrelated
@@ -273,7 +275,7 @@ func TestAccessLogMiddleware_BootstrapForcesAdmin(t *testing.T) {
 // alone: identity now comes from the credential basicAuthMiddleware verified,
 // so testing the log layer in isolation would assert a caller that no gate
 // ever authenticated.
-func TestAccessLogMiddleware_HTPasswdUserGetsAdmin(t *testing.T) {
+func TestIdentityMiddleware_HTPasswdUserGetsAdmin(t *testing.T) {
 	initTestStore(t)
 	resetHTPasswdUsers(t)
 	u := newUserWithPassword(t, "someone-else", "Correct-Horse1!", RoleViewer)
@@ -282,8 +284,8 @@ func TestAccessLogMiddleware_HTPasswdUserGetsAdmin(t *testing.T) {
 	}
 
 	path := writeHTPasswdFile(t, map[string]string{"htp-admin": "htp-pass"})
-	old := *flagHTPasswd // pragma: allowlist secret
-	*flagHTPasswd = path // pragma: allowlist secret
+	old := *flagHTPasswd                   // pragma: allowlist secret
+	*flagHTPasswd = path                   // pragma: allowlist secret
 	defer func() { *flagHTPasswd = old }() // pragma: allowlist secret
 	if err := loadHTPasswd(path); err != nil {
 		t.Fatalf("loadHTPasswd: %v", err)
@@ -294,7 +296,7 @@ func TestAccessLogMiddleware_HTPasswdUserGetsAdmin(t *testing.T) {
 		gotRole = roleFromContext(r)
 		w.WriteHeader(http.StatusOK)
 	})
-	h := basicAuthMiddleware(accessLogMiddleware(inner, ""))
+	h := basicAuthMiddleware(identityMiddleware(accessLogMiddleware(inner), ""))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	req.SetBasicAuth("htp-admin", "htp-pass")
@@ -437,5 +439,36 @@ func TestBasicAuthMiddleware_ProxyModeWithHeaderPassesThrough(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("proxy mode, header present: got %d, want 200", rr.Code)
+	}
+}
+
+// ── accessLogMiddleware ──────────────────────────────────────────────────────
+
+// accessLogMiddleware no longer resolves anything; it reports the role
+// identityMiddleware put in the context, and never the identity itself.
+func TestAccessLogMiddleware_LogsRoleButNotIdentity(t *testing.T) {
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(old) })
+
+	h := accessLogMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	ctx := context.WithValue(req.Context(), ctxViewer, "alice")
+	ctx = context.WithValue(ctx, ctxRole, RoleAdmin)
+	h.ServeHTTP(httptest.NewRecorder(), req.WithContext(ctx))
+
+	line := buf.String()
+	if !strings.Contains(line, "role=admin") {
+		t.Errorf("log line does not carry the resolved role: %s", line)
+	}
+	if !strings.Contains(line, "status=418") {
+		t.Errorf("log line does not carry the response status: %s", line)
+	}
+	if strings.Contains(line, "alice") {
+		t.Errorf("identity leaked into the access log: %s", line)
 	}
 }

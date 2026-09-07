@@ -44,7 +44,7 @@ func TestAuthSnapshot_OneReadOfEachPerRequest(t *testing.T) {
 	sessionStore = counting
 	t.Cleanup(func() { sessionStore = real })
 
-	h := basicAuthMiddleware(accessLogMiddleware(newOKHandler(), ""))
+	h := basicAuthMiddleware(identityMiddleware(accessLogMiddleware(newOKHandler()), ""))
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 	req.SetBasicAuth("alice", "Correct-Horse1!")
 	rr := httptest.NewRecorder()
@@ -71,7 +71,7 @@ func TestAuthSnapshot_DoesNotPersistAcrossRequests(t *testing.T) {
 	sessionStore = counting
 	t.Cleanup(func() { sessionStore = real })
 
-	h := basicAuthMiddleware(accessLogMiddleware(newOKHandler(), ""))
+	h := basicAuthMiddleware(identityMiddleware(accessLogMiddleware(newOKHandler()), ""))
 	for i := 0; i < 3; i++ {
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/sessions", nil))

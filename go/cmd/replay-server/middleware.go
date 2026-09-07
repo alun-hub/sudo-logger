@@ -75,9 +75,16 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// accessLogMiddleware logs every request with the authenticated username,
-// resolved from the dynamic AuthConfig (proxy mode, OIDC, or Basic Auth).
-func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
+// identityMiddleware resolves who the caller is and what they may do, and puts
+// that in the request context as ctxViewer, ctxRole and ctxPermissions.
+//
+// It runs after basicAuthMiddleware, which is the gate: by the time a request
+// reaches here it has already been allowed through, and this decides what name
+// and role to attach to it. Everything downstream — every can(), require() and
+// ownership check — reads what is set here, so this is an authorization
+// boundary and is named as one. It used to be the tail of accessLogMiddleware,
+// where a security decision was easy to mistake for bookkeeping.
+func identityMiddleware(next http.Handler, trustedHeader string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := "-"
 		role := RoleViewer
@@ -86,7 +93,7 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		if err != nil {
 			// Logging-only path (not an auth gate) — proceed with the
 			// zero-value config, but note the failure so it isn't silent.
-			log.Printf("accessLogMiddleware: GetAuthConfig: %v", err)
+			log.Printf("identityMiddleware: GetAuthConfig: %v", err)
 		}
 
 		if cfg.Source == "proxy" {
@@ -159,13 +166,22 @@ func accessLogMiddleware(next http.Handler, trustedHeader string) http.Handler {
 		tmpR := r.WithContext(tmpCtx)
 		perms := resolveRolePerms(tmpR, role)
 
-		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		ctx := context.WithValue(r.Context(), ctxViewer, user)
 		ctx = context.WithValue(ctx, ctxRole, role)
 		ctx = context.WithValue(ctx, ctxPermissions, perms)
-		next.ServeHTTP(lrw, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// accessLogMiddleware writes one line per request, naming the role
+// identityMiddleware resolved. The identity itself is deliberately not logged.
+func accessLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lrw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(lrw, r)
 		log.Printf("access identity=%s role=%s addr=%s method=%s path=%s status=%d",
-			"***", role, r.RemoteAddr, r.Method, util.SanitizeForLog(r.URL.Path), lrw.status)
+			"***", roleFromContext(r), r.RemoteAddr, r.Method,
+			util.SanitizeForLog(r.URL.Path), lrw.status)
 	})
 }
 

@@ -126,7 +126,7 @@ func TestAuthModes_IdentityAndRole(t *testing.T) {
 				gotConfigWrite = permsFromContext(r)[store.PermConfigWrite]
 				w.WriteHeader(http.StatusOK)
 			})
-			h := basicAuthMiddleware(accessLogMiddleware(inner, tc.trusted))
+			h := basicAuthMiddleware(identityMiddleware(accessLogMiddleware(inner), tc.trusted))
 
 			req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
 			for k, v := range tc.headers {

@@ -22,8 +22,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sort"
 	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,14 +38,8 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-
-
 // sessionStore is the active storage backend, initialised in main().
 var sessionStore store.SessionStore
-
-
-
-
 
 // sessionCache is a TTL-based in-memory cache of scored SessionInfo values.
 // It wraps sessionStore.ListSessions and adds risk scoring on top.
@@ -169,14 +163,6 @@ func recordToInfo(r store.SessionRecord) SessionInfo {
 
 // ── Blocked users API ─────────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-
 func main() {
 	flag.Parse()
 
@@ -190,23 +176,23 @@ func main() {
 	// Initialise storage first — rules and siem config may be loaded from DB.
 	var storeErr error
 	sessionStore, storeErr = store.New(store.Config{
-		Backend:          *flagStorage,
-		LogDir:           *flagLogDir,
+		Backend:              *flagStorage,
+		LogDir:               *flagLogDir,
 		BlockedUsersPath:     *flagBlockedUsers,
 		WhitelistedUsersPath: *flagWhitelistedUsers,
-		SiemConfigPath:   *flagSiemConfig,
-		RiskRulesPath:    *flagRules,
-		SandboxConfigPath: *flagSandbox,
+		SiemConfigPath:       *flagSiemConfig,
+		RiskRulesPath:        *flagRules,
+		SandboxConfigPath:    *flagSandbox,
 		SandboxTemplatesPath: *flagSandboxTemplates,
-		S3Bucket:         *flagS3Bucket,
-		S3Region:         *flagS3Region,
-		S3Prefix:         *flagS3Prefix,
-		S3Endpoint:       *flagS3Endpoint,
-		S3PathStyle:      *flagS3PathStyle,
-		S3AccessKey:      *flagS3AccessKey,
-		S3SecretKey:      *flagS3SecretKey,
-		DBURL:            *flagDBURL,
-		BufferDir:        *flagBufferDir,
+		S3Bucket:             *flagS3Bucket,
+		S3Region:             *flagS3Region,
+		S3Prefix:             *flagS3Prefix,
+		S3Endpoint:           *flagS3Endpoint,
+		S3PathStyle:          *flagS3PathStyle,
+		S3AccessKey:          *flagS3AccessKey,
+		S3SecretKey:          *flagS3SecretKey,
+		DBURL:                *flagDBURL,
+		BufferDir:            *flagBufferDir,
 	})
 	if storeErr != nil {
 		log.Fatalf("init storage: %v", storeErr)
@@ -325,10 +311,13 @@ func main() {
 		}
 	}
 
-	// Build middleware chain (innermost first):
-	//   security → basicAuth → accessLog → handler
+	// Build middleware chain (innermost first). Requests travel outside in:
+	//   security → basicAuth → identity → accessLog → handler
+	// basicAuth decides whether the request may proceed, identity decides who
+	// it is and what it may do, accessLog only records the outcome.
 	var handler http.Handler = mux
-	handler = accessLogMiddleware(handler, *flagTrustedUserHeader)
+	handler = accessLogMiddleware(handler)
+	handler = identityMiddleware(handler, *flagTrustedUserHeader)
 	handler = basicAuthMiddleware(handler)
 	handler = securityHeadersMiddleware(handler)
 
@@ -384,7 +373,6 @@ func main() {
 	}
 	log.Printf("sudo-replay-server: shutdown complete")
 }
-
 
 // warnOnDeadOIDCFlags reports the -oidc-* flags as ignored.
 //
