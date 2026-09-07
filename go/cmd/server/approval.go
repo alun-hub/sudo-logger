@@ -1,13 +1,13 @@
 // approval.go — JIT sudo approval system.
 //
 // Flow:
-//   1. SESSION_START arrives → ApprovalManager.Check() is called.
-//   2. If feature disabled or user exempt → returns ApprovalResultAllow.
-//   3. If an active window exists for user@host → returns ApprovalResultAllow.
-//   4. If justification provided → creates pending request, fires webhook,
-//      returns ApprovalResultPending (SESSION_DENIED with request ID).
-//   5. If no justification → returns ApprovalResultNeedReason (SESSION_DENIED
-//      asking user to provide a reason).
+//  1. SESSION_START arrives → ApprovalManager.Check() is called.
+//  2. If feature disabled or user exempt → returns ApprovalResultAllow.
+//  3. If an active window exists for user@host → returns ApprovalResultAllow.
+//  4. If justification provided → creates pending request, fires webhook,
+//     returns ApprovalResultPending (SESSION_DENIED with request ID).
+//  5. If no justification → returns ApprovalResultNeedReason (SESSION_DENIED
+//     asking user to provide a reason).
 //
 // REST API (mounted on -health-listen):
 //
@@ -40,6 +40,7 @@ import (
 	"sudo-logger/internal/iolog"
 	"sudo-logger/internal/policy"
 	"sudo-logger/internal/store"
+	"sudo-logger/internal/util"
 )
 
 // ── Policy ────────────────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ type ApprovalManager struct {
 
 	mu             sync.RWMutex
 	policy         approvalPolicy
-	lastPolicyHash string // SHA256 hex of last successfully loaded policy bytes
+	lastPolicyHash string         // SHA256 hex of last successfully loaded policy bytes
 	opaEngine      *policy.Engine // nil if OPA policy not configured
 	opaPolicy      policy.Policy  // last successfully loaded OPA policy
 
@@ -355,7 +356,7 @@ func (m *ApprovalManager) Check(user, host, runas, command string, groups []stri
 		case policy.DecisionDeny:
 			log.Printf("approval: OPA denied user=%s host=%s command=%s", user, host, command)
 			return CheckResult{Result: ApprovalResultDeny}
-		// DecisionChallenge: fall through to justification flow below.
+			// DecisionChallenge: fall through to justification flow below.
 		}
 	} else if pol.isExempt(user, host) {
 		// Legacy exempt list: only used when OPA engine is not configured.
@@ -982,7 +983,21 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	action := payload.Context["action"]
 	token := strings.TrimSpace(payload.Context["token"])
 
-	decidedBy := "@" + payload.UserName + " (via Mattermost)"
+	// The action token is a bearer credential: it authorises this decision on
+	// this request, but says nothing about who is presenting it. user_name
+	// arrives in the callback body and is not covered by the HMAC -- and it
+	// cannot be, since the token is minted when the message is posted, before
+	// anyone has clicked. So record the name as reported rather than as
+	// established, and strip control characters so it cannot forge log lines
+	// of its own.
+	reportedBy := util.SanitizeForLog(payload.UserName)
+	if len(reportedBy) > 64 {
+		reportedBy = reportedBy[:64]
+	}
+	if reportedBy == "" {
+		reportedBy = "unknown"
+	}
+	decidedBy := "@" + reportedBy + " (via Mattermost, name not verified)"
 
 	m.mu.RLock()
 	secret := m.policy.Notifications.WebhookSecret // pragma: allowlist secret
@@ -1020,7 +1035,7 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"update": map[string]interface{}{
-			"message": fmt.Sprintf("Request %s %s by @%s.", reqID, verb, payload.UserName),
+			"message": fmt.Sprintf("Request %s %s by @%s.", reqID, verb, reportedBy),
 		},
 	})
 }
@@ -1029,8 +1044,8 @@ func (m *ApprovalManager) handleCallback(w http.ResponseWriter, r *http.Request)
 
 // handleJITPolicy serves GET/PUT /api/jit-policy.
 //
-//   GET  → returns {policy: {...}, rego: "<compiled Rego source>"}
-//   PUT  → saves new policy; validates Rego before accepting
+//	GET  → returns {policy: {...}, rego: "<compiled Rego source>"}
+//	PUT  → saves new policy; validates Rego before accepting
 func (m *ApprovalManager) handleJITPolicy(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
