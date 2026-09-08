@@ -2,13 +2,27 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SessionList } from './SessionList'
 import { TerminalPlayer } from '../terminal/TerminalPlayer'
+import { cn } from '@/lib/utils'
 import type { SessionInfo } from '@/types/session'
 import { fetchSessions } from '@/api/sessions'
+
+const SIDEBAR_KEY = 'sudo-replay-sidebar-collapsed'
 
 export function SessionsView() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [selected, setSelected] = useState<SessionInfo | null>(null)
   const tsidParam = searchParams.get('tsid')
+
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_KEY) === '1' } catch { return false }
+  })
+  // The list is the only way to pick a session, so never hide it until one is open.
+  const sidebarHidden = collapsed && !!selected
+  const toggleSidebar = () => setCollapsed(v => {
+    const next = !v
+    try { localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0') } catch { /* private mode */ }
+    return next
+  })
 
   useEffect(() => {
     if (tsidParam && (!selected || selected.tsid !== tsidParam)) {
@@ -20,11 +34,14 @@ export function SessionsView() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.code === 'Slash') {
-        const tag = (e.target as HTMLElement).tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
         e.preventDefault()
         document.getElementById('global-search')?.focus()
+      } else if (e.key === '[') {
+        e.preventDefault()
+        toggleSidebar()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -40,10 +57,20 @@ export function SessionsView() {
 
   return (
     <div className="flex h-[calc(100vh-48px)] overflow-hidden">
-      <SessionList selectedTsid={selected?.tsid ?? null} onSelect={onSelect} />
+      <div className={cn(
+        'shrink-0 overflow-hidden transition-[width] duration-200 ease-out',
+        sidebarHidden ? 'w-0' : 'w-[380px]'
+      )}>
+        <SessionList selectedTsid={selected?.tsid ?? null} onSelect={onSelect} />
+      </div>
       <div className="flex-1 overflow-hidden bg-bg relative">
         {selected ? (
-          <TerminalPlayer session={selected} key={selected.tsid} />
+          <TerminalPlayer
+            session={selected}
+            key={selected.tsid}
+            sidebarHidden={sidebarHidden}
+            onToggleSidebar={toggleSidebar}
+          />
         ) : (
           <div className="flex h-full items-center justify-center p-8 bg-bg transition-colors duration-200">
             <div className="max-w-[600px] text-text-dim font-mono text-[13px] bg-card/20 p-8 rounded-lg border border-border/50">
@@ -63,6 +90,7 @@ export function SessionsView() {
                 <div className="text-green font-bold">? </div><div className="text-text-sub">show player shortcuts</div>
                 <div className="text-green/60 uppercase text-[10px] tracking-widest col-span-2 mt-2">Navigation</div>
                 <div className="text-green font-bold">/</div><div className="text-text-sub">focus session search</div>
+                <div className="text-green font-bold">[</div><div className="text-text-sub">collapse / expand session list</div>
                 <div className="text-green font-bold">↑ / ↓</div><div className="text-text-sub">navigate sessions</div>
               </div>
             </div>

@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import * as AsciinemaPlayer from 'asciinema-player'
 import 'asciinema-player/dist/bundle/asciinema-player.css'
-import { VideoOff } from 'lucide-react'
+import { VideoOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { RiskBadge } from '../sessions/RiskBadge'
 import { fmtDate, fmtDuration } from '@/lib/date'
 import type { SessionInfo } from '@/types/session'
 
 interface Props {
   session: SessionInfo
+  sidebarHidden?: boolean
+  onToggleSidebar?: () => void
 }
 
-export function TerminalPlayer({ session }: Props) {
+export function TerminalPlayer({ session, sidebarHidden, onToggleSidebar }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<any>(null)
   const [copied, setCopied] = useState(false)
@@ -80,6 +82,15 @@ export function TerminalPlayer({ session }: Props) {
     <div className="flex flex-col h-full bg-bg overflow-hidden">
       {/* Compact single-row header */}
       <div className="bg-surface border-b border-border px-4 py-2 shrink-0 flex items-center gap-4 min-w-0">
+        {onToggleSidebar && (
+          <button
+            onClick={onToggleSidebar}
+            title={sidebarHidden ? 'Show session list ( [ )' : 'Hide session list ( [ )'}
+            className="shrink-0 text-text-dim hover:text-foreground transition-colors cursor-pointer"
+          >
+            {sidebarHidden ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        )}
         <div className="flex items-center gap-5 font-mono text-[12px] flex-1 min-w-0 overflow-hidden">
           <span className="flex gap-1.5 shrink-0">
             <span className="text-green/70 uppercase text-[10px] font-bold tracking-wider self-center">user</span>

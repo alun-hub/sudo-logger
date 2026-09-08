@@ -1119,7 +1119,8 @@ once running, it's reachable at `http://<server>:8080`.
 - **Full command with all arguments** shown in the session list and info bar
   (e.g. `vim /etc/nginx/nginx.conf`, `pg_dump -U postgres mydb -f backup.sql`)
 - Terminal player with play/pause, scrubbing, and speed control (0.25×–16×)
-- Keyboard shortcuts: `Space` play/pause, `←`/`→` seek ±5 s, `R` restart
+- Keyboard shortcuts: `Space` play/pause, `←`/`→` seek ±5 s, `R` restart,
+  `[` collapse/expand the session list to give the player the full window width
 - **Summary tab** — aggregate statistics for a selectable date range: total
   sessions, unique users and hosts, incomplete sessions, sessions > 2 h, High
   Risk and Critical sessions. Per-user table with sortable columns (Sessions,
