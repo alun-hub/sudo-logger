@@ -11,6 +11,9 @@ Findings from a full review of the plugin, agent, log server and replay server.
 Every fix in this release ships with a test that fails against the previous code.
 
 ### Security
+- **deps**: `golang.org/x/crypto` to v0.55.0, resolving CVE-2026-56854 (CRITICAL) —
+  an authentication bypass in `golang.org/x/crypto/ssh` caused by source-address
+  restrictions not being enforced.
 - **replay-server**: `accessLogMiddleware` named the caller by re-reading the
   `Authorization` header without checking the password. Harmless while
   `basicAuthMiddleware` had already validated the credential, but that gate lets
