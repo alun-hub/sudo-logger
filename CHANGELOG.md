@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **approval**: the reload loop reparsed and recompiled the OPA policy, and rebuilt
+  the justification redactor's regex suite, on every 30-second tick regardless of
+  whether either had changed — and logged `OPA policy loaded` each time, 2880 lines
+  a day in the log an operator reads to notice a real configuration change.
+  `loadPolicy` already compared a SHA-256 of its input before acting; the two
+  configs it pulls in alongside it now do the same. A load that fails does not
+  record its hash, so the same bytes are retried rather than treated as applied,
+  and `SetOPAPolicy` records the hash of what it stored so an admin save is not
+  recompiled again on the next tick.
+
 ## [1.42.0] - 2026-09-08
 
 Findings from a full review of the plugin, agent, log server and replay server.

@@ -125,9 +125,15 @@ type ApprovalManager struct {
 
 	mu             sync.RWMutex
 	policy         approvalPolicy
-	lastPolicyHash string         // SHA256 hex of last successfully loaded policy bytes
-	opaEngine      *policy.Engine // nil if OPA policy not configured
-	opaPolicy      policy.Policy  // last successfully loaded OPA policy
+	lastPolicyHash string // SHA256 hex of last successfully loaded policy bytes
+	// Same idea for the two configs loadPolicy pulls in alongside it. Without
+	// them every 30-second tick recompiled the Rego and rebuilt the redactor's
+	// regex suite from unchanged input, and logged a line saying so — 2880 of
+	// them a day, in the log an operator reads to spot real config changes.
+	lastOPAHash       string
+	lastRedactionHash string
+	opaEngine         *policy.Engine // nil if OPA policy not configured
+	opaPolicy         policy.Policy  // last successfully loaded OPA policy
 
 	redactMu sync.Mutex      // serializes access to redactor: it is not safe for concurrent use
 	redactor *iolog.Redactor // masks secrets pasted into a justification
@@ -218,8 +224,23 @@ func (m *ApprovalManager) loadPolicy() error {
 // so a secret pasted into a JIT justification is masked before it reaches
 // logs, the pending-request record, or the approval webhook.
 func (m *ApprovalManager) loadRedactor(ctx context.Context) {
+	cfgStr, err := m.backend.GetConfig(ctx, "redaction_config")
+	if err != nil {
+		cfgStr = "" // fall back to the built-in patterns, as before
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(cfgStr)))
+
+	// Rebuilding compiles the whole system pattern suite, so skip it when the
+	// configuration has not moved. The nil check keeps a failed build retryable.
+	m.redactMu.Lock()
+	unchanged := hash == m.lastRedactionHash && m.redactor != nil
+	m.redactMu.Unlock()
+	if unchanged {
+		return
+	}
+
 	var patterns []string
-	if cfgStr, err := m.backend.GetConfig(ctx, "redaction_config"); err == nil && cfgStr != "" {
+	if cfgStr != "" {
 		if err := json.Unmarshal([]byte(cfgStr), &patterns); err != nil {
 			log.Printf("approval: parse redaction_config: %v", err)
 		}
@@ -231,6 +252,7 @@ func (m *ApprovalManager) loadRedactor(ctx context.Context) {
 	}
 	m.redactMu.Lock()
 	m.redactor = red
+	m.lastRedactionHash = hash
 	m.redactMu.Unlock()
 }
 
@@ -259,6 +281,8 @@ func (m *ApprovalManager) loadOPAPolicy(ctx context.Context) {
 		log.Printf("approval: read OPA policy: %v", err)
 		return
 	}
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(cfgStr)))
+
 	if cfgStr == "" {
 		// Deleted through the admin UI, or never configured. Drop the
 		// compiled engine: it used to stay live until the next restart, so a
@@ -268,12 +292,26 @@ func (m *ApprovalManager) loadOPAPolicy(ctx context.Context) {
 		had := m.opaEngine != nil
 		m.opaEngine = nil
 		m.opaPolicy = policy.Policy{}
+		m.lastOPAHash = hash
 		m.mu.Unlock()
 		if had {
 			log.Printf("approval: OPA policy removed — reverting to the exempt list and justification flow")
 		}
 		return
 	}
+
+	// Unchanged since the last successful load: skip the parse, the compile
+	// and the log line. Re-reading the store is what detects a change, so that
+	// still happens every tick. The engine check matters because a previous
+	// load may have failed to compile, and the same bytes must then be retried
+	// rather than treated as already applied.
+	m.mu.RLock()
+	unchanged := hash == m.lastOPAHash && m.opaEngine != nil
+	m.mu.RUnlock()
+	if unchanged {
+		return
+	}
+
 	var p policy.Policy
 	if err := json.Unmarshal([]byte(cfgStr), &p); err != nil {
 		log.Printf("approval: parse OPA policy: %v", err)
@@ -301,6 +339,7 @@ func (m *ApprovalManager) loadOPAPolicy(ctx context.Context) {
 		}
 	}
 	m.opaPolicy = p
+	m.lastOPAHash = hash
 	log.Printf("approval: OPA policy loaded (%d rules, default=%s)", len(p.Rules), p.DefaultAction)
 }
 
@@ -433,6 +472,9 @@ func (m *ApprovalManager) SetOPAPolicy(ctx context.Context, p policy.Policy) err
 	defer m.mu.Unlock()
 	m.opaEngine = eng
 	m.opaPolicy = p
+	// Record the hash of exactly what was stored, so the next reload tick sees
+	// its own write rather than recompiling and re-logging it.
+	m.lastOPAHash = fmt.Sprintf("%x", sha256.Sum256(data))
 	return nil
 }
 
