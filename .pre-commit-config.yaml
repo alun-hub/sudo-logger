@@ -62,15 +62,31 @@ repos:
         files: plugin/.*\.c$
         pass_filenames: true
 
+  # --- npm audit (replay-server UI) ---
+  # Fast GHSA-backed path for JS dependency alerts. Trivy's own vuln DB
+  # curation for npm lags the GitHub Advisory Database by days-to-weeks, so
+  # this catches fresh advisories (e.g. GHSA-73wf-gq98-2v4g) before Trivy does.
+  - repo: local
+    hooks:
+      - id: npm-audit-ui
+        name: npm audit (replay-server UI)
+        language: system
+        entry: bash -c 'cd go/cmd/replay-server/ui && npm audit --audit-level=high'
+        pass_filenames: false
+        files: ^go/cmd/replay-server/ui/package(-lock)?\.json$
+
   # --- Trivy (beroenden + IaC) ---
+  # --include-dev-deps: build-time devDependencies still run in CI and on dev
+  # machines; a crash / prototype-pollution in the build chain is a real
+  # supply-chain risk, and Trivy suppresses npm dev deps without this flag.
   - repo: local
     hooks:
       - id: trivy
         name: Trivy filesystem scan
         language: system
-        entry: trivy fs --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed .
+        entry: trivy fs --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --include-dev-deps .
         pass_filenames: false
-        files: (go\.mod|go\.sum|Dockerfile|\.yaml|\.yml)$
+        files: (go\.mod|go\.sum|package(-lock)?\.json|Dockerfile|\.yaml|\.yml)$
 
   # --- Generella hooks (whitespace, syntax, mm) ---
   - repo: https://github.com/pre-commit/pre-commit-hooks
