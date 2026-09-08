@@ -5,6 +5,121 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.42.0] - 2026-09-08
+
+Findings from a full review of the plugin, agent, log server and replay server.
+Every fix in this release ships with a test that fails against the previous code.
+
+### Security
+- **replay-server**: `accessLogMiddleware` named the caller by re-reading the
+  `Authorization` header without checking the password. Harmless while
+  `basicAuthMiddleware` had already validated the credential, but that gate lets
+  every request through when no local account has a password — the state
+  `-admin-users` leaves behind, since it seeds an admin with no password hash and
+  the bootstrap screen stops appearing once any user exists. In such a deployment
+  an arbitrary `Authorization: Basic <user>:<anything>` header named that user and
+  inherited their role, turning an anonymous viewer into a full admin. The verified
+  username is now handed downstream from the gate; the cookie, proxy and bootstrap
+  paths are untouched. Note this closes the privilege escalation, not the open
+  deployment itself — see the bootstrap section of INSTALLATION.md.
+- **redactor**: `RedactString` routed whole strings through the streaming path,
+  assuming its stand-in stream value never triggered PEM buffering. Nothing
+  special-cased that value, so a string merely containing `-----BEGIN ` without a
+  matching `-----END ` was absorbed into the buffer and returned empty — and every
+  later call on the same `Redactor` returned empty too, until 64 KB had accumulated
+  and was flushed into an unrelated caller's result. The agent redacts
+  `start.Command` through this path, so a command naming a PEM header was recorded
+  with no command at all; the log server shares one `Redactor` across sessions for
+  JIT justifications, so one user's buffered text could surface inside another
+  user's approval record and webhook.
+- **plugin**: the `SESSION_DENIED` path wrote the server's block message straight to
+  `/dev/tty`, bypassing `safe_write_tty`. `block_message` is free-form operator text,
+  never validated between the admin UI and that write, so a clear-screen plus
+  cursor-home sequence could repaint the terminal with a convincing fake password
+  prompt at the moment sudo had just refused the user.
+- **approval**: the Mattermost callback attributed a decision to whatever
+  `user_name` arrived in the body. The action token authorises the decision but
+  cannot identify who presents it — it is minted when the message is posted, before
+  anyone clicks — so the record now reads "name not verified". The same field went
+  unescaped into the approval log line, letting a newline forge a second, fabricated
+  entry; it is now sanitised and bounded.
+
+### Fixed
+- **approval**: `jit-policy` was missing from `LocalStore`'s config key table, so
+  reads and writes both failed with `unknown config key`. In local mode — the
+  default — the OPA policy engine was therefore never populated and the whole
+  just-in-time policy feature was inert: the UI accepted a policy and nothing
+  enforced it. The key now maps to a `JitPolicyPath` config field, defaulting to
+  `/etc/sudo-logger/jit-policy.json`.
+- **approval**: `SetOPAPolicy` swapped the compiled engine in before persisting, so
+  a failed write returned an error to the caller while the process had already
+  switched to a policy that was never stored and no restart would restore. It now
+  compiles a candidate, persists, and only then swaps.
+- **approval**: `loadOPAPolicy` treated a read error and an absent key identically,
+  so a policy deleted through the admin UI kept being enforced until the next
+  restart. The two are now distinguished — an error keeps the current policy rather
+  than dropping enforcement on a transient store failure.
+- **approval**: `loadPolicy` returned as soon as the policy file was absent, before
+  reaching the redactor loader, leaving the justification redactor nil for the life
+  of the process. A secret pasted into a JIT justification was stored, logged and
+  forwarded to the webhook unmasked.
+- **iolog**: `Writer.Close` returned as soon as `Flush` or `Sync` failed, leaving
+  `session.cast` open. Both fail in practice only when the volume is full or gone —
+  exactly when the agent keeps opening new session files — so the process leaked one
+  descriptor per failed session and ran out just as the disk pressure eased.
+- **plugin**: `build_cmdline_json` skipped a control character whose `\uXXXX`
+  escape did not fit and carried on, recording a command line subtly different from
+  the one that ran with no truncation marker to say so.
+- **plugin**: `json_unescape_into` did not combine surrogate pairs, so a non-BMP
+  code point in an operator disclaimer reached the terminal as invalid UTF-8; the
+  encoding branches shared their length checks, producing overlong forms when space
+  was tight; and invalid hex digits contributed a zero nibble instead of being
+  rejected.
+
+### Changed
+- **replay-server**: identity resolution moved out of `accessLogMiddleware` into a
+  new `identityMiddleware`. It sets the viewer, role and permissions every
+  authorization check downstream reads, so it is now named for the boundary it is.
+  The chain reads security → basicAuth → identity → accessLog → handler.
+- **replay-server**: the auth config and user list are read once per request and
+  carried in the request context, instead of six times each while authenticating.
+  Deliberately scoped to the request — both are edited through the admin UI and must
+  take effect on the next one.
+- **replay-server**: the deprecated `--oidc-*` flags now log a warning naming each
+  one that was set, instead of being silently ignored. They remain declared so
+  deployments already passing them keep starting. The manual previously stated that
+  they took precedence over the stored config, which was never true.
+- **replay-server**: uploaded SIEM certificates are read with `io.ReadAll` rather
+  than a single `Read` whose byte count was treated as the whole file. Not reachable
+  today — the size limits happen to prevent it — but the correctness of the read no
+  longer depends on how those limits relate.
+- **plugin**: `refresh_ack_cache` — 198 lines, 17 return points, the same frame
+  handling repeated four times — now delegates to `handle_agent_frame`, which is
+  reachable from the test harness for the first time.
+- **agent**: the flat two-second wait at the end of every session is now polled with
+  the same upper bound, so a session that leaves nothing behind no longer pays the
+  full delay.
+
+### Removed
+- Six declarations nothing reached: `nonIDChar`, the agent's duplicate
+  `validSessionID`, `exitEvent`, `ApprovalManager.HasWebhook`, `policy.ValidateRego`
+  and `protocol.Writer.Flush`, plus the plugin's unreferenced `FREEZE_MSG` macro.
+  `golangci-lint unused` goes from 8 findings to 0.
+
+### Documentation
+- The eBPF sandbox covers privilege escalation through sudo, not through
+  pkexec/polkit. Sessions captured that way are recorded but not restricted; nothing
+  said so, and the unused hook's own comment implied the opposite.
+- `-admin-users` seeds an account without a password, and the replay server treats a
+  deployment where no local account has one as open. Following the documented
+  bootstrap path end to end therefore left an audit-log UI readable by anyone who
+  could reach the port. Both places that mention the flag now say so.
+- There is no `require_justification` plugin option; the package description and a
+  source comment both advertised one. Whether a justification is required is a
+  server-side policy decision.
+- The `/api/approval-config` example in API.md described a payload the endpoint does
+  not accept.
+
 ## [1.41.2] - 2026-08-30
 
 ### Fixed
