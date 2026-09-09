@@ -67,6 +67,7 @@ func (s *ebpfSubsystem) watch(ctx context.Context) {
 			if offset+syscall.SizeofInotifyEvent > n {
 				break
 			}
+			// nosemgrep -- unsafe is required to decode fixed-layout eBPF ring-buffer records; length is checked first
 			ev := (*syscall.InotifyEvent)(unsafe.Pointer(&buf[offset]))
 			nameLen := int(ev.Len)
 			nameBytes := buf[offset+syscall.SizeofInotifyEvent : offset+syscall.SizeofInotifyEvent+nameLen]

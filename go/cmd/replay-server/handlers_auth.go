@@ -207,6 +207,7 @@ func handleLocalLogin(w http.ResponseWriter, r *http.Request) {
 	})
 	secure := r.Header.Get("X-Forwarded-Proto") == "https" || r.TLS != nil
 
+	// nosemgrep -- Secure is set from a runtime bool (TLS / X-Forwarded-Proto); hardcoding true breaks plain-HTTP local use
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sudo_session",
 		Value:    sid,
@@ -244,6 +245,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	// nosemgrep -- Secure is set from a runtime bool (TLS / X-Forwarded-Proto); hardcoding true breaks plain-HTTP local use
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sudo_session",
 		Value:    "",

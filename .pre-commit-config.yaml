@@ -79,6 +79,28 @@ repos:
         files: ^plugin/.*\.(c|h)$
         pass_filenames: false
 
+  # --- Semgrep (C + Go SAST) ---
+  # Pattern-based SAST that cppcheck/flawfinder/go vet miss (taint tracking,
+  # injection, unsafe patterns). Rules are VENDORED under .semgrep/rules/ so the
+  # scan is fully offline and never uploads code — refresh them with:
+  #   for p in c golang gosec; do curl -sfL https://semgrep.dev/c/p/$p \
+  #     -o .semgrep/rules/$p.yml; done
+  # Suppress a confirmed false positive with `// nosemgrep -- <reason>` on the
+  # line above the finding. Needs `pip install --user semgrep`.
+  - repo: local
+    hooks:
+      - id: semgrep
+        name: semgrep (C + Go SAST)
+        language: system
+        # pass_filenames:false + one invocation — pre-commit otherwise fans the
+        # file list out into concurrent chunks that race on ~/.semgrep and exit 2.
+        entry: semgrep scan --config .semgrep/rules/ --error --quiet
+          --metrics=off --disable-version-check
+          --exclude='go/vendor' --exclude='*_test.go' plugin/ go/
+        files: \.(c|h|go)$
+        exclude: ^go/vendor/
+        pass_filenames: false
+
   # --- npm audit (replay-server UI) ---
   # Fast GHSA-backed path for JS dependency alerts. Trivy's own vuln DB
   # curation for npm lags the GitHub Advisory Database by days-to-weeks, so

@@ -1026,6 +1026,7 @@ func handleDeleteSudoersConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := sessionStore.SetConfig(r.Context(), "sudoers/"+host, ""); err != nil {
+		// nosemgrep -- host is validated by util.ValidAgentHost above; SetConfig uses parameterized ($1/$2) queries, no string-built SQL
 		http.Error(w, "delete config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

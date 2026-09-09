@@ -1139,6 +1139,9 @@ static int build_session_start_json(char *payload, size_t payload_len,
     /* Add 4 random bytes so two simultaneous sudo invocations from the same
      * user on the same host within the same nanosecond still get distinct IDs. */
     uint8_t rnd[4] = {0};
+    /* These 4 bytes are only a tiebreaker on top of pid + nanosecond timestamp,
+     * not a key or nonce; a short read just leaves bytes zero. */
+    /* nosemgrep */
     int rfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
     if (rfd >= 0) {
         (void)read(rfd, rnd, sizeof(rnd));

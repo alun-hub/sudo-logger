@@ -1,0 +1,1256 @@
+rules:
+- id: go.lang.security.audit.crypto.bad_imports.insecure-module-used
+  message: The package `net/http/cgi` is on the import blocklist.  The package is
+    vulnerable to httpoxy attacks (CVE-2015-5386). It is recommended to use `net/http`
+    or a web framework to build a web application instead.
+  metadata:
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    cwe:
+    - 'CWE-327: Use of a Broken or Risky Cryptographic Algorithm'
+    source-rule-url: https://github.com/securego/gosec
+    references:
+    - https://godoc.org/golang.org/x/crypto/sha3
+    category: security
+    technology:
+    - go
+    confidence: MEDIUM
+    subcategory:
+    - audit
+    likelihood: MEDIUM
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.bad_imports.insecure-module-used
+    shortlink: https://sg.run/l2gj
+    semgrep.dev:
+      rule:
+        r_id: 9113
+        rv_id: 1262921
+        rule_id: yyUnov
+        version_id: 2KTv2vJ
+        url: https://semgrep.dev/playground/r/2KTv2vJ/go.lang.security.audit.crypto.bad_imports.insecure-module-used
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  pattern-either:
+  - patterns:
+    - pattern-inside: |
+        import "net/http/cgi"
+        ...
+    - pattern: |
+        cgi.$FUNC(...)
+- id: go.lang.security.audit.crypto.insecure_ssh.avoid-ssh-insecure-ignore-host-key
+  message: Disabled host key verification detected. This allows man-in-the-middle
+    attacks. Use the 'golang.org/x/crypto/ssh/knownhosts' package to do host key verification.
+    See https://skarlso.github.io/2019/02/17/go-ssh-with-host-key-verification/ to
+    learn more about the problem and how to fix it.
+  metadata:
+    cwe:
+    - 'CWE-322: Key Exchange without Entity Authentication'
+    owasp:
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    source-rule-url: https://github.com/securego/gosec
+    references:
+    - https://skarlso.github.io/2019/02/17/go-ssh-with-host-key-verification/
+    - https://gist.github.com/Skarlso/34321a230cf0245018288686c9e70b2d
+    category: security
+    technology:
+    - go
+    confidence: MEDIUM
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Improper Authentication
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.insecure_ssh.avoid-ssh-insecure-ignore-host-key
+    shortlink: https://sg.run/Yv6X
+    semgrep.dev:
+      rule:
+        r_id: 9114
+        rv_id: 1262922
+        rule_id: r6UrW9
+        version_id: X0TzyzN
+        url: https://semgrep.dev/playground/r/X0TzyzN/go.lang.security.audit.crypto.insecure_ssh.avoid-ssh-insecure-ignore-host-key
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  pattern: ssh.InsecureIgnoreHostKey()
+- id: go.lang.security.audit.crypto.math_random.math-random-used
+  metadata:
+    cwe:
+    - 'CWE-338: Use of Cryptographically Weak Pseudo-Random Number Generator (PRNG)'
+    owasp:
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    references:
+    - https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html#secure-random-number-generation
+    category: security
+    technology:
+    - go
+    confidence: MEDIUM
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.math_random.math-random-used
+    shortlink: https://sg.run/6nK6
+    semgrep.dev:
+      rule:
+        r_id: 9115
+        rv_id: 1262923
+        rule_id: bwUwy8
+        version_id: jQTn5nj
+        url: https://semgrep.dev/playground/r/jQTn5nj/go.lang.security.audit.crypto.math_random.math-random-used
+        origin: community
+  message: Do not use `math/rand`. Use `crypto/rand` instead.
+  languages:
+  - go
+  severity: WARNING
+  patterns:
+  - pattern-either:
+    - pattern: |
+        import $RAND "$MATH"
+    - pattern: |
+        import "$MATH"
+  - metavariable-regex:
+      metavariable: $MATH
+      regex: ^(math/rand(\/v[0-9]+)*)$
+  - pattern-either:
+    - pattern-inside: |
+        ...
+        rand.$FUNC(...)
+    - pattern-inside: |
+        ...
+        $RAND.$FUNC(...)
+  - focus-metavariable:
+    - $MATH
+  fix: |
+    crypto/rand
+- id: go.lang.security.audit.crypto.ssl.ssl-v3-is-insecure
+  message: SSLv3 is insecure because it has known vulnerabilities. Starting with go1.14,
+    SSLv3 will be removed. Instead, use 'tls.VersionTLS13'.
+  metadata:
+    cwe:
+    - 'CWE-327: Use of a Broken or Risky Cryptographic Algorithm'
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    source-rule-url: https://github.com/securego/gosec/blob/master/rules/tls_config.go
+    references:
+    - https://golang.org/doc/go1.14#crypto/tls
+    - https://www.us-cert.gov/ncas/alerts/TA14-290A
+    category: security
+    technology:
+    - go
+    confidence: HIGH
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.ssl.ssl-v3-is-insecure
+    shortlink: https://sg.run/zvE1
+    semgrep.dev:
+      rule:
+        r_id: 9117
+        rv_id: 1262926
+        rule_id: kxUkJ2
+        version_id: yeTxpxj
+        url: https://semgrep.dev/playground/r/yeTxpxj/go.lang.security.audit.crypto.ssl.ssl-v3-is-insecure
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  fix-regex:
+    regex: VersionSSL30
+    replacement: VersionTLS13
+  pattern: 'tls.Config{..., MinVersion: $TLS.VersionSSL30, ...}'
+- id: go.lang.security.audit.crypto.missing-ssl-minversion.missing-ssl-minversion
+  message: '`MinVersion` is missing from this TLS configuration.  By default, as of
+    Go 1.22, TLS 1.2 is currently used as the minimum. General purpose web applications
+    should default to TLS 1.3 with all other protocols disabled.  Only where it is
+    known that a web server must support legacy clients with unsupported an insecure
+    browsers (such as Internet Explorer 10), it may be necessary to enable TLS 1.0
+    to provide support. Add `MinVersion: tls.VersionTLS13'' to the TLS configuration
+    to bump the minimum version to TLS 1.3.'
+  metadata:
+    cwe:
+    - 'CWE-327: Use of a Broken or Risky Cryptographic Algorithm'
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    source-rule-url: https://github.com/securego/gosec/blob/master/rules/tls_config.go
+    references:
+    - https://go.dev/doc/go1.22#minor_library_changes
+    - https://pkg.go.dev/crypto/tls#:~:text=MinVersion
+    - https://www.us-cert.gov/ncas/alerts/TA14-290A
+    category: security
+    technology:
+    - go
+    confidence: HIGH
+    subcategory:
+    - audit
+    likelihood: MEDIUM
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.missing-ssl-minversion.missing-ssl-minversion
+    shortlink: https://sg.run/oxEN
+    semgrep.dev:
+      rule:
+        r_id: 9116
+        rv_id: 1262924
+        rule_id: NbUk4X
+        version_id: 1QTypyp
+        url: https://semgrep.dev/playground/r/1QTypyp/go.lang.security.audit.crypto.missing-ssl-minversion.missing-ssl-minversion
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  patterns:
+  - pattern: |
+      tls.Config{ $...CONF }
+  - pattern-not: |
+      tls.Config{..., MinVersion: ..., ...}
+  fix: |
+    tls.Config{ $...CONF, MinVersion: tls.VersionTLS13 }
+- id: go.lang.security.audit.crypto.tls.tls-with-insecure-cipher
+  message: Detected an insecure CipherSuite via the 'tls' module. This suite is considered
+    weak. Use the function 'tls.CipherSuites()' to get a list of good cipher suites.
+    See https://golang.org/pkg/crypto/tls/#InsecureCipherSuites for why and what other
+    cipher suites to use.
+  metadata:
+    cwe:
+    - 'CWE-327: Use of a Broken or Risky Cryptographic Algorithm'
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    source-rule-url: https://github.com/securego/gosec/blob/master/rules/tls.go
+    references:
+    - https://golang.org/pkg/crypto/tls/#InsecureCipherSuites
+    category: security
+    technology:
+    - go
+    confidence: HIGH
+    subcategory:
+    - vuln
+    likelihood: HIGH
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.tls.tls-with-insecure-cipher
+    shortlink: https://sg.run/px8N
+    semgrep.dev:
+      rule:
+        r_id: 9118
+        rv_id: 1262927
+        rule_id: wdUJYk
+        version_id: rxTAKAZ
+        url: https://semgrep.dev/playground/r/rxTAKAZ/go.lang.security.audit.crypto.tls.tls-with-insecure-cipher
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  pattern-either:
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_RSA_WITH_RC4_128_SHA, ...}}
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA, ...}}
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_RSA_WITH_AES_128_CBC_SHA256, ...}}
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, ...}}
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_ECDHE_RSA_WITH_RC4_128_SHA, ...}}
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, ...}}
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, ...}}
+  - pattern: |
+      tls.Config{..., CipherSuites: []$TYPE{..., tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, ...}}
+  - pattern: |
+      tls.CipherSuite{..., TLS_RSA_WITH_RC4_128_SHA, ...}
+  - pattern: |
+      tls.CipherSuite{..., TLS_RSA_WITH_3DES_EDE_CBC_SHA, ...}
+  - pattern: |
+      tls.CipherSuite{..., TLS_RSA_WITH_AES_128_CBC_SHA256, ...}
+  - pattern: |
+      tls.CipherSuite{..., TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, ...}
+  - pattern: |
+      tls.CipherSuite{..., TLS_ECDHE_RSA_WITH_RC4_128_SHA, ...}
+  - pattern: |
+      tls.CipherSuite{..., TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, ...}
+  - pattern: |
+      tls.CipherSuite{..., TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256, ...}
+  - pattern: |
+      tls.CipherSuite{..., TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256, ...}
+- id: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5
+  message: Detected MD5 hash algorithm which is considered insecure. MD5 is not collision
+    resistant and is therefore not suitable as a cryptographic signature. Use SHA256
+    or SHA3 instead.
+  languages:
+  - go
+  severity: WARNING
+  metadata:
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    cwe:
+    - 'CWE-328: Use of Weak Hash'
+    source-rule-url: https://github.com/securego/gosec#available-rules
+    category: security
+    technology:
+    - go
+    confidence: MEDIUM
+    references:
+    - https://owasp.org/Top10/A02_2021-Cryptographic_Failures
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Insecure Hashing Algorithm
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5
+    shortlink: https://sg.run/2xB5
+    semgrep.dev:
+      rule:
+        r_id: 9119
+        rv_id: 1262928
+        rule_id: x8Un6q
+        version_id: bZT535Y
+        url: https://semgrep.dev/playground/r/bZT535Y/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-md5
+        origin: community
+  patterns:
+  - pattern-inside: |
+      import "crypto/md5"
+      ...
+  - pattern-either:
+    - pattern: |
+        md5.New()
+    - pattern: |
+        md5.Sum(...)
+- id: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-sha1
+  message: Detected SHA1 hash algorithm which is considered insecure. SHA1 is not
+    collision resistant and is therefore not suitable as a cryptographic signature.
+    Use SHA256 or SHA3 instead.
+  languages:
+  - go
+  severity: WARNING
+  metadata:
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    cwe:
+    - 'CWE-328: Use of Weak Hash'
+    source-rule-url: https://github.com/securego/gosec#available-rules
+    category: security
+    technology:
+    - go
+    references:
+    - https://owasp.org/Top10/A02_2021-Cryptographic_Failures
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: MEDIUM
+    confidence: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Insecure Hashing Algorithm
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-sha1
+    shortlink: https://sg.run/XBYA
+    semgrep.dev:
+      rule:
+        r_id: 9120
+        rv_id: 1262929
+        rule_id: OrU31O
+        version_id: NdTzyz1
+        url: https://semgrep.dev/playground/r/NdTzyz1/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-sha1
+        origin: community
+  patterns:
+  - pattern-inside: |
+      import "crypto/sha1"
+      ...
+  - pattern-either:
+    - pattern: |
+        sha1.New()
+    - pattern: |
+        sha1.Sum(...)
+- id: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-DES
+  message: Detected DES cipher algorithm which is insecure. The algorithm is considered
+    weak and has been deprecated. Use AES instead.
+  languages:
+  - go
+  severity: WARNING
+  metadata:
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    cwe:
+    - 'CWE-327: Use of a Broken or Risky Cryptographic Algorithm'
+    source-rule-url: https://github.com/securego/gosec#available-rules
+    category: security
+    technology:
+    - go
+    references:
+    - https://owasp.org/Top10/A02_2021-Cryptographic_Failures
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: MEDIUM
+    confidence: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-DES
+    shortlink: https://sg.run/jREA
+    semgrep.dev:
+      rule:
+        r_id: 9121
+        rv_id: 1262930
+        rule_id: eqU8B3
+        version_id: kbTzGzA
+        url: https://semgrep.dev/playground/r/kbTzGzA/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-DES
+        origin: community
+  patterns:
+  - pattern-inside: |
+      import "crypto/des"
+      ...
+  - pattern-either:
+    - pattern: |
+        des.NewTripleDESCipher(...)
+    - pattern: |
+        des.NewCipher(...)
+- id: go.lang.security.audit.crypto.use_of_weak_crypto.use-of-rc4
+  message: Detected RC4 cipher algorithm which is insecure. The algorithm has many
+    known vulnerabilities. Use AES instead.
+  languages:
+  - go
+  severity: WARNING
+  metadata:
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    cwe:
+    - 'CWE-327: Use of a Broken or Risky Cryptographic Algorithm'
+    source-rule-url: https://github.com/securego/gosec#available-rules
+    category: security
+    technology:
+    - go
+    references:
+    - https://owasp.org/Top10/A02_2021-Cryptographic_Failures
+    subcategory:
+    - vuln
+    likelihood: MEDIUM
+    impact: MEDIUM
+    confidence: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cryptographic Issues
+    source: https://semgrep.dev/r/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-rc4
+    shortlink: https://sg.run/1ZAD
+    semgrep.dev:
+      rule:
+        r_id: 9122
+        rv_id: 1262931
+        rule_id: v8Unl0
+        version_id: w8TRoRQ
+        url: https://semgrep.dev/playground/r/w8TRoRQ/go.lang.security.audit.crypto.use_of_weak_crypto.use-of-rc4
+        origin: community
+  patterns:
+  - pattern-inside: |
+      import "crypto/rc4"
+      ...
+  - pattern: rc4.NewCipher(...)
+- id: go.lang.security.audit.database.string-formatted-query.string-formatted-query
+  languages:
+  - go
+  message: String-formatted SQL query detected. This could lead to SQL injection if
+    the string is not sanitized properly. Audit this call to ensure the SQL is not
+    manipulable by external data.
+  severity: WARNING
+  metadata:
+    owasp:
+    - A01:2017 - Injection
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    cwe:
+    - 'CWE-89: Improper Neutralization of Special Elements used in an SQL Command
+      (''SQL Injection'')'
+    source-rule-url: https://github.com/securego/gosec
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    references:
+    - https://owasp.org/Top10/A03_2021-Injection
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: HIGH
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - SQL Injection
+    source: https://semgrep.dev/r/go.lang.security.audit.database.string-formatted-query.string-formatted-query
+    shortlink: https://sg.run/ydEr
+    semgrep.dev:
+      rule:
+        r_id: 9124
+        rv_id: 1262937
+        rule_id: ZqU5bD
+        version_id: ZRTKA2q
+        url: https://semgrep.dev/playground/r/ZRTKA2q/go.lang.security.audit.database.string-formatted-query.string-formatted-query
+        origin: community
+  patterns:
+  - metavariable-regex:
+      metavariable: $OBJ
+      regex: (?i).*(db|database)
+  - pattern-not-inside: |
+      $VAR = "..." + "..."
+      ...
+      $OBJ.$SINK(..., $VAR, ...)
+  - pattern-not: $OBJ.Exec("...")
+  - pattern-not: $OBJ.ExecContext($CTX, "...")
+  - pattern-not: $OBJ.Query("...")
+  - pattern-not: $OBJ.QueryContext($CTX, "...")
+  - pattern-not: $OBJ.QueryRow("...")
+  - pattern-not: $OBJ.QueryRow($CTX, "...")
+  - pattern-not: $OBJ.QueryRowContext($CTX, "...")
+  - pattern-either:
+    - pattern: $OBJ.Exec($X + ...)
+    - pattern: $OBJ.ExecContext($CTX, $X + ...)
+    - pattern: $OBJ.Query($X + ...)
+    - pattern: $OBJ.QueryContext($CTX, $X + ...)
+    - pattern: $OBJ.QueryRow($X + ...)
+    - pattern: $OBJ.QueryRow($CTX, $X + ...)
+    - pattern: $OBJ.QueryRowContext($CTX, $X + ...)
+    - pattern: $OBJ.Exec(fmt.$P("...", ...))
+    - pattern: $OBJ.ExecContext($CTX, fmt.$P("...", ...))
+    - pattern: $OBJ.Query(fmt.$P("...", ...))
+    - pattern: $OBJ.QueryContext($CTX, fmt.$P("...", ...))
+    - pattern: $OBJ.QueryRow(fmt.$P("...", ...))
+    - pattern: $OBJ.QueryRow($CTX, fmt.$U("...", ...))
+    - pattern: $OBJ.QueryRowContext($CTX, fmt.$P("...", ...))
+    - patterns:
+      - pattern-either:
+        - pattern: $QUERY = fmt.Fprintf($F, "$SQLSTR", ...)
+        - pattern: $QUERY = fmt.Sprintf("$SQLSTR", ...)
+        - pattern: $QUERY = fmt.Printf("$SQLSTR", ...)
+        - pattern: $QUERY = $X + ...
+      - pattern-either:
+        - pattern-inside: |
+            func $FUNC(...) {
+                ...
+                $OBJ.Query($QUERY, ...)
+                ...
+            }
+        - pattern-inside: |
+            func $FUNC(...) {
+                ...
+                $OBJ.ExecContext($CTX, $QUERY, ...)
+                ...
+            }
+        - pattern-inside: |
+            func $FUNC(...) {
+                ...
+                $OBJ.Exec($QUERY, ...)
+                ...
+            }
+        - pattern-inside: |
+            func $FUNC(...) {
+                ...
+                $OBJ.QueryRow($CTX, $QUERY)
+                ...
+            }
+        - pattern-inside: |
+            func $FUNC(...) {
+                ...
+                $OBJ.QueryRow($QUERY)
+                ...
+            }
+        - pattern-inside: |
+            func $FUNC(...) {
+                ...
+                $OBJ.QueryContext($CTX, $QUERY)
+                ...
+            }
+        - pattern-inside: |
+            func $FUNC(...) {
+                ...
+                $OBJ.QueryRowContext($CTX, $QUERY, ...)
+                ...
+            }
+- id: go.lang.security.audit.net.bind_all.avoid-bind-to-all-interfaces
+  message: Detected a network listener listening on 0.0.0.0 or an empty string. This
+    could unexpectedly expose the server publicly as it binds to all available interfaces.
+    Instead, specify another IP address that is not 0.0.0.0 nor the empty string.
+  languages:
+  - go
+  severity: WARNING
+  metadata:
+    cwe:
+    - 'CWE-200: Exposure of Sensitive Information to an Unauthorized Actor'
+    owasp:
+    - A01:2021 - Broken Access Control
+    - A01:2025 - Broken Access Control
+    source-rule-url: https://github.com/securego/gosec
+    category: security
+    technology:
+    - go
+    confidence: HIGH
+    references:
+    - https://owasp.org/Top10/A01_2021-Broken_Access_Control
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Mishandled Sensitive Information
+    source: https://semgrep.dev/r/go.lang.security.audit.net.bind_all.avoid-bind-to-all-interfaces
+    shortlink: https://sg.run/rdE0
+    semgrep.dev:
+      rule:
+        r_id: 9125
+        rv_id: 1262939
+        rule_id: nJUz3J
+        version_id: ExTExoK
+        url: https://semgrep.dev/playground/r/ExTExoK/go.lang.security.audit.net.bind_all.avoid-bind-to-all-interfaces
+        origin: community
+  pattern-either:
+  - pattern: tls.Listen($NETWORK, "=~/^0.0.0.0:.*$/", ...)
+  - pattern: net.Listen($NETWORK, "=~/^0.0.0.0:.*$/", ...)
+  - pattern: tls.Listen($NETWORK, "=~/^:.*$/", ...)
+  - pattern: net.Listen($NETWORK, "=~/^:.*$/", ...)
+- id: go.lang.security.audit.net.dynamic-httptrace-clienttrace.dynamic-httptrace-clienttrace
+  message: Detected a potentially dynamic ClientTrace. This occurred because semgrep
+    could not find a static definition for '$TRACE'. Dynamic ClientTraces are dangerous
+    because they deserialize function code to run when certain Request events occur,
+    which could lead to code being run without your knowledge. Ensure that your ClientTrace
+    is statically defined.
+  metadata:
+    cwe:
+    - 'CWE-913: Improper Control of Dynamically-Managed Code Resources'
+    owasp:
+    - A01:2021 - Broken Access Control
+    - A01:2025 - Broken Access Control
+    references:
+    - https://github.com/returntocorp/semgrep-rules/issues/518
+    category: security
+    technology:
+    - go
+    confidence: MEDIUM
+    subcategory:
+    - vuln
+    likelihood: LOW
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Code Injection
+    source: https://semgrep.dev/r/go.lang.security.audit.net.dynamic-httptrace-clienttrace.dynamic-httptrace-clienttrace
+    shortlink: https://sg.run/kXEK
+    semgrep.dev:
+      rule:
+        r_id: 9128
+        rv_id: 1262942
+        rule_id: L1Uyjp
+        version_id: 8KT5rNv
+        url: https://semgrep.dev/playground/r/8KT5rNv/go.lang.security.audit.net.dynamic-httptrace-clienttrace.dynamic-httptrace-clienttrace
+        origin: community
+  patterns:
+  - pattern-not-inside: |
+      package $PACKAGE
+      ...
+      &httptrace.ClientTrace { ... }
+      ...
+  - pattern: httptrace.WithClientTrace($ANY, $TRACE)
+  severity: WARNING
+  languages:
+  - go
+- id: go.lang.security.audit.net.formatted-template-string.formatted-template-string
+  message: Found a formatted template string passed to 'template.HTML()'. 'template.HTML()'
+    does not escape contents. Be absolutely sure there is no user-controlled data
+    in this template. If user data can reach this template, you may have a XSS vulnerability.
+  metadata:
+    cwe:
+    - 'CWE-79: Improper Neutralization of Input During Web Page Generation (''Cross-site
+      Scripting'')'
+    owasp:
+    - A07:2017 - Cross-Site Scripting (XSS)
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    references:
+    - https://golang.org/pkg/html/template/#HTML
+    category: security
+    technology:
+    - go
+    confidence: MEDIUM
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cross-Site-Scripting (XSS)
+    source: https://semgrep.dev/r/go.lang.security.audit.net.formatted-template-string.formatted-template-string
+    shortlink: https://sg.run/weE0
+    semgrep.dev:
+      rule:
+        r_id: 9129
+        rv_id: 1262943
+        rule_id: 8GUjDW
+        version_id: gETB7Pe
+        url: https://semgrep.dev/playground/r/gETB7Pe/go.lang.security.audit.net.formatted-template-string.formatted-template-string
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  patterns:
+  - pattern-not: template.HTML("..." + "...")
+  - pattern-either:
+    - pattern: template.HTML($T + $X, ...)
+    - pattern: template.HTML(fmt.$P("...", ...), ...)
+    - pattern: |
+        $T = "..."
+        ...
+        $T = $FXN(..., $T, ...)
+        ...
+        template.HTML($T, ...)
+    - pattern: |
+        $T = fmt.$P("...", ...)
+        ...
+        template.HTML($T, ...)
+    - pattern: |
+        $T, $ERR = fmt.$P("...", ...)
+        ...
+        template.HTML($T, ...)
+    - pattern: |
+        $T = $X + $Y
+        ...
+        template.HTML($T, ...)
+    - pattern: |-
+        $T = "..."
+        ...
+        $OTHER, $ERR = fmt.$P(..., $T, ...)
+        ...
+        template.HTML($OTHER, ...)
+- id: go.lang.security.audit.net.unescaped-data-in-htmlattr.unescaped-data-in-htmlattr
+  message: Found a formatted template string passed to 'template. HTMLAttr()'. 'template.HTMLAttr()'
+    does not escape contents. Be absolutely sure there is no user-controlled data
+    in this template or validate and sanitize the data before passing it into the
+    template.
+  metadata:
+    cwe:
+    - 'CWE-79: Improper Neutralization of Input During Web Page Generation (''Cross-site
+      Scripting'')'
+    owasp:
+    - A07:2017 - Cross-Site Scripting (XSS)
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    references:
+    - https://golang.org/pkg/html/template/#HTMLAttr
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cross-Site-Scripting (XSS)
+    source: https://semgrep.dev/r/go.lang.security.audit.net.unescaped-data-in-htmlattr.unescaped-data-in-htmlattr
+    shortlink: https://sg.run/OPRp
+    semgrep.dev:
+      rule:
+        r_id: 9131
+        rv_id: 1262945
+        rule_id: QrUz9R
+        version_id: 3ZT4XRr
+        url: https://semgrep.dev/playground/r/3ZT4XRr/go.lang.security.audit.net.unescaped-data-in-htmlattr.unescaped-data-in-htmlattr
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  pattern-either:
+  - pattern: template.HTMLAttr($T + $X, ...)
+  - pattern: template.HTMLAttr(fmt.$P("...", ...), ...)
+  - pattern: |
+      $T = "..."
+      ...
+      $T = $FXN(..., $T, ...)
+      ...
+      template.HTMLAttr($T, ...)
+  - pattern: |
+      $T = fmt.$P("...", ...)
+      ...
+      template.HTMLAttr($T, ...)
+  - pattern: |
+      $T, $ERR = fmt.$P("...", ...)
+      ...
+      template.HTMLAttr($T, ...)
+  - pattern: |
+      $T = $X + $Y
+      ...
+      template.HTMLAttr($T, ...)
+  - pattern: |-
+      $T = "..."
+      ...
+      $OTHER, $ERR = fmt.$P(..., $T, ...)
+      ...
+      template.HTMLAttr($OTHER, ...)
+- id: go.lang.security.audit.net.unescaped-data-in-js.unescaped-data-in-js
+  message: Found a formatted template string passed to 'template.JS()'. 'template.JS()'
+    does not escape contents. Be absolutely sure there is no user-controlled data
+    in this template.
+  metadata:
+    cwe:
+    - 'CWE-79: Improper Neutralization of Input During Web Page Generation (''Cross-site
+      Scripting'')'
+    owasp:
+    - A07:2017 - Cross-Site Scripting (XSS)
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    references:
+    - https://golang.org/pkg/html/template/#JS
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cross-Site-Scripting (XSS)
+    source: https://semgrep.dev/r/go.lang.security.audit.net.unescaped-data-in-js.unescaped-data-in-js
+    shortlink: https://sg.run/eLNl
+    semgrep.dev:
+      rule:
+        r_id: 9132
+        rv_id: 1262946
+        rule_id: 3qUP8K
+        version_id: 44TEj9E
+        url: https://semgrep.dev/playground/r/44TEj9E/go.lang.security.audit.net.unescaped-data-in-js.unescaped-data-in-js
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  pattern-either:
+  - pattern: template.JS($T + $X, ...)
+  - pattern: template.JS(fmt.$P("...", ...), ...)
+  - pattern: |
+      $T = "..."
+      ...
+      $T = $FXN(..., $T, ...)
+      ...
+      template.JS($T, ...)
+  - pattern: |
+      $T = fmt.$P("...", ...)
+      ...
+      template.JS($T, ...)
+  - pattern: |
+      $T, $ERR = fmt.$P("...", ...)
+      ...
+      template.JS($T, ...)
+  - pattern: |
+      $T = $X + $Y
+      ...
+      template.JS($T, ...)
+  - pattern: |
+      $T = "..."
+      ...
+      $OTHER, $ERR = fmt.$P(..., $T, ...)
+      ...
+      template.JS($OTHER, ...)
+- id: go.lang.security.audit.net.unescaped-data-in-url.unescaped-data-in-url
+  message: Found a formatted template string passed to 'template.URL()'. 'template.URL()'
+    does not escape contents, and this could result in XSS (cross-site scripting)
+    and therefore confidential data being stolen. Sanitize data coming into this function
+    or make sure that no user-controlled input is coming into the function.
+  metadata:
+    cwe:
+    - 'CWE-79: Improper Neutralization of Input During Web Page Generation (''Cross-site
+      Scripting'')'
+    owasp:
+    - A07:2017 - Cross-Site Scripting (XSS)
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    references:
+    - https://golang.org/pkg/html/template/#URL
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Cross-Site-Scripting (XSS)
+    source: https://semgrep.dev/r/go.lang.security.audit.net.unescaped-data-in-url.unescaped-data-in-url
+    shortlink: https://sg.run/vzE4
+    semgrep.dev:
+      rule:
+        r_id: 9133
+        rv_id: 1262947
+        rule_id: 4bUkDW
+        version_id: PkTR3zz
+        url: https://semgrep.dev/playground/r/PkTR3zz/go.lang.security.audit.net.unescaped-data-in-url.unescaped-data-in-url
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  pattern-either:
+  - pattern: template.URL($T + $X, ...)
+  - pattern: template.URL(fmt.$P("...", ...), ...)
+  - pattern: |
+      $T = "..."
+      ...
+      $T = $FXN(..., $T, ...)
+      ...
+      template.URL($T, ...)
+  - pattern: |
+      $T = fmt.$P("...", ...)
+      ...
+      template.URL($T, ...)
+  - pattern: |
+      $T, $ERR = fmt.$P("...", ...)
+      ...
+      template.URL($T, ...)
+  - pattern: |
+      $T = $X + $Y
+      ...
+      template.URL($T, ...)
+  - pattern: |-
+      $T = "..."
+      ...
+      $OTHER, $ERR = fmt.$P(..., $T, ...)
+      ...
+      template.URL($OTHER, ...)
+- id: go.lang.security.audit.net.use-tls.use-tls
+  pattern: http.ListenAndServe($ADDR, $HANDLER)
+  fix: http.ListenAndServeTLS($ADDR, certFile, keyFile, $HANDLER)
+  metadata:
+    cwe:
+    - 'CWE-319: Cleartext Transmission of Sensitive Information'
+    owasp:
+    - A03:2017 - Sensitive Data Exposure
+    - A02:2021 - Cryptographic Failures
+    - A04:2025 - Cryptographic Failures
+    references:
+    - https://golang.org/pkg/net/http/#ListenAndServeTLS
+    category: security
+    technology:
+    - go
+    confidence: MEDIUM
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Mishandled Sensitive Information
+    source: https://semgrep.dev/r/go.lang.security.audit.net.use-tls.use-tls
+    shortlink: https://sg.run/dKbY
+    semgrep.dev:
+      rule:
+        r_id: 9134
+        rv_id: 1262948
+        rule_id: PeUZ8X
+        version_id: JdTzxkn
+        url: https://semgrep.dev/playground/r/JdTzxkn/go.lang.security.audit.net.use-tls.use-tls
+        origin: community
+  message: Found an HTTP server without TLS. Use 'http.ListenAndServeTLS' instead.
+    See https://golang.org/pkg/net/http/#ListenAndServeTLS for more information.
+  languages:
+  - go
+  severity: WARNING
+- id: go.lang.security.audit.unsafe.use-of-unsafe-block
+  message: Using the unsafe package in Go gives you low-level memory management and
+    many of the strengths of the C language, but also steps around the type safety
+    of Go and can lead to buffer overflows and possible arbitrary code execution by
+    an attacker. Only use this package if you absolutely know what you're doing.
+  languages:
+  - go
+  severity: WARNING
+  metadata:
+    cwe:
+    - 'CWE-242: Use of Inherently Dangerous Function'
+    source_rule_url: https://github.com/securego/gosec/blob/master/rules/unsafe.go
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    references:
+    - https://cwe.mitre.org/data/definitions/242.html
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Dangerous Method or Function
+    source: https://semgrep.dev/r/go.lang.security.audit.unsafe.use-of-unsafe-block
+    shortlink: https://sg.run/qxEx
+    semgrep.dev:
+      rule:
+        r_id: 9112
+        rv_id: 945595
+        rule_id: 9AU1p1
+        version_id: ZRT35Wd
+        url: https://semgrep.dev/playground/r/ZRT35Wd/go.lang.security.audit.unsafe.use-of-unsafe-block
+        origin: community
+  pattern: unsafe.$FUNC(...)
+- id: go.lang.security.bad_tmp.bad-tmp-file-creation
+  message: File creation in shared tmp directory without using `io.CreateTemp`.
+  languages:
+  - go
+  severity: WARNING
+  metadata:
+    cwe:
+    - 'CWE-377: Insecure Temporary File'
+    source-rule-url: https://github.com/securego/gosec
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    owasp:
+    - A01:2021 - Broken Access Control
+    - A01:2025 - Broken Access Control
+    references:
+    - https://owasp.org/Top10/A01_2021-Broken_Access_Control
+    - https://pkg.go.dev/io/ioutil#TempFile
+    - https://pkg.go.dev/os#CreateTemp
+    - https://github.com/securego/gosec/blob/5fd2a370447223541cddb35da8d1bc707b7bb153/rules/tempfiles.go#L67
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Other
+    source: https://semgrep.dev/r/go.lang.security.bad_tmp.bad-tmp-file-creation
+    shortlink: https://sg.run/Gejn
+    semgrep.dev:
+      rule:
+        r_id: 9104
+        rv_id: 1262965
+        rule_id: 6JUjnL
+        version_id: 2KTv2pJ
+        url: https://semgrep.dev/playground/r/2KTv2pJ/go.lang.security.bad_tmp.bad-tmp-file-creation
+        origin: community
+  pattern-either:
+  - pattern: ioutil.WriteFile("=~//tmp/.*$/", ...)
+  - pattern: os.Create("=~//tmp/.*$/", ...)
+  - pattern: os.WriteFile("=~//tmp/.*$/", ...)
+- id: go.lang.security.decompression_bomb.potential-dos-via-decompression-bomb
+  message: 'Detected a possible denial-of-service via a zip bomb attack. By limiting
+    the max bytes read, you can mitigate this attack. `io.CopyN()` can specify a size. '
+  severity: WARNING
+  languages:
+  - go
+  patterns:
+  - pattern-either:
+    - pattern: io.Copy(...)
+    - pattern: io.CopyBuffer(...)
+  - pattern-either:
+    - pattern-inside: |
+        gzip.NewReader(...)
+        ...
+    - pattern-inside: |
+        zlib.NewReader(...)
+        ...
+    - pattern-inside: |
+        zlib.NewReaderDict(...)
+        ...
+    - pattern-inside: |
+        bzip2.NewReader(...)
+        ...
+    - pattern-inside: |
+        flate.NewReader(...)
+        ...
+    - pattern-inside: |
+        flate.NewReaderDict(...)
+        ...
+    - pattern-inside: |
+        lzw.NewReader(...)
+        ...
+    - pattern-inside: |
+        tar.NewReader(...)
+        ...
+    - pattern-inside: |
+        zip.NewReader(...)
+        ...
+    - pattern-inside: |
+        zip.OpenReader(...)
+        ...
+  fix-regex:
+    regex: (.*)(Copy|CopyBuffer)\((.*?),(.*?)(\)|,.*\))
+    replacement: \1CopyN(\3, \4, 1024*1024*256)
+  metadata:
+    cwe:
+    - 'CWE-400: Uncontrolled Resource Consumption'
+    source-rule-url: https://github.com/securego/gosec
+    references:
+    - https://golang.org/pkg/io/#CopyN
+    - https://github.com/securego/gosec/blob/master/rules/decompression-bomb.go
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    cwe2022-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: MEDIUM
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Denial-of-Service (DoS)
+    source: https://semgrep.dev/r/go.lang.security.decompression_bomb.potential-dos-via-decompression-bomb
+    shortlink: https://sg.run/RodK
+    semgrep.dev:
+      rule:
+        r_id: 9105
+        rv_id: 945606
+        rule_id: oqUeqn
+        version_id: JdTDye5
+        url: https://semgrep.dev/playground/r/JdTDye5/go.lang.security.decompression_bomb.potential-dos-via-decompression-bomb
+        origin: community
+- id: go.lang.security.zip.path-traversal-inside-zip-extraction
+  message: File traversal when extracting zip archive
+  metadata:
+    cwe:
+    - 'CWE-22: Improper Limitation of a Pathname to a Restricted Directory (''Path
+      Traversal'')'
+    source_rule_url: https://github.com/securego/gosec/issues/205
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    owasp:
+    - A05:2017 - Broken Access Control
+    - A01:2021 - Broken Access Control
+    - A01:2025 - Broken Access Control
+    references:
+    - https://owasp.org/Top10/A01_2021-Broken_Access_Control
+    cwe2022-top25: true
+    cwe2021-top25: true
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Path Traversal
+    source: https://semgrep.dev/r/go.lang.security.zip.path-traversal-inside-zip-extraction
+    shortlink: https://sg.run/Av64
+    semgrep.dev:
+      rule:
+        r_id: 9106
+        rv_id: 1262971
+        rule_id: zdUkoR
+        version_id: rxTAK1Z
+        url: https://semgrep.dev/playground/r/rxTAK1Z/go.lang.security.zip.path-traversal-inside-zip-extraction
+        origin: community
+  languages:
+  - go
+  severity: WARNING
+  pattern: |
+    reader, $ERR := zip.OpenReader($ARCHIVE)
+    ...
+    for _, $FILE := range reader.File {
+      ...
+      path := filepath.Join($TARGET, $FILE.Name)
+      ...
+    }
+- id: go.lang.security.audit.unsafe-reflect-by-name.unsafe-reflect-by-name
+  patterns:
+  - pattern-either:
+    - pattern: |
+        $SMTH.MethodByName($NAME,...)
+    - pattern: |
+        $SMTH.FieldByName($NAME,...)
+  - pattern-not: |
+      $SMTH.MethodByName("...",...)
+  - pattern-not: |
+      $SMTH.FieldByName("...",...)
+  - pattern-inside: |
+      import "reflect"
+      ...
+  message: If an attacker can supply values that the application then uses to determine
+    which method or field to invoke, the potential exists for the attacker to create
+    control flow paths through the application that were not intended by the application
+    developers. This attack vector may allow the attacker to bypass authentication
+    or access control checks or otherwise cause the application to behave in an unexpected
+    manner.
+  metadata:
+    cwe:
+    - 'CWE-470: Use of Externally-Controlled Input to Select Classes or Code (''Unsafe
+      Reflection'')'
+    owasp:
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+    category: security
+    technology:
+    - go
+    confidence: LOW
+    references:
+    - https://owasp.org/Top10/A03_2021-Injection
+    subcategory:
+    - audit
+    likelihood: LOW
+    impact: LOW
+    license: Semgrep Rules License v1.0. For more details, visit semgrep.dev/legal/rules-license
+    vulnerability_class:
+    - Improper Authorization
+    source: https://semgrep.dev/r/go.lang.security.audit.unsafe-reflect-by-name.unsafe-reflect-by-name
+    shortlink: https://sg.run/R8Xv
+    semgrep.dev:
+      rule:
+        r_id: 10005
+        rv_id: 1262955
+        rule_id: BYUBdJ
+        version_id: WrTqK8e
+        url: https://semgrep.dev/playground/r/WrTqK8e/go.lang.security.audit.unsafe-reflect-by-name.unsafe-reflect-by-name
+        origin: community
+  severity: WARNING
+  languages:
+  - go

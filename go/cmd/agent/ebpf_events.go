@@ -51,6 +51,7 @@ func (s *ebpfSubsystem) readLoop(ctx context.Context) {
 }
 
 func (s *ebpfSubsystem) handleIO(raw []byte) {
+	// nosemgrep -- unsafe is required to decode fixed-layout eBPF ring-buffer records; length is checked first
 	if len(raw) < int(unsafe.Sizeof(ioEvent{})) {
 		return
 	}
@@ -78,6 +79,7 @@ func (s *ebpfSubsystem) handleIO(raw []byte) {
 }
 
 func (s *ebpfSubsystem) handleExecve(raw []byte) {
+	// nosemgrep -- unsafe is required to decode fixed-layout eBPF ring-buffer records; length is checked first
 	if len(raw) < int(unsafe.Sizeof(execEvent{})) {
 		return
 	}
