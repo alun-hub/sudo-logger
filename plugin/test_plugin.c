@@ -176,7 +176,8 @@ void test_safe_write_tty(void) {
 
     // Test unsafe ESC code (should be escaped to literal ^[)
     mock_write_len = 0;
-    safe_write_tty(mock_agent_fd, "Esc\x1b]8;;http://evil.com\x1b\\Evil", 31);
+    const char *osc_str = "Esc\x1b]8;;http://evil.com\x1b\\Evil";
+    safe_write_tty(mock_agent_fd, osc_str, strlen(osc_str));
     assert(mock_write_len > 0);
     // Let's verify it contains "^["
     assert(strstr((char*)mock_write_buf, "^[") != NULL);

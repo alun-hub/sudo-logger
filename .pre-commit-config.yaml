@@ -62,6 +62,23 @@ repos:
         files: plugin/.*\.c$
         pass_filenames: true
 
+      # AddressSanitizer + UBSan run of the plugin unit tests. Catches
+      # out-of-bounds / use-after-free / UB in plugin.c and the test harness
+      # that cppcheck and flawfinder miss (both are static-only). Uses clang
+      # because this repo's build hosts ship compiler-rt but not gcc's
+      # libasan/libubsan.
+      - id: plugin-asan
+        name: C plugin ASan/UBSan test
+        language: system
+        entry: >
+          bash -c 'set -e; d=$(mktemp -d); trap "rm -rf $d" EXIT;
+          cd plugin && clang -O1 -g -Iinclude -D_GNU_SOURCE
+          -fsanitize=address,undefined -fno-omit-frame-pointer
+          test_plugin.c -o "$d/test_plugin.asan" -lpthread &&
+          UBSAN_OPTIONS=halt_on_error=1 "$d/test_plugin.asan"'
+        files: ^plugin/.*\.(c|h)$
+        pass_filenames: false
+
   # --- npm audit (replay-server UI) ---
   # Fast GHSA-backed path for JS dependency alerts. Trivy's own vuln DB
   # curation for npm lags the GitHub Advisory Database by days-to-weeks, so
