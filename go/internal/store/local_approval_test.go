@@ -159,8 +159,7 @@ func TestApproval_PersistRoundTrip(t *testing.T) {
 		ExpiresAt: time.Now().Add(time.Hour),
 	}
 	s1.CreateApprovalRequest(ctx, req)
-	time.Sleep(100 * time.Millisecond) // let async saveApprovalStore finish
-	s1.Close()
+	s1.Close() // waits for the async saveApprovalStore to finish
 
 	s2 := open()
 	defer s2.Close()

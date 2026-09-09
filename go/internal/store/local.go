@@ -62,6 +62,10 @@ type LocalStore struct {
 	approvalMu      sync.RWMutex
 	approvalPending map[string]*ApprovalRequest // id → request
 	approvalWindows []localApprovalWindow
+	// saveWG tracks in-flight async saveApprovalStore goroutines so Close can
+	// wait for them — otherwise a shutdown (or a test's t.TempDir cleanup) can
+	// race a half-written approval-store.yaml.tmp.
+	saveWG sync.WaitGroup
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -182,6 +186,7 @@ func newLocalStore(cfg Config) (*LocalStore, error) {
 // Close implements SessionStore.
 func (ls *LocalStore) Close() error {
 	ls.stopOnce.Do(func() { close(ls.stopCh) })
+	ls.saveWG.Wait() // let any in-flight approval-store writes finish
 	return nil
 }
 

@@ -57,6 +57,16 @@ func (ls *LocalStore) loadApprovalStore() error {
 	return nil
 }
 
+// saveApprovalStoreAsync persists the approval store on a background goroutine,
+// registering it with ls.saveWG so Close waits for it to complete.
+func (ls *LocalStore) saveApprovalStoreAsync() {
+	ls.saveWG.Add(1)
+	go func() {
+		defer ls.saveWG.Done()
+		ls.saveApprovalStore()
+	}()
+}
+
 func (ls *LocalStore) saveApprovalStore() {
 	ls.approvalMu.RLock()
 	f := localApprovalStoreFile{}
@@ -102,7 +112,7 @@ func (ls *LocalStore) CreateApprovalRequest(_ context.Context, req ApprovalReque
 	ls.approvalMu.Lock()
 	ls.approvalPending[req.ID] = &req
 	ls.approvalMu.Unlock()
-	go ls.saveApprovalStore()
+	ls.saveApprovalStoreAsync()
 	return nil
 }
 
@@ -116,7 +126,7 @@ func (ls *LocalStore) DeleteApprovalRequest(_ context.Context, id string) (*Appr
 	copy := *req
 	delete(ls.approvalPending, id)
 	ls.approvalMu.Unlock()
-	go ls.saveApprovalStore()
+	ls.saveApprovalStoreAsync()
 	return &copy, nil
 }
 
@@ -150,6 +160,6 @@ func (ls *LocalStore) CreateApprovalWindow(_ context.Context, user, host, grante
 		})
 	}
 	ls.approvalMu.Unlock()
-	go ls.saveApprovalStore()
+	ls.saveApprovalStoreAsync()
 	return nil
 }

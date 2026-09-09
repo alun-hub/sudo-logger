@@ -203,8 +203,8 @@ func TestApprovalManager_Concurrent(t *testing.T) {
 		t.Errorf("expected %d pending requests, got %d", workers, len(pending))
 	}
 
-	// Give background cleanup worker time to finish before TempDir cleanup
-	time.Sleep(100 * time.Millisecond)
+	// deferred backend.Close() waits for the async approval-store writes, so
+	// t.TempDir cleanup can't race a half-written approval-store.yaml.tmp.
 }
 
 func TestApprovalManager_OPARejection(t *testing.T) {
