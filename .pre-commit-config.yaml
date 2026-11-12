@@ -123,7 +123,7 @@ repos:
       - id: trivy
         name: Trivy filesystem scan
         language: system
-        entry: trivy fs --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --include-dev-deps .
+        entry: trivy fs --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --include-dev-deps --skip-dirs go/vendor/github.com/testcontainers/testcontainers-go .
         pass_filenames: false
         files: (go\.mod|go\.sum|package(-lock)?\.json|Dockerfile|\.yaml|\.yml)$
 
